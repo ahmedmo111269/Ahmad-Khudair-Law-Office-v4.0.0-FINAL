@@ -39,12 +39,25 @@ export async function conflictCheck(office,query){
   return out.slice(0,50);
 }
 
+export async function savePoa(office,input,id=null){
+  if(!id) return createPoa(office,input);
+  const old=await office.r.powersOfAttorney.get(id); if(!old) throw new AppError(ERR.NOT_FOUND,'التوكيل غير موجود.');
+  const x={...old,...input};
+  if(!x.clientId) throw new AppError(ERR.VALIDATION,'يجب اختيار الموكل.',{clientId:'مطلوب'});
+  const c=await office.r.clients.get(x.clientId); if(!c||c.isDeleted) throw new AppError(ERR.NOT_FOUND,'الموكل غير موجود.');
+  const row={...x,id,updatedAt:Clock.now(),version:(old.version||0)+1};
+  await transaction(office.ctx,[STORE.powersOfAttorney,STORE.activityLog],async tx=>{
+    await request(tx.objectStore(STORE.powersOfAttorney).put(row));
+    await request(tx.objectStore(STORE.activityLog).add(office.activity('powersOfAttorney',id,'update',row.fileId||null)));
+  }); return row;
+}
+
 export async function createPoa(office,input){
   if(!input.clientId) throw new AppError(ERR.VALIDATION,'يجب اختيار الموكل.');
   const c=await office.r.clients.get(input.clientId); if(!c||c.isDeleted) throw new AppError(ERR.NOT_FOUND,'الموكل غير موجود.');
   const row={...input,id:uid(),createdAt:Clock.now(),updatedAt:Clock.now(),version:1,isArchived:false,isDeleted:false};
   await transaction(office.ctx,[STORE.powersOfAttorney,STORE.activityLog],async tx=>{
     await request(tx.objectStore(STORE.powersOfAttorney).add(row));
-    await request(tx.objectStore(STORE.activityLog).add(office.activity('powersOfAttorney',row.id,'create')));
+    await request(tx.objectStore(STORE.activityLog).add(office.activity('powersOfAttorney',row.id,'create',row.fileId||null)));
   }); return row;
 }
