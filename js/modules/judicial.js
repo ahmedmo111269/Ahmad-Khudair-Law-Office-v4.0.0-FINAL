@@ -3,14 +3,14 @@ import { esc, formData } from '../ui/dom.js';
 import { modal, closeModal } from '../ui/modal.js';
 import { toast } from '../ui/toast.js';
 import { saveJudicial } from '../services/judicial.js';
-import { pager } from '../ui/pagination.js';
+import { pager, pagingState, currentCursor, applyPageResult, nextPage, prevPage, resetPaging } from '../ui/pagination.js';
 import { lookupField, bindLookups } from '../ui/lookup.js';
 
 const cfg = {
   witnesses: { title: 'الشهود', desc: 'بيانات الشهود المرتبطين بالقضية.', fields: ['caseId', 'name', 'side', 'phone', 'address', 'notes'], index: 'caseId' },
   expertReports: { title: 'تقارير الخبراء', desc: 'تسجيل الخبراء وتقاريرهم وملخصاتها.', fields: ['caseId', 'expertName', 'reportDate', 'summary', 'notes'], index: 'reportDate' },
   judgments: { title: 'الأحكام', desc: 'تسجيل بيانات الأحكام وملخص منطوقها.', fields: ['caseId', 'judgmentNumber', 'court', 'judgmentDate', 'operativeSummary', 'notes'], index: 'judgmentDate' },
-  execution: { title: 'التنفيذ', desc: 'متابعة مرحلة تنفيذ الحكم المرتبطة بالقضية.', fields: ['caseId', 'executionNumber', 'status', 'stage', 'openedDate', 'lastActionDate', 'nextAction', 'notes'], index: 'openedDate' }
+  execution: { title: 'التنفيذ', desc: 'متابعة مرحلة تنفيذ الحكم المرتبطة بالقضية.', fields: ['caseId', 'executionNumber', 'status', 'stage', 'openedDate', 'lastActionDate', 'nextAction', 'notes'], index: null }
 };
 
 const labels = {
@@ -23,10 +23,10 @@ const labels = {
 export async function judicialPage(app, store) {
   const c = cfg[store];
   app.__judPages = app.__judPages || {};
-  const state = app.__judPages[store] || { page: 1, cursor: null, filters: { q: '', status: '', from: '', to: '', sort: 'desc' } };
+  const state = pagingState(app.__judPages[store], { filters: { q: '', status: '', from: '', to: '', sort: 'desc' } });
   app.__judPages[store] = state;
   state.filters = state.filters || { q: '', status: '', from: '', to: '', sort: 'desc' };
-  
+
   const f = state.filters;
   const q = normalizeText(f.q);
   const dateField = store === 'expertReports' ? 'reportDate' : store === 'judgments' ? 'judgmentDate' : store === 'execution' ? 'openedDate' : '';
@@ -39,16 +39,12 @@ export async function judicialPage(app, store) {
 
   const r = await app.office.r[store].page({
     index: c.index,
-    cursor: state.cursor,
+    cursor: currentCursor(state),
     limit: 25,
     direction: f.sort === 'asc' ? 'next' : 'prev',
     filter
   });
-
-  state.nextCursor = r.nextCursor;
-  state.prevCursor = r.prevCursor;
-  state.hasNext = r.hasMore;
-  state.hasPrev = state.page > 1;
+  applyPageResult(state, r);
 
   const cases = await app.office.r.cases.getMany(r.items.map((x) => x.caseId));
   const cm = new Map(cases.map((x) => [x.id, `${x.caseNumber || ''}/${x.caseYear || ''} — ${x.courtId || ''}`]));
@@ -65,15 +61,12 @@ export async function judicialPage(app, store) {
       <details class="filter-tab">
         <summary>فرز وتصفية</summary>
         <div class="mini-filter">
-          <select id="j-status">
-            <option value="" ${!f.status ? 'selected' : ''}>كل الحالات</option>
-            <option>active</option>
-            <option>completed</option>
-            <option>suspended</option>
-            <option>cancelled</option>
-          </select>
-          <input id="j-from" type="date">
-          <input id="j-to" type="date">
+          ${store === 'execution' ? `<select id="j-status">
+            <option value="">كل الحالات</option>
+            ${['not_started', 'active', 'suspended', 'completed', 'cancelled'].map((x) => `<option ${f.status === x ? 'selected' : ''}>${x}</option>`).join('')}
+          </select>` : ''}
+          <input id="j-from" type="date" value="${esc(f.from || '')}">
+          <input id="j-to" type="date" value="${esc(f.to || '')}">
           <select id="j-sort">
             <option value="desc" ${f.sort === 'desc' ? 'selected' : ''}>الأحدث أولًا</option>
             <option value="asc" ${f.sort === 'asc' ? 'selected' : ''}>الأقدم أولًا</option>
@@ -88,14 +81,15 @@ export async function judicialPage(app, store) {
           <tr>${columns(store).map((f) => `<th>${labels[f] || f}</th>`).join('')}<th>إجراء</th></tr>
         </thead>
         <tbody id="j-body">
-          ${r.items.map((x) => `<tr data-status="${esc(x.status || '')}" data-date="${esc(x.judgmentDate \vert{}\vert{} x.reportDate \vert{}\vert{} x.lastActionDate \vert{}\vert{} x.openedDate \vert{}\vert{} '')}" data-search="${esc(JSON.stringify(x))}">
+          ${r.items.length ? '' : `<tr><td colspan="${columns(store).length + 1}" class="muted">لا توجد سجلات.</td></tr>`}
+          ${r.items.map((x) => `<tr data-status="${esc(x.status || '')}" data-date="${esc(x.judgmentDate || x.reportDate || x.lastActionDate || x.openedDate || '')}" data-search="${esc(JSON.stringify(x))}">
             ${columns(store).map((f) => `<td>${display(f, x[f], cm)}</td>`).join('')}
-            <td><button class="link" data-j-edit="${store}\vert{}${x.id}">فتح</button></td>
+            <td><button class="link" data-j-edit="${store}|${x.id}">فتح</button></td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
-    ${pager({ page: state.page, hasNext: r.hasMore, hasPrev: state.hasPrev })}
+    ${pager({ page: state.page, hasNext: state.hasNext, hasPrev: state.hasPrev })}
   </div>`;
 }
 
@@ -121,24 +115,17 @@ export function bindJudicial(app, store) {
   }));
 
   document.querySelector('[data-pager-next]')?.addEventListener('click', () => {
-    const s = app.__judPages[store];
-    s.cursor = s.nextCursor;
-    s.page++;
-    s.direction = 'next';
-    app.refresh();
+    if (nextPage(app.__judPages[store])) app.refresh();
   });
 
   document.querySelector('[data-pager-prev]')?.addEventListener('click', () => {
-    const s = app.__judPages[store];
-    if (!s?.hasPrev) return;
-    s.cursor = s.prevCursor;
-    s.page--;
-    s.direction = 'prev';
-    app.refresh();
+    if (prevPage(app.__judPages[store])) app.refresh();
   });
 
-  ['j-q', 'j-status', 'j-from', 'j-to', 'j-sort'].forEach((id) =>
-    document.querySelector('#' + id)?.addEventListener(id === 'j-q' ? 'input' : 'change', apply)
+  let timer = 0;
+  document.querySelector('#j-q')?.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(apply, 300); });
+  ['j-status', 'j-from', 'j-to', 'j-sort'].forEach((id) =>
+    document.querySelector('#' + id)?.addEventListener('change', apply)
   );
 
   function apply() {
@@ -150,10 +137,7 @@ export function bindJudicial(app, store) {
       to: document.querySelector('#j-to')?.value || '',
       sort: document.querySelector('#j-sort')?.value || 'desc'
     };
-    s.page = 1;
-    s.cursor = null;
-    s.prevCursor = null;
-    s.nextCursor = null;
+    resetPaging(s);
     app.refresh();
   }
 }
@@ -169,19 +153,23 @@ function normalizeText(v) {
 }
 
 async function form(app, store, id = null) {
-  const old = id ? await app.office.r[store].get(id) : {};
+  const old = id ? (await app.office.r[store].get(id)) || {} : {};
+  const oldCase = old.caseId ? await app.office.r.cases.get(old.caseId) : null;
+  const caseLabel = oldCase ? `${oldCase.caseNumber || ''}/${oldCase.caseYear || ''} — ${oldCase.courtId || ''}` : '';
   const c = modal(`<div class="modal-tools">
     <button type="button" data-modal-back class="ghost">رجوع</button>
     <button type="button" data-close class="modal-close">×</button>
   </div>
   <h2>${id ? 'تعديل' : 'إضافة'} — ${cfg[store].title}</h2>
-  <form>${cfg[store].fields.map((f) => field(f, old)).join('')}<button class="primary">حفظ</button></form>`);
+  <form>${cfg[store].fields.map((f) => field(f, old, caseLabel)).join('')}<button class="primary">حفظ</button></form>`);
 
   bindLookups(c, app.office);
   c.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
     try {
-      await saveJudicial(app.office, store, formData(e.target), id);
+      const data = formData(e.target);
+      if (!data.caseId) throw new Error('اختر القضية من القائمة المقترحة.');
+      await saveJudicial(app.office, store, data, id);
       closeModal();
       toast('تم الحفظ وتحديث دورة القضية');
       app.refresh();
@@ -191,10 +179,10 @@ async function form(app, store, id = null) {
   };
 }
 
-function field(f, old) {
+function field(f, old, caseLabel = '') {
   const v = old?.[f] ?? '';
   if (f === 'caseId') {
-    return lookupField({ name: 'caseId', label: labels[f], store: 'cases', index: 'caseNumber', value: v, displayValue: '' });
+    return lookupField({ name: 'caseId', label: labels[f], store: 'cases', index: 'caseNumber', value: v, displayValue: caseLabel });
   }
   if (f === 'status') {
     return `<label>${labels[f]}<select name="status">${['not_started', 'active', 'suspended', 'completed', 'cancelled'].map((x) => `<option value="${x}" ${v === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>`;

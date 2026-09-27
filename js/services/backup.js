@@ -1,5 +1,5 @@
-import {STORES, SCHEMA_VERSION} from '../db/schema.js';
-import {APP_VERSION} from '../core/constants.js';
+import {STORES} from '../db/schema.js';
+import {APP_VERSION, SCHEMA_VERSION} from '../core/constants.js';
 import {AppError, ERR} from '../core/errors.js';
 
 export const BACKUP_FORMAT='AhmadKhudairLawOfficeBackup';

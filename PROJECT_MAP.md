@@ -194,3 +194,10 @@ Performance rule: UI list screens should migrate from `Office.list()` to `Office
 ## RC10 hardening
 - Repository indexed counts respect `isDeleted`.
 - Release audit version gate tracks RC10.
+
+## v4.0.1 — Bug-fix release
+- `js/ui/pagination.js`: `pagingState / currentCursor / applyPageResult / nextPage / prevPage / resetPaging` — مكدس مؤشرات موحد لكل شاشات القوائم؛ `Repository.page()` يعيد `nextCursor` فقط (direction = ترتيب الفرز).
+- `js/core/clock.js`: `localDate()` و`addDays()` للتاريخ المحلي، و`isActiveProcedure()` (الحالات `open`/`pending`).
+- `js/ui/lookup.js`: البحث المساعد يبحث في أكثر من فهرس لكل مخزن (رقم + اسم/عنوان).
+- `App.setContext()` يعيد ضبط حالة التصفح عند تغيير قاعدة البيانات.
+- `tools/release-audit.mjs`: فحص ES modules وتطابق imports/exports والإصدار مع CHANGELOG.

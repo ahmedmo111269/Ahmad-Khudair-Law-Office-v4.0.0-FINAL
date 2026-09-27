@@ -14,7 +14,7 @@ export async function saveFee(office,input,id=null){
  const amount=Number(input.agreedAmount||0);
  if(!Number.isFinite(amount)||amount<0) throw new AppError(ERR.VALIDATION,'قيمة الأتعاب غير صحيحة.');
  const now=Clock.now();
- const row={...(old||{}),...input,id:id||uid(),agreedAmount:amount,createdAt:old?.createdAt||now,updatedAt:now,version:(old?.version||0)+1,isArchived:old?.isArchived||false,isDeleted:false,deletedAt:null};
+ const row={...(old||{}),...input,id:id||uid(),agreedAmount:amount,paymentStatus:input.paymentStatus||old?.paymentStatus||'unpaid',createdAt:old?.createdAt||now,updatedAt:now,version:(old?.version||0)+1,isArchived:old?.isArchived||false,isDeleted:false,deletedAt:null};
  const out=await transaction(office.ctx,[STORE.fees,STORE.files,STORE.activityLog],async tx=>{
    await request(tx.objectStore(STORE.fees).put(row));
    file.updatedAt=now;file.lastActivityAt=now;file.version=(file.version||0)+1;

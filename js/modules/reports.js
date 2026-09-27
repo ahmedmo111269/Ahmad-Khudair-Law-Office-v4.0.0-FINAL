@@ -28,7 +28,7 @@ export function bindReports(app){
  const $=s=>document.querySelector(s), result=$('#report-result');
  const typeEl=$('#report-type');
  const resetPeriod=()=>{const custom=$('#report-preset')?.value==='custom';if($('#report-from'))$('#report-from').disabled=!custom;if($('#report-to'))$('#report-to').disabled=!custom};
- typeEl?.addEventListener('change',()=>app.refresh());
+ typeEl?.addEventListener('change',()=>app.go('reports?type='+encodeURIComponent(typeEl.value)+'&preset='+encodeURIComponent($('#report-preset')?.value||'today'),{replace:true}));
  $('#report-preset')?.addEventListener('change',resetPeriod);resetPeriod();
  buildConditions();buildSorts();
  $('#add-condition')?.addEventListener('click',()=>{addCondition();});

@@ -9,7 +9,9 @@ export async function runTransactionTests(test,expect){
  try{
   let failed=false;
   try{await transaction({db,assert(){}},['a','b'],async tx=>{await request(tx.objectStore('a').put({id:'x',value:1}));await request(tx.objectStore('b').put({id:'y',value:2}));throw new Error('injected failure')})}catch(e){failed=true}
-  test('transaction rollback on injected failure',async()=>{expect(failed).toBe(true);expect(await get(db,'a','x')).toBe(undefined);expect(await get(db,'b','y')).toBe(undefined)});
+  // Read back BEFORE the connection is closed in finally; test bodies run later via run().
+  const afterA=await get(db,'a','x'),afterB=await get(db,'b','y');
+  test('transaction rollback on injected failure',()=>{expect(failed).toBe(true);expect(afterA).toBe(undefined);expect(afterB).toBe(undefined)});
   test('optimistic concurrency accepts matching version',()=>expect(()=>assertExpectedVersion({version:3},3,'سجل')).not.toThrow());
   test('optimistic concurrency rejects stale version',()=>expect(()=>assertExpectedVersion({version:4},3,'سجل')).toThrow());
  }finally{db.close();try{indexedDB.deleteDatabase(name)}catch{}}
