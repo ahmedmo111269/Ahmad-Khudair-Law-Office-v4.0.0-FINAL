@@ -1,4 +1,5 @@
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
+import {scan,rowText} from './entity-query.js';
 
 async function prefix(repo,index,prefix,limit=15){if(!prefix)return [];return repo.prefix(index,prefix,limit)}
 async function exact(repo,index,key,limit=15){if(key===undefined||key===null||key==='')return [];return repo.byIndex(index,key,limit)}
@@ -16,12 +17,20 @@ export async function unifiedSearch(office,raw,limit=15){
   prefix(office.r.cases,'subjectNormalized',n,limit),
   prefix(office.r.opponents,'nameNormalized',n,limit)
  ]);
- const merge=(a,b)=>[...new Map([...a,...b].map(x=>[x.id,x])).values()].slice(0,limit);
+ const merge=(...lists)=>[...new Map(lists.flat().map(x=>[x.id,x])).values()].slice(0,limit);
+ // بحث احتوائي محدود (بمؤشر) يكمل البحث بالبادئة: أسماء الأطراف، أرقام المراحل، الهواتف، أي جزء من النص.
+ const contains=(store,fn)=>scan(office,store,{limit,filter:fn}).then(r=>r.rows).catch(()=>[]);
+ const [fx,cx,kx,ox]=await Promise.all([
+  contains('files',f=>(f.searchText||rowText(f)).includes(n)),
+  contains('clients',c=>rowText(c).includes(n)),
+  contains('cases',c=>rowText(c).includes(n)),
+  contains('opponents',o=>rowText(o).includes(n))
+ ]);
  return {
-  clients:merge(clientsByName,clientsById),
-  files:merge(filesByTitle,filesByNumber),
-  cases:merge(casesByNumber,casesBySubject),
-  opponents
+  clients:merge(clientsByName,clientsById,cx),
+  files:merge(filesByTitle,filesByNumber,fx),
+  cases:merge(casesByNumber,casesBySubject,kx),
+  opponents:merge(opponents,ox)
  };
 }
 
@@ -59,7 +68,7 @@ export async function relatedTimeline(office,{fileId=null,caseId=null,limit=100}
  }
  if(caseId){
   add((await office.r.activityLog.byIndex('entityId',caseId,1000)),'نشاط القضية','timestamp');
-  add(await office.r.hearings.byIndex('caseId',caseId,limit),'جلسة','hearingDate');add(await office.r.procedures.byIndex('caseId',caseId,limit),'إجراء','actionDate');add(await office.r.caseNotes.byIndex('fileId',caseId,limit),'ملاحظة','createdAt');add(await office.r.witnesses.byIndex('caseId',caseId,limit),'شاهد','createdAt');add(await office.r.expertReports.byIndex('caseId',caseId,limit),'تقرير خبير','reportDate');add(await office.r.judgments.byIndex('caseId',caseId,limit),'حكم','judgmentDate');add(await office.r.execution.byIndex('caseId',caseId,limit),'تنفيذ','openedDate');
+  add(await office.r.hearings.byIndex('caseId',caseId,limit),'جلسة','hearingDate');add(await office.r.procedures.byIndex('caseId',caseId,limit),'إجراء','actionDate');add((await office.r.caseNotes.byIndex('caseId',caseId,limit)),'ملاحظة','createdAt');add(await office.r.witnesses.byIndex('caseId',caseId,limit),'شاهد','createdAt');add(await office.r.expertReports.byIndex('caseId',caseId,limit),'تقرير خبير','reportDate');add(await office.r.judgments.byIndex('caseId',caseId,limit),'حكم','judgmentDate');add(await office.r.execution.byIndex('caseId',caseId,limit),'تنفيذ','openedDate');
  }
  return out.filter(x=>x.date).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,limit);
 }
