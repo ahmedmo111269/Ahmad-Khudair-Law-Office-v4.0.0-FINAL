@@ -19,7 +19,7 @@ export async function saveFee(office,input,id=null){
    await request(tx.objectStore(STORE.fees).put(row));
    file.updatedAt=now;file.lastActivityAt=now;file.version=(file.version||0)+1;
    await request(tx.objectStore(STORE.files).put(file));
-   await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:STORE.fees,entityId:row.id,action:id?'update':'create',timestamp:now,summary:id?'تحديث الأتعاب':'إنشاء الأتعاب',metadata:{}}));
+   await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:STORE.fees,entityId:row.id,action:id?'update':'create',timestamp:now,summary:id?'تحديث الأتعاب':'إنشاء الأتعاب',metadata:{},fileId:file.id}));
    return row;
  });
  events.emit('entity:changed',{entityType:STORE.fees,id:out.id});events.emit('entity:changed',{entityType:STORE.files,id:file.id});return out;
@@ -36,7 +36,7 @@ export async function addFeePayment(office,input){
   const nextPaid=paid+amount;const nextStatus=nextPaid>=Number(fee.agreedAmount||0)?'paid':'partial';fee.paymentStatus=nextStatus;fee.updatedAt=now;fee.version=(fee.version||0)+1;
   await request(tx.objectStore(STORE.fees).put(fee));
   const file=await request(tx.objectStore(STORE.files).get(fee.fileId));if(file&&!file.isDeleted){file.updatedAt=now;file.lastActivityAt=now;file.version=(file.version||0)+1;await request(tx.objectStore(STORE.files).put(file));}
-  await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:STORE.feePayments,entityId:row.id,action:'create',timestamp:now,summary:'تسجيل دفعة أتعاب',metadata:{}}));return row;
+  await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:STORE.feePayments,entityId:row.id,action:'create',timestamp:now,summary:'تسجيل دفعة أتعاب',metadata:{},fileId:fee.fileId}));return row;
  });
  events.emit('entity:changed',{entityType:STORE.feePayments,id:out.id});events.emit('entity:changed',{entityType:STORE.fees,id:fee.id});return out;
 }
