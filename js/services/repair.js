@@ -23,7 +23,7 @@ export async function buildRepairPlan(ctx,{max=300}={}){
  for(const store of ['clients','files','cases','opponents']) await scan(ctx.db,store,row=>{
    if(plan.items.length>=max)return;if(row.isDeleted===true&&(!row.deletedAt||!row.deletedBy))plan.items.push({kind:'soft-delete-audit',safe:true,store,id:row.id,description:'استكمال بيانات تدقيق الحذف المنطقي',changes:{deletedAt:row.deletedAt||row.updatedAt||new Date().toISOString(),deletedBy:row.deletedBy||'system-repair'}});
  });
- for(const [store,a,as,b,bs] of RELATION_RULES){if(plan.items.length>=max)break;await scan(ctx.db,store,row=>{if(plan.items.length>=max)return;if(a&&!ids[as]?.has(row[a]))plan.items.push({kind:'orphan-relation',safe:false,store,id:row.id,field:a,value:row[a],description:`علاقة يتيمة: ${a}`});if(b&&!ids[bs]?.has(row[b])&&plan.items.length<max)plan.items.push({kind:'orphan-relation',safe:false,store,id:row.id,field:b,value:row[b],description:`علاقة يتيمة: ${b}`})})}
+ for(const [store,a,as,b,bs] of RELATION_RULES){if(plan.items.length>=max)break;await scan(ctx.db,store,row=>{if(plan.items.length>=max)return;if(a&&row[a]&&!ids[as]?.has(row[a]))plan.items.push({kind:'orphan-relation',safe:false,store,id:row.id,field:a,value:row[a],description:`علاقة يتيمة: ${a}`});if(b&&row[b]&&!ids[bs]?.has(row[b])&&plan.items.length<max)plan.items.push({kind:'orphan-relation',safe:false,store,id:row.id,field:b,value:row[b],description:`علاقة يتيمة: ${b}`})})}
  plan.counts.safe=plan.items.filter(x=>x.safe).length;plan.counts.destructive=plan.items.filter(x=>!x.safe).length;return plan;
 }
 

@@ -20,7 +20,7 @@ export async function health(ctx,{includeOrphans=true}={}){
     ];
     for(const [store,a,aSet,b,bSet] of checks){
       if(out.orphanRelations.length>=200)break;
-      await scan(ctx.db,store,row=>{if(out.orphanRelations.length>=200)return;if(a&&!ids[aSet]?.has(row[a]))out.orphanRelations.push({store,id:row.id,field:a,value:row[a]});if(b&&!ids[bSet]?.has(row[b])&&out.orphanRelations.length<200)out.orphanRelations.push({store,id:row.id,field:b,value:row[b]})},{maxRows:Infinity});
+      await scan(ctx.db,store,row=>{if(out.orphanRelations.length>=200)return;if(a&&row[a]&&!ids[aSet]?.has(row[a]))out.orphanRelations.push({store,id:row.id,field:a,value:row[a]});if(b&&row[b]&&!ids[bSet]?.has(row[b])&&out.orphanRelations.length<200)out.orphanRelations.push({store,id:row.id,field:b,value:row[b]})},{maxRows:Infinity});
     }
   }
   if(out.orphanRelations.length){out.ok=false;out.issues.push({type:'orphans',count:out.orphanRelations.length})}

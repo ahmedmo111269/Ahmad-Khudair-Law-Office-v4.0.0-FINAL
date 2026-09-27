@@ -1,7 +1,8 @@
 import {STORE} from '../db/schema.js';
+import {localDate,isActiveProcedure} from '../core/clock.js';
 
 const MAX=100;
-const isoDay=d=>d.toISOString().slice(0,10);
+const isoDay=localDate;
 const addDays=(s,n)=>{const d=new Date(`${s}T00:00:00`);d.setDate(d.getDate()+n);return isoDay(d)};
 const today=()=>isoDay(new Date());
 async function range(repo,index,lower,upper,filter){return repo.reportRange({index,lower,upper,limit:MAX,filter})}
@@ -12,9 +13,9 @@ export async function actionCenterBrief(office){
     range(office.r.hearings,'hearingDate',t,t),
     range(office.r.hearings,'hearingDate',tomorrow,d3),
     range(office.r.hearings,'hearingDate',addDays(t,4),week),
-    range(office.r.procedures,'internalDueDate','0000-01-01',t,x=>x.status==='pending'&&x.internalDueDate<t),
-    range(office.r.procedures,'internalDueDate',t,d3,x=>x.status==='pending'),
-    range(office.r.procedures,'internalDueDate',addDays(t,4),week,x=>x.status==='pending'),
+    range(office.r.procedures,'internalDueDate','0000-01-01',t,x=>isActiveProcedure(x)&&x.internalDueDate&&x.internalDueDate<t),
+    range(office.r.procedures,'internalDueDate',t,d3,isActiveProcedure),
+    range(office.r.procedures,'internalDueDate',addDays(t,4),week,isActiveProcedure),
     range(office.r.appointments,'date',t,d3,x=>x.status!=='done'&&x.status!=='cancelled'),
     range(office.r.communications,'followUpDate',t,week,x=>x.followUpRequired===true||x.followUpRequired==='true'),
     range(office.r.files,'nextStepDate',t,week,x=>x.status!=='closed'),

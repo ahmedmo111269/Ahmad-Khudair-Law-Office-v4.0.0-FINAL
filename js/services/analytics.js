@@ -1,10 +1,11 @@
 import {STORE} from '../db/schema.js';
+import {localDate} from '../core/clock.js';
 
 const LIMIT=10000;
 const DAY=86400000;
-const iso=d=>d.toISOString().slice(0,10);
+const iso=localDate;
 const parseDay=s=>{const d=new Date(`${s}T00:00:00`);return Number.isNaN(d.getTime())?null:d};
-const addDays=(s,n)=>{const d=parseDay(s);d.setTime(d.getTime()+n*DAY);return iso(d)};
+const addDays=(s,n)=>{const d=parseDay(s);d.setDate(d.getDate()+n);return iso(d)};
 export function analyticsPeriod(kind,from,to){
  const now=new Date(),t=iso(now);
  if(kind==='today')return [t,t];
@@ -27,14 +28,14 @@ export async function analyticsSnapshot(office,{dataset='cases',from,to,status='
  const repo=office.r[cfg.store];
  const tx=office.ctx.db.transaction(cfg.store,'readonly'),s=tx.objectStore(cfg.store);
  const src=s.indexNames.contains(cfg.index)?s.index(cfg.index):s;
- const range=s.indexNames.contains(cfg.index)?IDBKeyRange.bound(lo,hi):undefined;
+ const range=s.indexNames.contains(cfg.index)?IDBKeyRange.bound(lo,hi+'\uffff'):undefined; // timestamps like 2026-09-27T10:00Z must be included for the last day
  const result={dataset,label:cfg.label,from:lo,to:hi,total:0,groups:{},trend:{},filters:{status},limit:LIMIT,truncated:false};
  return new Promise((resolve,reject)=>{
    const c=src.openCursor(range);c.onerror=()=>reject(c.error);c.onsuccess=()=>{
      const cur=c.result;
      if(!cur){resolve(result);return}
      const v=cur.value;
-     if(!v.isDeleted && between(String(v[cfg.date]||''),lo,hi) && (!status||String(v.status||'')===status)){
+     if(!v.isDeleted && between(String(v[cfg.date]||'').slice(0,10),lo,hi) && (!status||String(v.status||'')===status)){
        result.total++;
        const g=String(v[groupBy||cfg.group]||'غير محدد')||'غير محدد';result.groups[g]=(result.groups[g]||0)+1;
        const day=String(v[cfg.date]||'').slice(0,10);if(day)result.trend[day]=(result.trend[day]||0)+1;

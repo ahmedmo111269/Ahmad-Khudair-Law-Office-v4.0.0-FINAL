@@ -9,7 +9,7 @@ export class DatabaseManager {
     this.current = null;
   }
 
-  open(profile) {
+  open(profile, { makeCurrent = true } = {}) {
     if (!profile?.databaseName) {
       return Promise.reject(new Error('ملف قاعدة البيانات غير صالح.'));
     }
@@ -31,7 +31,7 @@ export class DatabaseManager {
             profileId: profile.id,
             databaseName: profile.databaseName,
             version: SCHEMA_VERSION
-          });
+          }, false);
           upgradeSchema(e.target.result, e.target.transaction);
         } catch (err) {
           try {
@@ -63,12 +63,12 @@ export class DatabaseManager {
           events.emit('db:closing', {
             profileId: profile.id,
             databaseName: profile.databaseName
-          });
+          }, false);
           db.close();
         };
 
         const c = new DatabaseContext(db, profile);
-        this.current = c;
+        if (makeCurrent) this.current = c;
         this.reg.update(profile.id, {
           schemaVersion: SCHEMA_VERSION,
           applicationVersion: APP_VERSION
@@ -78,7 +78,7 @@ export class DatabaseManager {
           profileId: profile.id,
           databaseName: profile.databaseName,
           version: SCHEMA_VERSION
-        });
+        }, false);
 
         resolve(c);
       };
@@ -106,10 +106,11 @@ export class DatabaseManager {
     this.current = next;
 
     if (previous && previous !== next) {
+      // Local only: other tabs may legitimately keep this database open.
       events.emit('db:closing', {
         profileId: previous.profile.id,
         databaseName: previous.profile.databaseName
-      });
+      }, false);
       previous.close();
     }
 
@@ -128,7 +129,7 @@ export class DatabaseManager {
       events.emit('db:closing', {
         profileId: this.current.profile.id,
         databaseName: this.current.profile.databaseName
-      });
+      }, false);
       this.current.close();
       this.current = null;
     }

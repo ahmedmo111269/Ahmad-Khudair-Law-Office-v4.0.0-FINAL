@@ -7,10 +7,10 @@ const REQUIRED={
   fileClients:['id','fileId','clientId'],caseClients:['id','caseId','clientId'],
   caseOpponents:['id','caseId','opponentId'],caseRelations:['id','sourceCaseId','targetCaseId'],
   hearings:['id','caseId','hearingDate'],procedures:['id','fileId','status'],
-  appointments:['id','date'],communications:['id','clientId','date'],caseNotes:['id','fileId','content'],
+  appointments:['id','date'],communications:['id','fileId'],caseNotes:['id','fileId','content'],
   witnesses:['id','caseId','name'],expertReports:['id','caseId','reportDate'],judgments:['id','caseId','judgmentDate'],
   execution:['id','caseId','status'],fees:['id','fileId','agreedAmount'],feePayments:['id','feeId','amount','date'],
-  documentReferences:['id','fileId','title'],powersOfAttorney:['id','clientId','poaNumber'],activityLog:['id','entityType','entityId','action','timestamp']
+  documentReferences:['id','fileId','title'],powersOfAttorney:['id','clientId'],activityLog:['id','entityType','entityId','action','timestamp']
 };
 const OPEN=(db,name,mode='readonly')=>db.transaction(name,mode).objectStore(name);
 const scan=(db,name,visit,{maxRows=Infinity}={})=>new Promise((resolve,reject)=>{const s=OPEN(db,name);const c=s.openCursor();let n=0;c.onerror=()=>reject(c.error);c.onsuccess=()=>{const cur=c.result;if(!cur||n>=maxRows){resolve(n);return}n++;try{visit(cur.value);cur.continue()}catch(e){reject(e)}}});
@@ -40,8 +40,8 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
       const [store,a,as,b,bs]=rule;if(!ctx.db.objectStoreNames.contains(store))continue;
       await scan(ctx.db,store,row=>{
         if(out.relationIssues.length>=maxIssues)return;
-        if(a&&!sets[as]?.has(row[a]))out.relationIssues.push({store,id:row.id,field:a,value:row[a],expected:as});
-        if(b&&!sets[bs]?.has(row[b])&&out.relationIssues.length<maxIssues)out.relationIssues.push({store,id:row.id,field:b,value:row[b],expected:bs});
+        if(a&&row[a]&&!sets[as]?.has(row[a]))out.relationIssues.push({store,id:row.id,field:a,value:row[a],expected:as});
+        if(b&&row[b]&&!sets[bs]?.has(row[b])&&out.relationIssues.length<maxIssues)out.relationIssues.push({store,id:row.id,field:b,value:row[b],expected:bs});
       });
     }
     for(const [name,fields] of Object.entries(REQUIRED)){

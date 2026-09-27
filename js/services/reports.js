@@ -1,7 +1,8 @@
 import {STORE} from '../db/schema.js';
+import {localDate,addDays,ACTIVE_PROCEDURE_STATUSES} from '../core/clock.js';
 
-const dayAdd=(d,n)=>{const x=new Date(d+'T00:00:00');x.setDate(x.getDate()+n);return x.toISOString().slice(0,10)};
-const today=()=>new Date().toISOString().slice(0,10);
+const dayAdd=addDays;
+const today=()=>localDate();
 
 export function periodRange(preset,from,to){
  const t=today(),d=new Date(t+'T00:00:00'),dow=d.getDay(),monday=dayAdd(t,dow===0?-6:1-dow);
@@ -9,8 +10,8 @@ export function periodRange(preset,from,to){
   case'tomorrow':return [dayAdd(t,1),dayAdd(t,1)];
   case'week':return [monday,dayAdd(monday,6)];
   case'nextWeek':return [dayAdd(monday,7),dayAdd(monday,13)];
-  case'month':return [t.slice(0,8)+'01',new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().slice(0,10)];
-  case'nextMonth':return [new Date(d.getFullYear(),d.getMonth()+1,1).toISOString().slice(0,10),new Date(d.getFullYear(),d.getMonth()+2,0).toISOString().slice(0,10)];
+  case'month':return [t.slice(0,8)+'01',localDate(new Date(d.getFullYear(),d.getMonth()+1,0))];
+  case'nextMonth':return [localDate(new Date(d.getFullYear(),d.getMonth()+1,1)),localDate(new Date(d.getFullYear(),d.getMonth()+2,0))];
   case'custom':{const a=from||t,b=to||from||t;return a<=b?[a,b]:[b,a];}
   default:return [t,t];
  }
@@ -117,7 +118,7 @@ function rangeMatch(row,dateField,lo,hi){const d=String(row[dateField]||'').slic
 export async function generateReport(office,{type='hearings',preset='today',from,to,filters={},conditions=[],conditionLogic='AND',sorts=[],groupBy='',columns=null,limit=5000,clientId=null,relationId=null}={}){
  const spec=REPORT_SPECS[type]||REPORT_SPECS.hearings;
  let [lo,hi]=periodRange(preset,from,to);
- if(type==='procedures'&&preset==='overdue'){lo='0000-01-01';hi=today();filters={...(filters||{}),status:'pending'};}
+ if(type==='procedures'&&preset==='overdue'){lo='0000-01-01';hi=dayAdd(today(),-1);filters={...(filters||{}),status:ACTIVE_PROCEDURE_STATUSES};}
  if(spec.dateField==='createdAt'||spec.dateField==='lastActivityAt'){lo+='T00:00:00';hi+='T23:59:59.999';}
  let rows;
  if(spec.relation) rows=await relationRows(office, spec.relation, type==='clientFiles'||type==='clientCases'?clientId:relationId, limit);
@@ -128,7 +129,7 @@ export async function generateReport(office,{type='hearings',preset='today',from
  return {title:spec.title,type,preset,from:lo,to:hi,rows,limit,filters,conditions,conditionLogic,sorts,groupBy,groups,columns:columns?.length?columns:columnsFor(type),clientId,relationId};
 }
 
-function matchLegacyFilters(x,f){for(const [k,v] of Object.entries(f||{})){if(v===undefined||v===null||v==='')continue;if(k==='q'){if(!JSON.stringify(x).toLocaleLowerCase('ar-EG').includes(String(v).toLocaleLowerCase('ar-EG')))return false;}else if(['status','priority','clientId','fileId','caseId'].includes(k)&&x[k]!==v)return false;}return true}
+function matchLegacyFilters(x,f){for(const [k,v] of Object.entries(f||{})){if(v===undefined||v===null||v==='')continue;if(k==='q'){if(!JSON.stringify(x).toLocaleLowerCase('ar-EG').includes(String(v).toLocaleLowerCase('ar-EG')))return false;}else if(['status','priority','clientId','fileId','caseId'].includes(k)&&(Array.isArray(v)?!v.includes(x[k]):x[k]!==v))return false;}return true}
 function groupRows(rows,field){const m=new Map();for(const row of rows){const key=String(row[field]??'غير محدد');if(!m.has(key))m.set(key,[]);m.get(key).push(row)}return [...m.entries()].map(([key,items])=>({key,items}))}
 
 export function reportSummary(rows,columns){const numeric=columns.filter(c=>rows.some(r=>typeof r[c]==='number'));return {count:rows.length,totals:Object.fromEntries(numeric.map(c=>[c,rows.reduce((s,r)=>s+(Number(r[c])||0),0)]))}}

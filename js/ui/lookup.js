@@ -1,8 +1,63 @@
 import {esc} from './dom.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
+
+// Extra indexes searched for each store so the user can type a number OR a name/title.
+const SEARCH_INDEXES={
+ clients:[['fullNameNormalized','text'],['nationalId','digits']],
+ files:[['fileNumber','digits'],['titleNormalized','text']],
+ cases:[['caseNumber','digits'],['subjectNormalized','text']],
+ opponents:[['nameNormalized','text']]
+};
+
 export function lookupField({name,label,store,index,display,placeholder='اكتب حرفين على الأقل…',value='',displayValue=''}){
  const listId=`lookup-${name}-${Math.random().toString(36).slice(2,8)}`;
  return `<label>${esc(label)}<input class="lookup-input" data-lookup-store="${esc(store)}" data-lookup-index="${esc(index)}" data-lookup-name="${esc(name)}" list="${listId}" value="${esc(displayValue)}" placeholder="${esc(placeholder)}" autocomplete="off"><input type="hidden" name="${esc(name)}" value="${esc(value)}"><datalist id="${listId}"></datalist></label>`;
 }
-export function bindLookups(root,office){root?.querySelectorAll('.lookup-input').forEach(input=>{const list=root.querySelector('#'+input.getAttribute('list'));const hidden=input.parentElement.querySelector(`input[type="hidden"][name="${CSS.escape(input.dataset.lookupName)}"]`);let timer;input.addEventListener('input',()=>{clearTimeout(timer);const raw=input.value.trim();const q=input.dataset.lookupIndex?.toLowerCase().includes('normalized')?normalizeArabic(raw):normalizeDigits(raw);hidden.value='';if(raw.length<2){list.innerHTML='';return}timer=setTimeout(async()=>{try{const rows=await office.r[input.dataset.lookupStore].prefix(input.dataset.lookupIndex,q,10);list.innerHTML=rows.map(r=>`<option value="${esc(formatValue(r,input.dataset.lookupStore))}" data-id="${esc(r.id)}"></option>`).join('');const row=rows.find(r=>formatValue(r,input.dataset.lookupStore)===raw);if(row)hidden.value=row.id;}catch{list.innerHTML=''}},120)});input.addEventListener('change',()=>{const q=input.value.trim();const opt=[...list.options].find(o=>o.value===q);if(opt&&opt.dataset.id)hidden.value=opt.dataset.id;});});}
-function formatValue(r,store){if(store==='clients')return r.fullName||'';if(store==='files')return `${r.fileNumber||''} — ${r.title||''}`.trim();if(store==='cases')return `${r.caseNumber||''}/${r.caseYear||''} — ${r.courtId||''}`.trim();return r.name||r.title||r.id||''}
+
+async function findRows(office,store,index,raw){
+ const specs=SEARCH_INDEXES[store]||[[index,index?.toLowerCase().includes('normalized')?'text':'digits']];
+ const out=new Map();
+ for(const [idx,kind] of specs){
+  const q=kind==='text'?normalizeArabic(raw):normalizeDigits(raw).trim();
+  if(!q)continue;
+  try{for(const r of await office.r[store].prefix(idx,q,10))out.set(r.id,r)}catch{/* ignore a single failing index */}
+  if(out.size>=10)break;
+ }
+ return [...out.values()].slice(0,10);
+}
+
+export function bindLookups(root,office){
+ root?.querySelectorAll('.lookup-input').forEach(input=>{
+  const list=root.querySelector('#'+input.getAttribute('list'));
+  const hidden=input.parentElement.querySelector(`input[type="hidden"][name="${CSS.escape(input.dataset.lookupName)}"]`);
+  const store=input.dataset.lookupStore;
+  const labels=new Map(); // label -> id for the currently offered suggestions
+  let timer,seq=0;
+  const pick=()=>{const id=labels.get(input.value.trim());if(id){hidden.value=id;return true}return false};
+  input.addEventListener('input',()=>{
+   clearTimeout(timer);
+   if(pick())return; // the user selected one of the offered suggestions
+   hidden.value='';
+   const raw=input.value.trim();
+   if(raw.length<2){list.innerHTML='';labels.clear();return}
+   const my=++seq;
+   timer=setTimeout(async()=>{
+    try{
+     const rows=await findRows(office,store,input.dataset.lookupIndex,raw);
+     if(my!==seq)return;
+     labels.clear();
+     list.innerHTML=rows.map(r=>{const text=formatValue(r,store);labels.set(text,r.id);return `<option value="${esc(text)}"></option>`}).join('');
+     pick();
+    }catch{list.innerHTML='';labels.clear()}
+   },150);
+  });
+  input.addEventListener('change',pick);
+ });
+}
+
+export function formatValue(r,store){
+ if(store==='clients')return `${r.fullName||''}${r.nationalId?` — ${r.nationalId}`:''}`;
+ if(store==='files')return `${r.fileNumber||''} — ${r.title||''}`.trim();
+ if(store==='cases')return `${r.caseNumber||''}/${r.caseYear||''} — ${r.courtId||''}`.trim();
+ return r.name||r.title||r.id||'';
+}
