@@ -41,17 +41,24 @@ export async function exportDatabase(ctx){
   return data;
 }
 
+// النسخ من بنية أقدم (بدءًا من 10) مقبولة: المخازن التي أُضيفت لاحقًا تُستعاد فارغة، ولا يُحذف أي سجل موجود في النسخة.
+const MIN_BACKUP_SCHEMA=10;
+function expectedStores(payload){return Number(payload.schemaVersion)===SCHEMA_VERSION?STORES:STORES.filter(s=>Array.isArray(payload.stores?.[s]))}
 function validatePayload(payload){
   if(!payload||payload.format!==BACKUP_FORMAT)throw new AppError(ERR.VALIDATION,'ملف النسخة الاحتياطية غير صالح أو ليس من هذا البرنامج.');
   if(Number(payload.version)!==BACKUP_VERSION)throw new AppError(ERR.VALIDATION,`إصدار ملف النسخة ${payload.version||'غير معروف'} غير مدعوم. أنشئ نسخة جديدة من الإصدار الحالي.`);
-  if(Number(payload.schemaVersion)!==SCHEMA_VERSION)throw new AppError(ERR.VALIDATION,`إصدار بنية البيانات في النسخة (${payload.schemaVersion||'غير معروف'}) لا يطابق الإصدار الحالي (${SCHEMA_VERSION}). لم يتم تعديل القاعدة.`);
+  const sv=Number(payload.schemaVersion);
+  if(!(sv>=MIN_BACKUP_SCHEMA&&sv<=SCHEMA_VERSION))throw new AppError(ERR.VALIDATION,`إصدار بنية البيانات في النسخة (${payload.schemaVersion||'غير معروف'}) غير مدعوم في الإصدار الحالي (${SCHEMA_VERSION}). لم يتم تعديل القاعدة.`);
   if(!payload.stores||typeof payload.stores!=='object')throw new AppError(ERR.VALIDATION,'النسخة لا تحتوي على مخازن البيانات.');
-  for(const s of STORES)if(!Array.isArray(payload.stores[s]))throw new AppError(ERR.VALIDATION,`النسخة ناقصة: ${s}`);
+  const need=expectedStores(payload);
+  for(const s of need)if(!Array.isArray(payload.stores[s]))throw new AppError(ERR.VALIDATION,`النسخة ناقصة: ${s}`);
+  if(sv===SCHEMA_VERSION)for(const s of STORES)if(!Array.isArray(payload.stores[s]))throw new AppError(ERR.VALIDATION,`النسخة ناقصة: ${s}`);
   for(const key of Object.keys(payload.stores))if(!STORES.includes(key))throw new AppError(ERR.VALIDATION,`مخزن غير معروف في النسخة: ${key}`);
   if(payload.manifest){
-    if(!Array.isArray(payload.manifest.storeNames)||payload.manifest.storeNames.length!==STORES.length||STORES.some(s=>!payload.manifest.storeNames.includes(s)))throw new AppError(ERR.VALIDATION,'بيان المخازن في النسخة غير متوافق مع بنية البرنامج.');
+    const names=payload.manifest.storeNames;
+    if(!Array.isArray(names)||names.some(s=>!STORES.includes(s))||Object.keys(payload.stores).some(s=>!names.includes(s))||(sv===SCHEMA_VERSION&&(names.length!==STORES.length||STORES.some(s=>!names.includes(s)))))throw new AppError(ERR.VALIDATION,'بيان المخازن في النسخة غير متوافق مع بنية البرنامج.');
     const actual=counts(payload.stores);
-    for(const s of STORES)if(Number(payload.manifest.recordCounts?.[s])!==actual[s])throw new AppError(ERR.VALIDATION,`عدد السجلات المعلن للمخزن ${s} لا يطابق البيانات الفعلية.`);
+    for(const s of names)if(Number(payload.manifest.recordCounts?.[s])!==(actual[s]||0))throw new AppError(ERR.VALIDATION,`عدد السجلات المعلن للمخزن ${s} لا يطابق البيانات الفعلية.`);
     const total=Object.values(actual).reduce((a,b)=>a+b,0);
     if(payload.manifest.totalRecords!=null&&Number(payload.manifest.totalRecords)!==total)throw new AppError(ERR.VALIDATION,'إجمالي السجلات المعلن لا يطابق البيانات الفعلية.');
   }
@@ -74,7 +81,7 @@ export async function importDatabase(ctx,payload,{mode='replace'}={}){
   await inspectBackup(payload);
   if(mode!=='replace')throw new AppError(ERR.VALIDATION,'وضع الاستعادة المدعوم حاليًا هو الاستبدال الكامل فقط.');
   const tx=ctx.db.transaction(STORES,'readwrite');
-  try{for(const s of STORES){const st=tx.objectStore(s);st.clear();for(const row of payload.stores[s])st.put(row)}}
+  try{for(const s of STORES){const st=tx.objectStore(s);st.clear();for(const row of (payload.stores[s]||[]))st.put(row)}}
   catch(err){try{tx.abort()}catch{};throw new AppError(ERR.TX,'تعذر تجهيز عملية الاستعادة. لم يتم اعتماد التغيير.',err)}
   await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('فشلت الاستعادة'));tx.onabort=()=>reject(tx.error||new Error('تم إلغاء الاستعادة'))});
   return {stores:counts(payload.stores),exportedAt:payload.exportedAt};
