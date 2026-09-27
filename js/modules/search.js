@@ -2,16 +2,16 @@ import {unifiedSearch} from '../services/search.js';
 import {esc} from '../ui/dom.js';
 
 const TYPES=[['all','الكل'],['clients','الموكلون'],['files','الملفات'],['cases','القضايا'],['opponents','الخصوم']];
-const title=x=>x.fullName||x.title||x.name||x.caseNumber||x.subject||'بدون عنوان';
+const title=x=>x.fullName||(x.fileNumber?`${x.fileNumber} — ${x.title||''}`:x.title)||x.name||x.caseNumber||x.subject||'بدون عنوان';
 const meta=(type,x)=>{
  if(type==='clients') return [x.nationalId&&`رقم قومي: ${x.nationalId}`,x.phone||x.phone1].filter(Boolean).join(' — ');
- if(type==='files') return [x.fileNumber,x.workType,x.status].filter(Boolean).join(' — ');
- if(type==='cases') return [x.caseNumber&&`قضية ${x.caseNumber}`,x.caseYear,x.courtId,x.status].filter(Boolean).join(' / ');
+ if(type==='files') return [x.fileNumber,x.fileType||x.workType,x.status,x.partyNames].filter(Boolean).join(' — ');
+ if(type==='cases') return [x.stageType||x.numberType,x.caseNumber&&`رقم ${x.caseNumber}`,x.caseYear,x.courtId,x.status].filter(Boolean).join(' / ');
  return [x.capacity,x.phone].filter(Boolean).join(' — ');
 };
 const route=(type,id)=>({clients:'client',files:'file',cases:'case'}[type]||'')[type==='opponents'?0?'':'':0];
 function resultRow(type,x){
- const r=type==='clients'?`client:${x.id}`:type==='files'?`file:${x.id}`:type==='cases'?`case:${x.id}`:'';
+ const r=type==='clients'?`client:${x.id}`:type==='files'?`file:${x.id}`:type==='cases'?`case:${x.id}`:type==='opponents'?`opponent:${x.id}`:'';
  const action=r?`<button class="link" data-search-open="${esc(r)}">فتح السجل</button>`:`<span class="muted">عرض</span>`;
  return `<div class="search-result"><div><b>${esc(title(x))}</b><small>${esc(meta(type,x)||'')}</small></div>${action}</div>`;
 }
