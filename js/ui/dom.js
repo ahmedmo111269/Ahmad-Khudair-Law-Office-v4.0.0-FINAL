@@ -1,0 +1,1 @@
+export const $=s=>document.querySelector(s);export const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));export function formData(form){return Object.fromEntries(new FormData(form).entries())}

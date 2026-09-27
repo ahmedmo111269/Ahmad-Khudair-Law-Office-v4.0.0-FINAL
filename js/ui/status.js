@@ -1,0 +1,2 @@
+export function setBusy(root,busy,text='جارٍ التنفيذ…'){if(!root)return;root.setAttribute('aria-busy',busy?'true':'false');root.querySelectorAll('button[type=submit],button[data-action]').forEach(b=>{b.disabled=busy;b.dataset.prevText??=b.textContent;if(busy&&text)b.textContent=text;else if(!busy&&b.dataset.prevText)b.textContent=b.dataset.prevText})}
+export function renderEmpty(title='لا توجد بيانات',text='لا توجد سجلات مطابقة للمعايير الحالية.'){return `<div class="empty" role="status"><h3>${title}</h3><p>${text}</p></div>`}

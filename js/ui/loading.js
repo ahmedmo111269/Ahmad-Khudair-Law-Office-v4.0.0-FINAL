@@ -1,0 +1,1 @@
+export const loading=()=>'<div class="loading">جارٍ التحميل…</div>';export const empty=(title='لا توجد بيانات',text='ابدأ بإضافة أول سجل.')=>`<div class="empty"><h3>${title}</h3><p>${text}</p></div>`;

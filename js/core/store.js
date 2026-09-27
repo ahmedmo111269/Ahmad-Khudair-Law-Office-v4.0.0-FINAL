@@ -1,0 +1,1 @@
+class Store{constructor(){this.s={route:'dashboard',query:'',refresh:0};this.l=new Set}get(){return this.s}set(p){this.s={...this.s,...p};this.l.forEach(f=>f(this.s))}subscribe(f){this.l.add(f);return()=>this.l.delete(f)}}export const appStore=new Store();

@@ -1,0 +1,1 @@
+import {normalizeArabic} from '../core/search-normalizer.js';export const caseIdentity=x=>[String(x.caseNumber||'').trim(),x.caseYear||'',x.courtId||'',normalizeArabic(x.chamber||'')].join('|');export function canDeleteFile(file,cases){return !cases.some(c=>!c.isDeleted)}

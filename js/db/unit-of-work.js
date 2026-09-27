@@ -1,0 +1,2 @@
+export function transaction(ctx,stores,fn){ctx.assert();return new Promise((resolve,reject)=>{const tx=ctx.db.transaction([...new Set(stores)],'readwrite');let out;tx.oncomplete=()=>resolve(out);tx.onerror=()=>reject(tx.error||Error('فشلت العملية وتم التراجع عنها'));tx.onabort=()=>reject(tx.error||Error('تم التراجع عن العملية'));Promise.resolve().then(()=>fn(tx)).then(v=>out=v).catch(e=>{try{tx.abort()}catch{}reject(e)})})}
+export function request(r){return new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
