@@ -13,7 +13,7 @@ export async function saveJudicial(office,store,input,id=null){
   if(id&&!old) throw new AppError(ERR.NOT_FOUND,'السجل غير موجود.');
   const parentRow=await office.r.cases.get(input.caseId);
   if(!parentRow||parentRow.isDeleted) throw new AppError(ERR.NOT_FOUND,'القضية غير موجودة أو محذوفة.');
-  const row={...(old||{}),...input,id:id||uid(),createdAt:old?.createdAt||Clock.now(),updatedAt:Clock.now(),version:(old?.version||0)+1,isArchived:old?.isArchived||false,isDeleted:old?.isDeleted||false,deletedAt:old?.deletedAt||null};
+  const row={...(old||{}),...input,fileId:parentRow.fileId,id:id||uid(),createdAt:old?.createdAt||Clock.now(),updatedAt:Clock.now(),version:(old?.version||0)+1,isArchived:old?.isArchived||false,isDeleted:old?.isDeleted||false,deletedAt:old?.deletedAt||null};
   if(store==='execution'&&!row.status) row.status='not_started';
   const f=await office.r.files.get(parentRow.fileId);
   if(!f||f.isDeleted) throw new AppError(ERR.CONFLICT,'الملف المرتبط بالقضية غير متاح.');
@@ -23,7 +23,7 @@ export async function saveJudicial(office,store,input,id=null){
     await request(tx.objectStore(STORE.cases).put(parentRow));
     f.updatedAt=row.updatedAt; f.lastActivityAt=row.updatedAt; f.version=(f.version||0)+1;
     await request(tx.objectStore(STORE.files).put(f));
-    await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:store,entityId:row.id,action:id?'update':'create',timestamp:Clock.now(),summary:`${id?'تحديث':'إنشاء'} ${store}`,metadata:{}}));
+    await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:store,entityId:row.id,action:id?'update':'create',timestamp:Clock.now(),summary:`${id?'تحديث':'إنشاء'} ${store}`,metadata:{},fileId:f.id}));
     return row;
   });
   events.emit('entity:changed',{entityType:store,id:result.id});
