@@ -1,3 +1,4 @@
+import {formatDate as fmtDate,formatDateTime as fmtDateTime} from '../core/format.js';
 // تعريف موحّد لكل كيانات البرنامج: الحقول والمجموعات والأعمدة الظاهرة في الجداول.
 // النماذج وصفحات السجل والجداول والتقارير تعتمد كلها على هذا الملف بدل تكرار الحقول في كل صفحة.
 // كل الحقول اختيارية ما عدا اسم الشخص وربط السجل بأصله (req:true).
@@ -310,8 +311,7 @@ export const ENTITIES={
 };
 export const ENTITY_LABEL=Object.fromEntries(Object.entries(ENTITIES).map(([k,v])=>[k,v.label]));
 
-export function fmtDate(v){if(!v)return '';const s=String(v);const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);if(!m)return s;return `${m[3]}/${m[2]}/${m[1]}`}
-export function fmtDateTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);const p=n=>String(n).padStart(2,'0');return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`}
+export {fmtDate,fmtDateTime};
 export const phonesOf=r=>[...(Array.isArray(r?.phones)?r.phones:[]),r?.phone,r?.phone1,r?.phone2].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
 
 // الحالة الإدارية للملف (ليست قاعدة قانونية)

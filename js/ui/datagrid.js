@@ -4,6 +4,21 @@
 import {esc} from './dom.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {APP_NAME} from '../core/constants.js';
+import {prefs} from '../core/preferences.js';
+import {formatDate} from '../core/format.js';
+
+// أعمدة لا تُصدَّر افتراضيًا (خصوصية الموكلين) إلا باختيار "تصدير كامل"
+const SENSITIVE=/nationalId|idNumber|passport|phone|mobile|email|address|birth/i;
+const VIRTUAL_THRESHOLD=600;
+// تمييز نتائج البحث مع مراعاة اختلافات الكتابة العربية (أ/ا، ى/ي، ة/ه، التشكيل)
+const AR_EQ={'ا':'[اأإآٱ]','ي':'[يى]','ى':'[يى]','ه':'[هة]','ة':'[هة]','و':'[وؤ]'};
+const DIG='0123456789',ADIG='٠١٢٣٤٥٦٧٨٩';
+function highlighter(q){
+ const t=String(q||'').trim();if(!t)return null;
+ const parts=[...normalizeArabic(t)].map(ch=>{if(ch===' ')return '\\s+';if(AR_EQ[ch])return AR_EQ[ch];const d=DIG.indexOf(ch);if(d>=0)return `[${ch}${ADIG[d]}]`;return ch.replace(/[.*+?^${}()|[\]\\\/]/g,'\\$&')});
+ try{return new RegExp(parts.join('[\\u064B-\\u065F\\u0670ـ]*'),'gi')}catch{return null}
+}
+const markHtml=(text,re)=>{if(!re)return esc(text);let out='',last=0;const s=String(text);re.lastIndex=0;let m;while((m=re.exec(s))){if(!m[0]){re.lastIndex++;continue}out+=esc(s.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';last=m.index+m[0].length}return out+esc(s.slice(last))};
 
 const OPS={
  text:[['contains','يحتوي'],['notContains','لا يحتوي'],['eq','يساوي'],['neq','لا يساوي'],['starts','يبدأ بـ'],['ends','ينتهي بـ'],['empty','فارغ'],['notEmpty','غير فارغ']],
@@ -47,8 +62,12 @@ export function mountGrid(root,opts){
  const cols=o.columns.map(c=>({type:'text',get:r=>r[c.key],text:r=>String(c.get?c.get(r)??'':r[c.key]??''),...c}));
  const byKey=new Map(cols.map(c=>[c.key,c]));
  let rows=o.rows||[];
- const saved=(()=>{try{return JSON.parse(localStorage.getItem('grid:'+o.storageKey)||'null')}catch{return null}})();
- const st={sort:[],filters:new Map(),adv:{logic:'and',rules:[]},quick:'',groupBy:'',hidden:new Set(saved?.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),shown:o.pageSize,cards:false};
+ const PK='grid:'+(o.storageKey||'');
+ const legacy=(()=>{try{return JSON.parse(localStorage.getItem('grid:'+o.storageKey)||'null')}catch{return null}})();
+ const saved=(o.storageKey&&prefs.get(PK))||legacy||{};
+ const order=(Array.isArray(saved.order)?saved.order:[]).filter(k=>byKey.has(k));cols.forEach(c=>{if(!order.includes(c.key))order.push(c.key)});
+ const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map(),adv:{logic:'and',rules:[]},quick:'',groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:''};
+ let hl=null;
  let view=[];
  root.classList.add('dg');
  root.innerHTML=`<div class="dg-toolbar">
@@ -56,22 +75,26 @@ export function mountGrid(root,opts){
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
   <label class="dg-group-lbl">تجميع حسب <select class="dg-groupby"><option value="">بدون</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select></label>
   <button type="button" class="ghost dg-cols-btn">الأعمدة</button>
+  <button type="button" class="ghost dg-views-btn" title="حفظ واسترجاع الفلاتر والفرز باسم">★ طرق العرض</button>
+  <select class="dg-density" aria-label="كثافة العرض" title="كثافة العرض"><option value="">كثافة: حسب الثيم</option><option value="compact">مضغوط</option><option value="normal">عادي</option><option value="comfortable">مريح</option></select>
   <button type="button" class="ghost dg-cards-btn" title="تبديل العرض">بطاقات</button>
   <button type="button" class="ghost dg-clear" hidden>مسح التصفية</button>
   <span class="dg-count" aria-live="polite"></span>
   <span class="dg-spacer"></span>
   <button type="button" class="ghost dg-print">طباعة</button>
-  <select class="dg-export" aria-label="تصدير"><option value="">تصدير…</option><option value="xls">Excel</option><option value="doc">Word</option><option value="csv">CSV</option><option value="txt">نص TXT</option></select>
+  <select class="dg-export" aria-label="تصدير"><option value="">تصدير…</option><option value="xls">Excel</option><option value="doc">Word</option><option value="csv">CSV</option><option value="txt">نص TXT</option><optgroup label="يشمل البيانات الحساسة"><option value="xls:full">Excel كامل</option><option value="csv:full">CSV كامل</option></optgroup></select>
  </div>
  <div class="dg-adv" hidden></div>
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody></table></div>
  <div class="dg-more"></div>`;
  const $=s=>root.querySelector(s);
- const visibleCols=()=>cols.filter(c=>!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)try{localStorage.setItem('grid:'+o.storageKey,JSON.stringify({hidden:[...st.hidden]}))}catch{}};
+ const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
+ const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views})};
+ const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards;
+ let rowH=0,vStart=-1;
 
  function compute(){
-  const q=n(st.quick);
+  const q=n(st.quick);hl=highlighter(st.quick);vStart=-1;
   const vc=cols;
   let out=rows.filter(r=>{
    if(q&&!vc.some(c=>n(c.text(r)).includes(q)))return false;
@@ -89,7 +112,19 @@ export function mountGrid(root,opts){
   const sortMark=k=>{const i=st.sort.findIndex(s=>s.key===k);if(i<0)return '';return `<span class="dg-sortmark">${st.sort[i].dir==='asc'?'▲':'▼'}${st.sort.length>1?i+1:''}</span>`};
   $('thead').innerHTML=`<tr>${visibleCols().map(c=>`<th data-key="${esc(c.key)}" class="${st.filters.has(c.key)?'dg-filtered':''}"><div class="dg-th"><button type="button" class="dg-sort" title="فرز (Shift للفرز المتعدد)">${esc(c.label)} ${sortMark(c.key)}</button><button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية وفرز">▾</button></div></th>`).join('')}</tr>`;
  }
- function cellHtml(c,r){const t=c.text(r);return `<td data-label="${esc(c.label)}"${c.type==='number'?' class="num"':''}>${esc(t)}</td>`}
+ function cellHtml(c,r){const t=c.text(r);return `<td data-label="${esc(c.label)}"${c.type==='number'?' class="num"':''} title="${esc(t)}">${hl?markHtml(t,hl):esc(t)}</td>`}
+ const rowHtml=(r,i,vc)=>`<tr data-i="${i}" tabindex="0" class="${o.onRowClick?'dg-click':''}${st.sel===i?' dg-selected':''}">${vc.map(c=>cellHtml(c,r)).join('')}</tr>`;
+ function renderWindow(force){
+  const sc=$('.dg-scroll'),vc=visibleCols();
+  const h=rowH||36,start=Math.max(0,Math.floor(sc.scrollTop/h)-15);
+  if(!force&&start===vStart)return;vStart=start;
+  const end=Math.min(view.length,start+Math.ceil((sc.clientHeight||600)/h)+30);
+  let html=`<tr class="dg-vpad" aria-hidden="true"><td colspan="${vc.length}" style="height:${start*h}px"></td></tr>`;
+  for(let i=start;i<end;i++)html+=rowHtml(view[i],i,vc);
+  html+=`<tr class="dg-vpad" aria-hidden="true"><td colspan="${vc.length}" style="height:${(view.length-end)*h}px"></td></tr>`;
+  $('tbody').innerHTML=html;
+  if(!rowH){const tr=$('tbody tr[data-i]');if(tr&&tr.offsetHeight){rowH=tr.offsetHeight;vStart=-1;renderWindow(true)}}
+ }
  function renderBody(){
   const vc=visibleCols();
   const shown=view.slice(0,st.shown);
@@ -98,15 +133,17 @@ export function mountGrid(root,opts){
   const counts=g?view.reduce((m,r)=>{const k=g.text(r)||EMPTY;m.set(k,(m.get(k)||0)+1);return m},new Map()):null;
   shown.forEach((r,i)=>{
    if(g){const k=g.text(r)||EMPTY;if(k!==last){html+=`<tr class="dg-grouprow"><th colspan="${vc.length}">${esc(g.label)}: ${esc(k)} <small>(${counts.get(k)})</small></th></tr>`;last=k}}
-   html+=`<tr data-i="${i}" tabindex="0"${o.onRowClick?' class="dg-click"':''}>${vc.map(c=>cellHtml(c,r)).join('')}</tr>`;
+   html+=rowHtml(r,i,vc);
   });
   if(!view.length)html=`<tr><td colspan="${Math.max(1,vc.length)}" class="dg-empty">${esc(rows.length?'لا توجد صفوف مطابقة للتصفية.':o.emptyText)}</td></tr>`;
-  $('tbody').innerHTML=html;
+  if(view.length&&virtualOn())renderWindow(true);else $('tbody').innerHTML=html;
   $('.dg-count').textContent=view.length===rows.length?`${rows.length} سجل`:`${view.length} من ${rows.length} سجل`;
-  const rest=view.length-shown.length;
+  const rest=virtualOn()?0:view.length-shown.length;
   $('.dg-more').innerHTML=rest>0?`<button type="button" class="ghost dg-showmore">عرض ${Math.min(rest,o.pageSize)} صف إضافي (متبقٍ ${rest})</button>`:'';
   $('.dg-clear').hidden=!(st.filters.size||st.adv.rules.length||st.quick||st.sort.length);
   root.classList.toggle('dg-cards',st.cards);
+  ['compact','normal','comfortable'].forEach(d=>root.classList.toggle('dg-d-'+d,st.density===d));$('.dg-density').value=st.density;
+  $('.dg-views-btn').classList.toggle('dg-chip-active',Boolean(st.activeView));
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
  }
  function render(){compute();renderHead();renderBody()}
@@ -115,8 +152,10 @@ export function mountGrid(root,opts){
  let qt=0;
  $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{st.quick=e.target.value;st.shown=o.pageSize;compute();renderBody()},120)});
  $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;render()});
- $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];$('.dg-quick').value='';renderAdv();render()});
- $('.dg-cards-btn').addEventListener('click',()=>{st.cards=!st.cards;renderBody()});
+ $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.activeView='';persist();$('.dg-quick').value='';renderAdv();render()});
+ $('.dg-cards-btn').addEventListener('click',()=>{st.cards=!st.cards;persist();renderBody()});
+ $('.dg-density').addEventListener('change',e=>{st.density=e.target.value;rowH=0;persist();renderBody()});
+ let raf=0;$('.dg-scroll').addEventListener('scroll',()=>{if(!virtualOn()||raf)return;raf=requestAnimationFrame(()=>{raf=0;renderWindow(false)})},{passive:true});
  $('.dg-print').addEventListener('click',()=>printGrid());
  $('.dg-export').addEventListener('change',e=>{const v=e.target.value;e.target.value='';if(v)exportGrid(v)});
  $('.dg-more').addEventListener('click',e=>{if(e.target.closest('.dg-showmore')){st.shown+=o.pageSize;renderBody()}});
@@ -127,12 +166,16 @@ export function mountGrid(root,opts){
    const i=st.sort.findIndex(s=>s.key===key);
    if(e.shiftKey){if(i<0)st.sort.push({key,dir:'asc'});else if(st.sort[i].dir==='asc')st.sort[i].dir='desc';else st.sort.splice(i,1)}
    else{const cur=i>=0?st.sort[i].dir:null;st.sort=cur==='asc'?[{key,dir:'desc'}]:cur==='desc'?[]:[{key,dir:'asc'}]}
-   render();
+   persist();render();
   }
  });
- const clickRow=tr=>{const r=view[Number(tr.dataset.i)];if(r&&o.onRowClick)o.onRowClick(r)};
+ const selectRow=tr=>{st.sel=Number(tr.dataset.i);root.querySelectorAll('tr.dg-selected').forEach(x=>x.classList.remove('dg-selected'));tr.classList.add('dg-selected')};
+ const clickRow=tr=>{selectRow(tr);const r=view[Number(tr.dataset.i)];if(r&&o.onRowClick)o.onRowClick(r)};
  $('tbody').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr)clickRow(tr)});
- $('tbody').addEventListener('keydown',e=>{if(e.key==='Enter'){const tr=e.target.closest('tr[data-i]');if(tr)clickRow(tr)}});
+ $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]');if(!tr)return;
+  if(e.key==='Enter')clickRow(tr);
+  else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();let nx=e.key==='ArrowDown'?tr.nextElementSibling:tr.previousElementSibling;while(nx&&!nx.dataset.i)nx=e.key==='ArrowDown'?nx.nextElementSibling:nx.previousElementSibling;if(nx){selectRow(nx);nx.focus()}}
+ });
 
  // ===== نافذة تصفية العمود =====
  let pop=null;
@@ -185,11 +228,45 @@ export function mountGrid(root,opts){
  // ===== الأعمدة =====
  $('.dg-cols-btn').addEventListener('click',e=>{
   closePop();pop=document.createElement('div');pop.className='dg-pop';
-  pop.innerHTML=`<div class="dg-pop-head"><b>الأعمدة الظاهرة</b><button type="button" class="link dg-x">✕</button></div><div class="dg-checks">${cols.map(c=>`<label><input type="checkbox" value="${esc(c.key)}" ${st.hidden.has(c.key)?'':'checked'}> ${esc(c.label)}</label>`).join('')}</div><div class="dg-pop-actions"><button type="button" class="ghost dg-allcols">إظهار الكل</button></div>`;
+  const listHtml=()=>order.map((k,i)=>{const c=byKey.get(k);return `<li draggable="true" data-k="${esc(k)}"><span class="dg-handle" title="اسحب لإعادة الترتيب">⋮⋮</span><label><input type="checkbox" value="${esc(k)}" ${st.hidden.has(k)?'':'checked'}> ${esc(c.label)}</label><button type="button" class="link dg-mv" data-mv="-1" ${i===0?'disabled':''} aria-label="تحريك لأعلى">▲</button><button type="button" class="link dg-mv" data-mv="1" ${i===order.length-1?'disabled':''} aria-label="تحريك لأسفل">▼</button></li>`}).join('');
+  pop.innerHTML=`<div class="dg-pop-head"><b>الأعمدة — إظهار وترتيب</b><button type="button" class="link dg-x">✕</button></div><small class="muted">اسحب العمود لتغيير ترتيبه. يُحفظ الترتيب لهذا الجدول.</small><ul class="dg-cols-list">${listHtml()}</ul><div class="dg-pop-actions"><button type="button" class="ghost dg-allcols">إظهار الكل</button><button type="button" class="ghost dg-resetcols">الترتيب الافتراضي</button></div>`;
   place(pop,e.currentTarget);
+  const ul=pop.querySelector('.dg-cols-list');
+  const refresh=()=>{ul.innerHTML=listHtml();persist();renderHead();renderBody()};
   pop.querySelector('.dg-x').onclick=closePop;
-  pop.querySelectorAll('.dg-checks input').forEach(i=>i.onchange=()=>{if(i.checked)st.hidden.delete(i.value);else st.hidden.add(i.value);persist();renderHead();renderBody()});
-  pop.querySelector('.dg-allcols').onclick=()=>{st.hidden.clear();persist();closePop();render()};
+  ul.addEventListener('change',ev=>{const i=ev.target;if(i.type!=='checkbox')return;if(i.checked)st.hidden.delete(i.value);else st.hidden.add(i.value);persist();renderHead();renderBody()});
+  ul.addEventListener('click',ev=>{const b=ev.target.closest('.dg-mv');if(!b)return;const k=b.closest('li').dataset.k,i=order.indexOf(k),j=i+Number(b.dataset.mv);if(j<0||j>=order.length)return;order.splice(i,1);order.splice(j,0,k);refresh()});
+  let dragK=null;
+  ul.addEventListener('dragstart',ev=>{const li=ev.target.closest('li');dragK=li?.dataset.k;li?.classList.add('dragging');ev.dataTransfer.effectAllowed='move';try{ev.dataTransfer.setData('text/plain',dragK)}catch{}});
+  ul.addEventListener('dragover',ev=>{ev.preventDefault();ul.querySelectorAll('.drag-over').forEach(x=>x.classList.remove('drag-over'));ev.target.closest('li')?.classList.add('drag-over')});
+  ul.addEventListener('dragend',()=>{ul.querySelectorAll('.dragging,.drag-over').forEach(x=>x.classList.remove('dragging','drag-over'))});
+  ul.addEventListener('drop',ev=>{ev.preventDefault();const to=ev.target.closest('li')?.dataset.k;if(!dragK||!to||dragK===to)return;const from=order.indexOf(dragK),target=order.indexOf(to);order.splice(from,1);order.splice(target,0,dragK);dragK=null;refresh()});
+  pop.querySelector('.dg-allcols').onclick=()=>{st.hidden.clear();refresh()};
+  pop.querySelector('.dg-resetcols').onclick=()=>{order.splice(0,order.length,...cols.map(c=>c.key));refresh()};
+ });
+ // ===== طرق العرض المحفوظة (فلاتر + فرز + أعمدة باسم) =====
+ const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order]});
+ function restore(v){
+  st.quick=v.quick||'';$('.dg-quick').value=st.quick;
+  st.filters=new Map((v.filters||[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f.set?new Set(f.set):null}]));
+  st.adv=v.adv||{logic:'and',rules:[]};st.sort=(v.sort||[]).filter(x=>byKey.has(x.key));st.groupBy=byKey.has(v.groupBy)?v.groupBy:'';$('.dg-groupby').value=st.groupBy;
+  if(v.hidden)st.hidden=new Set(v.hidden);
+  if(v.order){const ord=v.order.filter(k=>byKey.has(k));cols.forEach(c=>{if(!ord.includes(c.key))ord.push(c.key)});order.splice(0,order.length,...ord)}
+  st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length;render();
+ }
+ $('.dg-views-btn').addEventListener('click',e=>{
+  closePop();pop=document.createElement('div');pop.className='dg-pop';
+  const draw=()=>{pop.innerHTML=`<div class="dg-pop-head"><b>طرق العرض المحفوظة</b><button type="button" class="link dg-x">✕</button></div>
+   <div class="dg-views">${st.views.map((v,i)=>`<div class="dg-view"><button type="button" class="ghost${st.activeView===v.name?' dg-chip-active':''}" data-vi="${i}">★ ${esc(v.name)}</button><button type="button" class="link" data-vup="${i}" title="تحديث بالحالة الحالية">⟳</button><button type="button" class="link danger" data-vdel="${i}" aria-label="حذف">✕</button></div>`).join('')||'<p class="muted small">لا توجد طرق عرض محفوظة. طبّق الفلاتر والفرز ثم احفظها باسم لتسترجعها بنقرة.</p>'}</div>
+   <form class="dg-vsave" style="display:flex;gap:6px"><input name="nm" placeholder="اسم العرض، مثل: جلسات الأسبوع" required style="flex:1"><button class="primary">حفظ</button></form>`;
+   pop.querySelector('.dg-x').onclick=closePop;
+   pop.querySelector('.dg-vsave').onsubmit=ev=>{ev.preventDefault();const nm=ev.target.nm.value.trim();if(!nm)return;const i=st.views.findIndex(v=>v.name===nm);const v={name:nm,state:snapshot(),at:new Date().toISOString()};if(i>=0)st.views[i]=v;else st.views.push(v);st.activeView=nm;persist();draw();renderBody()};
+  };
+  draw();place(pop,e.currentTarget);
+  pop.addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
+   if(b.dataset.vi!==undefined){const v=st.views[Number(b.dataset.vi)];st.activeView=v.name;closePop();restore(v.state)}
+   else if(b.dataset.vup!==undefined){st.views[Number(b.dataset.vup)].state=snapshot();persist();draw()}
+   else if(b.dataset.vdel!==undefined){const [v]=st.views.splice(Number(b.dataset.vdel),1);if(st.activeView===v?.name)st.activeView='';persist();draw();renderBody()}});
  });
  // ===== التصفية المركّبة =====
  function renderAdv(){
@@ -213,8 +290,8 @@ export function mountGrid(root,opts){
  });
 
  // ===== الطباعة والتصدير =====
- function matrix(){const vc=visibleCols();return {head:vc.map(c=>c.label),body:view.map(r=>vc.map(c=>c.text(r)))}}
- function tableHtml(){const {head,body}=matrix();return `<table border="1" cellspacing="0" cellpadding="4" dir="rtl"><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
+ function matrix(full=true){const vc=visibleCols().filter(c=>full||!(c.sensitive||SENSITIVE.test(c.key)));return {head:vc.map(c=>c.label),body:view.map(r=>vc.map(c=>c.text(r)))}}
+ function tableHtml(full=true){const {head,body}=matrix(full);return `<table border="1" cellspacing="0" cellpadding="4" dir="rtl"><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
  function docHtml(forPrint){
   const now=new Date();const stamp=`${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
   const filt=[st.quick&&`بحث: ${st.quick}`,...[...st.filters.keys()].map(k=>`تصفية: ${byKey.get(k)?.label}`),st.adv.rules.length&&`شروط مركبة: ${st.adv.rules.length}`,st.groupBy&&`تجميع: ${byKey.get(st.groupBy)?.label}`].filter(Boolean).join(' — ');
@@ -223,10 +300,11 @@ export function mountGrid(root,opts){
  function printGrid(){const w=window.open('','_blank');if(!w){alert('اسمح بالنوافذ المنبثقة للطباعة.');return}w.document.open();w.document.write(docHtml(true));w.document.close()}
  function download(content,name,type){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
  function exportGrid(kind){
-  const base=(o.exportName||o.title||'report').replace(/[\\/:*?"<>|]+/g,'-');const {head,body}=matrix();
+  const full=kind.endsWith(':full');kind=kind.replace(':full','');
+  const base=((o.exportName||o.title||'report')+'-'+formatDate(new Date()).replace(/\//g,'-')).replace(/[\\/:*?"<>|]+/g,'-');const {head,body}=matrix(full);
   if(kind==='csv'){const q=v=>`"${String(v??'').replace(/"/g,'""')}"`;download('\ufeff'+[head,...body].map(r=>r.map(q).join(',')).join('\r\n'),base+'.csv','text/csv;charset=utf-8')}
   else if(kind==='txt'){download('\ufeff'+[head,...body].map(r=>r.map(v=>String(v??'').replace(/[\t\r\n]+/g,' ')).join('\t')).join('\r\n'),base+'.txt','text/plain;charset=utf-8')}
-  else if(kind==='xls'){download('\ufeff'+`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" dir="rtl"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${tableHtml()}</body></html>`,base+'.xls','application/vnd.ms-excel;charset=utf-8')}
+  else if(kind==='xls'){download('\ufeff'+`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" dir="rtl"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${tableHtml(full)}</body></html>`,base+'.xls','application/vnd.ms-excel;charset=utf-8')}
   else if(kind==='doc'){download('\ufeff'+docHtml(false),base+'.doc','application/msword;charset=utf-8')}
  }
 

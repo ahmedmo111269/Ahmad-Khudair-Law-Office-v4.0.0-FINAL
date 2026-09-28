@@ -7,11 +7,18 @@ import {lookupRows,saveLookupValue,removeLookupValue,moveLookupValue,seedLookups
 import {rebuildAllFileSearchText} from '../services/legal-files.js';
 import {migrateLegacyParties} from '../services/maintenance.js';
 import {userError} from '../core/errors.js';
+import {renderAppearance,bindAppearance} from './appearance.js';
 
 export async function renderSettings(app){
+ const tab=app.__settingsTab||'appearance';
+ const tabs=`<div class="tabs" role="tablist"><button role="tab" data-stab="appearance" class="${tab==='appearance'?'active':''}">🎨 المظهر والثيمات</button><button role="tab" data-stab="general" class="${tab==='general'?'active':''}">القوائم والنظام</button></div>`;
+ if(tab==='appearance')return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">خصّص المظهر بالكامل — التغييرات تُطبَّق فورًا وتُحفظ على هذا الجهاز لهذا المستخدم.</p></div></div>${tabs}<div id="appearance-root">${renderAppearance()}</div>`;
+ return (await renderGeneral(app)).replace('<!--TABS-->',tabs);
+}
+async function renderGeneral(app){
  const cat=app.__lookupCat=app.__lookupCat||'fileType';
  const rows=await lookupRows(app.office,cat);
- return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">إعدادات التشغيل المحلية والقوائم التي تظهر في النماذج.</p></div></div>
+ return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">إعدادات التشغيل المحلية والقوائم التي تظهر في النماذج.</p></div></div><!--TABS-->
  <section class="panel"><div class="panel-head"><h3>القوائم القابلة للتعديل</h3><span class="muted small">القيم تظهر كاقتراحات في النماذج ويمكن دائمًا كتابة قيمة أخرى. حذف قيمة لا يغيّر السجلات القديمة التي استخدمتها.</span></div>
   <div class="lookup-admin"><label>القائمة<select id="lk-cat">${Object.entries(LOOKUP_CATEGORIES).map(([k,v])=>`<option value="${k}"${k===cat?' selected':''}>${esc(v.label)}</option>`).join('')}</select></label>
   <form id="lk-add" class="inline-form"><input name="value" placeholder="قيمة جديدة" aria-label="قيمة جديدة"><button class="primary">إضافة</button></form></div>
@@ -23,6 +30,8 @@ export async function renderSettings(app){
 }
 export function bindSettings(app){
  const root=document.querySelector('#main-content');const cat=app.__lookupCat;
+ root.querySelectorAll('[data-stab]').forEach(b=>b.onclick=()=>{app.__settingsTab=b.dataset.stab;app.refresh()});
+ if((app.__settingsTab||'appearance')==='appearance'){bindAppearance(app);return}
  root.querySelector('#lk-cat').onchange=e=>{app.__lookupCat=e.target.value;app.refresh()};
  root.querySelector('#lk-add').onsubmit=async e=>{e.preventDefault();try{await saveLookupValue(app.office,cat,e.target.value.value);toast('تمت الإضافة');app.refresh()}catch(err){toast(userError(err),'error')}};
  root.querySelectorAll('[data-lk]').forEach(b=>b.onclick=async()=>{

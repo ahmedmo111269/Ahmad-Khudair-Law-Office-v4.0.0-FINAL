@@ -8,9 +8,9 @@ export function modal(html){
  return root.querySelector('.modal-card');
 }
 export function closeModal(){document.querySelector('#modal-root').innerHTML=''}
-export function confirmBox(message,{okText='تأكيد',input=false,placeholder=''}={}){
+export function confirmBox(message,{okText='تأكيد',input=false,placeholder='',label='السبب / ملاحظة',value=''}={}){
  return new Promise(resolve=>{
-  const card=modal(`<h2 class="modal-title">تأكيد</h2><p>${message}</p>${input?`<label>السبب / ملاحظة<textarea class="confirm-input" rows="2" placeholder="${placeholder}"></textarea></label>`:''}<div class="form-actions"><button class="primary" type="button" data-ok>${okText}</button><button class="ghost" type="button" data-cancel>إلغاء</button></div>`);
+  const card=modal(`<h2 class="modal-title">تأكيد</h2><p>${message}</p>${input?`<label>${label}<textarea class="confirm-input" rows="2" placeholder="${placeholder}">${String(value).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"})[c])}</textarea></label>`:''}<div class="form-actions"><button class="primary" type="button" data-ok>${okText}</button><button class="ghost" type="button" data-cancel>إلغاء</button></div>`);
   const done=v=>{closeModal();resolve(v)};
   card.querySelector('[data-ok]').onclick=()=>done(input?{ok:true,value:card.querySelector('.confirm-input').value}:true);
   card.querySelector('[data-cancel]').onclick=()=>done(input?{ok:false}:false);

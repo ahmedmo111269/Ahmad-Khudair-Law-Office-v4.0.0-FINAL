@@ -24,6 +24,10 @@ import {integrityPage,bindIntegrity} from './modules/integrity.js';
 import {repairPage,bindRepair} from './modules/repair.js';
 import {renderSettings,bindSettings} from './modules/settings.js';
 import {runMaintenance} from './services/maintenance.js';
+import {initTheme} from './ui/theme.js';
+import {bindThemeMenu} from './ui/theme-menu.js';
+import {decorateNav} from './ui/icons.js';
+import {installDateInputs} from './ui/date-input.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
 const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','appointments','communications','caseNotes','witnesses','expertReports','judgments','execution','fees','feePayments','documentReferences'];
@@ -108,4 +112,4 @@ class App{
 }
 const app=new App();
 function updateNetworkBadge(){const e=document.querySelector('#network-badge');if(!e)return;e.textContent=navigator.onLine?'محلي':'وضع عدم الاتصال';e.classList.toggle('is-offline',!navigator.onLine);e.classList.toggle('is-online',navigator.onLine)}
-window.addEventListener('online',updateNetworkBadge);window.addEventListener('offline',updateNetworkBadge);window.addEventListener('error',e=>{console.error('window error',e.error||e.message)});window.addEventListener('unhandledrejection',e=>{console.error('unhandled rejection',e.reason)});updateNetworkBadge();window.__LAW_OFFICE_APP__=app;app.boot();
+window.addEventListener('online',updateNetworkBadge);window.addEventListener('offline',updateNetworkBadge);window.addEventListener('error',e=>{console.error('window error',e.error||e.message)});window.addEventListener('unhandledrejection',e=>{console.error('unhandled rejection',e.reason)});updateNetworkBadge();window.__LAW_OFFICE_APP__=app;initTheme();decorateNav();installDateInputs(document.body);bindThemeMenu(app);app.boot();

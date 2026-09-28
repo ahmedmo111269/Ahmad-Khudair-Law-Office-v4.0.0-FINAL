@@ -1,8 +1,9 @@
 import {STORE} from '../db/schema.js';
+import {formatDate,formatDateTime,formatTime,formatNumber} from '../core/format.js';
 
 const MAX_LINKS=500;
-const d=v=>v?new Date(v).toLocaleDateString('ar-EG'):'';
-const dt=v=>v?new Date(v).toLocaleString('ar-EG'):'';
+const d=v=>formatDate(v);
+const dt=v=>formatDateTime(v);
 
 async function idx(r,store,index,key,limit=MAX_LINKS){return r[store]?.byIndex(index,key,limit)||[]}
 async function many(r,store,ids){return r[store]?.getMany(ids)||[]}
@@ -42,11 +43,11 @@ export async function buildFileTimeline(office,fileId){
   communications.forEach(x=>timeline.push(item(x.date||x.createdAt,'اتصال',x.subject||'اتصال',x.summary||'',x.id)));
   notes.forEach(x=>timeline.push(item(x.createdAt,'ملاحظة',x.category||'ملاحظة',x.content||'',x.id)));
   docs.forEach(x=>timeline.push(item(x.date,'مرجع مستند',x.title||'مرجع مستند',x.physicalLocation||'',x.id)));
-  hearings.forEach(x=>timeline.push(item(x.hearingDate+'T'+(x.hearingTime||'00:00'),'جلسة',`جلسة ${x.hearingDate||''}`,[x.reason,x.result,x.whatHappened].filter(Boolean).join(' — '),x.id)));
+  hearings.forEach(x=>timeline.push(item(x.hearingDate+'T'+(x.hearingTime||'00:00'),'جلسة',`جلسة ${formatDate(x.hearingDate)}`,[x.reason,x.result,x.whatHappened].filter(Boolean).join(' — '),x.id)));
   judgments.forEach(x=>timeline.push(item(x.judgmentDate,'حكم',x.judgmentNumber||'حكم',x.operativeSummary||'',x.id)));
   execution.forEach(x=>timeline.push(item(x.openedDate||x.createdAt,'تنفيذ',x.executionNumber||'تنفيذ',[x.status,x.stage,x.lastAction].filter(Boolean).join(' — '),x.id)));
   activities.forEach(x=>timeline.push(item(x.timestamp,'نشاط',x.summary||x.action||'نشاط','سجل النظام',x.id)));
-  fees.forEach(x=>timeline.push(item(x.createdAt,'أتعاب','اتفاق أتعاب',`${Number(x.agreedAmount||0).toLocaleString('ar-EG')} ${x.currency||''}`.trim(),x.id)));
+  fees.forEach(x=>timeline.push(item(x.createdAt,'أتعاب','اتفاق أتعاب',`${formatNumber(x.agreedAmount)} ${x.currency||''}`.trim(),x.id)));
   const allDates=timeline.map(x=>x.date).filter(Boolean).sort();
   const now=new Date();
   const future=timeline.filter(x=>new Date(x.date)>=now).sort((a,b)=>String(a.date).localeCompare(String(b.date)))[0]||null;
@@ -62,7 +63,7 @@ export async function buildCaseTimeline(office,caseId){
     idx(r,STORE.expertReports,'caseId',caseId),idx(r,STORE.judgments,'caseId',caseId),idx(r,STORE.execution,'caseId',caseId),idx(r,STORE.activityLog,'entityId',caseId)
   ]);
   const timeline=[];
-  h.forEach(v=>timeline.push(item(v.hearingDate+'T'+(v.hearingTime||'00:00'),'جلسة',`جلسة ${v.hearingDate||''}`,[v.reason,v.result,v.whatHappened,v.nextAction].filter(Boolean).join(' — '),v.id)));
+  h.forEach(v=>timeline.push(item(v.hearingDate+'T'+(v.hearingTime||'00:00'),'جلسة',`جلسة ${formatDate(v.hearingDate)}`,[v.reason,v.result,v.whatHappened,v.nextAction].filter(Boolean).join(' — '),v.id)));
   p.forEach(v=>timeline.push(item(v.actionDate||v.createdAt,'إجراء/مهمة',v.description||v.type||'إجراء',`الحالة: ${v.status||''}${v.internalDueDate?' — الاستحقاق: '+d(v.internalDueDate):''}`,v.id)));
   w.forEach(v=>timeline.push(item(v.createdAt,'شاهد',v.name||'شاهد',v.side||'',v.id)));
   e.forEach(v=>timeline.push(item(v.reportDate,'خبير',v.expertName||'تقرير خبير',v.summary||'',v.id)));
