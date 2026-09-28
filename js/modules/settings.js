@@ -11,8 +11,9 @@ import {renderAppearance,bindAppearance} from './appearance.js';
 
 export async function renderSettings(app){
  const tab=app.__settingsTab||'appearance';
- const tabs=`<div class="tabs" role="tablist"><button role="tab" data-stab="appearance" class="${tab==='appearance'?'active':''}">🎨 المظهر والثيمات</button><button role="tab" data-stab="general" class="${tab==='general'?'active':''}">القوائم والنظام</button></div>`;
+ const tabs=`<div class="tabs" role="tablist"><button role="tab" data-stab="appearance" class="${tab==='appearance'?'active':''}">🎨 المظهر والثيمات</button><button role="tab" data-stab="taxonomy" class="${tab==='taxonomy'?'active':''}">📂 الأقسام وأنواع الأعمال</button><button role="tab" data-stab="general" class="${tab==='general'?'active':''}">القوائم والنظام</button></div>`;
  if(tab==='appearance')return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">خصّص المظهر بالكامل — التغييرات تُطبَّق فورًا وتُحفظ على هذا الجهاز لهذا المستخدم.</p></div></div>${tabs}<div id="appearance-root">${renderAppearance()}</div>`;
+ if(tab==='taxonomy'){const {renderTaxonomyEditor}=await import('./taxonomy-editor.js');return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">الأقسام وأنواع الأعمال والمسارات المقترحة والحقول الخاصة — كلها بيانات قابلة للتعديل دون برمجة.</p></div></div>${tabs}${await renderTaxonomyEditor(app)}`}
  return (await renderGeneral(app)).replace('<!--TABS-->',tabs);
 }
 async function renderGeneral(app){
@@ -32,6 +33,7 @@ export function bindSettings(app){
  const root=document.querySelector('#main-content');const cat=app.__lookupCat;
  root.querySelectorAll('[data-stab]').forEach(b=>b.onclick=()=>{app.__settingsTab=b.dataset.stab;app.refresh()});
  if((app.__settingsTab||'appearance')==='appearance'){bindAppearance(app);return}
+ if(app.__settingsTab==='taxonomy'){import('./taxonomy-editor.js').then(m=>m.bindTaxonomyEditor(app));return}
  root.querySelector('#lk-cat').onchange=e=>{app.__lookupCat=e.target.value;app.refresh()};
  root.querySelector('#lk-add').onsubmit=async e=>{e.preventDefault();try{await saveLookupValue(app.office,cat,e.target.value.value);toast('تمت الإضافة');app.refresh()}catch(err){toast(userError(err),'error')}};
  root.querySelectorAll('[data-lk]').forEach(b=>b.onclick=async()=>{

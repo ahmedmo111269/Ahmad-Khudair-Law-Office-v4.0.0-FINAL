@@ -81,6 +81,7 @@ const phonesField={k:'phones',l:'أرقام الهاتف',t:'phones',g:'الات
 export const ENTITIES={
  clients:{label:'موكل',plural:'الموكلون',title:r=>r.fullName,route:'client',dateField:'createdAt',dateIndex:'createdAt',fields:[
   {k:'fullName',l:'الاسم الكامل',t:'text',req:true,grid:true,g:'البيانات الأساسية'},
+  {k:'clientCode',l:'كود ملف الموكل',t:'readonly',grid:true,g:'البيانات الأساسية'},
   {k:'clientType',l:'نوع الشخص',t:'lookup',lk:'clientType',grid:true,g:'البيانات الأساسية'},
   {k:'nationalId',l:'الرقم القومي',t:'text',grid:true,g:'البيانات الأساسية'},
   {k:'idType',l:'نوع إثبات آخر',t:'lookup',lk:'idType',g:'البيانات الأساسية'},
@@ -137,6 +138,8 @@ export const ENTITIES={
   {k:'fileId',l:'الملف',t:'ref',ref:'files',req:true,grid:true,g:'الربط'},
   {k:'stageType',l:'نوع المرحلة',t:'lookup',lk:'stageType',grid:true,g:'بيانات المرحلة'},
   {k:'numberType',l:'نوع الرقم',t:'lookup',lk:'numberType',grid:true,g:'بيانات المرحلة'},
+  {k:'lifecycle',l:'حالة المرحلة في المسار',t:'select',opts:[['planned','مخططة'],['active','جارية'],['done','منتهية'],['skipped','متخطاة']],g:'بيانات المرحلة'},
+  {k:'outcome',l:'نتيجة المرحلة',t:'lookup',lk:'stageOutcome',g:'بيانات المرحلة'},
   {k:'caseNumber',l:'الرقم',t:'text',grid:true,g:'بيانات المرحلة'},
   {k:'caseYear',l:'السنة',t:'number',grid:true,g:'بيانات المرحلة'},
   {k:'courtId',l:'المحكمة / الجهة',t:'lookup',lk:'court',grid:true,g:'بيانات المرحلة'},

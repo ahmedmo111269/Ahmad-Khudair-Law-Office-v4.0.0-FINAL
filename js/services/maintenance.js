@@ -5,6 +5,7 @@ import {STORE} from '../db/schema.js';
 import {Clock} from '../core/clock.js';
 import {transaction,request} from '../db/unit-of-work.js';
 import {seedLookups} from './lookups.js';
+import {seedTaxonomy,migrateToClientFiles} from './client-files.js';
 import {refreshFileSearchText} from './legal-files.js';
 import {phonesOf} from '../domain/entities.js';
 
@@ -15,6 +16,7 @@ export async function runMaintenance(office){
  const meta=(await office.r.meta.get(META_ID))||{id:META_ID,key:META_ID};
  const report={lookups:0,parties:0,indexed:0};
  report.lookups=await seedLookups(office);
+ try{report.taxonomy=await seedTaxonomy(office);report.clientFiles=await migrateToClientFiles(office)}catch(e){console.error('clientFiles migration',e);report.clientFilesError=String(e?.message||e)}
  if(!meta.partiesMigrated)report.parties=await migrateLegacyParties(office);
  report.indexed=await indexMissingSearchText(office);
  await office.r.meta.put({...meta,partiesMigrated:true,maintenanceVersion:MAINTENANCE_VERSION,lastRunAt:Clock.now()});

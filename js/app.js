@@ -1,3 +1,4 @@
+import {clientFilePage,bindClientFilePage} from './modules/client-file.js';
 import * as constants from './core/constants.js';
 import {APP_NAME} from './core/constants.js';
 import {DatabaseRegistry} from './db/database-registry.js';
@@ -49,6 +50,8 @@ for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>li
 function recordRoute(route){
  let m=/^(client|opponent|file|case):(.+)$/.exec(route);
  if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0]}}
+ m=/^cfile:(.+)$/.exec(route);
+ if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
  if(m&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1]};
  return null;
