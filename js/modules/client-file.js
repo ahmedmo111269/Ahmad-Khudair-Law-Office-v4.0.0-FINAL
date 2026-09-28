@@ -258,3 +258,25 @@ export async function openRelatedMenu(app,file,anchor){
  void anchor;void tax;
 }
 export {formatDateTime};
+
+// ======================= اختيار الموكل ثم المعالج (من «+ إضافة» وقائمة الملفات) =======================
+export async function startNewLegalFile(app){
+ const {openEntityForm}=await import('../ui/form.js');
+ const {normalizeArabic}=await import('../core/search-normalizer.js');
+ const card=modal(`<h2 class="modal-title">ملف قانوني جديد</h2><p class="muted small">كل ملف يتبع ملف موكل. اختر الموكل أو أضف موكلًا جديدًا.</p>
+  <input type="search" id="pc-q" placeholder="اسم الموكل أو كود CL-… أو الرقم القومي" autocomplete="off" aria-label="بحث عن موكل">
+  <div id="pc-r" class="cf-lines pc-results"></div>
+  <div class="form-actions"><button class="primary" data-pc-new>+ موكل جديد</button><button class="ghost" data-pc-legacy title="النموذج الكامل بدون معالج">النموذج الكامل</button></div>`);
+ const q=card.querySelector('#pc-q'),r=card.querySelector('#pc-r');let t=0,seq=0;
+ const recent=async()=>{try{const x=await app.office.r.clients.reportRange({index:'createdAt',direction:'prev',limit:8});return Array.isArray(x)?x:(x.rows||[])}catch{return []}};
+ const draw=(rows,title)=>{r.innerHTML=(title?`<small class="muted">${title}</small>`:'')+(rows.filter(c=>!c.isDeleted).map(c=>`<button class="cf-line" data-id="${esc(c.id)}"><span class="cf-avatar sm">${esc((c.fullName||'؟').charAt(0))}</span><span class="cf-line-main"><b>${esc(c.fullName)}</b><small><span class="mono">${esc(c.clientCode||'')}</span> ${esc(phonesOf(c)[0]||'')}</small></span></button>`).join('')||'<p class="muted small">لا نتائج — أضف موكلًا جديدًا.</p>')};
+ const run=async()=>{const my=++seq;const v=q.value.trim();if(v.length<2){const rows=await recent();if(my===seq)draw(rows,'أحدث الموكلين');return}
+  const n=normalizeArabic(v),code=v.toUpperCase();
+  const [a,b,c]=await Promise.all([app.office.r.clients.prefix('fullNameNormalized',n,10),/^CL/.test(code)?app.office.r.clients.prefix('clientCode',code,10).catch(()=>[]):[],/^\d{4,}/.test(v)?app.office.r.clients.prefix('nationalId',v,10).catch(()=>[]):[]]);
+  if(my===seq)draw([...new Map([...b,...c,...a].map(x=>[x.id,x])).values()])};
+ q.oninput=()=>{clearTimeout(t);t=setTimeout(run,180)};run();setTimeout(()=>q.focus(),30);
+ q.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();r.querySelector('[data-id]')?.click()}};
+ r.onclick=e=>{const b=e.target.closest('[data-id]');if(!b)return;closeModal();openLegalFileWizard(app,{clientId:b.dataset.id})};
+ card.querySelector('[data-pc-new]').onclick=()=>{closeModal();openEntityForm(app,'clients',{preset:{fullName:/\d|CL/i.test(q.value)?'':q.value.trim()},onSaved:async(row,isNew)=>{if(isNew)setTimeout(()=>openLegalFileWizard(app,{clientId:row.id}),60)}})};
+ card.querySelector('[data-pc-legacy]').onclick=()=>{closeModal();openEntityForm(app,'files',{onSaved:async(row,isNew)=>{if(isNew)return app.go('file:'+row.id)}})};
+}

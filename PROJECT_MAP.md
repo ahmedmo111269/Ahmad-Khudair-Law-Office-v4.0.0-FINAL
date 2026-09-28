@@ -14,6 +14,10 @@
 
 # PROJECT MAP
 
+## v4.4.0 polish
+- `js/ui/combobox.js` — global styled dropdown for every `<input list>` (delegated, initialized in app.js).
+- Datagrid: filter chips, collapsible groups, totals footer, mobile tools toggle. Themes: 9 presets (`LIGHT_PRESETS`).
+
 ## v4.3.0 Client File architecture (schema v12)
 - `js/domain/taxonomy-defaults.js` — seed categories/file types/stage types/field sets/templates, relation types, extra lookups.
 - `js/services/client-files.js` — taxonomy cache, client file (CL codes), legal file creation (LF codes), stage ops, related files, assets, v12 migration.

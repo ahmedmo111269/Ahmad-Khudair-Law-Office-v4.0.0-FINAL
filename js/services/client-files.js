@@ -395,6 +395,7 @@ export function classifyLegacy(f){
 export async function migrateToClientFiles(office,onProgress=null){
  const meta=(await office.r.meta.get(META_MIG))||{id:META_MIG,key:META_MIG};
  if(meta.done)return {clients:0,files:0,skipped:true};
+ await snapshotBeforeV12(office,meta);
  await seedTaxonomy(office);
  const tax=await taxonomy(office);
  let clients=0,files=0;
@@ -446,3 +447,17 @@ export async function migrateToClientFiles(office,onProgress=null){
 }
 export async function unclassifiedFiles(office,limit=200){return office.r.files.reportRange({index:'categoryId',lower:'other',upper:'other',limit,filter:f=>f.needsClassification})}
 export async function orphanFiles(office,limit=200){return office.r.files.reportRange({index:'lastActivityAt',limit,direction:'prev',filter:f=>!f.clientFileId})}
+
+// نسخة أمان تلقائية قبل أول ترقية v12 تُحفظ داخل القاعدة نفسها (meta.preV12Backup) ويمكن تنزيلها من الإعدادات.
+async function snapshotBeforeV12(office,meta){
+ if(meta.snapshotAt)return;
+ try{
+  const hasFiles=(await office.r.files.reportRange({index:'lastActivityAt',limit:1}).catch(()=>[])).length||(await office.r.clients.reportRange({index:'createdAt',limit:1}).catch(()=>[])).length;
+  if(!hasFiles){meta.snapshotAt='empty';return}
+  const {exportDatabase}=await import('./backup.js');
+  const data=await exportDatabase(office.ctx);
+  await office.r.meta.put({id:'preV12Backup',key:'preV12Backup',createdAt:Clock.now(),data});
+  meta.snapshotAt=Clock.now();await office.r.meta.put(meta);
+ }catch(e){console.warn('preV12 snapshot skipped',e)}
+}
+export async function preV12Backup(office){return office.r.meta.get('preV12Backup')}

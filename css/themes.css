@@ -108,6 +108,51 @@
   color-scheme:dark;
 }
 
+/* ---------- 5) Emerald Court ---------- */
+:root[data-theme="emeraldCourt"]{
+  --bg:#07140F;--surface:#10231B;--surface2:#152C22;--chrome:#0A1A13;
+  --text-strong:#F4FAF6;--text:#DCE8E1;--text-muted:#8FA89A;
+  --primary:#D4AF37;--primary-2:#E9D58E;--on-primary:#07140F;
+  --success:#5FD39A;--warn:#E6B95C;--danger:#EF7F7F;--info:#8CC4E8;
+  --border-tint:14%;--shadow-strength:.5;--glow-strength:.22;color-scheme:dark;
+}
+/* ---------- 6) Royal Burgundy ---------- */
+:root[data-theme="royalBurgundy"]{
+  --bg:#160A0E;--surface:#241218;--surface2:#2D171E;--chrome:#1B0D12;
+  --text-strong:#FFF7F8;--text:#EDDFE2;--text-muted:#B39AA0;
+  --primary:#D9A55B;--primary-2:#EFCB97;--on-primary:#160A0E;
+  --success:#7CCB9C;--warn:#EDBE6A;--danger:#FF8C8C;--info:#A9BFE3;
+  --border-tint:15%;--shadow-strength:.5;--glow-strength:.2;color-scheme:dark;
+}
+/* ---------- 7) Pearl Blue ---------- */
+:root[data-theme="pearlBlue"]{
+  --bg:#F3F6FA;--surface:#FFFFFF;--surface2:#EDF1F7;--chrome:#FFFFFF;
+  --text-strong:#0B1320;--text:#1F2A37;--text-muted:#5B6878;
+  --primary:#1D4F91;--primary-2:#3A73C0;--on-primary:#FFFFFF;
+  --success:#177245;--warn:#9A5B00;--danger:#B42318;--info:#1D4F91;
+  --border-tint:11%;--shadow-strength:.10;--glow-strength:.12;
+  --overlay:rgb(11 19 32 / .45);--chrome-text:#2B3747;--on-chrome:#0B1320;color-scheme:light;
+}
+/* ---------- 8) Desert Sand ---------- */
+:root[data-theme="desertSand"]{
+  --bg:#F4EEE3;--surface:#FBF8F2;--surface2:#F0E8DA;--chrome:#FBF8F2;
+  --text-strong:#21190F;--text:#3B3024;--text-muted:#7A6B58;
+  --primary:#8B5A2B;--primary-2:#B07A43;--on-primary:#FFFFFF;
+  --success:#2F7A45;--warn:#9A5B00;--danger:#A8321F;--info:#2D5F8A;
+  --border-tint:12%;--shadow-strength:.10;--glow-strength:.12;
+  --overlay:rgb(33 25 15 / .45);--chrome-text:#43372A;--on-chrome:#21190F;color-scheme:light;
+}
+/* ---------- 9) High Contrast ---------- */
+:root[data-theme="highContrast"]{
+  --bg:#000000;--surface:#0A0A0A;--surface2:#141414;--chrome:#000000;
+  --text-strong:#FFFFFF;--text:#FFFFFF;--text-muted:#D0D0D0;
+  --primary:#FFD400;--primary-2:#FFE866;--on-primary:#000000;
+  --success:#3DFF8F;--warn:#FFB300;--danger:#FF5C5C;--info:#6CC4FF;
+  --border-tint:40%;--shadow-strength:0;--glow-strength:0;color-scheme:dark;
+}
+:root[data-theme="highContrast"] :focus-visible{outline:3px solid #FFD400!important;outline-offset:2px}
+:root[data-theme="highContrast"] a{text-decoration:underline}
+
 /* التأثيرات: إيقاف الظلال والتوهج */
 :root[data-effects="off"]{--shadow-sm:none;--shadow-md:none;--shadow-lg:none;--glow:none}
 /* احترام تفضيل تقليل الحركة */

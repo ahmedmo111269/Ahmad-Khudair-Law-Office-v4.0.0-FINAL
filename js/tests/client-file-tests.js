@@ -3,6 +3,8 @@ import {upgradeSchema} from '../db/schema.js';
 import {Office} from '../services/office.js';
 import {createLegalFile} from '../services/legal-files.js';
 import * as S from '../services/client-files.js';
+import {PRESETS,LIGHT_PRESETS} from '../ui/theme.js';
+import {mountGrid} from '../ui/datagrid.js';
 
 export async function runClientFileTests(test,expect){
  const name=`AhmadKhudairLawOfficeDB__test__cf__${Date.now()}`;
@@ -44,5 +46,7 @@ export async function runClientFileTests(test,expect){
  test('تخطي مرحلة دون حذفها',()=>expect(out.skipped).toBe('skipped'));
  test('علاقة نشأ عن مكتوبة',()=>expect(out.rel[0]?.relationCode).toBe('ORIGINATED_FROM'));
  test('الترحيل إضافي: لا يغيّر الرقم أو النوع القديم',()=>{const {before,after}=out.migration;expect(after.fileNumber).toBe(before.fileNumber);expect(after.fileType).toBe(before.fileType);expect(after.categoryId).toBe('family');expect(after.clientFileId).toBe(out.migration.lc.clientFileId)});
+ test('الثيمات: 9 أوضاع والفاتحة معرفة',()=>{expect(Object.keys(PRESETS).length>=9).toBe(true);expect(LIGHT_PRESETS.every(k=>PRESETS[k])).toBe(true)});
+ test('الجدول: إجمالي الأعمدة الرقمية وطي المجموعات وشرائح التصفية',()=>{const g=document.createElement('div');document.body.append(g);mountGrid(g,{rows:[{a:'x',n:5,t:'أ'},{a:'y',n:7,t:'أ'},{a:'z',n:1,t:'ب'}],columns:[{key:'a',label:'A'},{key:'n',label:'N',type:'number'},{key:'t',label:'T'}]});expect(g.querySelector('tfoot').textContent.includes('١٣')).toBe(true);const sel=g.querySelector('.dg-groupby');sel.value='t';sel.dispatchEvent(new Event('change'));g.querySelector('.dg-grouprow').click();expect(g.querySelectorAll('tbody tr[data-i]').length).toBe(1);g.querySelector('.dg-sort').click();expect(g.querySelector('.dg-chips').hidden).toBe(false);g.remove()});
  test('لا أرشفة لملف موكل به ملفات نشطة',()=>expect(out.blocked).toBe(true));
 }

@@ -36,6 +36,7 @@ export async function exportDatabase(ctx){
   const data={format:BACKUP_FORMAT,version:BACKUP_VERSION,applicationVersion:APP_VERSION,schemaVersion:SCHEMA_VERSION,
     database:{...ctx.profile},exportedAt:new Date().toISOString(),stores:{}};
   data.stores=await readStoresSnapshot(ctx.db);
+  if(Array.isArray(data.stores.meta))data.stores.meta=data.stores.meta.filter(r=>r?.id!=='preV12Backup'); // لا تُضمَّن نسخة الأمان داخل كل نسخة
   data.manifest={storeNames:[...STORES],recordCounts:counts(data.stores),totalRecords:Object.values(counts(data.stores)).reduce((a,b)=>a+b,0)};
   data.integrity={algorithm:'SHA-256',storesDigest:await digest(JSON.stringify(data.stores))};
   return data;

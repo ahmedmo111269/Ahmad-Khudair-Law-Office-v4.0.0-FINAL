@@ -67,10 +67,10 @@ export function mountGrid(root,opts){
  const saved=(o.storageKey&&prefs.get(PK))||legacy||{};
  const order=(Array.isArray(saved.order)?saved.order:[]).filter(k=>byKey.has(k));cols.forEach(c=>{if(!order.includes(c.key))order.push(c.key)});
  const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map(),adv:{logic:'and',rules:[]},quick:'',groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:''};
- let hl=null;
+ let hl=null;const collapsed=new Set();
  let view=[];
  root.classList.add('dg');
- root.innerHTML=`<div class="dg-toolbar">
+ root.innerHTML=`<div class="dg-toolbar"><button type="button" class="ghost dg-tools-btn" aria-expanded="false" title="أدوات الجدول">⚙︎ أدوات</button>
   <input class="dg-quick" type="search" placeholder="تصفية داخل النتائج…" aria-label="تصفية داخل النتائج">
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
   <label class="dg-group-lbl">تجميع حسب <select class="dg-groupby"><option value="">بدون</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select></label>
@@ -84,8 +84,9 @@ export function mountGrid(root,opts){
   <button type="button" class="ghost dg-print">طباعة</button>
   <select class="dg-export" aria-label="تصدير"><option value="">تصدير…</option><option value="xls">Excel</option><option value="doc">Word</option><option value="csv">CSV</option><option value="txt">نص TXT</option><optgroup label="يشمل البيانات الحساسة"><option value="xls:full">Excel كامل</option><option value="csv:full">CSV كامل</option></optgroup></select>
  </div>
+ <div class="dg-chips" hidden aria-label="التصفية النشطة"></div>
  <div class="dg-adv" hidden></div>
- <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody></table></div>
+ <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
  <div class="dg-more"></div>`;
  const $=s=>root.querySelector(s);
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
@@ -132,7 +133,7 @@ export function mountGrid(root,opts){
   let html='',last=null;
   const counts=g?view.reduce((m,r)=>{const k=g.text(r)||EMPTY;m.set(k,(m.get(k)||0)+1);return m},new Map()):null;
   shown.forEach((r,i)=>{
-   if(g){const k=g.text(r)||EMPTY;if(k!==last){html+=`<tr class="dg-grouprow"><th colspan="${vc.length}">${esc(g.label)}: ${esc(k)} <small>(${counts.get(k)})</small></th></tr>`;last=k}}
+   if(g){const k=g.text(r)||EMPTY;if(k!==last){html+=`<tr class="dg-grouprow${collapsed.has(k)?' dg-collapsed':''}" data-g="${esc(k)}" tabindex="0" title="اضغط للطي / الفتح"><th colspan="${vc.length}"><span class="dg-gcaret">${collapsed.has(k)?'◂':'▾'}</span> ${esc(g.label)}: ${esc(k)} <small>(${counts.get(k)})</small></th></tr>`;last=k}if(collapsed.has(k))return}
    html+=rowHtml(r,i,vc);
   });
   if(!view.length)html=`<tr><td colspan="${Math.max(1,vc.length)}" class="dg-empty">${esc(rows.length?'لا توجد صفوف مطابقة للتصفية.':o.emptyText)}</td></tr>`;
@@ -141,10 +142,26 @@ export function mountGrid(root,opts){
   const rest=virtualOn()?0:view.length-shown.length;
   $('.dg-more').innerHTML=rest>0?`<button type="button" class="ghost dg-showmore">عرض ${Math.min(rest,o.pageSize)} صف إضافي (متبقٍ ${rest})</button>`:'';
   $('.dg-clear').hidden=!(st.filters.size||st.adv.rules.length||st.quick||st.sort.length);
+  renderChips();renderFoot(vc);
   root.classList.toggle('dg-cards',st.cards);
   ['compact','normal','comfortable'].forEach(d=>root.classList.toggle('dg-d-'+d,st.density===d));$('.dg-density').value=st.density;
   $('.dg-views-btn').classList.toggle('dg-chip-active',Boolean(st.activeView));
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
+ }
+ function renderChips(){
+  const chips=[];
+  if(st.quick)chips.push(['q','',`بحث: «${st.quick}»`]);
+  for(const [k,f] of st.filters){const c=byKey.get(k);if(!c)continue;let t;if(f.set)t=[...f.set].slice(0,3).map(v=>v===EMPTY?'(فارغ)':v).join('، ')+(f.set.size>3?` +${f.set.size-3}`:'');else{const op=(OPS[c.type]||OPS.text).find(x=>x[0]===f.op)?.[1]||f.op;t=`${op} ${f.v1||''}${f.v2?' – '+f.v2:''}`}chips.push(['f',k,`${c.label}: ${t}`])}
+  const rules=st.adv.rules.filter(x=>byKey.get(x.key));if(rules.length)chips.push(['a','',`تصفية مركّبة (${rules.length} ${st.adv.logic==='or'?'أيٌّ منها':'كلها'})`]);
+  st.sort.forEach((x,i)=>{const c=byKey.get(x.key);if(c)chips.push(['s',x.key,`فرز ${i+1}: ${c.label} ${x.dir==='asc'?'▲':'▼'}`])});
+  const el=$('.dg-chips');el.hidden=!chips.length;
+  el.innerHTML=chips.map(([t,k,l])=>`<span class="dg-fchip dg-fchip-${t}"><span>${esc(l)}</span><button type="button" data-rm="${t}" data-k="${esc(k)}" aria-label="إزالة ${esc(l)}">✕</button></span>`).join('')+(chips.length>1?'<button type="button" class="link dg-chips-clear">مسح الكل</button>':'');
+ }
+ function renderFoot(vc){
+  const nums=vc.filter(c=>c.type==='number'&&c.sum!==false);
+  if(!nums.length||!view.length||st.cards){$('tfoot').innerHTML='';return}
+  const fmt=v=>Number.isInteger(v)?v.toLocaleString('ar-EG'):v.toLocaleString('ar-EG',{maximumFractionDigits:2});
+  $('tfoot').innerHTML=`<tr class="dg-total">${vc.map((c,i)=>{if(!nums.includes(c))return `<td>${i===0?`الإجمالي (${view.length})`:''}</td>`;const vals=view.map(r=>Number(c.get(r))).filter(Number.isFinite);const sum=vals.reduce((a,b)=>a+b,0);return `<td class="num" title="المتوسط: ${vals.length?fmt(sum/vals.length):'—'}">${fmt(sum)}</td>`}).join('')}</tr>`;
  }
  function render(){compute();renderHead();renderBody()}
 
@@ -153,6 +170,18 @@ export function mountGrid(root,opts){
  $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{st.quick=e.target.value;st.shown=o.pageSize;compute();renderBody()},120)});
  $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;render()});
  $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.activeView='';persist();$('.dg-quick').value='';renderAdv();render()});
+ $('.dg-chips').addEventListener('click',e=>{
+  if(e.target.closest('.dg-chips-clear')){$('.dg-clear').click();return}
+  const b=e.target.closest('[data-rm]');if(!b)return;const t=b.dataset.rm,k=b.dataset.k;
+  if(t==='q'){st.quick='';$('.dg-quick').value=''}else if(t==='f')st.filters.delete(k);else if(t==='a'){st.adv.rules=[];renderAdv()}else if(t==='s'){st.sort=st.sort.filter(x=>x.key!==k)}
+  st.activeView='';persist();render();
+ });
+ $('.dg-tools-btn').addEventListener('click',e=>{const on=root.classList.toggle('dg-tools-open');e.currentTarget.setAttribute('aria-expanded',on)});
+ const toggleGroup=tr=>{const k=tr.dataset.g;collapsed.has(k)?collapsed.delete(k):collapsed.add(k);renderBody()};
+ $('tbody').addEventListener('click',e=>{const tr=e.target.closest('.dg-grouprow');if(tr){e.stopPropagation();toggleGroup(tr)}},true);
+ $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest?.('.dg-grouprow');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();toggleGroup(tr)}});
+ $('.dg-groupby').addEventListener('change',()=>collapsed.clear());
+ root.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();$('.dg-quick').focus()}});
  $('.dg-cards-btn').addEventListener('click',()=>{st.cards=!st.cards;persist();renderBody()});
  $('.dg-density').addEventListener('change',e=>{st.density=e.target.value;rowH=0;persist();renderBody()});
  let raf=0;$('.dg-scroll').addEventListener('scroll',()=>{if(!virtualOn()||raf)return;raf=requestAnimationFrame(()=>{raf=0;renderWindow(false)})},{passive:true});

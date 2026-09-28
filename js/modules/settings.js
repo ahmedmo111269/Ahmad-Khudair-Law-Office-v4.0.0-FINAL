@@ -26,7 +26,7 @@ async function renderGeneral(app){
   <ol class="lookup-list">${rows.map((r,i)=>`<li data-id="${r.id}"><span class="lk-val">${esc(r.value)}</span><span class="lk-actions"><button type="button" class="link" data-lk="up" ${i===0?'disabled':''} aria-label="أعلى">▲</button><button type="button" class="link" data-lk="down" ${i===rows.length-1?'disabled':''} aria-label="أسفل">▼</button><button type="button" class="link" data-lk="edit">تعديل</button><button type="button" class="link danger" data-lk="del">حذف</button></span></li>`).join('')||'<li class="muted">القائمة فارغة.</li>'}</ol>
  </section>
  <div class="grid2"><section class="panel"><h3>الإصدار</h3><p>التطبيق: ${esc(app.constants.APP_VERSION)}</p><p>Schema: ${app.constants.SCHEMA_VERSION}</p><p>قاعدة البيانات: ${esc(app.registry.active?.displayName||'')}</p></section>
- <section class="panel"><h3>صيانة (لا تحذف أي بيانات)</h3><div class="action-stack"><button class="ghost" data-maint="index">إعادة بناء فهرس البحث للملفات</button><button class="ghost" data-maint="parties">ترحيل روابط الموكلين القديمة إلى أطراف الملفات</button><button class="ghost" data-maint="seed">استكمال القوائم الافتراضية الناقصة</button></div><p class="muted small" id="maint-status"></p></section>
+ <section class="panel"><h3>صيانة (لا تحذف أي بيانات)</h3><div class="action-stack"><button class="ghost" data-maint="preV12">⬇ تنزيل نسخة الأمان التلقائية (قبل ترقية ملف الموكل)</button><button class="ghost" data-maint="index">إعادة بناء فهرس البحث للملفات</button><button class="ghost" data-maint="parties">ترحيل روابط الموكلين القديمة إلى أطراف الملفات</button><button class="ghost" data-maint="seed">استكمال القوائم الافتراضية الناقصة</button></div><p class="muted small" id="maint-status"></p></section>
  <section class="panel"><h3>الخصوصية</h3><p>البيانات مخزنة محليًا في متصفح الجهاز. لا توجد خدمة تحليل أو API خارجية في النسخة الأساسية.</p></section></div>`;
 }
 export function bindSettings(app){
@@ -48,6 +48,7 @@ export function bindSettings(app){
  root.querySelectorAll('[data-maint]').forEach(b=>b.onclick=async()=>{
   b.disabled=true;
   try{
+   if(b.dataset.maint==='preV12'){const {preV12Backup}=await import('../services/client-files.js');const {downloadJSON}=await import('../services/backup.js');const row=await preV12Backup(app.office);if(!row?.data){status.textContent='لا توجد نسخة أمان تلقائية (القاعدة كانت فارغة أو أُنشئت على الإصدار الجديد).'}else{downloadJSON(row.data,`pre-v12-backup-${String(row.createdAt).slice(0,10)}.json`);status.textContent='تم تنزيل النسخة. يمكن استعادتها من صفحة النسخ الاحتياطي.'}}
    if(b.dataset.maint==='index'){const n=await rebuildAllFileSearchText(app.office,d=>status.textContent=`تمت معالجة ${d} ملف…`);status.textContent=`تمت إعادة بناء فهرس ${n} ملف.`}
    if(b.dataset.maint==='parties'){const n=await migrateLegacyParties(app.office);status.textContent=`تم ترحيل ${n} رابط.`}
    if(b.dataset.maint==='seed'){const n=await seedLookups(app.office);status.textContent=n?`أضيفت ${n} قيمة افتراضية.`:'كل القوائم مكتملة.'}

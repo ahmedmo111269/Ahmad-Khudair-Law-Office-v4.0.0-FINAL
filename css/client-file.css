@@ -78,3 +78,36 @@
 .file-head{border-inline-start:4px solid var(--cat,var(--primary))}
 button.badge{cursor:pointer;font:inherit}
 .tax-editor .cf-line.active{background:var(--panel,rgba(127,127,127,.1));border-color:var(--primary)}.tax-editor textarea{width:100%}.tax-editor label{display:block;margin:10px 0 4px}
+.cf-avatar.sm{width:32px;height:32px;font-size:15px;border-radius:10px}.pc-results{max-height:50vh;overflow:auto;margin:8px 0}#pc-q{width:100%}
+/* ===== القوائم المنسدلة الموحدة (combobox) ===== */
+.cbx-pop{position:fixed;z-index:3000;overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--primary-border,var(--border));border-radius:12px;box-shadow:var(--shadow-lg,0 18px 40px rgba(0,0,0,.35));padding:4px;overscroll-behavior:contain;animation:cbxIn .12s ease-out}
+.cbx-pop.up{animation-name:cbxUp}
+@keyframes cbxIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}@keyframes cbxUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.cbx-opt{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 12px;border-radius:8px;cursor:pointer;min-height:40px;line-height:1.4}
+.cbx-opt small{color:var(--text-muted,var(--muted));font-size:12px}
+.cbx-opt:hover,.cbx-opt.on{background:color-mix(in srgb,var(--primary) 16%,transparent)}
+.cbx-opt.sel{font-weight:700}.cbx-opt.sel::after{content:"✓";color:var(--primary);margin-inline-start:auto}
+.cbx-opt mark{background:transparent;color:var(--primary);font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.cbx-more{padding:6px 12px;font-size:12px;color:var(--text-muted,var(--muted));border-top:1px solid var(--border)}
+input[data-cbx-list],input[list]{background-image:linear-gradient(45deg,transparent 50%,var(--text-muted,#999) 50%),linear-gradient(135deg,var(--text-muted,#999) 50%,transparent 50%);background-position:14px calc(50% + 1px),9px calc(50% + 1px);background-size:5px 5px;background-repeat:no-repeat;padding-inline-start:28px}
+/* قوائم select الأصلية بشكل موحد */
+select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--primary) 50%),linear-gradient(135deg,var(--primary) 50%,transparent 50%);background-position:14px calc(50% + 1px),9px calc(50% + 1px);background-size:5px 5px;background-repeat:no-repeat;padding-inline-start:28px;cursor:pointer}
+select:focus-visible,input[data-cbx-list]:focus{outline:none;box-shadow:0 0 0 3px var(--primary-ring,rgba(212,175,55,.3));border-color:var(--primary)}
+select option{background:var(--surface);color:var(--text)}
+/* ===== تحسينات الجداول ===== */
+.dg-chips{display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--primary) 5%,var(--surface))}
+.dg-fchip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 10px;border-radius:999px;border:1px solid var(--primary-border,var(--border));font-size:12px;background:var(--surface)}
+.dg-fchip button{border:0;background:transparent;color:inherit;cursor:pointer;width:20px;height:20px;border-radius:50%;padding:0;line-height:1}
+.dg-fchip button:hover{background:var(--danger-soft,rgba(200,0,0,.15));color:var(--danger)}
+.dg-fchip-s{border-style:dashed}.dg-chips-clear{font-size:12px;background:none;border:0;color:var(--primary);cursor:pointer}
+.dg-grouprow{cursor:pointer;user-select:none}.dg-grouprow:hover th{color:var(--primary)}.dg-gcaret{display:inline-block;width:14px}
+.dg-table tfoot td{position:sticky;bottom:0;background:var(--surface2);font-weight:700;border-top:2px solid var(--primary-border,var(--border))}
+.dg-table thead th{position:sticky;top:0;z-index:2}
+.dg-tools-btn{display:none}
+@media (max-width:760px){
+ .dg-tools-btn{display:inline-flex}
+ .dg:not(.dg-tools-open) .dg-toolbar>:is(.dg-adv-btn,.dg-group-lbl,.dg-cols-btn,.dg-views-btn,.dg-density,.dg-print,.dg-export,.dg-spacer){display:none}
+ .dg-toolbar .dg-quick{flex:1 1 140px;min-width:0}
+ .dg-table tfoot{display:none}
+}
+.theme-menu{max-height:min(78vh,640px);overflow:auto;overscroll-behavior:contain}

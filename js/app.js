@@ -1,3 +1,4 @@
+import {initCombobox} from './ui/combobox.js';
 import {clientFilePage,bindClientFilePage} from './modules/client-file.js';
 import * as constants from './core/constants.js';
 import {APP_NAME} from './core/constants.js';
@@ -63,7 +64,7 @@ class App{
  bindCrossTab(){if(this.boundCrossTab)return;this.boundCrossTab=true;events.on('db:switched',async p=>{if(!p?.profileId)return;/* local emit from this tab's own switch: manager already holds the target */if(this.manager.current?.profile?.id===p.profileId&&!this.manager.current.closed)return;try{this.registry.reload?.();if(this.registry.active?.id!==p.profileId)return;if(this.ctx?.profile?.id===p.profileId)return;await this.switchDb(p.profileId,{remote:true});toast('تم تبديل قاعدة البيانات من نافذة أخرى');await this.refresh()}catch(e){console.error('remote db switch',e);toast('تعذر مزامنة تبديل قاعدة البيانات من نافذة أخرى','error')}});events.on('db:migration:starting',p=>{if(p?.profileId===this.registry.active?.id&&this.ctx)toast('تجري ترقية قاعدة البيانات...');});events.on('db:closing',p=>{if(p?.profileId===this.ctx?.profile?.id&&this.ctx&&!this.ctx.closed&&this.manager.current===this.ctx){this.ctx.closed=true;toast('تم إغلاق اتصال قاعدة البيانات. أعد فتح القاعدة أو أعد تحميل الصفحة.','error')}});window.addEventListener('storage',e=>{if(e.key===constants.REGISTRY_KEY&&e.newValue){try{this.registry.reload?.();$('#db-badge').textContent=this.registry.active?.displayName||''}catch{}}});}
  bindShell(){
   $('#mobile-menu').onclick=()=>$('#sidebar').classList.toggle('open');
-  $('#quick-add').onclick=()=>openQuickAdd(this);
+  $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
   $('#command-btn').onclick=()=>this.go('search');
   $('#nav-back').onclick=()=>this.back();
   $('#nav-close').onclick=()=>this.closePage();

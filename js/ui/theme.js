@@ -10,8 +10,19 @@ export const PRESETS={
  midnightBlue:{name:'Midnight Blue',ar:'الكحلي الليلي',desc:'كحلي هادئ مريح للقراءة الطويلة',
   c:{bg:'#0A1628',surface:'#132337',chrome:'#0D1C31',text:'#D9E2EE',textStrong:'#F4F7FB',textMuted:'#93A4BA',primary:'#D6B35A',primary2:'#EBD9A2'},meta:'#0A1628'},
  warmCharcoal:{name:'Warm Charcoal',ar:'الفحمي الدافئ',desc:'رمادي دافئ ولمسات برونزية لتقليل إجهاد العين',
-  c:{bg:'#1C1A18',surface:'#262320',chrome:'#181614',text:'#E6DFD3',textStrong:'#FAF6EF',textMuted:'#ABA293',primary:'#C8925A',primary2:'#E3BF93'},meta:'#1C1A18'}
+  c:{bg:'#1C1A18',surface:'#262320',chrome:'#181614',text:'#E6DFD3',textStrong:'#FAF6EF',textMuted:'#ABA293',primary:'#C8925A',primary2:'#E3BF93'},meta:'#1C1A18'},
+ emeraldCourt:{name:'Emerald Court',ar:'الزمردي القضائي',desc:'أخضر زمردي داكن مع ذهب — وقار قاعات المحاكم',
+  c:{bg:'#07140F',surface:'#10231B',chrome:'#0A1A13',text:'#DCE8E1',textStrong:'#F4FAF6',textMuted:'#8FA89A',primary:'#D4AF37',primary2:'#E9D58E'},meta:'#07140F'},
+ royalBurgundy:{name:'Royal Burgundy',ar:'العنابي الملكي',desc:'عنابي عميق بلمسات ذهبية وردية',
+  c:{bg:'#160A0E',surface:'#241218',chrome:'#1B0D12',text:'#EDDFE2',textStrong:'#FFF7F8',textMuted:'#B39AA0',primary:'#D9A55B',primary2:'#EFCB97'},meta:'#160A0E'},
+ pearlBlue:{name:'Pearl Blue',ar:'اللؤلؤي الأزرق',desc:'فاتح بارد ونقي بأزرق مؤسسي — مثالي للنهار',
+  c:{bg:'#F3F6FA',surface:'#FFFFFF',chrome:'#FFFFFF',text:'#1F2A37',textStrong:'#0B1320',textMuted:'#5B6878',primary:'#1D4F91',primary2:'#3A73C0'},meta:'#F3F6FA'},
+ desertSand:{name:'Desert Sand',ar:'الرملي الدافئ',desc:'بيج رملي هادئ وبني قهوة — ورقي مريح',
+  c:{bg:'#F4EEE3',surface:'#FBF8F2',chrome:'#FBF8F2',text:'#3B3024',textStrong:'#21190F',textMuted:'#7A6B58',primary:'#8B5A2B',primary2:'#B07A43'},meta:'#F4EEE3'},
+ highContrast:{name:'High Contrast',ar:'التباين العالي',desc:'أقصى وضوح للقراءة وضعاف البصر والشمس المباشرة',
+  c:{bg:'#000000',surface:'#0A0A0A',chrome:'#000000',text:'#FFFFFF',textStrong:'#FFFFFF',textMuted:'#D0D0D0',primary:'#FFD400',primary2:'#FFE866'},meta:'#000000'}
 };
+export const LIGHT_PRESETS=['elegantLight','pearlBlue','desertSand'];
 export const FONTS_AR=[
  {id:'Cairo',label:'القاهرة (Cairo)'},{id:'Tajawal',label:'تجوّل (Tajawal)'},{id:'Almarai',label:'المراعي (Almarai)'},
  {id:'IBM Plex Sans Arabic',label:'IBM Plex Arabic'},{id:'Noto Kufi Arabic',label:'نوتو كوفي'},{id:'Noto Naskh Arabic',label:'نوتو نسخ (كلاسيكي)'},
@@ -49,7 +60,7 @@ function mix(a,b,t){const x=hex(a),y=hex(b);return '#'+x.map((v,i)=>Math.round(v
 export function applyTheme(cfg=getConfig(),{animate=true}={}){
  const c=normalize(cfg);const root=document.documentElement;
  let preset=c.preset;
- if(c.followSystem&&!c.customId)preset=matchMedia('(prefers-color-scheme: light)').matches?'elegantLight':(c.preset==='elegantLight'?'luxuryGold':c.preset);
+ if(c.followSystem&&!c.customId){const light=matchMedia('(prefers-color-scheme: light)').matches;preset=light?(LIGHT_PRESETS.includes(c.preset)?c.preset:'elegantLight'):(LIGHT_PRESETS.includes(c.preset)?'luxuryGold':c.preset)}
  if(animate){root.classList.add('theme-animating');clearTimeout(applyTheme.t);applyTheme.t=setTimeout(()=>root.classList.remove('theme-animating'),450)}
  if(preset==='luxuryGold')root.removeAttribute('data-theme');else root.setAttribute('data-theme',preset);
  const s=root.style;

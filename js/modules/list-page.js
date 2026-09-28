@@ -68,7 +68,7 @@ export function bindListPage(app,store){
   else grid.setRows(rows);
   status.innerHTML=more?`تم عرض أول ${rows.length} سجل. <button type="button" class="link" data-more>تحميل المزيد</button> أو ضيّق البحث/الفترة.`:(st.q||from||to?`${rows.length} نتيجة${from||to?` — الفترة: ${fmtDate(from)||'…'} إلى ${fmtDate(to)||'…'}`:''}`:'');
  }
- root.querySelector('[data-list-add]').onclick=()=>openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
+ root.querySelector('[data-list-add]').onclick=async()=>store==='files'?(await import('./client-file.js')).startNewLegalFile(app):openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
  let t=0;
  root.querySelector('#list-q').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.q=e.target.value;st.limit=DEFAULT_LIMIT;load().catch(err=>app.fail(err))},250)});
  root.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{st.preset=b.dataset.preset;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x===b));root.querySelector('.custom-range').hidden=st.preset!=='custom';if(st.preset!=='custom'){st.limit=DEFAULT_LIMIT;load().catch(err=>app.fail(err))}});
