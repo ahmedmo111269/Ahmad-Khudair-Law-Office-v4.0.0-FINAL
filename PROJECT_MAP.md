@@ -14,6 +14,17 @@
 
 # PROJECT MAP
 
+## v4.4.0 polish
+- `js/ui/combobox.js` — global styled dropdown for every `<input list>` (delegated, initialized in app.js).
+- Datagrid: filter chips, collapsible groups, totals footer, mobile tools toggle. Themes: 9 presets (`LIGHT_PRESETS`).
+
+## v4.3.0 Client File architecture (schema v12)
+- `js/domain/taxonomy-defaults.js` — seed categories/file types/stage types/field sets/templates, relation types, extra lookups.
+- `js/services/client-files.js` — taxonomy cache, client file (CL codes), legal file creation (LF codes), stage ops, related files, assets, v12 migration.
+- `js/modules/client-file.js` — client file dashboard (`cfile:<clientId>`), 3-step wizard, stage path bar, related-file menu.
+- `js/modules/taxonomy-editor.js` — settings tab for categories/types/templates/fields.
+- `css/client-file.css` — styles for the above. Stores added: clientFiles, taxonomy, caseTemplates, assets, fileAssets.
+
 ## Current release
 2.5.0 — Relational Reports & Workflow Intelligence.
 
@@ -201,3 +212,15 @@ Performance rule: UI list screens should migrate from `Office.list()` to `Office
 - `js/ui/lookup.js`: البحث المساعد يبحث في أكثر من فهرس لكل مخزن (رقم + اسم/عنوان).
 - `App.setContext()` يعيد ضبط حالة التصفح عند تغيير قاعدة البيانات.
 - `tools/release-audit.mjs`: فحص ES modules وتطابق imports/exports والإصدار مع CHANGELOG.
+
+
+## نظام المظهر والتفضيلات (4.2.0)
+- `css/themes.css`: Design Tokens والثيمات الأربعة (`data-theme` على `<html>`).
+- `css/luxe.css`: طبقة التصميم الفاخر، وتقرأ كل قيمها من التوكنز.
+- `js/ui/theme.js`: محرك الثيمات، والتخصيص، والثيمات المخصصة، وفحص التباين.
+- `js/ui/theme-menu.js`: قائمة التبديل السريع في الهيدر.
+- `js/modules/appearance.js`: استوديو المظهر داخل الإعدادات.
+- `js/core/preferences.js`: تفضيلات المستخدم في IndexedDB (`akl-preferences`).
+- `js/core/format.js`: التنسيق الموحّد (تاريخ DD/MM/YYYY، وأرقام، وعملة).
+- `js/ui/date-input.js`: إدخال التاريخ يوم/شهر/سنة فوق input[type=date].
+- `js/ui/icons.js`: أيقونات خطية بأسلوب Lucide.

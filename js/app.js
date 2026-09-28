@@ -1,3 +1,5 @@
+import {initCombobox} from './ui/combobox.js';
+import {clientFilePage,bindClientFilePage} from './modules/client-file.js';
 import * as constants from './core/constants.js';
 import {APP_NAME} from './core/constants.js';
 import {DatabaseRegistry} from './db/database-registry.js';
@@ -24,6 +26,10 @@ import {integrityPage,bindIntegrity} from './modules/integrity.js';
 import {repairPage,bindRepair} from './modules/repair.js';
 import {renderSettings,bindSettings} from './modules/settings.js';
 import {runMaintenance} from './services/maintenance.js';
+import {initTheme} from './ui/theme.js';
+import {bindThemeMenu} from './ui/theme-menu.js';
+import {decorateNav} from './ui/icons.js';
+import {installDateInputs} from './ui/date-input.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
 const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','appointments','communications','caseNotes','witnesses','expertReports','judgments','execution','fees','feePayments','documentReferences'];
@@ -45,6 +51,8 @@ for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>li
 function recordRoute(route){
  let m=/^(client|opponent|file|case):(.+)$/.exec(route);
  if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0]}}
+ m=/^cfile:(.+)$/.exec(route);
+ if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
  if(m&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1]};
  return null;
@@ -56,7 +64,7 @@ class App{
  bindCrossTab(){if(this.boundCrossTab)return;this.boundCrossTab=true;events.on('db:switched',async p=>{if(!p?.profileId)return;/* local emit from this tab's own switch: manager already holds the target */if(this.manager.current?.profile?.id===p.profileId&&!this.manager.current.closed)return;try{this.registry.reload?.();if(this.registry.active?.id!==p.profileId)return;if(this.ctx?.profile?.id===p.profileId)return;await this.switchDb(p.profileId,{remote:true});toast('تم تبديل قاعدة البيانات من نافذة أخرى');await this.refresh()}catch(e){console.error('remote db switch',e);toast('تعذر مزامنة تبديل قاعدة البيانات من نافذة أخرى','error')}});events.on('db:migration:starting',p=>{if(p?.profileId===this.registry.active?.id&&this.ctx)toast('تجري ترقية قاعدة البيانات...');});events.on('db:closing',p=>{if(p?.profileId===this.ctx?.profile?.id&&this.ctx&&!this.ctx.closed&&this.manager.current===this.ctx){this.ctx.closed=true;toast('تم إغلاق اتصال قاعدة البيانات. أعد فتح القاعدة أو أعد تحميل الصفحة.','error')}});window.addEventListener('storage',e=>{if(e.key===constants.REGISTRY_KEY&&e.newValue){try{this.registry.reload?.();$('#db-badge').textContent=this.registry.active?.displayName||''}catch{}}});}
  bindShell(){
   $('#mobile-menu').onclick=()=>$('#sidebar').classList.toggle('open');
-  $('#quick-add').onclick=()=>openQuickAdd(this);
+  $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
   $('#command-btn').onclick=()=>this.go('search');
   $('#nav-back').onclick=()=>this.back();
   $('#nav-close').onclick=()=>this.closePage();
@@ -108,4 +116,4 @@ class App{
 }
 const app=new App();
 function updateNetworkBadge(){const e=document.querySelector('#network-badge');if(!e)return;e.textContent=navigator.onLine?'محلي':'وضع عدم الاتصال';e.classList.toggle('is-offline',!navigator.onLine);e.classList.toggle('is-online',navigator.onLine)}
-window.addEventListener('online',updateNetworkBadge);window.addEventListener('offline',updateNetworkBadge);window.addEventListener('error',e=>{console.error('window error',e.error||e.message)});window.addEventListener('unhandledrejection',e=>{console.error('unhandled rejection',e.reason)});updateNetworkBadge();window.__LAW_OFFICE_APP__=app;app.boot();
+window.addEventListener('online',updateNetworkBadge);window.addEventListener('offline',updateNetworkBadge);window.addEventListener('error',e=>{console.error('window error',e.error||e.message)});window.addEventListener('unhandledrejection',e=>{console.error('unhandled rejection',e.reason)});updateNetworkBadge();window.__LAW_OFFICE_APP__=app;initTheme();decorateNav();installDateInputs(document.body);bindThemeMenu(app);app.boot();

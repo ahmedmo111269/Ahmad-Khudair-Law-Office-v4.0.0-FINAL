@@ -1,3 +1,4 @@
+import {formatDate,formatDateTime} from '../core/format.js';
 import {isClosedFile} from '../domain/entities.js';
 import {STORE} from '../db/schema.js';
 import {localDate,isActiveProcedure} from '../core/clock.js';
@@ -28,8 +29,8 @@ export async function actionCenterBrief(office){
 export function actionRows(r){
   const rows=[];
   const push=(items,kind,dateFn,titleFn,routeFn)=>items.forEach(x=>rows.push({id:x.id,kind,date:dateFn(x)||'',title:titleFn(x),recordRoute:routeFn(x),raw:x}));
-  push(r.todayHearings,'جلسة',x=>x.hearingDate+'T'+(x.hearingTime||'00:00'),x=>`جلسة ${x.hearingDate||''}`,x=>`rec:hearings:${x.id}`);
-  push(r.hearingsNext3,'جلسة',x=>x.hearingDate+'T'+(x.hearingTime||'00:00'),x=>`جلسة ${x.hearingDate||''}`,x=>`rec:hearings:${x.id}`);
+  push(r.todayHearings,'جلسة',x=>x.hearingDate+'T'+(x.hearingTime||'00:00'),x=>`جلسة ${formatDate(x.hearingDate)}`,x=>`rec:hearings:${x.id}`);
+  push(r.hearingsNext3,'جلسة',x=>x.hearingDate+'T'+(x.hearingTime||'00:00'),x=>`جلسة ${formatDate(x.hearingDate)}`,x=>`rec:hearings:${x.id}`);
   push(r.overdueProcedures,'متأخر',x=>x.internalDueDate,x=>x.description||x.type||'إجراء متأخر',x=>x.fileId?`file:${x.fileId}`:'procedures');
   push(r.proceduresNext3,'إجراء',x=>x.internalDueDate,x=>x.description||x.type||'إجراء',x=>x.fileId?`file:${x.fileId}`:'procedures');
   push(r.proceduresNextWeek,'إجراء',x=>x.internalDueDate,x=>x.description||x.type||'إجراء',x=>x.fileId?`file:${x.fileId}`:'procedures');

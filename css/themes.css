@@ -1,1 +1,159 @@
-:root{--navy:#101827;--gold:#a58a4d}@media(prefers-color-scheme:dark){body.dark-auto{background:#0d1420;color:#e9eef6}}
+/* =====================================================================
+   Design Tokens + الثيمات الأربعة
+   - الثيم يحدد "الألوان الأساسية" فقط، وكل الألوان الأخرى مشتقة منها بـ color-mix
+     لذلك تغيير اللون الذهبي أو الخلفية من شاشة التخصيص ينعكس على كل البرنامج فورًا.
+   - التخصيصات تُكتب inline على <html> وتتقدم على قيم الثيم.
+   ===================================================================== */
+:root{
+  /* ---- خطوط ---- */
+  --font-ar:"Cairo";
+  --font-en:"Inter";
+  --font-body:var(--font-ar),var(--font-en),"Noto Sans Arabic","Segoe UI",Tahoma,system-ui,sans-serif;
+  --font-heading:var(--font-heading-family,var(--font-ar)),var(--font-en),"Noto Sans Arabic","Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --font-size:15px;
+  --font-weight:400;
+  --heading-weight:700;
+
+  /* ---- شكل ---- */
+  --radius:14px;
+  --radius-sm:calc(var(--radius) * .65);
+  --radius-lg:calc(var(--radius) * 1.3);
+  --radius-pill:999px;
+  --density:1;              /* 0.75 مضغوط — 1 مريح — 1.3 واسع */
+  --space-1:calc(4px * var(--density));
+  --space-2:calc(8px * var(--density));
+  --space-3:calc(12px * var(--density));
+  --space-4:calc(16px * var(--density));
+  --space-5:calc(24px * var(--density));
+  --row-pad:calc(9px * var(--density));
+  --transition:.25s cubic-bezier(.2,.7,.2,1);
+
+  /* ---- الثيم الافتراضي: Luxury Dark Gold ---- */
+  --bg:#0B0B0B;
+  --surface:#1A1A1A;
+  --surface2:#222222;
+  --chrome:#101010;
+  --text-strong:#FFFFFF;
+  --text:#E9E6DF;
+  --text-muted:#A9A396;
+  --primary:#D4AF37;
+  --primary-2:#E8D48B;
+  --on-primary:#141006;
+  --success:#4CC38A;--warn:#E7B65C;--danger:#F26D6D;--info:#7DB3F5;
+  --border-tint:22%;
+  --shadow-strength:.55;
+  --glow-strength:.28;
+  color-scheme:dark;
+
+  /* ---- مشتقات (لا تعدّلها الثيمات عادةً) ---- */
+  --primary-soft:color-mix(in srgb,var(--primary) 13%,var(--surface));
+  --primary-border:color-mix(in srgb,var(--primary) 38%,var(--surface));
+  --primary-strong:color-mix(in srgb,var(--primary) 78%,var(--text-strong));
+  --primary-ring:color-mix(in srgb,var(--primary) 28%,transparent);
+  --primary-gradient:linear-gradient(135deg,var(--primary-2) 0%,var(--primary) 45%,color-mix(in srgb,var(--primary) 70%,#000) 100%);
+  --border:color-mix(in srgb,var(--primary) var(--border-tint),color-mix(in srgb,var(--text) 9%,var(--surface)));
+  --border-subtle:color-mix(in srgb,var(--text) 7%,var(--surface));
+  --selected-bg:var(--primary);
+  --selected-text:var(--on-primary);
+  --row-selected:color-mix(in srgb,var(--primary) 17%,var(--surface));
+  --row-hover:color-mix(in srgb,var(--primary) 8%,var(--surface));
+  --chrome-text:color-mix(in srgb,var(--text) 82%,var(--chrome));
+  --on-chrome:var(--text-strong);
+  --chrome-hover:color-mix(in srgb,var(--primary) 16%,var(--chrome));
+  --chrome-border:color-mix(in srgb,var(--primary) 22%,var(--chrome));
+  --success-soft:color-mix(in srgb,var(--success) 16%,var(--surface));
+  --warn-soft:color-mix(in srgb,var(--warn) 16%,var(--surface));
+  --warn-border:color-mix(in srgb,var(--warn) 45%,var(--surface));
+  --danger-soft:color-mix(in srgb,var(--danger) 14%,var(--surface));
+  --danger-border:color-mix(in srgb,var(--danger) 45%,var(--surface));
+  --info-soft:color-mix(in srgb,var(--info) 15%,var(--surface));
+  --overlay:rgb(0 0 0 / .62);
+  --shadow-color:rgb(0 0 0 / var(--shadow-strength));
+  --shadow-sm:0 1px 2px rgb(0 0 0 / calc(var(--shadow-strength) * .5)),0 1px 1px rgb(0 0 0 / calc(var(--shadow-strength) * .3));
+  --shadow-md:0 6px 20px -6px var(--shadow-color),0 2px 6px -2px rgb(0 0 0 / calc(var(--shadow-strength) * .4));
+  --shadow-lg:0 24px 48px -12px var(--shadow-color);
+  --glow:0 0 0 1px color-mix(in srgb,var(--primary) 18%,transparent),0 0 22px -6px color-mix(in srgb,var(--primary) calc(var(--glow-strength) * 100%),transparent);
+  /* أسماء قديمة مستخدمة في الملفات الأصلية */
+  --panel:var(--surface);--surface-2:var(--surface2);--muted:var(--text-muted);--accent:var(--primary);--gold:var(--primary);--navy:var(--chrome);
+}
+
+/* ---------- 2) Elegant Light ---------- */
+:root[data-theme="elegantLight"]{
+  --bg:#F8F7F4;--surface:#FFFFFF;--surface2:#F3F1EC;--chrome:#FFFFFF;
+  --text-strong:#14120E;--text:#2A2723;--text-muted:#6B665C;
+  --primary:#8A6A12;--primary-2:#B08A22;--on-primary:#FFFFFF;
+  --success:#1E7A46;--warn:#9A5B00;--danger:#B42318;--info:#1D4F91;
+  --border-tint:10%;--shadow-strength:.10;--glow-strength:.12;
+  --overlay:rgb(20 18 14 / .45);
+  --chrome-text:#3A362F;--on-chrome:#14120E;
+  color-scheme:light;
+}
+/* ---------- 3) Midnight Blue ---------- */
+:root[data-theme="midnightBlue"]{
+  --bg:#0A1628;--surface:#132337;--surface2:#182B43;--chrome:#0D1C31;
+  --text-strong:#F4F7FB;--text:#D9E2EE;--text-muted:#93A4BA;
+  --primary:#D6B35A;--primary-2:#EBD9A2;--on-primary:#0A1628;
+  --success:#56C79A;--warn:#E9BC67;--danger:#F07B7B;--info:#86B8F7;
+  --border-tint:14%;--shadow-strength:.5;--glow-strength:.22;
+  color-scheme:dark;
+}
+/* ---------- 4) Warm Charcoal ---------- */
+:root[data-theme="warmCharcoal"]{
+  --bg:#1C1A18;--surface:#262320;--surface2:#2E2A26;--chrome:#181614;
+  --text-strong:#FAF6EF;--text:#E6DFD3;--text-muted:#ABA293;
+  --primary:#C8925A;--primary-2:#E3BF93;--on-primary:#1C1A18;
+  --success:#7FC49A;--warn:#E3B566;--danger:#E88A7A;--info:#9DB8D9;
+  --border-tint:16%;--shadow-strength:.45;--glow-strength:.18;
+  color-scheme:dark;
+}
+
+/* ---------- 5) Emerald Court ---------- */
+:root[data-theme="emeraldCourt"]{
+  --bg:#07140F;--surface:#10231B;--surface2:#152C22;--chrome:#0A1A13;
+  --text-strong:#F4FAF6;--text:#DCE8E1;--text-muted:#8FA89A;
+  --primary:#D4AF37;--primary-2:#E9D58E;--on-primary:#07140F;
+  --success:#5FD39A;--warn:#E6B95C;--danger:#EF7F7F;--info:#8CC4E8;
+  --border-tint:14%;--shadow-strength:.5;--glow-strength:.22;color-scheme:dark;
+}
+/* ---------- 6) Royal Burgundy ---------- */
+:root[data-theme="royalBurgundy"]{
+  --bg:#160A0E;--surface:#241218;--surface2:#2D171E;--chrome:#1B0D12;
+  --text-strong:#FFF7F8;--text:#EDDFE2;--text-muted:#B39AA0;
+  --primary:#D9A55B;--primary-2:#EFCB97;--on-primary:#160A0E;
+  --success:#7CCB9C;--warn:#EDBE6A;--danger:#FF8C8C;--info:#A9BFE3;
+  --border-tint:15%;--shadow-strength:.5;--glow-strength:.2;color-scheme:dark;
+}
+/* ---------- 7) Pearl Blue ---------- */
+:root[data-theme="pearlBlue"]{
+  --bg:#F3F6FA;--surface:#FFFFFF;--surface2:#EDF1F7;--chrome:#FFFFFF;
+  --text-strong:#0B1320;--text:#1F2A37;--text-muted:#5B6878;
+  --primary:#1D4F91;--primary-2:#3A73C0;--on-primary:#FFFFFF;
+  --success:#177245;--warn:#9A5B00;--danger:#B42318;--info:#1D4F91;
+  --border-tint:11%;--shadow-strength:.10;--glow-strength:.12;
+  --overlay:rgb(11 19 32 / .45);--chrome-text:#2B3747;--on-chrome:#0B1320;color-scheme:light;
+}
+/* ---------- 8) Desert Sand ---------- */
+:root[data-theme="desertSand"]{
+  --bg:#F4EEE3;--surface:#FBF8F2;--surface2:#F0E8DA;--chrome:#FBF8F2;
+  --text-strong:#21190F;--text:#3B3024;--text-muted:#7A6B58;
+  --primary:#8B5A2B;--primary-2:#B07A43;--on-primary:#FFFFFF;
+  --success:#2F7A45;--warn:#9A5B00;--danger:#A8321F;--info:#2D5F8A;
+  --border-tint:12%;--shadow-strength:.10;--glow-strength:.12;
+  --overlay:rgb(33 25 15 / .45);--chrome-text:#43372A;--on-chrome:#21190F;color-scheme:light;
+}
+/* ---------- 9) High Contrast ---------- */
+:root[data-theme="highContrast"]{
+  --bg:#000000;--surface:#0A0A0A;--surface2:#141414;--chrome:#000000;
+  --text-strong:#FFFFFF;--text:#FFFFFF;--text-muted:#D0D0D0;
+  --primary:#FFD400;--primary-2:#FFE866;--on-primary:#000000;
+  --success:#3DFF8F;--warn:#FFB300;--danger:#FF5C5C;--info:#6CC4FF;
+  --border-tint:40%;--shadow-strength:0;--glow-strength:0;color-scheme:dark;
+}
+:root[data-theme="highContrast"] :focus-visible{outline:3px solid #FFD400!important;outline-offset:2px}
+:root[data-theme="highContrast"] a{text-decoration:underline}
+
+/* التأثيرات: إيقاف الظلال والتوهج */
+:root[data-effects="off"]{--shadow-sm:none;--shadow-md:none;--shadow-lg:none;--glow:none}
+/* احترام تفضيل تقليل الحركة */
+@media (prefers-reduced-motion:reduce){:root{--transition:0s}}

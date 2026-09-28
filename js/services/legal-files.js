@@ -23,6 +23,8 @@ export async function refreshFileSearchText(office,fileId){
  const bits=[];
  for(const k of FILE_TEXT_FIELDS)bits.push(f[k]);
  for(const fld of allFileTypeFields())if(typeof f[fld.k]==='string')bits.push(f[fld.k]);
+ for(const [k,v] of Object.entries(f))if(k.startsWith('x_')&&(typeof v==='string'||typeof v==='number'))bits.push(String(v));
+ if(f.typeSnapshot)bits.push(f.typeSnapshot.category,f.typeSnapshot.type);
  for(const p of parties)bits.push(p.name,p.role,p.phone);
  for(const s of stages)for(const k of STAGE_TEXT_FIELDS)bits.push(s[k]);
  const text=normalizeArabic(bits.filter(v=>v!==undefined&&v!==null&&v!=='').join(' | '));

@@ -14,22 +14,27 @@ import {kvHtml,bindRefLinks,notFound} from './record-page.js';
 import {sectionGrid,columnsFor,openRow} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {localDate} from '../core/clock.js';
+import {taxonomy,saveFileMeta,reclassifyFile,fileAssets,ASSET_KINDS,saveAsset,linkAsset,unlinkAsset,findAssets,assetDetails} from '../services/client-files.js';
+import {stagePathHtml,bindStagePath,metaInput,hydrateLookups} from './client-file.js';
 
-const TABS=[['summary','ملخص'],['parties','الأطراف'],['judicial','البيانات القضائية'],['hearings','الجلسات'],['procedures','الإجراءات'],['judgments','الأحكام'],['notes','الملاحظات'],['relations','العلاقات'],['extra','بيانات إضافية'],['money','الأتعاب والمستندات'],['activity','سجل النشاط']];
+const TABS=[['summary','ملخص'],['parties','الأطراف'],['judicial','البيانات القضائية'],['hearings','الجلسات'],['procedures','الأعمال الإدارية'],['judgments','الأحكام'],['notes','الملاحظات'],['relations','العلاقات'],['typeData','بيانات نوع العمل'],['assets','العقارات والمركبات'],['extra','بيانات إضافية (قديمة)'],['money','الأتعاب والمستندات'],['activity','سجل النشاط']];
 const BASE_KEYS=['fileNumber','title','fileType','mainCategory','subCategory','status','priority','openedAt','responsibleLawyer','coLawyers','staff','nextStep','nextStepDate','closedAt','closeReason','notes','lastActivityAt'];
 
 export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
  if(!f||f.isDeleted)return notFound('الملف');
  const [parties,stages]=await Promise.all([fileParties(app.office,id),fileStages(app.office,id)]);
- app.__file={id,f,parties,stages};
+ const tax=await taxonomy(app.office);const cat=tax.byId.get(f.categoryId),ftype=tax.byId.get(f.fileTypeId);
+ const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
+ app.__file={id,f,parties,stages,tax};
  app.__fileTab=app.__fileTab&&app.__fileTab.id===id?app.__fileTab:{id,tab:'summary'};
  const clients=parties.filter(p=>p.partyKind==='client'),opps=parties.filter(p=>p.partyKind==='opponent');
- const cur=stages.at(-1);
- return `<div class="record-head file-head"><div><small class="muted">ملف داخلي رقم</small><h2><span class="file-no">${esc(f.fileNumber||'')}</span> ${esc(f.title||'')}</h2>
-  <p class="badges">${f.fileType?`<span class="badge type">${esc(f.fileType)}</span>`:''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
+ const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
+ return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">ملف الموكل ${esc(cfRow.clientCode||'')}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}<div class="record-head file-head" style="--cat:${esc(cat?.color||'var(--primary)')}"><div><small class="muted">ملف داخلي رقم</small><h2><span class="file-no">${esc(f.fileNumber||'')}</span> ${esc(f.title||'')}</h2>
+  <p class="badges">${cat?`<span class="badge type cat-badge">${esc(cat.icon||'')} ${esc(cat.name)}${ftype?' · '+esc(ftype.name):''}</span>`:f.fileType?`<span class="badge type">${esc(f.fileType)}</span>`:''}${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
   <p class="muted small">${clients.length?`الموكل: ${clients.map(p=>`${esc(p.name)} (${esc(p.role||'موكل')})`).join('، ')}`:'لا يوجد موكل مرتبط بعد'}${opps.length?` — الخصم: ${opps.map(p=>esc(p.name)).join('، ')}`:''}${cur?` — المرحلة الحالية: ${esc(refLabel('cases',cur))}`:' — لا توجد أرقام قضائية (ملف بلا قضية)'}</p></div>
-  <div class="head-actions"><button class="ghost" data-file-edit>تعديل البيانات</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
+  <div class="head-actions"><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
+ ${stagePathHtml(stages,f.currentStageId||cur?.id)}
  <nav class="tabs" role="tablist">${TABS.map(([k,l])=>`<button type="button" role="tab" data-tab="${k}" aria-selected="${app.__fileTab.tab===k}" class="${app.__fileTab.tab===k?'active':''}">${l}${k==='parties'?` <small>${parties.length}</small>`:k==='judicial'?` <small>${stages.length}</small>`:''}</button>`).join('')}</nav>
  <div id="file-tab" role="tabpanel"></div>`;
 }
@@ -41,7 +46,8 @@ export async function bindFilePage(app,id){
  root.querySelector('[data-file-reopen]')?.addEventListener('click',async()=>{const r=await confirmBox('إعادة فتح الملف؟',{okText:'إعادة فتح',input:true,placeholder:'سبب إعادة الفتح (اختياري)'});if(!r.ok)return;try{await reopenFile(app.office,id,r.value);toast('تمت إعادة فتح الملف');app.refresh()}catch(e){toast(userError(e),'error')}});
  root.querySelector('[data-file-close]')?.addEventListener('click',async()=>{const r=await confirmBox('تسجيل انتهاء الملف (حالة إدارية فقط)؟',{okText:'إنهاء',input:true,placeholder:'سبب الانتهاء (اختياري)'});if(!r.ok)return;try{await closeFile(app.office,id,{closeReason:r.value});toast('تم تسجيل انتهاء الملف');app.refresh()}catch(e){toast(userError(e),'error')}});
  root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{app.__fileTab.tab=b.dataset.tab;root.querySelectorAll('[data-tab]').forEach(x=>{x.classList.toggle('active',x===b);x.setAttribute('aria-selected',x===b)});renderTab(app).catch(e=>app.fail(e))});
- void f;
+ bindStagePath(app,f,app.__file.stages);
+ root.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
  await renderTab(app);
 }
 
@@ -123,6 +129,23 @@ async function renderTab(app){
    onRowClick:r=>relationActions(app,r)});
   return;
  }
+ if(tab==='typeData'){
+  const {tax}=app.__file;const t=tax.byId.get(f.fileTypeId);const fields=t?.fields||[];
+  if(!fields.length){el.innerHTML=`<div class="notice">${t?'لا توجد حقول خاصة لهذا النوع. يمكنك إضافة حقول من الإعدادات ← الأقسام وأنواع الأعمال.':'حدد نوع العمل أولًا من «تغيير القسم / النوع».'}</div>`;return}
+  el.innerHTML=`<section class="panel"><div class="panel-head"><h3>بيانات ${esc(t.name)}</h3><span class="muted small">كل الحقول اختيارية</span></div><form class="entity-form" id="meta-form"><div class="form-grid">${fields.map(x=>metaInput(x,f['x_'+x.k])).join('')}</div><div class="form-actions"><button class="primary">حفظ</button></div></form></section>`;
+  await hydrateLookups(app,el);
+  el.querySelector('#meta-form').onsubmit=async e=>{e.preventDefault();const v={};el.querySelectorAll('[data-meta]').forEach(i=>v[i.dataset.meta]=i.value);try{await saveFileMeta(office,id,v);toast('تم الحفظ');reload(app)}catch(err){toast(userError(err),'error')}};
+  return;
+ }
+ if(tab==='assets'){
+  const rows=await fileAssets(office,id);
+  el.innerHTML=`<div class="sec-actions">${Object.entries(ASSET_KINDS).map(([k,d])=>`<button class="ghost" data-new-asset="${k}">+ ${esc(d.label)}</button>`).join('')}<button class="ghost" data-link-asset>ربط أصل مسجل</button><span class="muted small">عقار أو مركبة أو جهة يمكن ربطها بأكثر من ملف دون تكرار بياناتها.</span></div>
+   <div class="asset-list">${rows.map(({link,asset:a})=>`<article class="lf-card"><header><span>${esc(ASSET_KINDS[a.kind]?.icon||'📎')}</span><div><b>${esc(a.name||'')}</b><small>${esc(ASSET_KINDS[a.kind]?.label||'')}${link.role?' · '+esc(link.role):''}</small></div><button class="link danger" data-unlink="${esc(a.id)}">إلغاء الربط</button></header>${assetDetails(a)?`<p class="small muted">${esc(assetDetails(a))}</p>`:''}</article>`).join('')||'<p class="muted">لا توجد أصول مرتبطة.</p>'}</div>`;
+  el.querySelectorAll('[data-new-asset]').forEach(b=>b.onclick=()=>assetDialog(app,id,b.dataset.newAsset));
+  el.querySelector('[data-link-asset]').onclick=()=>linkAssetDialog(app,id);
+  el.querySelectorAll('[data-unlink]').forEach(b=>b.onclick=async()=>{if(!await confirmBox('إلغاء ربط الأصل بهذا الملف؟ (بيانات الأصل لا تُحذف)',{okText:'إلغاء الربط'}))return;await unlinkAsset(office,id,b.dataset.unlink);reload(app)});
+  return;
+ }
  if(tab==='extra'){
   const g=fileTypeGroup(f.fileType);const def=FILE_TYPE_GROUPS[g];
   const otherData=Object.entries(FILE_TYPE_GROUPS).filter(([k])=>k!==g).map(([,d])=>({d,html:kvHtml(d.fields,f,new Map())})).filter(x=>!x.html.includes('class="muted"'));
@@ -163,3 +186,24 @@ function relationActions(app,r){
  card.querySelector('[data-a="remove"]').onclick=async()=>{closeModal();if(!await confirmBox('إلغاء الربط بين الملفين؟ (حذف منطقي للعلاقة فقط)',{okText:'إلغاء الربط'}))return;try{await deleteEntity(app.office,'fileRelations',r.id);toast('تم إلغاء الربط');app.refresh()}catch(e){toast(userError(e),'error')}};
 }
 export {openRow,displayValue,bindRefLinks};
+
+async function reclassDialog(app,f){
+ const tax=await taxonomy(app.office);
+ const card=modal(`<h2 class="modal-title">تغيير القسم / نوع العمل</h2><p class="muted small">لا تُحذف أي بيانات: الحقول السابقة تبقى محفوظة، ويُسجل التغيير في سجل النشاط.</p><form id="rc"><label>القسم<select name="cat">${tax.categories.map(c=>`<option value="${esc(c.id)}" ${c.id===f.categoryId?'selected':''}>${esc(c.icon||'')} ${esc(c.name)}</option>`).join('')}</select></label><label>نوع العمل<select name="type"></select></label><div class="form-actions"><button class="primary">حفظ</button><button type="button" class="ghost" data-cancel>إلغاء</button></div></form>`);
+ const form=card.querySelector('#rc'),fill=()=>{form.type.innerHTML='<option value="">— بدون نوع —</option>'+tax.typesOf(form.cat.value).map(t=>`<option value="${esc(t.id)}" ${t.id===f.fileTypeId?'selected':''}>${esc(t.name)}</option>`).join('')};fill();form.cat.onchange=fill;
+ card.querySelector('[data-cancel]').onclick=closeModal;
+ form.onsubmit=async e=>{e.preventDefault();try{await reclassifyFile(app.office,f.id,form.cat.value,form.type.value||null);closeModal();toast('تم التحديث');app.refresh()}catch(err){toast(userError(err),'error')}};
+}
+function assetDialog(app,fileId,kind){
+ const d=ASSET_KINDS[kind];
+ const card=modal(`<h2 class="modal-title">${esc(d.icon)} ${esc(d.label)} جديد</h2><form id="as" class="entity-form"><div class="form-grid">${d.fields.map(([k,l])=>`<div class="field"><label>${esc(l)}<input name="${esc(k)}"></label></div>`).join('')}<div class="field"><label>صفته في الملف<input name="__role" placeholder="مثل: محل النزاع، المركبة المضبوطة"></label></div></div><div class="form-actions"><button class="primary">حفظ وربط</button><button type="button" class="ghost" data-cancel>إلغاء</button></div></form>`);
+ card.querySelector('[data-cancel]').onclick=closeModal;
+ card.querySelector('#as').onsubmit=async e=>{e.preventDefault();const v=Object.fromEntries(new FormData(e.target));const role=v.__role;delete v.__role;try{const a=await saveAsset(app.office,kind,v);await linkAsset(app.office,fileId,a.id,role);closeModal();toast('تم الحفظ والربط');app.refresh()}catch(err){toast(userError(err),'error')}};
+}
+function linkAssetDialog(app,fileId){
+ const card=modal(`<h2 class="modal-title">ربط أصل مسجل</h2><input type="search" id="as-q" placeholder="ابحث بالعنوان، اللوحة، رقم الشاسيه، الجهة…"><div id="as-r" class="cf-lines"></div>`);
+ const q=card.querySelector('#as-q'),r=card.querySelector('#as-r');let t=0;
+ const run=async()=>{const rows=await findAssets(app.office,q.value);r.innerHTML=rows.map(a=>`<button class="cf-line" data-id="${esc(a.id)}"><span class="cf-line-icon">${esc(ASSET_KINDS[a.kind]?.icon||'')}</span><span class="cf-line-main"><b>${esc(a.name)}</b><small>${esc(assetDetails(a))}</small></span></button>`).join('')||'<p class="muted small">لا نتائج.</p>'};
+ q.oninput=()=>{clearTimeout(t);t=setTimeout(run,250)};run();
+ r.onclick=async e=>{const b=e.target.closest('[data-id]');if(!b)return;try{await linkAsset(app.office,fileId,b.dataset.id);closeModal();toast('تم الربط');app.refresh()}catch(err){toast(userError(err),'error')}};
+}

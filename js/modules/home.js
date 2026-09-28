@@ -5,11 +5,12 @@ import {mountGrid} from '../ui/datagrid.js';
 import {agenda,agendaMarks,resolveRefs} from '../services/entity-query.js';
 import {fmtDate,label} from '../domain/entities.js';
 import {localDate} from '../core/clock.js';
+import {formatDate,formatDateTime,formatTime,formatNumber} from '../core/format.js';
 
 export async function homePage(app){
  const {dashboardBrief}=await import('../services/dashboard.js');
  const r=await dashboardBrief(app.office);
- const d=v=>v?new Date(v).toLocaleDateString('ar-EG'):'';
+ const d=v=>formatDate(v);
  return `<div class="hero hero-compact"><h2>صباح الخير، مكتب الأستاذ أحمد محمد خضير</h2></div>
  <div class="dashboard-grid">
   <section class="panel priority-panel"><div class="panel-head"><h3>جلسات اليوم</h3><button class="link" data-dashboard-report="hearings|today">تقرير الجلسات</button></div>${r.todayHearings.length?r.todayHearings.slice(0,12).map(x=>`<div class="work-row"><b>${esc(x.hearingTime||'بدون وقت')}</b><span>${esc(x.reason||x.type||'جلسة')}</span><small>${d(x.hearingDate)}</small></div>`).join(''):'<p class="muted">لا توجد جلسات مسجلة اليوم.</p>'}</section>

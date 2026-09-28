@@ -1,8 +1,9 @@
 import {esc} from '../ui/dom.js';
 import {actionCenterBrief,actionRows} from '../services/action-center.js';
+import {formatDate,formatDateTime,formatTime,formatNumber} from '../core/format.js';
 
-const fmt=v=>v?new Date(v).toLocaleDateString('ar-EG'):'';
-const time=v=>v&&String(v).includes('T')?new Date(v).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'}):'';
+const fmt=v=>formatDate(v);
+const time=v=>formatTime(v);
 
 export async function actionCenterPage(app){
   const r=await actionCenterBrief(app.office);

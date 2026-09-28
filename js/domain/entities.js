@@ -1,3 +1,4 @@
+import {formatDate as fmtDate,formatDateTime as fmtDateTime} from '../core/format.js';
 // تعريف موحّد لكل كيانات البرنامج: الحقول والمجموعات والأعمدة الظاهرة في الجداول.
 // النماذج وصفحات السجل والجداول والتقارير تعتمد كلها على هذا الملف بدل تكرار الحقول في كل صفحة.
 // كل الحقول اختيارية ما عدا اسم الشخص وربط السجل بأصله (req:true).
@@ -80,6 +81,7 @@ const phonesField={k:'phones',l:'أرقام الهاتف',t:'phones',g:'الات
 export const ENTITIES={
  clients:{label:'موكل',plural:'الموكلون',title:r=>r.fullName,route:'client',dateField:'createdAt',dateIndex:'createdAt',fields:[
   {k:'fullName',l:'الاسم الكامل',t:'text',req:true,grid:true,g:'البيانات الأساسية'},
+  {k:'clientCode',l:'كود ملف الموكل',t:'readonly',grid:true,g:'البيانات الأساسية'},
   {k:'clientType',l:'نوع الشخص',t:'lookup',lk:'clientType',grid:true,g:'البيانات الأساسية'},
   {k:'nationalId',l:'الرقم القومي',t:'text',grid:true,g:'البيانات الأساسية'},
   {k:'idType',l:'نوع إثبات آخر',t:'lookup',lk:'idType',g:'البيانات الأساسية'},
@@ -136,6 +138,8 @@ export const ENTITIES={
   {k:'fileId',l:'الملف',t:'ref',ref:'files',req:true,grid:true,g:'الربط'},
   {k:'stageType',l:'نوع المرحلة',t:'lookup',lk:'stageType',grid:true,g:'بيانات المرحلة'},
   {k:'numberType',l:'نوع الرقم',t:'lookup',lk:'numberType',grid:true,g:'بيانات المرحلة'},
+  {k:'lifecycle',l:'حالة المرحلة في المسار',t:'select',opts:[['planned','مخططة'],['active','جارية'],['done','منتهية'],['skipped','متخطاة']],g:'بيانات المرحلة'},
+  {k:'outcome',l:'نتيجة المرحلة',t:'lookup',lk:'stageOutcome',g:'بيانات المرحلة'},
   {k:'caseNumber',l:'الرقم',t:'text',grid:true,g:'بيانات المرحلة'},
   {k:'caseYear',l:'السنة',t:'number',grid:true,g:'بيانات المرحلة'},
   {k:'courtId',l:'المحكمة / الجهة',t:'lookup',lk:'court',grid:true,g:'بيانات المرحلة'},
@@ -310,8 +314,7 @@ export const ENTITIES={
 };
 export const ENTITY_LABEL=Object.fromEntries(Object.entries(ENTITIES).map(([k,v])=>[k,v.label]));
 
-export function fmtDate(v){if(!v)return '';const s=String(v);const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);if(!m)return s;return `${m[3]}/${m[2]}/${m[1]}`}
-export function fmtDateTime(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);const p=n=>String(n).padStart(2,'0');return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`}
+export {fmtDate,fmtDateTime};
 export const phonesOf=r=>[...(Array.isArray(r?.phones)?r.phones:[]),r?.phone,r?.phone1,r?.phone2].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
 
 // الحالة الإدارية للملف (ليست قاعدة قانونية)

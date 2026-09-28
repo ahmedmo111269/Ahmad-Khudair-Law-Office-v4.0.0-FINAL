@@ -17,6 +17,11 @@ export async function unifiedSearch(office,raw,limit=15){
   prefix(office.r.cases,'subjectNormalized',n,limit),
   prefix(office.r.opponents,'nameNormalized',n,limit)
  ]);
+ // كود ملف الموكل CL-YYYY-NNNNNN: يُرجع الموكل وكل ملفاته القانونية مباشرة
+ const code=d.toUpperCase().replace(/\s+/g,'');
+ const clientsByCode=/^CL-?\d/.test(code)?await office.r.clients.prefix('clientCode',code.startsWith('CL-')?code:'CL-'+code.slice(2),limit).catch(()=>[]):[];
+ const filesByCode=clientsByCode.length===1&&clientsByCode[0].clientFileId?await office.r.files.byIndex('clientFileId',clientsByCode[0].clientFileId,limit).catch(()=>[]):[];
+ const filesByLf=/^LF-?\d/.test(code)?await office.r.files.prefix('fileNumber',code,limit).catch(()=>[]):[];
  const merge=(...lists)=>[...new Map(lists.flat().map(x=>[x.id,x])).values()].slice(0,limit);
  // بحث احتوائي محدود (بمؤشر) يكمل البحث بالبادئة: أسماء الأطراف، أرقام المراحل، الهواتف، أي جزء من النص.
  const contains=(store,fn)=>scan(office,store,{limit,filter:fn}).then(r=>r.rows).catch(()=>[]);
@@ -27,8 +32,8 @@ export async function unifiedSearch(office,raw,limit=15){
   contains('opponents',o=>rowText(o).includes(n))
  ]);
  return {
-  clients:merge(clientsByName,clientsById,cx),
-  files:merge(filesByTitle,filesByNumber,fx),
+  clients:merge(clientsByCode,clientsByName,clientsById,cx),
+  files:merge(filesByLf,filesByCode,filesByTitle,filesByNumber,fx),
   cases:merge(casesByNumber,casesBySubject,kx),
   opponents:merge(opponents,ox)
  };
