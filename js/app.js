@@ -9,7 +9,7 @@ import {appStore} from './core/store.js';
 import {events} from './core/events.js';
 import {toast} from './ui/toast.js';
 import {esc,$} from './ui/dom.js';
-import {closeModal} from './ui/modal.js';
+import {closeModal,modal} from './ui/modal.js';
 import {normalizeError,userError} from './core/errors.js';
 import {ENTITIES} from './domain/entities.js';
 import {homePage,bindHome} from './modules/home.js';
@@ -32,6 +32,8 @@ import {enhanceCollapsiblePanels} from './ui/collapsible.js';
 import {prefs} from './core/preferences.js';
 import {decorateNav} from './ui/icons.js';
 import {installDateInputs} from './ui/date-input.js';
+import {openPalette,closePalette,paletteOpen} from './ui/palette.js';
+import {icon} from './ui/icons.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
 const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','serviceRecords','appointments','communications','caseNotes','expertReports','judgments','execution','fees','feePayments','documentReferences','bailiffs'];
@@ -66,14 +68,50 @@ class App{
  bindCrossTab(){if(this.boundCrossTab)return;this.boundCrossTab=true;events.on('db:switched',async p=>{if(!p?.profileId)return;/* local emit from this tab's own switch: manager already holds the target */if(this.manager.current?.profile?.id===p.profileId&&!this.manager.current.closed)return;try{this.registry.reload?.();if(this.registry.active?.id!==p.profileId)return;if(this.ctx?.profile?.id===p.profileId)return;await this.switchDb(p.profileId,{remote:true});toast('تم تبديل قاعدة البيانات من نافذة أخرى');await this.refresh()}catch(e){console.error('remote db switch',e);toast('تعذر مزامنة تبديل قاعدة البيانات من نافذة أخرى','error')}});events.on('db:migration:starting',p=>{if(p?.profileId===this.registry.active?.id&&this.ctx)toast('تجري ترقية قاعدة البيانات...');});events.on('db:closing',p=>{if(p?.profileId===this.ctx?.profile?.id&&this.ctx&&!this.ctx.closed&&this.manager.current===this.ctx){this.ctx.closed=true;toast('تم إغلاق اتصال قاعدة البيانات. أعد فتح القاعدة أو أعد تحميل الصفحة.','error')}});window.addEventListener('storage',e=>{if(e.key===constants.REGISTRY_KEY&&e.newValue){try{this.registry.reload?.();$('#db-badge').textContent=this.registry.active?.displayName||''}catch{}}});}
  bindShell(){
   const desktop=!window.matchMedia('(max-width:900px)').matches;const initiallyCollapsed=desktop&&Boolean(prefs.get('ui:sidebar-collapsed',false));document.body.classList.toggle('sidebar-collapsed',initiallyCollapsed);$('#mobile-menu').setAttribute('aria-expanded',String(desktop&&!initiallyCollapsed));
-  $('#mobile-menu').onclick=e=>{const sidebar=$('#sidebar');if(window.matchMedia('(max-width:900px)').matches){const open=sidebar.classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',String(open))}else{const collapsed=document.body.classList.toggle('sidebar-collapsed');e.currentTarget.setAttribute('aria-expanded',String(!collapsed));void prefs.set('ui:sidebar-collapsed',collapsed)}};
+  // خلفية الشريط الجانبي على الهاتف: النقر خارج القائمة يغلقها
+  const backdrop=document.createElement('div');backdrop.id='sidebar-backdrop';backdrop.hidden=true;document.body.append(backdrop);
+  backdrop.onclick=()=>{$('#sidebar').classList.remove('open');backdrop.hidden=true;$('#mobile-menu').setAttribute('aria-expanded','false')};
+  $('#mobile-menu').onclick=e=>{const sidebar=$('#sidebar');if(window.matchMedia('(max-width:900px)').matches){const open=sidebar.classList.toggle('open');backdrop.hidden=!open;e.currentTarget.setAttribute('aria-expanded',String(open))}else{const collapsed=document.body.classList.toggle('sidebar-collapsed');e.currentTarget.setAttribute('aria-expanded',String(!collapsed));void prefs.set('ui:sidebar-collapsed',collapsed)}};
   $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
-  $('#command-btn').onclick=()=>this.go('search');
+  $('#command-btn').innerHTML=`${icon('search')} <span>لوحة الأوامر</span> <kbd>Ctrl K</kbd>`;
+  $('#command-btn').onclick=()=>openPalette(this);
   $('#nav-back').onclick=()=>this.back();
   $('#nav-close').onclick=()=>this.closePage();
   $('#nav-home').onclick=()=>this.go('dashboard');
   document.querySelectorAll('#sidebar [data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
-  document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();this.go('search')}if(e.key==='Escape'&&!document.querySelector('.dg-pop'))closeModal()});
+  this.initNavGroups();
+  this.initShortcuts();
+ }
+ // طي/فتح مجموعات الشريط الجانبي مع تذكر التفضيل، وتقليل ازدحام القائمة الطويلة
+ initNavGroups(){
+  const nav=$('#main-nav');if(!nav)return;
+  const state=prefs.get('ui:nav-groups',{});
+  const seps=[...nav.querySelectorAll('.nav-sep')];
+  const membersOf=sep=>{const out=[];let el=sep.nextElementSibling;while(el&&!el.classList.contains('nav-sep')&&el.tagName!=='HR'){if(el.matches('button[data-route]'))out.push(el);el=el.nextElementSibling}return out};
+  seps.forEach(sep=>{
+   const name=sep.textContent.trim();if(!name)return;
+   const members=membersOf(sep);
+   const apply=open=>{sep.classList.toggle('collapsed',!open);sep.setAttribute('aria-expanded',String(open));members.forEach(m=>m.hidden=!open)};
+   const open=state[name]!==false;
+   apply(open);
+   const toggle=()=>{const now=sep.classList.contains('collapsed')?true:false;apply(now);const s=prefs.get('ui:nav-groups',{});s[name]=now;prefs.set('ui:nav-groups',s)};
+   sep.setAttribute('role','button');sep.tabIndex=0;
+   sep.onclick=toggle;sep.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
+  });
+ }
+ // اختصارات لوحة المفاتيح: Ctrl+K اللوحة، ? المساعدة، Alt+رقم للتنقل السريع
+ initShortcuts(){
+  document.addEventListener('keydown',e=>{
+   const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
+   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
+   if(e.key==='Escape'&&!document.querySelector('.dg-pop')){if(paletteOpen()){closePalette();return}closeModal();return}
+   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
+   if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
+  });
+ }
+ showShortcutsHelp(){
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['Shift + نقرة رأس عمود','فرز متعدد المستويات في الجداول'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
+  modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
  async go(route,opts={}){
   // Navigation handlers are bound before the initial IndexedDB open completes. Queue any early click
@@ -86,11 +124,12 @@ class App{
   const baseRoute=route.split('?')[0];const query=new URLSearchParams(route.includes('?')?route.split('?')[1]:'');
   const page=recordRoute(baseRoute)||PAGES[baseRoute]||PAGES.dashboard;
   const navKey=page.store||baseRoute; // صفحة السجل تُبرز قائمة كيانها في الشريط الجانبي
-  document.querySelectorAll('#sidebar [data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===navKey));
+  document.querySelectorAll('#sidebar [data-route]').forEach(b=>{const on=b.dataset.route===navKey;b.classList.toggle('active',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
   $('#page-title').textContent=page.title;
+  document.title=`${page.title} — ${constants.APP_NAME}`;
   $('#nav-back').disabled=!this.history.length;
   const main=$('#main-content');const scrollTop=opts.replace?window.scrollY:0;
-  if(!opts.replace)main.innerHTML='<div class="loading" role="status" aria-live="polite">جارٍ التحميل…</div>';
+  if(!opts.replace)main.innerHTML='<div class="skel-page" role="status" aria-live="polite" aria-label="جارٍ التحميل"><div class="skel skel-hero"></div><div class="skel-row"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div><div class="skel skel-block"></div><div class="skel skel-block"></div></div>';
   try{
    const html=await page.render(this,query);
    if(my!==this.navSeq)return; // انتقال أحدث بدأ أثناء التحميل
@@ -101,6 +140,7 @@ class App{
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
    document.querySelector('#sidebar')?.classList.remove('open');
+   const bd=document.querySelector('#sidebar-backdrop');if(bd)bd.hidden=true;
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}
  }

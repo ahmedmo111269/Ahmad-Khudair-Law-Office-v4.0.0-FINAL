@@ -23,3 +23,19 @@ export function parseDisplayDate(s){
 }
 export const formatNumber=(n,opts)=>new Intl.NumberFormat('ar-EG',opts).format(Number(n)||0);
 export const formatMoney=(n,cur='ج.م')=>`${formatNumber(n,{maximumFractionDigits:2})} ${cur}`.trim();
+// تاريخ عربي كامل للأجندة والتحية: «الاثنين 29 سبتمبر 2026»
+const AR_MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+const AR_DAYS=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+export function longDateAr(v=new Date()){
+ const d=v instanceof Date?v:new Date(v);if(isNaN(d))return '';
+ return `${AR_DAYS[d.getDay()]} ${d.getDate()} ${AR_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+export const AR_MONTH_NAMES=AR_MONTHS;
+// تحية حسب وقت اليوم (تُختبر): 5–11 صباح الخير، 11–15 مساء الخير، 15–21 مساء الخير المسائي، وإلا مساء الخير/ليلة سعيدة
+export function greetingKey(hour=new Date().getHours()){
+ if(hour>=5&&hour<12)return 'morning';
+ if(hour>=12&&hour<15)return 'noon';
+ if(hour>=15&&hour<21)return 'evening';
+ return 'night';
+}
+export const GREETINGS={morning:'صباح الخير',noon:'طاب يومك',evening:'مساء الخير',night:'ليلة موفقة'};

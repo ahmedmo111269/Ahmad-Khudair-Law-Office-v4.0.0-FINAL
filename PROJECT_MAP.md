@@ -14,6 +14,29 @@
 
 # PROJECT MAP
 
+## v4.7.0 — محرك البحث المركزي والجداول الاحترافية
+- `js/services/search-engine.js` — **المحرك المركزي للبحث** (المصدر الوحيد): `searchAll(office,q,{stores,perStore})` و`searchStore` فوق مخازن `allSearchStores()` (20 مخزنًا) مع تكتيك ثلاثي: فهارس الأكواد (`CL/LF`) → فهارس الأرقام (fileNumber/caseNumber/nationalId) → مسح Cursor مبكر التوقف بحد `perStore` ووسم `more`. صافٍ قابل للاختبار: `tokenizeQuery/normalizeCodeToken/looksLikeCode/codeValue/looksLikeNumber/digitsOf/matchTokens/scoreHit` فوق `core/search-normalizer.js`. سجل البحث والبحوث المحفوظة تفضيلات مستخدم في IDB (`ui:search-history` حد 8، `ui:search-save` حد 20).
+- `js/modules/search.js` — صفحة البحث الشامل: مجموعات مصنفة حسب النوع بشارة عدد و«المزيد»، فتح نتيجة → `app.go(route)` للسجل المرتبط، تمييز `<mark>`، فلاتر (نطاق/فترة/مدى مخصص بحقل التاريخ الصحيح لكل قسم)، سجل + محفوظات + شرائح، تنقل أسهم/Enter. `services/search.js` القديمة احتُفظ بها لخدمة الرئيسية (`relationalContext/relatedTimeline`).
+- `js/ui/palette.js` — لوحة الأوامر تبحث حيًا عبر `searchAll` (استيراد ديناميكي للمحرك عند أول ضغطة) بدل مسح الفهارس الثابت.
+- `js/ui/datagrid.js` — **إعادة بناء كاملة**: فرز متعدد (Shift+نقر) بخطة مفاتيح مسبقة، بحث أعمدة، فلاتر نوعية + شروط AND/OR، تثبيت عمودين، تحديد صفوف + شريط إجراءات جماعية، طرق عرض محفوظة (`grid:<storageKey>` في IDB مع سقوط لـ localStorage)، إعادة ضبط، كثافات/خط/بطاقات/ملء شاشة، تمرير افتراضي >600 صف، تصدير/طباعة «المعروض أو المحدد فقط» خلف بوابة الحساس. `list-page.js` يمرر `selectable:true,exportName`.
+- `js/ui/modal.js` — حصر التركيز داخل النافذة (Tab cycle) واستعادته للزر الاستدعائي عند الإغلاق؛ نفس API.
+- `js/modules/home.js` — شارة عدد عناصر العمل على زر «مركز العمل» بالشريط الجانبي.
+- `css/pro.css` — قسم «16) الجداول الاحترافية v4.7» (شرائط التحديد، التثبيت اللاصق، بحث الأعمدة) و«17) صفحة البحث v4.7» (hero، شرائح النطاق، المحفوظات، مجموعات النتائج) و«18) شارة عناصر العمل».
+- `sw.js` — كاش `v4.7.0-offline1` + `js/services/search-engine.js` في الأصول المسبقة.
+- الاختبارات: `js/tests/search-table-tests.js` (18 اختبارًا: المحرك على قاعدة حقيقية مؤقتة + الجدول على DOM) ضمن `tests.html` → **69/69**؛ E2E تكاملي (`/tmp/pw/e2e-node.mjs`) → **19/19**.
+
+## v4.6.0 — تجربة استخدام احترافية (UX/UI/أداء، بلا تغيير Schema)
+- `js/ui/palette.js` — لوحة أوامر عالمية (Ctrl+K): أوامر ثابتة (تنقل + إجراءات سريعة)، نتائج حية عبر `services/search.js`، و«آخر ما فُتح»؛ منطق الترشيح/التمييز مفصول (`filterCommands`/`scoreCommand`/`highlightMatch`) لقابلية الاختبار. `modal.js` يبث حدث `modal:closed` لمزامنة أي نافذة.
+- `js/services/recents.js` — حلقة «آخر ما فُتح» (12 عنصرًا) في تفضيلات المستخدم؛ تُسجَّل من صفحات السجل (`record-page.js`، `file-page.js`) وتُعرض في الرئيسية واللوحة والبحث.
+- `js/modules/timeline-view.js` — عارض الخط الزمني الموحد فوق `services/timeline.js` (التي كانت خدمة بلا واجهة): تبويب في صفحة الملف + قسم في صفحة القضية، فلاتر بالنوع، فاصل «الآن»، فتح الحدث بنقرة.
+- `js/modules/home.js` + `services/dashboard.js` — تحية حسب الوقت (`format.js: greetingKey/longDateAr`)، شريط 7 مؤشرات تفاعلية، صفوف عمل قابلة للنقر، واستعلامات مواعيد/متابعات/ملفات صامتة إضافية بحدود معلنة.
+- `css/pro.css` — طبقة مكونات 4.6 كلها من التوكنز: إشعارات (`ui/toast.js` أُعيد بناؤه: حاوية/أيقونات/إغلاق/تراكم)، هياكل تحميل (Skeletons في `app.js` و`file-page.js`)، KPI، شرائح آخر ما فُتح، الخط الزمني، لوحة الأوامر، كيبورد `kbd`، تركيز `:focus-visible`، خلفية الشريط الجانبي، ظهور أزرار التنقل على الهاتف، `content-visibility` للأداء، واحترام `prefers-reduced-motion` و`data-effects=off`.
+- `js/app.js` — Ctrl+K للوحة (بدل الانتقال لصفحة البحث)، `?` مساعدة اختصارات، Alt+1…9 تنقل سريع، طي مجموعات الشريط الجانبي (`ui:nav-groups`)، `aria-current`، عنوان تبويب ديناميكي، خلفية جوال للقائمة.
+- `js/ui/form.js` — حفظ بـ Ctrl+Enter وتركيز أول خطأ؛ `js/services/entity-query.js` — مذكّرة `rowText` (WeakMap) لتسريع البحث الفوري؛ `js/modules/search.js` — أسهم/Enter وتمييز مطابقة وآخر ما فُتح في الفراغ؛ `js/modules/quick-add.js` — أيقونات Lucide وفلترة فورية.
+- `sw.js` — كاش v4.6.0 + أصول جديدة (pro.css, palette, recents, timeline-view, pagination.js الذي كان غائبًا عن التخزين المسبق).
+- الاختبارات: `js/tests/ux-tests.js` (11 اختبارًا جديدًا) ضمن `tests.html` → 51 اختبارًا.
+
+
 ## v4.5.0 — Parties, Hearing Chains, Bailiffs and Service Records (schema v13)
 - `js/services/legal-files.js` — party groups, role/sequence ordering, explicit duplicate-client confirmation, safe removal and file relationships.
 - `js/services/operations.js` — predecessor-linked hearing cycles and atomic independent follow-up session creation on adjournment dates.
@@ -38,7 +61,7 @@
 - `css/client-file.css` — styles for the above. Stores added: clientFiles, taxonomy, caseTemplates, assets, fileAssets.
 
 ## Current release
-4.5.0 — Flexible parties, hearing cycles, bailiff/service-record lifecycle, saved reports and configurable grids. `APP_VERSION=4.5.0`, `SCHEMA_VERSION=13`.
+4.6.0 — تجربة استخدام احترافية: لوحة أوامر، خط زمني موحد، آخر ما فُتح، رئيسية تفاعلية، هاتف أفضل، إشعارات وهيكل تحميل. `APP_VERSION=4.6.0`, `SCHEMA_VERSION=13`.
 
 ## Architecture
 `UI → App/Services → Domain → Repository → IndexedDB`

@@ -64,13 +64,19 @@ export function bindListPage(app,store){
   if(my!==seq)return;
   await resolveRefs(app.office,rows,ENTITIES[store].fields,gridRefs);
   if(my!==seq)return;
-  if(!grid)grid=mountGrid(root.querySelector('#list-grid'),{columns:columnsFor(store,gridRefs),rows,title:ent.plural,storageKey:'list:'+store,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات مطابقة. غيّر البحث أو الفترة، أو أضف سجلًا جديدًا.'});
+  if(!grid)grid=mountGrid(root.querySelector('#list-grid'),{columns:columnsFor(store,gridRefs),rows,title:ent.plural,storageKey:'list:'+store,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات مطابقة. غيّر البحث أو الفترة، أو أضف سجلًا جديدًا.',selectable:true,exportName:ent.plural});
   else grid.setRows(rows);
   status.innerHTML=more?`تم عرض أول ${rows.length} سجل. <button type="button" class="link" data-more>تحميل المزيد</button> أو ضيّق البحث/الفترة.`:(st.q||from||to?`${rows.length} نتيجة${from||to?` — الفترة: ${fmtDate(from)||'…'} إلى ${fmtDate(to)||'…'}`:''}`:'');
  }
  root.querySelector('[data-list-add]').onclick=async()=>store==='files'?(await import('./client-file.js')).startNewLegalFile(app):openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
  let t=0;
  root.querySelector('#list-q').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.q=e.target.value;st.limit=DEFAULT_LIMIT;load().catch(err=>app.fail(err))},250)});
+ // «/» يقفز لبحث القائمة من أي موضع في الصفحة، وEsc يمسحه
+ root.addEventListener('keydown',e=>{
+  const q=root.querySelector('#list-q');if(!q)return;
+  if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();q.focus();q.select()}
+  else if(e.key==='Escape'&&e.target===q&&q.value){q.value='';st.q='';st.limit=DEFAULT_LIMIT;load().catch(err=>app.fail(err))}
+ });
  root.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{st.preset=b.dataset.preset;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x===b));root.querySelector('.custom-range').hidden=st.preset!=='custom';if(st.preset!=='custom'){st.limit=DEFAULT_LIMIT;load().catch(err=>app.fail(err))}});
  root.querySelector('[data-range-apply]')?.addEventListener('click',()=>{st.from=root.querySelector('#list-from').value;st.to=root.querySelector('#list-to').value;load().catch(err=>app.fail(err))});
  root.querySelector('[data-cal-toggle]')?.addEventListener('click',e=>{st.showCal=!st.showCal;e.currentTarget.setAttribute('aria-expanded',st.showCal);root.querySelector('.list-cal').hidden=!st.showCal});

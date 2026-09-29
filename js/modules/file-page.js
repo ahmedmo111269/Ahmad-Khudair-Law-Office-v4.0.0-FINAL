@@ -20,14 +20,18 @@ import {stagePathHtml,bindStagePath,metaInput,hydrateLookups} from './client-fil
 import {renderFileServiceTab,bindFileServiceTab} from './service-records.js';
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {prefs} from '../core/preferences.js';
+import {buildFileTimeline} from '../services/timeline.js';
+import {timelineHtml,bindTimeline} from './timeline-view.js';
+import {trackRecent} from '../services/recents.js';
 
-const TABS=[['summary','ملخص','◈'],['parties','الأطراف','⚖'],['judicial','البيانات القضائية','▣'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷'],['judgments','الأحكام','⚖'],['notes','الملاحظات','▤'],['relations','العلاقات','↔'],['serviceRecords','المحضرين والإعلانات','📬'],['typeData','بيانات نوع العمل','▧'],['assets','العقارات والمركبات','⌂'],['extra','بيانات إضافية (قديمة)','▤'],['money','الأتعاب والمستندات','＄'],['activity','سجل النشاط','≋']];
+const TABS=[['summary','ملخص','◈'],['timeline','الخط الزمني','⏳'],['parties','الأطراف','⚖'],['judicial','البيانات القضائية','▣'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷'],['judgments','الأحكام','⚖'],['notes','الملاحظات','▤'],['relations','العلاقات','↔'],['serviceRecords','المحضرين والإعلانات','📬'],['typeData','بيانات نوع العمل','▧'],['assets','العقارات والمركبات','⌂'],['extra','بيانات إضافية (قديمة)','▤'],['money','الأتعاب والمستندات','＄'],['activity','سجل النشاط','≋']];
 const BASE_KEYS=['fileNumber','title','fileType','mainCategory','subCategory','status','priority','openedAt','responsibleLawyer','coLawyers','staff','nextStep','nextStepDate','closedAt','closeReason','notes','lastActivityAt'];
 function orderedFileTabs(){const saved=prefs.get('file-tabs:order',[])||[];const rank=new Map(saved.map((k,i)=>[k,i]));return [...TABS].sort((a,b)=>(rank.get(a[0])??TABS.findIndex(x=>x[0]===a[0]))-(rank.get(b[0])??TABS.findIndex(x=>x[0]===b[0])))}
 
 export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
  if(!f||f.isDeleted)return notFound('الملف');
+ trackRecent('file:'+id,`${f.fileNumber||'ملف'} — ${f.title||'بدون عنوان'}`.trim(),{icon:'folder',sub:f.title?'':'ملف قانوني'});
  const [parties,stages,serviceCount]=await Promise.all([fileParties(app.office,id),fileStages(app.office,id),app.office.r.serviceRecords.countIndex('fileId_recordState',[id,'active'])]);
  const tax=await taxonomy(app.office);const cat=tax.byId.get(f.categoryId),ftype=tax.byId.get(f.fileTypeId);
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
@@ -92,7 +96,7 @@ async function renderTab(app){
 }
 async function renderTabContent(app){
  const el=document.querySelector('#file-tab');const {id,f,parties,stages}=app.__file;const tab=app.__fileTab.tab;const office=app.office;
- el.innerHTML='<div class="loading">جارٍ التحميل…</div>';
+ el.innerHTML='<div class="skel-page" role="status" aria-label="جارٍ التحميل"><div class="skel skel-row"><div class="skel-card skel"></div><div class="skel-card skel"></div><div class="skel-card skel"></div><div class="skel-card skel"></div></div><div class="skel skel-block"></div></div>';
  const needStage=what=>`<div class="notice">لإضافة ${what} يجب أولًا إضافة رقم قضائي / مرحلة في تبويب «البيانات القضائية». الملف نفسه لا يحتاج قضية.</div>`;
  if(tab==='summary'){
   const today=localDate();
@@ -114,6 +118,14 @@ async function renderTabContent(app){
   el.querySelectorAll('[data-open-case]').forEach(b=>b.onclick=()=>app.go('case:'+b.dataset.openCase));
   el.querySelector('[data-show-hearing-cycle]')?.addEventListener('click',()=>showHearingCycle(app,upcoming[0]?.id||last?.id||''));
   el.querySelector('[data-file-delete]').onclick=async()=>{if(!await confirmBox('حذف منطقي للملف؟ لا يُسمح إذا كان للملف قضايا/مراحل غير محذوفة. البيانات لا تُمحى نهائيًا.',{okText:'حذف منطقي'}))return;try{await deleteEntity(office,'files',id);toast('تم الحذف المنطقي');app.go('files')}catch(e){toast(userError(e),'error')}};
+  return;
+ }
+ if(tab==='timeline'){
+  try{
+   const t=await buildFileTimeline(office,id);
+   el.innerHTML=`<section class="panel tl-panel"><div class="panel-head"><h3>الخط الزمني الموحد للملف</h3><span class="muted small">كل ما جرى في هذا الملف: جلسات، أحكام، أعمال، مواعيد، اتصالات، ملاحظات، مستندات، أتعاب — بتسلسل واحد.</span></div>${timelineHtml(t)}</section>`;
+   bindTimeline(el,{onOpen:r=>app.go(r.startsWith('rec:')?r:'rec:'+r)});
+  }catch(err){el.innerHTML=`<div class="error-box" role="alert"><h2>تعذر بناء الخط الزمني</h2><p>${esc(userError(err))}</p></div>`}
   return;
  }
  if(tab==='parties'){

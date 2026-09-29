@@ -178,6 +178,8 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
  const fileLookup=form.querySelector('.lookup-input[data-lookup-name="fileId"]');
  if(fileLookup&&(store==='hearings'||store==='serviceRecords'))fileLookup.addEventListener('change',()=>{const fileId=form.querySelector('[name="fileId"]')?.value||'';updateFileOptions(fileId).catch(()=>{})});
  form.querySelector('input:not([type=hidden]):not([readonly]),select,textarea')?.focus();
+ // حفظ سريع بـ Ctrl+Enter من أي حقل
+ card.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();if(!form.querySelector('[type=submit]')?.disabled)form.requestSubmit()}});
  form.addEventListener('submit',async e=>{
   e.preventDefault();
   const btn=form.querySelector('[type=submit]');btn.disabled=true;
@@ -205,6 +207,8 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
    const n=normalizeError(err);toast(userError(n),'error');
    const details=err?.details||n?.details;
    if(details&&typeof details==='object')for(const [k,msg] of Object.entries(details)){const fd=form.querySelector(`[data-field="${CSS.escape(k)}"]`);if(fd){fd.classList.add('has-error');fd.insertAdjacentHTML('beforeend',`<small class="field-error" role="alert">${esc(msg)}</small>`)}}
+   form.querySelector('.has-error')?.scrollIntoView({behavior:'smooth',block:'center'});
+   form.querySelector('.has-error input,.has-error select,.has-error textarea')?.focus({preventScroll:true});
    btn.disabled=false;
   }
  });
