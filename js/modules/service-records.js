@@ -10,6 +10,7 @@ import { fileServiceRecords, reannounceServiceRecord } from '../services/service
 import { ENTITIES, fmtDate } from '../domain/entities.js';
 import { userError } from '../core/errors.js';
 import { localDate, addDays } from '../core/clock.js';
+import { formatFileNumber } from '../core/file-number.js';
 
 const completedStatus = s => ['تم الإعلان', 'تم الاستلام', 'مغلق'].includes(String(s || ''));
 const followUpStatus = s => /مطلوب|تسليم|جار|تعذر|مرتد|إعادة|مسودة/.test(String(s || ''));
@@ -43,7 +44,7 @@ export async function bindFileServiceTab(app, file, stages, parties) {
   const upcomingHearingIds = new Set(hearingRows.filter(h => h.hearingDate >= today).map(h => h.id));
   const refs = await resolveRefs(app.office, visibleRows, ENTITIES.serviceRecords.fields);
   const grid = mountGrid(root.querySelector('[data-service-grid]'), {
-    title: `إعلانات وإنذارات الملف ${file.fileNumber || ''}`,
+    title: `إعلانات وإنذارات الملف ${formatFileNumber(file.fileNumber)}`,
     storageKey: 'file:serviceRecords', rows: visibleRows,
     columns: columnsFor('serviceRecords', refs),
     emptyText: 'لا توجد سجلات مطابقة للفلاتر الحالية.',

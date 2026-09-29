@@ -1,5 +1,6 @@
 import {esc} from './dom.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
+import {formatFileNumber} from '../core/file-number.js';
 
 // Extra indexes searched for each store so the user can type a number OR a name/title.
 const SEARCH_INDEXES={
@@ -57,7 +58,7 @@ export function bindLookups(root,office){
 
 export function formatValue(r,store){
  if(store==='clients')return `${r.fullName||''}${r.nationalId?` — ${r.nationalId}`:''}`;
- if(store==='files')return `${r.fileNumber||''} — ${r.title||''}`.trim();
+ if(store==='files')return `${formatFileNumber(r.fileNumber)} — ${r.title||''}`.trim().replace(/^— /,'');
  if(store==='cases')return `${r.caseNumber||''}/${r.caseYear||''} — ${r.courtId||''}`.trim();
  return r.name||r.title||r.id||'';
 }

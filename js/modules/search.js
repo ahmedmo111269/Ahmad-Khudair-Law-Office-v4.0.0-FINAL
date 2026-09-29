@@ -22,12 +22,12 @@ export async function renderSearch(app){
  if(q.get('scope'))st.scope=q.get('scope');
  const sources=SEARCH_SOURCES.map(s=>({v:s.store,l:ENTITIES[s.store]?.plural||s.store,i:s.icon}));
  const year=localDate().slice(0,4);
- return `<div class="page-head"><div><h2>البحث الشامل</h2><p>محرك بحث واحد لكل بيانات المكتب: أسماء وأجزاء أسماء، أكواد CL-/LF-، أرقام قومية، أرقام قضايا وملفات وجلسات، أطراف، أتعاب، مستندات…</p></div>
+ return `<div class="page-head"><div><h2>البحث الشامل</h2><p>محرك بحث واحد لكل بيانات المكتب: أسماء وأجزاء أسماء، أرقام الملفات الرئيسية والفرعية (مثل 2/2026)، أرقام قومية، أرقام قضايا وجلسات، أطراف، أتعاب، مستندات…</p></div>
   <div class="head-actions"><button class="ghost" data-page-back>رجوع</button><button class="ghost" data-page-close>إغلاق</button></div></div>
  <section class="panel search-panel">
   <div class="search-hero">
    <span class="sh-ic" aria-hidden="true">${icon('search')}</span>
-   <input id="advanced-q" autocomplete="off" autofocus spellcheck="false" value="${esc(st.q)}" placeholder="اكتب اسمًا أو جزءًا منه، أو رقمًا، أو كودًا مثل CL-… أو LF-… — وكلمات متعددة للبحث الدقيق">
+   <input id="advanced-q" autocomplete="off" autofocus spellcheck="false" value="${esc(st.q)}" placeholder="اكتب اسمًا أو جزءًا منه، أو رقم ملف مثل 2/2026، أو رقم قضية، أو رقمًا قوميًا — وكلمات متعددة للبحث الدقيق">
    <button class="ghost" id="search-clear" title="مسح (Esc)">مسح</button>
   </div>
   <div class="scope-row" role="tablist" aria-label="نطاق البحث">
@@ -58,7 +58,7 @@ function recentsHtml(){
 }
 function syntaxHint(){
  return `<div class="search-hint"><h4>أمثلة سريعة</h4><div class="hint-chips">
-  <code>أحمد محمد</code> كلمتان معًا (AND) · <code>CL-2026</code> كود موكل · <code>LF-2026</code> ملف · <code>29001011201234</code> رقم قومي · <code>1545</code> رقم قضية/ملف · <code>أحمد 2026</code> اسم وسنة
+  <code>أحمد محمد</code> كلمتان معًا (AND) · <code>2/2026</code> رقم ملف رئيسي أو فرعي · <code>29001011201234</code> رقم قومي · <code>1545</code> رقم قضية رسمية · <code>أحمد 2026</code> اسم وسنة
  </div><p class="muted small">اكتب حرفين على الأقل. النتائج مصنفة بالمصدر، والنقر على أي نتيجة يفتح سجلها مباشرة.</p></div>`;
 }
 function idleHtml(){

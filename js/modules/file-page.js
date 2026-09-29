@@ -23,6 +23,7 @@ import {prefs} from '../core/preferences.js';
 import {buildFileTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {trackRecent} from '../services/recents.js';
+import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 
 const TABS=[['summary','ملخص','◈'],['timeline','الخط الزمني','⏳'],['parties','الأطراف','⚖'],['judicial','البيانات القضائية','▣'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷'],['judgments','الأحكام','⚖'],['notes','الملاحظات','▤'],['relations','العلاقات','↔'],['serviceRecords','المحضرين والإعلانات','📬'],['typeData','بيانات نوع العمل','▧'],['assets','العقارات والمركبات','⌂'],['extra','بيانات إضافية (قديمة)','▤'],['money','الأتعاب والمستندات','＄'],['activity','سجل النشاط','≋']];
 const BASE_KEYS=['fileNumber','title','fileType','mainCategory','subCategory','status','priority','openedAt','responsibleLawyer','coLawyers','staff','nextStep','nextStepDate','closedAt','closeReason','notes','lastActivityAt'];
@@ -31,7 +32,7 @@ function orderedFileTabs(){const saved=prefs.get('file-tabs:order',[])||[];const
 export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
  if(!f||f.isDeleted)return notFound('الملف');
- trackRecent('file:'+id,`${f.fileNumber||'ملف'} — ${f.title||'بدون عنوان'}`.trim(),{icon:'folder',sub:f.title?'':'ملف قانوني'});
+ trackRecent('file:'+id,`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||'بدون عنوان'}`.trim(),{icon:'folder',sub:f.title?'':'ملف قانوني'});
  const [parties,stages,serviceCount]=await Promise.all([fileParties(app.office,id),fileStages(app.office,id),app.office.r.serviceRecords.countIndex('fileId_recordState',[id,'active'])]);
  const tax=await taxonomy(app.office);const cat=tax.byId.get(f.categoryId),ftype=tax.byId.get(f.fileTypeId);
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
@@ -39,7 +40,7 @@ export async function filePage(app,id){
  app.__fileTab=app.__fileTab&&app.__fileTab.id===id?app.__fileTab:{id,tab:'summary'};
  const clients=parties.filter(p=>p.partyKind==='client'),opps=parties.filter(p=>p.partyKind==='opponent');
  const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
- return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">ملف الموكل ${esc(cfRow.clientCode||'')}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}<div class="record-head file-head" style="--cat:${esc(cat?.color||'var(--primary)')}"><div><small class="muted">ملف داخلي رقم</small><h2><span class="file-no">${esc(f.fileNumber||'')}</span> ${esc(f.title||'')}</h2>
+ return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}<div class="record-head file-head" style="--cat:${esc(cat?.color||'var(--primary)')}"><div><small class="muted">ملف فرعي — الرقم الداخلي للمكتب (مستقل عن أرقام القضايا الرسمية)</small><h2>${fileNumberChip(f)} ${esc(f.title||'')}</h2>
   <p class="badges">${cat?`<span class="badge type cat-badge">${esc(cat.icon||'')} ${esc(cat.name)}${ftype?' · '+esc(ftype.name):''}</span>`:f.fileType?`<span class="badge type">${esc(f.fileType)}</span>`:''}${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
   <p class="muted small">${clients.length?`الموكل: ${clients.map(p=>`${esc(p.name)} (${esc(p.role||'موكل')})`).join('، ')}`:'لا يوجد موكل مرتبط بعد'}${opps.length?` — الخصم: ${opps.map(p=>esc(p.name)).join('، ')}`:''}${cur?` — المرحلة الحالية: ${esc(refLabel('cases',cur))}`:' — لا توجد أرقام قضائية (ملف بلا قضية)'}</p></div>
   <div class="head-actions"><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
@@ -232,7 +233,7 @@ async function renderTabContent(app){
   const rows=[...new Map([...a,...b].map(x=>[x.id,x])).values()].sort((x,y)=>String(y.timestamp).localeCompare(String(x.timestamp)));
   el.innerHTML='<div data-grid></div>';
   const refs=new Map();
-  mountGrid(el.querySelector('[data-grid]'),{columns:columnsFor('activityLog',refs).filter(c=>c.key!=='fileId'),rows,title:`سجل نشاط الملف ${f.fileNumber}`,storageKey:'file:activity'});
+  mountGrid(el.querySelector('[data-grid]'),{columns:columnsFor('activityLog',refs).filter(c=>c.key!=='fileId'),rows,title:`سجل نشاط الملف ${formatFileNumber(f.fileNumber)}`,storageKey:'file:activity'});
  }
 }
 

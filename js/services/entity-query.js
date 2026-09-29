@@ -3,6 +3,7 @@
 import {ENTITIES,phonesOf,fmtDate} from '../domain/entities.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {localDate,addDays,isActiveProcedure} from '../core/clock.js';
+import {formatFileNumber} from '../core/file-number.js';
 
 export const DEFAULT_LIMIT=1000;
 export const MAX_LIMIT=5000;
@@ -17,6 +18,9 @@ export function rowText(row){
  const bits=[];
  for(const [k,v] of Object.entries(row)){if(SKIP.test(k)||v===null||v===undefined||v==='')continue;if(Array.isArray(v))bits.push(v.join(' '));else if(typeof v!=='object')bits.push(String(v))}
  if(row.searchText)bits.push(row.searchText);
+ // إتاحة البحث بالصيغة المعروضة الموحدة (2/2026) إلى جانب الكود التقني المخزن
+ if(row.fileNumber)bits.push(formatFileNumber(row.fileNumber));
+ if(row.clientCode)bits.push(formatFileNumber(row.clientCode));
  t=normalizeArabic(bits.join(' '));
  try{ROW_TEXT.set(row,t)}catch{}
  return t;
@@ -72,7 +76,7 @@ export async function loadRows(office,store,{q='',from='',to='',dateField=null,l
 // عرض مختصر للسجل المرجعي
 export function refLabel(store,r){
  if(!r)return '';
- if(store==='files')return `${r.fileNumber||''} — ${r.title||''}`.trim();
+ if(store==='files')return `${formatFileNumber(r.fileNumber)} — ${r.title||''}`.trim().replace(/^— /,'');
  if(store==='cases')return [r.stageType||r.numberType||'',`${r.caseNumber||'بدون رقم'}${r.caseYear?'/'+r.caseYear:''}`,r.courtId||''].filter(Boolean).join(' — ');
  if(store==='clients')return r.fullName||'';
  if(store==='opponents')return r.name||'';
@@ -95,7 +99,7 @@ export const AGENDA_SOURCES=[
  {store:'appointments',index:'date',kind:'موعد',time:'time',title:r=>r.title||'موعد',details:r=>[r.location,r.withWhom].filter(Boolean).join(' — ')},
  {store:'communications',index:'followUpDate',kind:'متابعة اتصال',title:r=>r.subject||'متابعة اتصال',details:r=>[r.contactName,r.channel].filter(Boolean).join(' — ')},
  {store:'judgments',index:'judgmentDate',kind:'حكم',title:r=>r.operativeSummary||r.judgmentType||'حكم',details:r=>[r.court,r.judgmentStatus].filter(Boolean).join(' — ')},
- {store:'files',index:'nextStepDate',kind:'خطوة ملف',title:r=>r.nextStep||'الخطوة التالية',details:r=>`${r.fileNumber||''} ${r.title||''}`},
+ {store:'files',index:'nextStepDate',kind:'خطوة ملف',title:r=>r.nextStep||'الخطوة التالية',details:r=>`${formatFileNumber(r.fileNumber)} ${r.title||''}`.trim()},
  {store:'expertReports',index:'reportDate',kind:'خبير',title:r=>r.expertName||'تقرير خبير',details:r=>r.expertOffice||''}
 ];
 export async function agenda(office,from,to,limit=2000){

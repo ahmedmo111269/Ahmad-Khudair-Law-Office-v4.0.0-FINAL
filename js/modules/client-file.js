@@ -5,6 +5,7 @@ import {toast} from '../ui/toast.js';
 import {modal,closeModal,confirmBox} from '../ui/modal.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {formatDate,formatDateTime} from '../core/format.js';
+import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {userError} from '../core/errors.js';
 import {Clock} from '../core/clock.js';
 import {phonesOf,isClosedFile,label} from '../domain/entities.js';
@@ -35,7 +36,7 @@ export async function clientFilePage(app,clientId,query){
  const head=`<div class="cfile-page"><nav class="crumbs" aria-label="المسار">${crumb.join('<span class="sep">‹</span>')}</nav>
  <section class="cf-hero">
   <div class="cf-id"><div class="cf-avatar" aria-hidden="true">${esc((fresh.fullName||'؟').trim().charAt(0))}</div>
-   <div><h2>${esc(fresh.fullName)}</h2><p class="cf-code"><span class="file-no">${esc(cf.clientCode||fresh.clientCode||'')}</span><span class="badge ${cf.isArchived?'warn':'open'}">${esc(cf.status||'نشط')}</span>${fresh.clientType?`<span class="badge">${esc(fresh.clientType)}</span>`:''}</p>
+   <div><h2>${esc(fresh.fullName)}</h2><p class="cf-code">${fileNumberChip({clientCode:cf.clientCode||fresh.clientCode})}<span class="badge ${cf.isArchived?'warn':'open'}">${esc(cf.status||'نشط')}</span>${fresh.clientType?`<span class="badge">${esc(fresh.clientType)}</span>`:''}</p>
    <dl class="cf-meta">${phone?`<div><dt>الهاتف</dt><dd><a href="tel:${esc(phone)}" dir="ltr">${esc(phone)}</a></dd></div>`:''}<div><dt>المحامي المسؤول</dt><dd>${esc(cf.responsibleLawyer||'—')}</dd></div><div><dt>فتح الملف</dt><dd>${formatDate(cf.openedAt)}</dd></div><div><dt>آخر نشاط</dt><dd>${rel(s.files[0]?.lastActivityAt||cf.lastActivityAt)}</dd></div></dl></div></div>
   <div class="cf-actions"><button class="primary" data-new-lf>+ إضافة ملف قانوني</button><button class="ghost" data-cf-edit>تعديل ملف الموكل</button>${cf.isArchived?'<button class="ghost" data-cf-reopen>إعادة فتح</button>':'<button class="ghost" data-cf-archive>أرشفة</button>'}</div>
  </section>
@@ -72,8 +73,8 @@ export async function clientFilePage(app,clientId,query){
 }
 const panel=(title,body)=>`<section class="panel"><div class="panel-head"><h3>${title}</h3></div><div class="cf-lines">${body||'<p class="muted small">لا يوجد.</p>'}</div></section>`;
 function catCard(c,n,clientId){return `<button class="cat-card" data-go="cfile:${esc(clientId)}?cat=${esc(c.id)}" style="--cat:${esc(c.color||'var(--primary)')}"><span class="cat-icon">${esc(c.icon||'📁')}</span><b>${esc(c.name)}</b><small>${filesWord(n)}</small></button>`}
-function fileLine(f,tax,note=''){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId);return `<button class="cf-line" data-go="file:${esc(f.id)}"><span class="cf-line-icon">${esc(c?.icon||'📁')}</span><span class="cf-line-main"><b>${esc(f.title||'')}</b><small><span class="mono">${esc(f.fileNumber||'')}</span> · ${esc(t?.name||f.fileType||'')}${f.__stage?` · ${esc(f.__stage.stageType||'')}`:''}${f.__shared?' · ملف مشترك':''}</small></span><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span>${note?`<small class="muted">${esc(note)}</small>`:''}</button>`}
-function fileCard(f,tax){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId),st=f.__stage;return `<article class="lf-card" style="--cat:${esc(c?.color||'var(--primary)')}"><header><span>${esc(c?.icon||'📁')}</span><div><b>${esc(f.title||'')}</b><small class="mono">${esc(f.fileNumber||'')}</small></div><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span></header>
+function fileLine(f,tax,note=''){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId);return `<button class="cf-line" data-go="file:${esc(f.id)}"><span class="cf-line-icon">${esc(c?.icon||'📁')}</span><span class="cf-line-main"><b>${esc(f.title||'')}</b><small>${fileNumberChip(f,{withKind:false})} · ${esc(t?.name||f.fileType||'')}${f.__stage?` · ${esc(f.__stage.stageType||'')}`:''}${f.__shared?' · ملف مشترك':''}</small></span><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span>${note?`<small class="muted">${esc(note)}</small>`:''}</button>`}
+function fileCard(f,tax){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId),st=f.__stage;return `<article class="lf-card" style="--cat:${esc(c?.color||'var(--primary)')}"><header><span>${esc(c?.icon||'📁')}</span><div><b>${esc(f.title||'')}</b><small>${fileNumberChip(f,{withKind:false})}</small></div><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span></header>
  <dl><div><dt>النوع</dt><dd>${esc(t?.name||f.fileType||'—')}</dd></div><div><dt>المرحلة الحالية</dt><dd>${esc(st?.stageType||'—')}</dd></div>${st?.courtId?`<div><dt>المحكمة</dt><dd>${esc(st.courtId)}</dd></div>`:''}<div><dt>آخر نشاط</dt><dd>${rel(f.lastActivityAt)}</dd></div></dl>
  <button class="ghost small" data-go="file:${esc(f.id)}">فتح</button></article>`}
 
@@ -89,11 +90,11 @@ export async function bindClientFilePage(app,clientId){
  const grid=root.querySelector('#cf-files');
  if(grid){
   let list=s.files;
-  if(q){const {normalizeArabic}=await import('../core/search-normalizer.js');const n=normalizeArabic(q);list=list.filter(f=>normalizeArabic([f.fileNumber,f.title,f.fileType,f.mainCategory,f.searchText].join(' ')).includes(n))}
+  if(q){const {normalizeArabic}=await import('../core/search-normalizer.js');const n=normalizeArabic(q);list=list.filter(f=>normalizeArabic([formatFileNumber(f.fileNumber),f.fileNumber,f.title,f.fileType,f.mainCategory,f.searchText].join(' ')).includes(n))}
   else{list=list.filter(f=>f.categoryId===catId&&(!typeId||f.fileTypeId===typeId))}
   grid.innerHTML=`<div class="lf-cards">${list.map(f=>fileCard(f,tax)).join('')||'<p class="muted">لا توجد ملفات.</p>'}</div><div class="lf-grid"></div>`;
   mountGrid(grid.querySelector('.lf-grid'),{title:'ملفات الموكل',storageKey:'cfile:files',rows:list,onRowClick:f=>app.go('file:'+f.id),emptyText:'لا توجد ملفات.',columns:[
-   {key:'fileNumber',label:'رقم الملف'},{key:'title',label:'الملف'},{key:'type',label:'النوع',get:f=>tax.byId.get(f.fileTypeId)?.name||f.fileType||''},
+   {key:'fileNumber',label:'رقم الملف الفرعي',get:f=>formatFileNumber(f.fileNumber)},{key:'title',label:'الملف'},{key:'type',label:'النوع',get:f=>tax.byId.get(f.fileTypeId)?.name||f.fileType||''},
    {key:'cat',label:'القسم',get:f=>tax.byId.get(f.categoryId)?.name||'',hidden:Boolean(catId)},
    {key:'stage',label:'المرحلة الحالية',get:f=>f.__stage?.stageType||''},{key:'court',label:'المحكمة',get:f=>f.__stage?.courtId||''},
    {key:'caseNo',label:'رقم القضية',get:f=>f.__stage?.caseNumber?`${f.__stage.caseNumber}${f.__stage.caseYear?'/'+f.__stage.caseYear:''}`:(f.x_refNumber||'')},
@@ -108,7 +109,7 @@ export async function bindClientFilePage(app,clientId){
 }
 async function editClientFile(app,cf){
  const lawyers=(await lookupRows(app.office,'lawyer')).map(r=>r.value),sts=(await lookupRows(app.office,'clientFileStatus')).map(r=>r.value);
- const card=modal(`<h2 class="modal-title">تعديل ملف الموكل ${esc(cf.clientCode||'')}</h2><form class="entity-form" id="cf-form"><div class="form-grid">
+ const card=modal(`<h2 class="modal-title">تعديل الملف الرئيسي ${esc(formatFileNumber(cf.clientCode))}</h2><form class="entity-form" id="cf-form"><div class="form-grid">
   <div class="field"><label>الحالة<input name="status" list="cf-sts" value="${esc(cf.status||'')}"></label><datalist id="cf-sts">${sts.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>
   <div class="field"><label>المحامي المسؤول<input name="responsibleLawyer" list="cf-law" value="${esc(cf.responsibleLawyer||'')}"></label><datalist id="cf-law">${lawyers.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>
   <div class="field"><label>تاريخ فتح الملف<input type="date" name="openedAt" value="${esc(cf.openedAt||'')}"></label></div>
@@ -178,7 +179,7 @@ export async function openLegalFileWizard(app,opts={}){
   try{
    const f=await createLegalFileInClientFile(app.office,{clientId:st.clientId,categoryId:st.categoryId,fileTypeId:st.fileTypeId||null,title:st.title,clientRole:st.clientRole,responsibleLawyer:st.responsibleLawyer,openedAt:st.openedAt,
     steps:st.steps.filter(s=>s.include&&s.name.trim()),templateId:st.useTemplate?tax.templateFor(st.fileTypeId)?.id:null,meta:st.meta,related:opts.related||null});
-   closeModal();toast(`تم إنشاء الملف ${f.fileNumber}`);app.go('file:'+f.id);
+   closeModal();toast(`تم إنشاء الملف الفرعي ${formatFileNumber(f.fileNumber)}`);app.go('file:'+f.id);
   }catch(err){toast(userError(err),'error');btn.disabled=false}
  });
  draw();
@@ -243,12 +244,12 @@ export async function openRelatedMenu(app,file,anchor){
  const clientLink=file.clientFileId?await app.office.r.clientFiles.get(file.clientFileId):null;
  const result=file.x_result||'';
  const sugg=RELATED_SUGGESTIONS.filter(s=>s.when.fileType===file.fileTypeId&&(!s.when.result||s.when.result===result));
- const card=modal(`<h2 class="modal-title">إنشاء ملف مرتبط بـ ${esc(file.fileNumber||'')}</h2>
+ const card=modal(`<h2 class="modal-title">إنشاء ملف مرتبط بـ ${esc(formatFileNumber(file.fileNumber)||file.title||'')}</h2>
   <p class="muted small">الملف الجديد يُنشأ داخل ملف نفس الموكل، وتُربط أطرافه تلقائيًا، ويبقى الملف الحالي كما هو بكل بياناته.</p>
   ${sugg.length?`<h4>مقترح بناءً على بيانات الملف</h4><div class="sp-menu">${sugg.map((s,i)=>`<button class="primary" data-s="${i}">${esc(s.label)}</button>`).join('')}</div>`:''}
   <h4>أو اختر نوع العلاقة</h4><div class="sp-menu">${GENERIC_RELATED.map((g,i)=>`<button class="ghost" data-g="${i}">${esc(g.label)} <small class="muted">(${esc(RELATION_TYPES[g.relation].label)})</small></button>`).join('')}</div>`);
  card.addEventListener('click',e=>{const b=e.target.closest('button[data-s],button[data-g]');if(!b)return;closeModal();
-  const related={fileId:file.id,relationCode:'',title:`${file.fileNumber} — ${file.title}`};
+  const related={fileId:file.id,relationCode:'',title:`${formatFileNumber(file.fileNumber)} — ${file.title}`};
   let o={clientId:clientLink?.clientId||'',related};
   if(b.dataset.s!==undefined){const s=sugg[Number(b.dataset.s)];related.relationCode=s.relation;o={...o,categoryId:s.targetCategory,allowedTypes:s.targetTypes,fileTypeId:s.targetTypes.length===1?s.targetTypes[0]:''}}
   else{const g=GENERIC_RELATED[Number(b.dataset.g)];related.relationCode=g.relation;o.categoryId=file.categoryId||''}
@@ -264,15 +265,18 @@ export async function startNewLegalFile(app){
  const {openEntityForm}=await import('../ui/form.js');
  const {normalizeArabic}=await import('../core/search-normalizer.js');
  const card=modal(`<h2 class="modal-title">ملف قانوني جديد</h2><p class="muted small">كل ملف يتبع ملف موكل. اختر الموكل أو أضف موكلًا جديدًا.</p>
-  <input type="search" id="pc-q" placeholder="اسم الموكل أو كود CL-… أو الرقم القومي" autocomplete="off" aria-label="بحث عن موكل">
+  <input type="search" id="pc-q" placeholder="اسم الموكل أو رقم الملف الرئيسي (مثل 2/2026) أو الرقم القومي" autocomplete="off" aria-label="بحث عن موكل">
   <div id="pc-r" class="cf-lines pc-results"></div>
   <div class="form-actions"><button class="primary" data-pc-new>+ موكل جديد</button><button class="ghost" data-pc-legacy title="النموذج الكامل بدون معالج">النموذج الكامل</button></div>`);
  const q=card.querySelector('#pc-q'),r=card.querySelector('#pc-r');let t=0,seq=0;
  const recent=async()=>{try{const x=await app.office.r.clients.reportRange({index:'createdAt',direction:'prev',limit:8});return Array.isArray(x)?x:(x.rows||[])}catch{return []}};
- const draw=(rows,title)=>{r.innerHTML=(title?`<small class="muted">${title}</small>`:'')+(rows.filter(c=>!c.isDeleted).map(c=>`<button class="cf-line" data-id="${esc(c.id)}"><span class="cf-avatar sm">${esc((c.fullName||'؟').charAt(0))}</span><span class="cf-line-main"><b>${esc(c.fullName)}</b><small><span class="mono">${esc(c.clientCode||'')}</span> ${esc(phonesOf(c)[0]||'')}</small></span></button>`).join('')||'<p class="muted small">لا نتائج — أضف موكلًا جديدًا.</p>')};
+ const draw=(rows,title)=>{r.innerHTML=(title?`<small class="muted">${title}</small>`:'')+(rows.filter(c=>!c.isDeleted).map(c=>`<button class="cf-line" data-id="${esc(c.id)}"><span class="cf-avatar sm">${esc((c.fullName||'؟').charAt(0))}</span><span class="cf-line-main"><b>${esc(c.fullName)}</b><small>${fileNumberChip(c,{withKind:true})} ${esc(phonesOf(c)[0]||'')}</small></span></button>`).join('')||'<p class="muted small">لا نتائج — أضف موكلًا جديدًا.</p>')};
  const run=async()=>{const my=++seq;const v=q.value.trim();if(v.length<2){const rows=await recent();if(my===seq)draw(rows,'أحدث الموكلين');return}
   const n=normalizeArabic(v),code=v.toUpperCase();
-  const [a,b,c]=await Promise.all([app.office.r.clients.prefix('fullNameNormalized',n,10),/^CL/.test(code)?app.office.r.clients.prefix('clientCode',code,10).catch(()=>[]):[],/^\d{4,}/.test(v)?app.office.r.clients.prefix('nationalId',v,10).catch(()=>[]):[]]);
+  // البحث برقم ملف رئيسي بصيغة العرض (2/2026) يترجم داخليًا إلى الكود التقني للفهرس
+  let codeQ=/^CL/.test(code)?code:'';
+  if(!codeQ){const p=/^(\d{1,6})\s*\/\s*(\d{4})$/.exec(v);if(p)codeQ=`CL-${p[2]}-${String(Number(p[1])).padStart(6,'0')}`}
+  const [a,b,c]=await Promise.all([app.office.r.clients.prefix('fullNameNormalized',n,10),codeQ?app.office.r.clients.prefix('clientCode',codeQ,10).catch(()=>[]):[],/^\d{4,}/.test(v)?app.office.r.clients.prefix('nationalId',v,10).catch(()=>[]):[]]);
   if(my===seq)draw([...new Map([...b,...c,...a].map(x=>[x.id,x])).values()])};
  q.oninput=()=>{clearTimeout(t);t=setTimeout(run,180)};run();setTimeout(()=>q.focus(),30);
  q.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();r.querySelector('[data-id]')?.click()}};

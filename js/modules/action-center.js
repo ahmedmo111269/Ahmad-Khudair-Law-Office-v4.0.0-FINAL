@@ -1,6 +1,7 @@
 import {esc} from '../ui/dom.js';
 import {actionCenterBrief,actionRows} from '../services/action-center.js';
 import {formatDate,formatDateTime,formatTime,formatNumber} from '../core/format.js';
+import {formatFileNumber} from '../core/file-number.js';
 
 const fmt=v=>formatDate(v);
 const time=v=>formatTime(v);
@@ -22,7 +23,7 @@ export async function actionCenterPage(app){
 function renderItems(items,bucket){
  if(!items.length)return '<p class="muted">لا توجد عناصر في هذه المجموعة.</p>';
  const rows=items.map(x=>({raw:x,kind:x.hearingDate?'جلسة':x.internalDueDate?(x.status==='pending'?'إجراء':'إجراء'):x.followUpDate?'متابعة':x.nextStepDate?'خطوة ملف':'ملف',date:x.hearingDate||x.internalDueDate||x.followUpDate||x.nextStepDate||x.lastActivityAt||'',title:x.reason||x.description||x.subject||x.nextStep||x.title||'عنصر متابعة',route:x.caseId?`case:${x.caseId}`:x.fileId?`file:${x.fileId}`:`file:${x.id}`}));
- return rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(x=>`<button class="action-item" data-action-open="${esc(x.route)}"><span class="action-kind">${esc(x.kind)}</span><b>${esc(x.title)}</b><time>${esc(fmt(x.date))} ${esc(time(x.date))}</time><small>${esc(x.raw.fileNumber||x.raw.caseNumber||x.raw.priority||x.raw.status||'')}</small></button>`).join('');
+ return rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(x=>`<button class="action-item" data-action-open="${esc(x.route)}"><span class="action-kind">${esc(x.kind)}</span><b>${esc(x.title)}</b><time>${esc(fmt(x.date))} ${esc(time(x.date))}</time><small>${esc(x.raw.fileNumber?('ملف فرعي: '+formatFileNumber(x.raw.fileNumber)):x.raw.caseNumber||x.raw.priority||x.raw.status||'')}</small></button>`).join('');
 }
 export function bindActionCenter(app){
  document.querySelectorAll('[data-action-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-action-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('[data-action-section]').forEach(s=>s.hidden=s.dataset.actionSection!==b.dataset.actionTab)});

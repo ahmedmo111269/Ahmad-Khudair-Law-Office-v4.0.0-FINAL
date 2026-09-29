@@ -34,6 +34,9 @@ import {decorateNav} from './ui/icons.js';
 import {installDateInputs} from './ui/date-input.js';
 import {openPalette,closePalette,paletteOpen} from './ui/palette.js';
 import {icon} from './ui/icons.js';
+import {buildSidebar,initSidebarState,toggleCollapsed,toggleMobile,closeMobile,isDesktop,setActiveRoute} from './ui/sidebar.js';
+import {bindCards} from './ui/card.js';
+import {Clock} from './core/clock.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
 const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','serviceRecords','appointments','communications','caseNotes','expertReports','judgments','execution','fees','feePayments','documentReferences','bailiffs'];
@@ -64,14 +67,27 @@ function recordRoute(route){
 
 class App{
  constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.maybeSeedDemo();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ /** زرع بيانات تجريبية مرة واحدة فقط في قاعدة فارغة تمامًا — إضافة بحتة، لا تحذف شيئًا. */
+ async maybeSeedDemo(){
+  try{
+   const office=this.office;if(!office)return;
+   const meta=await office.r.meta.get('demoSeed');
+   if(meta)return;
+   const [clients,files]=await Promise.all([office.r.clients.count(),office.r.files.count()]);
+   if(clients>0||files>0){await office.r.meta.put({id:'demoSeed',key:'demoSeed',seeded:false,skippedAt:Clock.now(),reason:'db-not-empty'});return}
+   const {seedDemoData}=await import('./services/demo-seed.js');
+   const report=await seedDemoData(office);
+   await office.r.meta.put({id:'demoSeed',key:'demoSeed',seeded:true,at:Clock.now(),files:report.files,clients:report.clients});
+   toast(`تم تحميل بيانات تجريبية جاهزة للتجربة: ${report.files} ملفًا قانونيًا و${report.clients} موكلًا. يمكنك حذفها سجلًا سجلًا في أي وقت.`,'ok',{duration:6500});
+  }catch(e){console.error('demo seed',e)}
+ }
  bindCrossTab(){if(this.boundCrossTab)return;this.boundCrossTab=true;events.on('db:switched',async p=>{if(!p?.profileId)return;/* local emit from this tab's own switch: manager already holds the target */if(this.manager.current?.profile?.id===p.profileId&&!this.manager.current.closed)return;try{this.registry.reload?.();if(this.registry.active?.id!==p.profileId)return;if(this.ctx?.profile?.id===p.profileId)return;await this.switchDb(p.profileId,{remote:true});toast('تم تبديل قاعدة البيانات من نافذة أخرى');await this.refresh()}catch(e){console.error('remote db switch',e);toast('تعذر مزامنة تبديل قاعدة البيانات من نافذة أخرى','error')}});events.on('db:migration:starting',p=>{if(p?.profileId===this.registry.active?.id&&this.ctx)toast('تجري ترقية قاعدة البيانات...');});events.on('db:closing',p=>{if(p?.profileId===this.ctx?.profile?.id&&this.ctx&&!this.ctx.closed&&this.manager.current===this.ctx){this.ctx.closed=true;toast('تم إغلاق اتصال قاعدة البيانات. أعد فتح القاعدة أو أعد تحميل الصفحة.','error')}});window.addEventListener('storage',e=>{if(e.key===constants.REGISTRY_KEY&&e.newValue){try{this.registry.reload?.();$('#db-badge').textContent=this.registry.active?.displayName||''}catch{}}});}
  bindShell(){
-  const desktop=!window.matchMedia('(max-width:900px)').matches;const initiallyCollapsed=desktop&&Boolean(prefs.get('ui:sidebar-collapsed',false));document.body.classList.toggle('sidebar-collapsed',initiallyCollapsed);$('#mobile-menu').setAttribute('aria-expanded',String(desktop&&!initiallyCollapsed));
-  // خلفية الشريط الجانبي على الهاتف: النقر خارج القائمة يغلقها
-  const backdrop=document.createElement('div');backdrop.id='sidebar-backdrop';backdrop.hidden=true;document.body.append(backdrop);
-  backdrop.onclick=()=>{$('#sidebar').classList.remove('open');backdrop.hidden=true;$('#mobile-menu').setAttribute('aria-expanded','false')};
-  $('#mobile-menu').onclick=e=>{const sidebar=$('#sidebar');if(window.matchMedia('(max-width:900px)').matches){const open=sidebar.classList.toggle('open');backdrop.hidden=!open;e.currentTarget.setAttribute('aria-expanded',String(open))}else{const collapsed=document.body.classList.toggle('sidebar-collapsed');e.currentTarget.setAttribute('aria-expanded',String(!collapsed));void prefs.set('ui:sidebar-collapsed',collapsed)}};
+  // الشريط الجانبي الموحّد v5: يُبنى من تعريف واحد (ui/sidebar.js) مع مجموعات
+  // قابلة للطي، ووضع مطوي بتلميحات على سطح المكتب، وقائمة منزلقة على الهاتف.
+  buildSidebar();initSidebarState();
+  $('#mobile-menu').onclick=()=>{isDesktop()?toggleCollapsed():toggleMobile()};
   $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
   $('#command-btn').innerHTML=`${icon('search')} <span>لوحة الأوامر</span> <kbd>Ctrl K</kbd>`;
   $('#command-btn').onclick=()=>openPalette(this);
@@ -79,32 +95,16 @@ class App{
   $('#nav-close').onclick=()=>this.closePage();
   $('#nav-home').onclick=()=>this.go('dashboard');
   document.querySelectorAll('#sidebar [data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
-  this.initNavGroups();
   this.initShortcuts();
- }
- // طي/فتح مجموعات الشريط الجانبي مع تذكر التفضيل، وتقليل ازدحام القائمة الطويلة
- initNavGroups(){
-  const nav=$('#main-nav');if(!nav)return;
-  const state=prefs.get('ui:nav-groups',{});
-  const seps=[...nav.querySelectorAll('.nav-sep')];
-  const membersOf=sep=>{const out=[];let el=sep.nextElementSibling;while(el&&!el.classList.contains('nav-sep')&&el.tagName!=='HR'){if(el.matches('button[data-route]'))out.push(el);el=el.nextElementSibling}return out};
-  seps.forEach(sep=>{
-   const name=sep.textContent.trim();if(!name)return;
-   const members=membersOf(sep);
-   const apply=open=>{sep.classList.toggle('collapsed',!open);sep.setAttribute('aria-expanded',String(open));members.forEach(m=>m.hidden=!open)};
-   const open=state[name]!==false;
-   apply(open);
-   const toggle=()=>{const now=sep.classList.contains('collapsed')?true:false;apply(now);const s=prefs.get('ui:nav-groups',{});s[name]=now;prefs.set('ui:nav-groups',s)};
-   sep.setAttribute('role','button');sep.tabIndex=0;
-   sep.onclick=toggle;sep.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
-  });
  }
  // اختصارات لوحة المفاتيح: Ctrl+K اللوحة، ? المساعدة، Alt+رقم للتنقل السريع
  initShortcuts(){
   document.addEventListener('keydown',e=>{
    const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
-   if(e.key==='Escape'&&!document.querySelector('.dg-pop')){if(paletteOpen()){closePalette();return}closeModal();return}
+   if(e.key==='Escape'&&!document.querySelector('.dg-pop')){
+    if(!isDesktop()&&document.querySelector('#sidebar.open')){closeMobile();return}
+    if(paletteOpen()){closePalette();return}closeModal();return}
    if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
    if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
   });
@@ -124,7 +124,7 @@ class App{
   const baseRoute=route.split('?')[0];const query=new URLSearchParams(route.includes('?')?route.split('?')[1]:'');
   const page=recordRoute(baseRoute)||PAGES[baseRoute]||PAGES.dashboard;
   const navKey=page.store||baseRoute; // صفحة السجل تُبرز قائمة كيانها في الشريط الجانبي
-  document.querySelectorAll('#sidebar [data-route]').forEach(b=>{const on=b.dataset.route===navKey;b.classList.toggle('active',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
+  setActiveRoute(navKey);
   $('#page-title').textContent=page.title;
   document.title=`${page.title} — ${constants.APP_NAME}`;
   $('#nav-back').disabled=!this.history.length;
@@ -136,11 +136,11 @@ class App{
    main.innerHTML=html;
    await page.bind?.(this,query);
    enhanceCollapsiblePanels(main,baseRoute);
+   bindCards(main);
    main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
-   document.querySelector('#sidebar')?.classList.remove('open');
-   const bd=document.querySelector('#sidebar-backdrop');if(bd)bd.hidden=true;
+   closeMobile(); // على الهاتف: تُغلق القائمة الجانبية تلقائيًا بعد اختيار الصفحة
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}
  }
@@ -153,6 +153,7 @@ class App{
  async switchDb(id,opts={}){const previousId=this.ctx?.profile?.id||this.registry.active?.id;try{const next=await this.manager.switchTo(id);this.setContext(next);return next}catch(e){if(!opts.remote&&previousId&&this.registry.active?.id!==previousId){this.registry.data.activeProfileId=previousId;this.registry.save()}throw e}}
  setContext(ctx){
   this.ctx=ctx;this.office=new Office(ctx);this.resetViewState();$('#db-badge').textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
+  const sbDb=document.querySelector('#sb-db-name');if(sbDb)sbDb.textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   // صيانة غير مدمرة بعد فتح القاعدة (زرع القوائم، ترحيل روابط الموكلين، فهرس البحث)
   const office=this.office;this.maintenance=runMaintenance(office).catch(e=>console.error('maintenance',e));
  }
