@@ -1,19 +1,21 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v4.7.0-offline1';
+const CACHE='ahmad-khudair-law-office-v5.0.0-offline1';
 const ASSETS=[
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./css/app.css",
   "./css/base.css",
+  "./css/cards.css",
   "./css/client-file.css",
   "./css/components.css",
   "./css/layout.css",
   "./css/luxe.css",
   "./css/pro.css",
   "./css/service-records.css",
+  "./css/sidebar.css",
   "./css/themes.css",
   "./css/ui.css",
   "./js/app.js",
@@ -21,6 +23,7 @@ const ASSETS=[
   "./js/core/constants.js",
   "./js/core/errors.js",
   "./js/core/events.js",
+  "./js/core/file-number.js",
   "./js/core/format.js",
   "./js/core/id.js",
   "./js/core/preferences.js",
@@ -63,6 +66,7 @@ const ASSETS=[
   "./js/services/client-files.js",
   "./js/services/consistency.js",
   "./js/services/dashboard.js",
+  "./js/services/demo-seed.js",
   "./js/services/entity-query.js",
   "./js/services/entity-save.js",
   "./js/services/finance.js",
@@ -80,7 +84,9 @@ const ASSETS=[
   "./js/services/search.js",
   "./js/services/search-engine.js",
   "./js/services/service-records.js",
+  "./js/ui/sidebar.js",
   "./js/ui/calendar.js",
+  "./js/ui/card.js",
   "./js/ui/collapsible.js",
   "./js/ui/combobox.js",
   "./js/ui/datagrid.js",

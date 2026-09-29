@@ -1,4 +1,5 @@
 import {formatDate,formatDateTime} from '../core/format.js';
+import {formatFileNumber} from '../core/file-number.js';
 import {isClosedFile} from '../domain/entities.js';
 import {STORE} from '../db/schema.js';
 import {localDate,isActiveProcedure} from '../core/clock.js';
@@ -37,6 +38,6 @@ export function actionRows(r){
   push(r.appointments,'موعد',x=>(x.date||'')+'T'+(x.time||'00:00'),x=>x.title||'موعد',x=>x.fileId?`file:${x.fileId}`:(x.clientId?`client:${x.clientId}`:'appointments'));
   push(r.followups,'متابعة',x=>x.followUpDate,x=>x.subject||'متابعة اتصال',x=>x.fileId?`file:${x.fileId}`:(x.clientId?`client:${x.clientId}`:'communications'));
   push(r.fileNext,'خطوة ملف',x=>x.nextStepDate,x=>x.nextStep||x.title||'خطوة تالية',x=>`file:${x.id}`);
-  push(r.staleFiles,'متابعة',x=>x.lastActivityAt,x=>`لا نشاط منذ مدة: ${x.title||x.fileNumber||'ملف'}`,x=>`file:${x.id}`);
+  push(r.staleFiles,'متابعة',x=>x.lastActivityAt,x=>`لا نشاط منذ مدة: ${x.title||formatFileNumber(x.fileNumber)||'ملف'}`,x=>`file:${x.id}`);
   return rows;
 }

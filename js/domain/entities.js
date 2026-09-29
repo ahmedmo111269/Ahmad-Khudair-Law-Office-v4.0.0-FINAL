@@ -1,4 +1,5 @@
 import {formatDate as fmtDate,formatDateTime as fmtDateTime} from '../core/format.js';
+import {formatFileNumber} from '../core/file-number.js';
 // تعريف موحّد لكل كيانات البرنامج: الحقول والمجموعات والأعمدة الظاهرة في الجداول.
 // النماذج وصفحات السجل والجداول والتقارير تعتمد كلها على هذا الملف بدل تكرار الحقول في كل صفحة.
 // كل الحقول اختيارية ما عدا اسم الشخص وربط السجل بأصله (req:true).
@@ -81,7 +82,7 @@ const phonesField={k:'phones',l:'أرقام الهاتف',t:'phones',g:'الات
 export const ENTITIES={
  clients:{label:'موكل',plural:'الموكلون',title:r=>r.fullName,route:'client',dateField:'createdAt',dateIndex:'createdAt',fields:[
   {k:'fullName',l:'الاسم الكامل',t:'text',req:true,grid:true,g:'البيانات الأساسية'},
-  {k:'clientCode',l:'كود ملف الموكل',t:'readonly',grid:true,g:'البيانات الأساسية'},
+  {k:'clientCode',l:'الملف الرئيسي',t:'readonly',grid:true,g:'البيانات الأساسية'},
   {k:'clientType',l:'نوع الشخص',t:'lookup',lk:'clientType',grid:true,g:'البيانات الأساسية'},
   {k:'nationalId',l:'الرقم القومي',t:'text',grid:true,g:'البيانات الأساسية'},
   {k:'idType',l:'نوع إثبات آخر',t:'lookup',lk:'idType',g:'البيانات الأساسية'},
@@ -115,8 +116,8 @@ export const ENTITIES={
   {k:'lawyerPhone',l:'هاتف محامي الخصم',t:'text',g:'محامي الخصم'},
   {k:'notes',l:'ملاحظات',t:'textarea',g:'أخرى'},
   {k:'createdAt',l:'تاريخ الإضافة',t:'readonly',dt:'date'}]},
- files:{label:'ملف',plural:'الملفات',title:r=>`${r.fileNumber||''} — ${r.title||''}`,route:'file',dateField:'openedAt',dateIndex:'openedAt',fields:[
-  {k:'fileNumber',l:'رقم الملف الداخلي',t:'readonly',grid:true,g:'البيانات الأساسية'},
+ files:{label:'ملف',plural:'الملفات',title:r=>`${formatFileNumber(r)||''} — ${r.title||''}`.replace(/^ — /,''),route:'file',dateField:'openedAt',dateIndex:'openedAt',fields:[
+  {k:'fileNumber',l:'رقم الملف الفرعي',t:'readonly',grid:true,g:'البيانات الأساسية'},
   {k:'title',l:'عنوان الملف',t:'text',grid:true,g:'البيانات الأساسية'},
   {k:'fileType',l:'نوع الملف',t:'lookup',lk:'fileType',grid:true,g:'البيانات الأساسية'},
   {k:'mainCategory',l:'التصنيف الرئيسي',t:'lookup',lk:'fileMainCategory',g:'البيانات الأساسية'},
@@ -172,8 +173,8 @@ export const ENTITIES={
   {k:'adjournReason',l:'سبب التأجيل',t:'text',g:'ما تم في الجلسة'},
   {k:'nextAction',l:'المطلوب للجلسة القادمة',t:'text',g:'ما تم في الجلسة'},
   {k:'notes',l:'ملاحظات',t:'textarea',g:'ما تم في الجلسة'}]},
- serviceRecords:{label:'إعلان / إنذار',plural:'المحضرين والإعلانات',title:r=>`${r.internalNumber||r.noticeNumber||'إعلان'} — ${r.partyName||''}`,route:'rec:serviceRecords',dateField:'serviceDate',dateIndex:'serviceDate',calendar:true,fields:[
-  {k:'internalNumber',l:'الرقم الداخلي',t:'readonly',grid:true,g:'البيانات الأساسية'},
+ serviceRecords:{label:'إعلان / إنذار',plural:'المحضرين والإعلانات',title:r=>`${formatFileNumber(r.internalNumber)||r.noticeNumber||'إعلان'} — ${r.partyName||''}`,route:'rec:serviceRecords',dateField:'serviceDate',dateIndex:'serviceDate',calendar:true,fields:[
+  {k:'internalNumber',l:'رقم الإعلان (تسلسلي المكتب)',t:'readonly',grid:true,g:'البيانات الأساسية'},
   {k:'fileId',l:'الملف',t:'ref',ref:'files',req:true,grid:true,g:'الربط'},
   {k:'caseId',l:'المرحلة',t:'ref',ref:'cases',grid:true,g:'الربط'},
   {k:'hearingId',l:'الجلسة المرتبطة',t:'hearingSelect',grid:false,g:'الربط'},
@@ -370,6 +371,8 @@ export const isClosedFile=f=>Boolean(f?.isArchived)||CLOSED_FILE_STATUSES.includ
 // عرض القيمة كنص للجدول/السجل
 export function displayValue(field,row,refs){
  const v=row?.[field.k];
+ // أرقام الملفات تُعرض دائمًا بالصيغة الموحدة (2/2026) وليس بالكود التقني (CL-/LF-/SR-)
+ if(field.k==='fileNumber'||field.k==='clientCode'||field.k==='internalNumber'){const t=formatFileNumber(v);return t||''}
  if(field.t==='phones')return phonesOf(row).join(' ، ');
  if(field.ref){const lbl=refs?.get?.(v);return lbl||(v?'—':'')}
  if(v===undefined||v===null||v==='')return '';

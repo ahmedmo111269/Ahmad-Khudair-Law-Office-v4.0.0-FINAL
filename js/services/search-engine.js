@@ -15,6 +15,7 @@ import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {ENTITIES} from '../domain/entities.js';
 import {rowText} from './entity-query.js';
 import {prefs} from '../core/preferences.js';
+import {formatFileNumber as fileNumber} from '../core/file-number.js';
 
 // ===== 1) منطق صافٍ قابل للاختبار =====
 export function tokenizeQuery(q){
@@ -43,8 +44,8 @@ export function scoreHit({title='',sub='',viaCode=false,tokens=[]}){
 // ===== 2) أقسام البحث =====
 const fdate=v=>String(v||'').slice(0,10);
 export const SEARCH_SOURCES=[
- {store:'clients',icon:'users',weight:100,title:r=>r.fullName||'موكل',sub:r=>[r.clientCode,r.nationalId&&(r.nationalId),(Array.isArray(r.phones)?r.phones[0]:r.phone)||''].filter(Boolean).join(' · ')},
- {store:'files',icon:'folder',weight:95,title:r=>`${r.fileNumber||''} ${r.title||''}`.trim()||'ملف',sub:r=>[r.fileType,r.status,r.responsibleLawyer].filter(Boolean).join(' · ')},
+ {store:'clients',icon:'users',weight:100,title:r=>r.fullName||'موكل',sub:r=>[r.clientCode&&`ملف رئيسي: ${fileNumber(r.clientCode)}`,r.nationalId&&(r.nationalId),(Array.isArray(r.phones)?r.phones[0]:r.phone)||''].filter(Boolean).join(' · ')},
+ {store:'files',icon:'folder',weight:95,title:r=>`${fileNumber(r.fileNumber)} ${r.title||''}`.trim()||'ملف',sub:r=>[r.fileType,r.status,r.responsibleLawyer].filter(Boolean).join(' · ')},
  {store:'cases',icon:'gavel',weight:90,title:r=>`${r.stageType||r.numberType||'مرحلة'} ${r.caseNumber||''}${r.caseYear?'/'+r.caseYear:''}`.trim(),sub:r=>[r.courtId,r.chamber,r.degree,r.status].filter(Boolean).join(' · ')},
  {store:'opponents',icon:'userX',weight:85,title:r=>r.name||'خصم',sub:r=>[r.capacity,r.nationalId].filter(Boolean).join(' · ')},
  {store:'hearings',icon:'calendar',weight:80,title:r=>`جلسة ${fdate(r.hearingDate)}${r.hearingTime?' '+r.hearingTime:''}`,sub:r=>[r.court,r.chamber,r.reason,r.result].filter(Boolean).join(' · ')},

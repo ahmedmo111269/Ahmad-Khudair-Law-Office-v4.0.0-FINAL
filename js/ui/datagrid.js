@@ -232,7 +232,7 @@ export function mountGrid(root,opts){
 
  // ===== أحداث =====
  let qt=0;
- $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{st.quick=e.target.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
+ $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{if(!root.isConnected)return;st.quick=e.target.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
  $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;persist();render()});
  $('.dg-filter-toggle').addEventListener('click',()=>{st.filterCollapsed=!st.filterCollapsed;root.classList.toggle('dg-filter-open',!st.filterCollapsed);persist();renderBody()});
  $('.dg-font').addEventListener('change',e=>{st.fontSize=e.target.value;persist();renderBody()});

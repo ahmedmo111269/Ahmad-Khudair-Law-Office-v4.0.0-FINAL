@@ -17,6 +17,7 @@ import {openLegalFileWizard} from './client-file.js';
 import {buildCaseTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {trackRecent} from '../services/recents.js';
+import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 
 export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
  const items=fields.map(f=>{const v=displayValue(f,row,refs);if(skipEmpty&&!v)return '';const link=f.ref&&row[f.k]?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}</dd></div>`}).join('');
@@ -52,7 +53,7 @@ async function confirmDelete(app,store,id){
 export async function clientPage(app,id){
  const c=await app.office.r.clients.get(id);
  if(!c||c.isDeleted)return notFound('الموكل');
- trackRecent('client:'+id,c.fullName||'موكل',{icon:'users',sub:c.clientCode||''});
+ trackRecent('client:'+id,c.fullName||'موكل',{icon:'users',sub:c.clientCode?formatFileNumber(c.clientCode):''});
  app.__rec={store:'clients',id,related:await clientRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[c],ENTITIES.clients.fields);
@@ -65,7 +66,7 @@ export async function clientPage(app,id){
   appointments:section('appointments','المواعيد',relatedCount(r,'appointments',r.appointments),'<div data-grid="appointments"></div>',{open:false,add:'<button class="ghost" data-add="appointments">+ موعد</button>'}),
   communications:section('communications','الاتصالات',relatedCount(r,'communications',r.communications),'<div data-grid="communications"></div>',{open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
  };
- return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?`<span class="badge type mono">${esc(c.clientCode)}</span>`:''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
+ return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
  <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-order-client-sections>⚙ ترتيب الأقسام</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
 }
 export async function bindClientPage(app,id){
@@ -118,7 +119,7 @@ async function createRelatedFromRecord(app,row,store){
  const file=row.fileId?await app.office.r.files.get(row.fileId):null;
  const clientFile=file?.clientFileId?await app.office.r.clientFiles.get(file.clientFileId):null;
  if(!file||!clientFile?.clientId){toast('لا يمكن إنشاء ملف موكل مرتبط تلقائيًا لأن الملف الحالي غير مرتبط بملف موكل.','error');return}
- openLegalFileWizard(app,{clientId:clientFile.clientId,related:{fileId:file.id,relationCode:'RELATED_TO',title:`${file.fileNumber||''} — ${file.title||ENTITIES.files.title(file)}`}});
+ openLegalFileWizard(app,{clientId:clientFile.clientId,related:{fileId:file.id,relationCode:'RELATED_TO',title:`${formatFileNumber(file.fileNumber)||''} — ${file.title||ENTITIES.files.title(file)}`}});
 }
 export async function recordPage(app,store,id){
  const ent=ENTITIES[store];if(!ent)return notFound('السجل');

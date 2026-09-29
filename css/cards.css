@@ -1,0 +1,133 @@
+/* =====================================================================
+   نظام البطاقات الموحّد (Card System) v5
+   ---------------------------------------------------------------------
+   بنية البطاقة: العنوان ← المعلومة الأساسية ← التفاصيل ← الإجراءات.
+   الأحجام: --sm سريعة • --md تشغيلية • --lg تفاصيل • --full عرض كامل.
+   الحالات: loading / empty / error / success.
+   .panel القديمة و .ux-card الجديدة تشتركان في نفس التصميم — نظام واحد.
+   ===================================================================== */
+:root{
+ --card-gap:14px;
+ --card-pad:16px;
+ --card-pad-sm:12px;
+}
+.ux-card,.panel{
+ background:var(--surface);
+ border:1px solid var(--border);
+ border-radius:calc(var(--radius) + 2px);
+ box-shadow:var(--shadow-sm);
+ display:flex;flex-direction:column;min-width:0;
+ transition:box-shadow var(--transition),border-color var(--transition);
+ scroll-margin-top:90px;
+}
+.ux-card:hover{box-shadow:var(--shadow-md)}
+.ux-card--sm{--card-pad:var(--card-pad-sm)}
+.ux-card--sm .ux-card-head{padding:10px 12px}
+.ux-card--lg{--card-pad:20px}
+.ux-card--full{grid-column:1/-1}
+.ux-card--dense .ux-card-body{padding:8px 10px}
+/* النغمات الدلالية */
+.ux-card--warn{border-color:var(--warn-border);background:color-mix(in srgb,var(--warn-soft) 32%,var(--surface))}
+.ux-card--danger{border-color:var(--danger-border);background:color-mix(in srgb,var(--danger-soft) 30%,var(--surface))}
+.ux-card--ok{border-color:color-mix(in srgb,var(--success) 40%,var(--border))}
+/* البطاقات .panel القديمة تشارك نفس الهوية البصرية (ظل وحدود ونصف قطر موحد) */
+.panel{box-shadow:var(--shadow-sm);border-radius:calc(var(--radius) + 2px);transition:box-shadow var(--transition)}
+.panel:hover{box-shadow:var(--shadow-md)}
+
+/* ---------- رأس البطاقة: العنوان + الشارة + الإجراءات ---------- */
+.ux-card-head{
+ display:flex;align-items:center;gap:10px;
+ padding:calc(var(--card-pad) - 2px) var(--card-pad) 10px;
+ min-width:0;
+}
+.ux-card.is-collapsed .ux-card-head{border-bottom-color:transparent}
+.ux-card-title{display:flex;align-items:center;gap:9px;min-width:0;flex:1 1 auto}
+.ux-card-title h3{margin:0;font-size:15px;font-weight:700;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ux-card-ic{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--primary-soft);color:var(--primary)}
+.ux-card-ic svg{width:16px;height:16px}
+.ux-card-badge{flex:none}
+.ux-card-actions{flex:none;display:flex;align-items:center;gap:6px;margin-inline-start:auto}
+.ux-card-actions button{white-space:nowrap}
+.ux-card-toggle{flex:none;border:0;background:transparent;color:var(--text-muted);width:28px;height:28px;border-radius:8px;display:grid;place-items:center;cursor:pointer}
+.ux-card-toggle:hover{background:var(--surface2);color:var(--text-strong)}
+.ux-card-toggle svg{width:16px;height:16px;transition:transform .18s ease}
+.ux-card.is-collapsed .ux-card-toggle svg{transform:rotate(180deg)}
+/* رأس البطاقات القديمة — نفس النمط */
+.panel-head,.panel-collapse-head{display:flex;align-items:center;gap:10px;justify-content:space-between;min-width:0}
+.panel-head h2,.panel-head h3,.panel-collapse-head h2,.panel-collapse-head h3{margin:0;font-size:15px;color:var(--text-strong)}
+
+/* ---------- الجسم والتذييل ---------- */
+.ux-card-body{padding:var(--card-pad)}
+.ux-card-foot{padding:10px var(--card-pad);border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+/* الطي: إخفاء الجسم مع بقاء العنوان */
+.ux-card.is-collapsed .ux-card-body,.ux-card.is-collapsed .ux-card-foot,
+.panel.card-collapsed>*:not(.panel-head):not(.panel-collapse-head){display:none}
+
+/* ---------- حالات البطاقة ---------- */
+.ux-state{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:26px 18px;color:var(--text-muted)}
+.ux-state p{margin:0;font-size:13.5px;max-width:46ch}
+.ux-state-ic{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:var(--surface2)}
+.ux-state-ic svg{width:20px;height:20px}
+.ux-state-loading{align-items:stretch;text-align:start}
+.ux-state-loading .skel-line{height:12px;border-radius:6px;background:var(--surface2);animation:ux-pulse 1.2s ease-in-out infinite}
+.ux-state-loading .w40{width:40%}.ux-state-loading .w70{width:70%}.ux-state-loading .w90{width:90%}
+@keyframes ux-pulse{0%,100%{opacity:.55}50%{opacity:1}}
+.ux-state-empty .ux-state-ic{color:var(--text-muted)}
+.ux-state-error{color:var(--danger)}
+.ux-state-error .ux-state-ic{background:var(--danger-soft);color:var(--danger)}
+.ux-state-error p{color:var(--text)}
+.ux-state-success{color:var(--success)}
+.ux-state-success .ux-state-ic{background:var(--success-soft);color:var(--success)}
+
+/* ---------- شارات الحالة الموحدة ---------- */
+.ux-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--surface2);color:var(--text-muted);white-space:nowrap}
+.ux-badge--ok{background:var(--success-soft);color:var(--success)}
+.ux-badge--warn{background:var(--warn-soft);color:color-mix(in srgb,var(--warning,#B45309) 80%,var(--text))}
+.ux-badge--danger{background:var(--danger-soft);color:var(--danger)}
+.ux-badge--info{background:var(--primary-soft);color:var(--primary)}
+
+/* ---------- أزرار الإجراءات الموحدة داخل البطاقات ---------- */
+button.small{padding:6px 11px;font-size:12.5px;border-radius:8px}
+.icon-only{display:inline-grid;place-items:center;width:32px;height:32px;padding:0}
+.icon-only svg{width:17px;height:17px}
+.danger-btn{color:var(--danger)!important;border-color:var(--danger-border)!important}
+.danger-btn:hover{background:var(--danger-soft)!important}
+
+/* ---------- قائمة الإجراءات (⋯) — لتقليل الأزرار الظاهرة ---------- */
+.ux-menu-wrap{position:relative;display:inline-block}
+.ux-menu{position:absolute;top:calc(100% + 4px);inset-inline-end:0;z-index:50;min-width:170px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);padding:5px;display:flex;flex-direction:column;gap:2px}
+.ux-menu-item{border:0;background:transparent;text-align:start;padding:8px 10px;border-radius:7px;font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px;cursor:pointer}
+.ux-menu-item svg{width:15px;height:15px;color:var(--text-muted)}
+.ux-menu-item:hover{background:var(--surface2)}
+.ux-menu-item.is-danger{color:var(--danger)}
+.ux-menu-item.is-danger svg{color:var(--danger)}
+
+/* ---------- شبكات البطاقات المتجاوبة ---------- */
+.ux-grid{display:grid;gap:var(--card-gap);min-width:0}
+.ux-grid--cards{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.ux-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ux-grid--3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ux-grid--4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:1000px){.ux-grid--4{grid-template-columns:repeat(2,minmax(0,1fr))}.ux-grid--3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){
+ .ux-grid--2,.ux-grid--3,.ux-grid--4{grid-template-columns:1fr}
+ .ux-card-head,.panel>.panel-head,.panel>.panel-collapse-head{flex-wrap:wrap}
+ .ux-card-actions{margin-inline-start:0;width:100%;justify-content:flex-start}
+}
+@media(max-width:600px){
+ :root{--card-pad:13px;--card-gap:10px}
+ .ux-card,.panel{border-radius:var(--radius)}
+}
+
+/* ---------- شارة رقم الملف الموحدة (رئيسي / فرعي) ---------- */
+.fno{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:12.5px;line-height:1.5;white-space:nowrap;font-weight:600;border:1px solid transparent}
+.fno b{font-size:12.5px;font-weight:700;letter-spacing:.2px}
+.fno-kind{font-style:normal;font-size:10.5px;font-weight:700;opacity:.9;padding-inline-end:6px;border-inline-end:1px solid currentColor;margin-inline-end:1px}
+.fno-main{background:var(--primary-soft);color:var(--primary);border-color:color-mix(in srgb,var(--primary) 25%,transparent)}
+.fno-sub{background:var(--surface2);color:var(--text-strong);border-color:var(--border)}
+.fno-service{background:color-mix(in srgb,var(--accent,var(--primary)) 12%,var(--surface));color:var(--accent,var(--primary));border-color:color-mix(in srgb,var(--accent,var(--primary)) 22%,transparent)}
+.fno-plain{background:var(--surface2);color:var(--text-muted)}
+.mono{font-variant-numeric:tabular-nums}
+
+@media print{.ux-card,.panel{box-shadow:none;break-inside:avoid}}
+@media(prefers-reduced-motion:reduce){.ux-state-loading .skel-line{animation:none}}
