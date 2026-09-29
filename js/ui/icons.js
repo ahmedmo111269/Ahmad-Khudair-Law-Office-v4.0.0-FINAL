@@ -41,8 +41,8 @@ const P={
 export const icon=(name,cls='')=>P[name]?`<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name]}</svg>`:'';
 export const ROUTE_ICONS={dashboard:'home',actionCenter:'target',files:'folder',clients:'users',opponents:'userX',cases:'gavel',powersOfAttorney:'stamp',hearings:'calendar',procedures:'clipboard',serviceRecords:'send',bailiffs:'userCheck',appointments:'clock',communications:'phone',caseNotes:'note',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',search:'search',reports:'report',analytics:'chart',integrity:'shield',repair:'wrench',databases:'database',backup:'save',settings:'settings'};
 export function decorateNav(){
- document.querySelectorAll('#main-nav button[data-route]').forEach(b=>{if(!b.querySelector('svg')){const i=ROUTE_ICONS[b.dataset.route];if(i)b.insertAdjacentHTML('afterbegin',icon(i))}});
- const mark=document.querySelector('.brand-mark');if(mark&&!mark.innerHTML)mark.innerHTML=icon('scale');
+ document.querySelectorAll('#main-nav button[data-route],#sidebar .tn-item[data-route]').forEach(b=>{if(!b.querySelector('svg')){const i=ROUTE_ICONS[b.dataset.route];if(i)b.insertAdjacentHTML('afterbegin',icon(i))}});
+ const mark=document.querySelector('.brand-mark,.tn-brand-mark');if(mark&&!mark.innerHTML)mark.innerHTML=icon('scale');
  const tb=document.querySelector('#theme-btn');if(tb&&!tb.innerHTML)tb.innerHTML=icon('palette');
  const mm=document.querySelector('#mobile-menu');if(mm&&!mm.querySelector('svg'))mm.innerHTML=icon('menu');
 }

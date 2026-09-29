@@ -17,6 +17,7 @@ const {runUxTests}=await import(`${R}/tests/ux-tests.js`);
 const {runSearchTableTests,runGridUpgradeTests}=await import(`${R}/tests/search-table-tests.js`);
 const {runFileNumberTests}=await import(`${R}/tests/file-number-tests.js`);
 const {runCardSidebarTests}=await import(`${R}/tests/card-sidebar-tests.js`);
+const {runTopNavTests}=await import(`${R}/tests/topnav-tests.js`);
 const {runDemoSeedTests}=await import(`${R}/tests/demo-seed-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
@@ -41,6 +42,7 @@ await runBackupAndIntegrityTests(test,expect);
 await runUxTests(test,expect);
 await runFileNumberTests(test,expect);
 await runCardSidebarTests(test,expect);
+await runTopNavTests(test,expect);
 try{await runSearchTableTests(test,expect)}catch(e){test('search-table suite import/setup',()=>{throw e})}
 try{await runGridUpgradeTests(test,expect)}catch(e){test('grid-upgrade suite import/setup',()=>{throw e})}
 await runDemoSeedTests(test,expect);

@@ -6,7 +6,7 @@ import {confirmBox} from '../ui/modal.js';
 import {PRESETS,FONTS_AR,FONTS_EN,getConfig,setTheme,resetTheme,effectiveColors,contrast,customThemes,saveCustomTheme,applyCustomTheme,deleteCustomTheme,exportThemeJSON,importThemeJSON,onThemeChange} from '../ui/theme.js';
 import {formatDate} from '../core/format.js';
 
-const COLOR_FIELDS=[['primary','اللون الأساسي (الذهبي)'],['primary2','الذهبي الثانوي'],['bg','الخلفية الرئيسية'],['surface','البطاقات والجداول'],['chrome','القائمة الجانبية'],['textStrong','العناوين'],['text','النص الأساسي'],['textMuted','النص الثانوي']];
+const COLOR_FIELDS=[['primary','اللون الأساسي (الذهبي)'],['primary2','الذهبي الثانوي'],['bg','الخلفية الرئيسية'],['surface','البطاقات والجداول'],['chrome','شريط التنقل العلوي'],['textStrong','العناوين'],['text','النص الأساسي'],['textMuted','النص الثانوي']];
 const seg=(name,val,opts)=>`<div class="ts-seg" role="radiogroup" data-seg="${name}">${opts.map(([v,l])=>`<button type="button" role="radio" aria-checked="${String(v)===String(val)}" class="${String(v)===String(val)?'on':''}" data-v="${v}">${l}</button>`).join('')}</div>`;
 function presetCard(k,p,on){const c=p.c;return `<button type="button" class="preset-card${on?' on':''}" data-preset="${k}" aria-pressed="${on}">
  <span class="preset-preview" style="background:${c.bg}"><span class="pv-side" style="background:${c.chrome}"><i style="background:${c.primary};opacity:1"></i><i style="background:${c.text}"></i><i style="background:${c.text}"></i><i style="background:${c.text}"></i></span>
