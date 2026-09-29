@@ -33,5 +33,18 @@ function render(r,root){
  const max=Math.max(1,...groups.map(x=>x[1]));
  root.innerHTML=`<div class="analytics-head"><div><h3>${esc(r.label)}</h3><p class="muted">من ${esc(r.from)} إلى ${esc(r.to)}</p></div><div class="analytics-total"><b>${fmt(r.total)}</b><span>إجمالي السجلات المطابقة</span></div></div>
  ${r.truncated?'<div class="notice">تم إيقاف التحليل عند 10,000 سجل. استخدم فترة أضيق للحصول على تحليل كامل.</div>':''}
- <div class="analytics-grid"><section><h4>التوزيع</h4>${groups.length?groups.map(([k,n])=>`<div class="metric-row"><span>${esc(k)}</span><div><i style="width:${Math.round(n/max*100)}%"></i></div><b>${fmt(n)}</b></div>`).join(''):'<p class="muted">لا توجد بيانات.</p>'}</section><section><h4>الاتجاه الزمني</h4><div class="trend-list">${trend.slice(-30).map(([d,n])=>`<div><span>${esc(d)}</span><b>${fmt(n)}</b></div>`).join('')||'<p class="muted">لا توجد بيانات.</p>'}</div></section></div>`;
+ <div class="analytics-grid"><section><h4>التوزيع</h4>${groups.length?groups.map(([k,n])=>`<div class="metric-row"><span>${esc(k)}</span><div><i style="width:${Math.round(n/max*100)}%"></i></div><b>${fmt(n)}</b></div>`).join(''):'<p class="muted">لا توجد بيانات.</p>'}</section><section><h4>الاتجاه الزمني</h4>${trendGraph(trend)}<div class="trend-list">${trend.slice(-30).map(([d,n])=>`<div><span>${esc(d)}</span><b>${fmt(n)}</b></div>`).join('')||'<p class="muted">لا توجد بيانات.</p>'}</div></section></div>`;
+}
+// رسم خطي SVG خفيف للاتجاه اليومي (بلا مكتبات، يتلوّن من التوكنز)
+function trendGraph(trend){
+ const pts=trend.slice(-30);
+ if(pts.length<2)return '';
+ const w=560,h=90,pad=6;
+ const maxV=Math.max(...pts.map(([,n])=>Number(n)||0),1);
+ const step=(w-pad*2)/(pts.length-1);
+ const xy=pts.map(([d,n],i)=>[pad+i*step,h-pad-(Number(n)||0)/maxV*(h-pad*2)]);
+ const line=xy.map(([x,y],i)=>`${i?'L':'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
+ const area=`${line} L${xy.at(-1)[0].toFixed(1)},${h-pad} L${xy[0][0].toFixed(1)},${h-pad} Z`;
+ const last=xy.at(-1);
+ return `<svg class="trend-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="رسم الاتجاه اليومي" preserveAspectRatio="none"><path d="${area}" fill="var(--primary-soft)"/><path d="${line}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.5" fill="var(--primary)"/></svg><div class="trend-cap muted small">${esc(pts[0][0])} ← ${esc(pts.at(-1)[0])} (آخر ${pts.length} يومًا، الأعلى ${fmt(maxV)})</div>`;
 }
