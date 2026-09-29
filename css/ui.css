@@ -46,7 +46,7 @@
 .dg{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .dg-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-bottom:1px solid var(--border);background:var(--surface2)}
 .dg-toolbar button,.dg-toolbar select{padding:7px 10px;font-size:13px}
-.dg:not(.dg-filter-open) .dg-quick,.dg:not(.dg-filter-open) .dg-adv-btn,.dg:not(.dg-filter-open) .dg-group-lbl,.dg:not(.dg-filter-open) .dg-clear,.dg:not(.dg-filter-open) .dg-adv{display:none!important}
+.dg:not(.dg-filter-open) .dg-adv-btn,.dg:not(.dg-filter-open) .dg-group-lbl,.dg:not(.dg-filter-open) .dg-clear,.dg:not(.dg-filter-open) .dg-adv,.dg:not(.dg-filter-open) .dg-scope,.dg:not(.dg-filter-open) .dg-filter-actions,.dg:not(.dg-filter-open) .dg-csearch-btn{display:none!important}
 .dg-filter-toggle{white-space:nowrap}
 .dg-quick{flex:1 1 180px;min-width:140px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm)}
 .dg-group-lbl{display:flex!important;align-items:center;gap:4px;font-size:13px;min-width:0!important}

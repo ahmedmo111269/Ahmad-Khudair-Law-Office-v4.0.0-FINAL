@@ -92,7 +92,12 @@ html[dir="rtl"] .nav-group.is-closed .ng-chev{transform:rotate(-90deg)}
 /* =====================================================================
    الوضع المطوي (سطح المكتب): أيقونات فقط + تلميحات، بلا فقدان وظائف.
    ===================================================================== */
+/* المحتوى الرئيسي يملأ العرض المتبقي دائمًا — لا فراغ بعد الطي */
+#app{display:flex;width:100%;max-width:100%;min-width:0;align-items:stretch}
+#app>main{flex:1 1 auto;min-width:0;width:auto;max-width:none}
+#mobile-menu{display:inline-flex;align-items:center;justify-content:center}
 body.sidebar-collapsed #sidebar{width:var(--sb-w-collapsed);max-width:var(--sb-w-collapsed);padding-inline:10px}
+body.sidebar-collapsed #sidebar>*{opacity:1;pointer-events:auto}
 body.sidebar-collapsed #sidebar .brand{justify-content:center;padding-inline:0}
 body.sidebar-collapsed #sidebar .brand-txt,
 body.sidebar-collapsed .sb-collapse-txt,
@@ -107,16 +112,10 @@ body.sidebar-collapsed #main-nav button[data-route]{justify-content:center;paddi
 body.sidebar-collapsed #main-nav .nav-badge{position:absolute;top:4px;inset-inline-end:6px;min-width:15px;height:15px;font-size:9px;padding:0 3px}
 body.sidebar-collapsed #main-nav button[data-route].active::before{inset-inline-start:-6px}
 /* التلميحات في الوضع المطوي */
-body.sidebar-collapsed #main-nav button[data-route]::after{
- content:attr(data-tip);
- position:absolute;inset-inline-start:calc(100% + 14px);top:50%;transform:translateY(-50%);
- background:var(--surface);color:var(--text-strong);border:1px solid var(--border);
- box-shadow:var(--shadow-md);border-radius:8px;padding:6px 11px;font-size:12.5px;font-weight:600;
- white-space:nowrap;opacity:0;pointer-events:none;z-index:60;
- transition:opacity .12s ease .25s;
-}
-body.sidebar-collapsed #main-nav button[data-route]:hover::after,
-body.sidebar-collapsed #main-nav button[data-route]:focus-visible::after{opacity:1}
+/* التلميح يُرسم خارج الشريط (بوابة ثابتة) حتى لا يقصّه التمرير */
+#sb-tip{position:fixed;z-index:80;transform:translateY(-50%);background:var(--surface);color:var(--text-strong);border:1px solid var(--border);box-shadow:var(--shadow-md);border-radius:8px;padding:6px 11px;font-size:12.5px;font-weight:600;white-space:nowrap;pointer-events:none}
+#sb-tip[hidden]{display:none}
+body.sidebar-collapsed #main-nav button[data-route].active{background:color-mix(in srgb,var(--primary) 22%,var(--chrome-hover));color:var(--on-chrome);outline:1px solid color-mix(in srgb,var(--primary) 55%,transparent)}
 body.sidebar-collapsed .sb-foot{justify-content:center}
 
 /* =====================================================================
@@ -126,13 +125,14 @@ body.sidebar-collapsed .sb-foot{justify-content:center}
 #sidebar-backdrop[hidden]{display:none}
 @media(max-width:900px){
  #sidebar{
-  position:fixed;top:0;bottom:0;inset-inline-start:auto;inset-inline-end:0;
+  position:fixed;top:0;bottom:0;left:auto;right:auto;inset-inline-start:auto;inset-inline-end:0;
   width:min(300px,86vw);max-width:min(300px,86vw);
   height:100dvh;z-index:40;
   transform:translateX(100%); /* RTL: الشريط على اليمين */
   transition:transform .22s ease;
   border-inline-start:1px solid var(--chrome-border);
  }
+ #sidebar.open{right:auto;left:auto}
  html[dir="ltr"] #sidebar{transform:translateX(-100%)}
  #sidebar.open{transform:none;box-shadow:var(--shadow-lg)}
  body.sidebar-open{overflow:hidden}

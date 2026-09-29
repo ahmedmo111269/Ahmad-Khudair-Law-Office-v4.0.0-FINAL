@@ -28,6 +28,10 @@ export async function runDemoSeedTests(test,expect){
 
  test('بيانات تجريبية: الزرع يكتمل بلا أخطاء',()=>{if(err)throw Error(String(err?.stack||err))});
  test('بيانات تجريبية: 50 ملفًا قانونيًا بالضبط',()=>{expect(report.files).toBe(50);expect(files.length).toBe(50)});
+ test('بيانات تجريبية: كل ملف معلَّم بوضوح ولا يُحذف تلقائيًا',()=>{
+  expect(files.every(f=>String(f.title||'').includes('〔تجريبي〕'))).toBe(true);
+  expect(files.every(f=>String(f.notes||'').includes('لا تُحذف تلقائيًا'))).toBe(true);
+ });
  test('بيانات تجريبية: موكلون وأكواد ملف رئيسي بصيغة صحيحة',()=>{
   expect(clients.length>=20).toBe(true);
   for(const c of clients){
@@ -67,6 +71,12 @@ export async function runDemoSeedTests(test,expect){
   expect(lifecycles.has('active')).toBe(true);
   expect(lifecycles.has('done')).toBe(true);
   expect(lifecycles.has('planned')).toBe(true);
+ });
+ test('بيانات تجريبية: محاكم قليوب وطوخ وبنها وشبرا ضمن التوزيع',()=>{
+  const courts=new Set((snap.cases||[]).map(c=>c.courtId));
+  for(const name of ['محكمة قليوب الجزئية','محكمة طوخ الجزئية','محكمة بنها الابتدائية','محكمة شبرا الخيمة']){
+   if(!courts.has(name))throw Error('محكمة غير موجودة في البيانات التجريبية: '+name);
+  }
  });
  test('بيانات تجريبية: أرقام قضائية رسمية منفصلة عن رقم الملف الداخلي',()=>{
   const numbered=(snap.cases||[]).filter(c=>!c.isDeleted&&c.caseNumber);

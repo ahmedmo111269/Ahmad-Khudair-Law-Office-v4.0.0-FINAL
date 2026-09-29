@@ -97,7 +97,7 @@ export function runUxTests(test,expect){
   expect(items.length).toBe(2);
   expect(items[0].hidden).toBe(false);
   expect(items[1].hidden).toBe(true);
-  document.body.innerHTML='';
+  document.body.innerHTML='<div id="app"><aside id="sidebar"></aside><main><section id="main-content"></section></main></div><div id="modal-root"></div>';
  });
  test('الإشعارات: إنشاء إشعار بخاصية role وزر إغلاق',async()=>{
   clearToasts();

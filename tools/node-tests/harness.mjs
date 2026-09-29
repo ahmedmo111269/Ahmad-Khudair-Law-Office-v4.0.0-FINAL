@@ -18,6 +18,11 @@ globalThis.window=Object.assign(dom.window,{matchMedia:q=>({matches:false,media:
 // linkedom لا يوفر matchMedia؛ نوفره على document-view أيضًا
 try{dom.window.matchMedia=globalThis.window.matchMedia}catch{}
 globalThis.matchMedia=globalThis.window.matchMedia;
+if(typeof globalThis.KeyboardEvent!=='function'){
+ class KE extends globalThis.Event{constructor(type,init={}){super(type,init);this.key=init.key||'';this.code=init.code||'';this.ctrlKey=!!init.ctrlKey;this.metaKey=!!init.metaKey;this.shiftKey=!!init.shiftKey;this.altKey=!!init.altKey}}
+ globalThis.KeyboardEvent=KE;
+ try{dom.window.KeyboardEvent=KE;document.defaultView.KeyboardEvent=KE}catch{}
+}
 
 // localStorage في الذاكرة
 class MemLS{
@@ -59,11 +64,34 @@ try{
   const d=Object.getOwnPropertyDescriptor(SEL.prototype,'value');
   if(d&&!d.set){
    Object.defineProperty(SEL.prototype,'value',{
-    get:d.get,
-    set(v){try{const opts=[...this.querySelectorAll('option')];const i=opts.findIndex(o=>o.value===String(v));this.selectedIndex=i}catch{}},
+    get(){try{const opts=[...this.querySelectorAll('option')];const opt=opts[this.selectedIndex];return opt?(opt.value??opt.getAttribute('value')??''):''}catch{return ''}},
+    set(v){try{const opts=[...this.querySelectorAll('option')];const i=opts.findIndex(o=>(o.value??o.getAttribute('value'))===String(v));this.selectedIndex=i<0?0:i}catch{}},
     configurable:true
    });
   }
  }
 }catch{}
 try{if(typeof globalThis.navigator==='undefined')Object.defineProperty(globalThis,'navigator',{value:{onLine:true},configurable:true})}catch{}
+// linkedom لا يطبّق checked ولا يقلب مربع الاختيار عند click — نحاكي سلوك المتصفح للاختبارات.
+try{
+ const INP=dom.window.HTMLInputElement;
+ if(INP&&!INP.prototype.__checkedPoly){
+  Object.defineProperty(INP.prototype,'checked',{
+   get(){return this.getAttribute('aria-checked')==='true'||this.hasAttribute('checked')},
+   set(v){if(v){this.setAttribute('checked','');this.setAttribute('aria-checked','true')}else{this.removeAttribute('checked');this.removeAttribute('aria-checked')}},
+   configurable:true
+  });
+  INP.prototype.__checkedPoly=true;
+ }
+ const proto=dom.window.HTMLElement.prototype;
+ const orig=proto.click;
+ proto.click=function(){
+  const type=this.getAttribute?.('type')||this.type;
+  if(type==='checkbox'){
+   this.checked=!this.checked;
+   this.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+   this.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+  }
+  return orig?orig.apply(this,arguments):undefined;
+ };
+}catch{}
