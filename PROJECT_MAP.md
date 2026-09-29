@@ -74,7 +74,7 @@
 - `css/client-file.css` — styles for the above. Stores added: clientFiles, taxonomy, caseTemplates, assets, fileAssets.
 
 ## Current release
-4.6.0 — تجربة استخدام احترافية: لوحة أوامر، خط زمني موحد، آخر ما فُتح، رئيسية تفاعلية، هاتف أفضل، إشعارات وهيكل تحميل. `APP_VERSION=4.6.0`, `SCHEMA_VERSION=13`.
+5.1.0 — طاولة عمل المحامي: شريط يتمدد عند الطي، جداول بتصفية من عنوان العمود وفرز متعدد وطرق عرض، بطاقات بهرم معلومات، أجندة يوم/أسبوع/شهر/قائمة، و50 ملفًا تجريبيًا معلَّمًا تبقى في القاعدة. `APP_VERSION=5.1.0`, `SCHEMA_VERSION=13`.
 
 ## Architecture
 `UI → App/Services → Domain → Repository → IndexedDB`

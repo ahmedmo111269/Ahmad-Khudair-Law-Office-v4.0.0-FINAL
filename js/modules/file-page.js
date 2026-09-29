@@ -14,6 +14,10 @@ import {kvHtml,bindRefLinks,notFound} from './record-page.js';
 import {sectionGrid,columnsFor,openRow} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {localDate} from '../core/clock.js';
+import {dateSignal,fileSignal} from '../ui/signals.js';
+import {card,statusBadge,infoStack,detailsBlock} from '../ui/card.js';
+import {bindCards} from '../ui/card.js';
+import {isFavorite,toggleFavorite} from '../services/favorites.js';
 import {hearingCycle} from '../services/operations.js';
 import {taxonomy,saveFileMeta,reclassifyFile,fileAssets,ASSET_KINDS,saveAsset,linkAsset,unlinkAsset,findAssets,assetDetails} from '../services/client-files.js';
 import {stagePathHtml,bindStagePath,metaInput,hydrateLookups} from './client-file.js';
@@ -43,7 +47,7 @@ export async function filePage(app,id){
  return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}<div class="record-head file-head" style="--cat:${esc(cat?.color||'var(--primary)')}"><div><small class="muted">ملف فرعي — الرقم الداخلي للمكتب (مستقل عن أرقام القضايا الرسمية)</small><h2>${fileNumberChip(f)} ${esc(f.title||'')}</h2>
   <p class="badges">${cat?`<span class="badge type cat-badge">${esc(cat.icon||'')} ${esc(cat.name)}${ftype?' · '+esc(ftype.name):''}</span>`:f.fileType?`<span class="badge type">${esc(f.fileType)}</span>`:''}${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
   <p class="muted small">${clients.length?`الموكل: ${clients.map(p=>`${esc(p.name)} (${esc(p.role||'موكل')})`).join('، ')}`:'لا يوجد موكل مرتبط بعد'}${opps.length?` — الخصم: ${opps.map(p=>esc(p.name)).join('، ')}`:''}${cur?` — المرحلة الحالية: ${esc(refLabel('cases',cur))}`:' — لا توجد أرقام قضائية (ملف بلا قضية)'}</p></div>
-  <div class="head-actions"><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
+  <div class="head-actions"><button class="ghost" data-file-pin aria-pressed="${isFavorite('file:'+id)}">${isFavorite('file:'+id)?'★ إلغاء التثبيت':'☆ تثبيت'}</button><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
  ${stagePathHtml(stages,f.currentStageId||cur?.id)}
  <nav class="tabs file-tabs" role="tablist" aria-label="أقسام الملف القانوني">${orderedFileTabs().map(([k,l,icon])=>{const count=k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:null;return `<button type="button" role="tab" data-tab="${k}" title="${esc(l)}" aria-label="${esc(l)}${count!==null?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="${app.__fileTab.tab===k?'active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count!==null?` <small>${count}</small>`:''}</button>`}).join('')}</nav><div class="file-tab-controls"><button type="button" class="link" data-order-file-tabs>⚙ ترتيب تبويبات الملف</button></div>
  <div id="file-tab" role="tabpanel"></div>`;
@@ -53,6 +57,12 @@ export async function bindFilePage(app,id){
  const root=document.querySelector('#main-content');const {f}=app.__file;
  root.querySelector('[data-order-file-tabs]')?.addEventListener('click',()=>fileTabOrderDialog(app));
  root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
+ root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{
+  const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()});
+  e.currentTarget.textContent=on?'★ إلغاء التثبيت':'☆ تثبيت';
+  e.currentTarget.setAttribute('aria-pressed',String(on));
+  toast(on?'ثُبّت الملف في الرئيسية':'أُلغي التثبيت');
+ });
  root.querySelector('[data-file-archive]')?.addEventListener('click',async()=>{const r=await confirmBox('أرشفة الملف؟ يبقى الملف وكل بياناته محفوظة ويمكن إعادة فتحه في أي وقت.',{okText:'أرشفة',input:true,placeholder:'سبب الأرشفة (اختياري)'});if(!r.ok)return;try{await archiveFile(app.office,id,r.value);toast('تمت الأرشفة');app.refresh()}catch(e){toast(userError(e),'error')}});
  root.querySelector('[data-file-reopen]')?.addEventListener('click',async()=>{const r=await confirmBox('إعادة فتح الملف؟',{okText:'إعادة فتح',input:true,placeholder:'سبب إعادة الفتح (اختياري)'});if(!r.ok)return;try{await reopenFile(app.office,id,r.value);toast('تمت إعادة فتح الملف');app.refresh()}catch(e){toast(userError(e),'error')}});
  root.querySelector('[data-file-close]')?.addEventListener('click',async()=>{const r=await confirmBox('تسجيل انتهاء الملف (حالة إدارية فقط)؟',{okText:'إنهاء',input:true,placeholder:'سبب الانتهاء (اختياري)'});if(!r.ok)return;try{await closeFile(app.office,id,{closeReason:r.value});toast('تم تسجيل انتهاء الملف');app.refresh()}catch(e){toast(userError(e),'error')}});
@@ -94,6 +104,7 @@ async function renderTab(app){
  await renderTabContent(app);
  const el=document.querySelector('#file-tab');
  enhanceCollapsiblePanels(el,`file:${app.__file.id}:${app.__fileTab.tab}`);
+ bindCards(el);
 }
 async function renderTabContent(app){
  const el=document.querySelector('#file-tab');const {id,f,parties,stages}=app.__file;const tab=app.__fileTab.tab;const office=app.office;
@@ -107,14 +118,29 @@ async function renderTabContent(app){
   const last=hearings.filter(h=>h.hearingDate<today).sort((a,b)=>String(b.hearingDate||'').localeCompare(String(a.hearingDate||'')))[0];
   const openProc=procedures.filter(p=>!p.status||['open','pending'].includes(p.status));
   const refs=new Map();
-  el.innerHTML=`<div class="stats-grid"><div class="stat-card"><strong>${stages.length}${stages.length>=500?'+':''}</strong><span>أرقام / مراحل</span></div><div class="stat-card"><strong>${hearings.length}${hearingResult.more?'+':''}</strong><span>جلسات</span></div><div class="stat-card"><strong>${openProc.length}</strong><span>أعمال مفتوحة</span></div><div class="stat-card"><strong>${parties.length}</strong><span>أطراف</span></div></div>
+  const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
+  const nextH=upcoming[0];
+  const sig=nextH?dateSignal(nextH.hearingDate):null;
+  const fsig=fileSignal(f);
+  const clientParty=parties.find(p=>p.clientId);
+  const snap=card({icon:'folder',title:f.title||'ملف',size:'full',collapsible:true,persistKey:'file:snap:'+id,badge:statusBadge(fsig?.text||label(f.status||'نشط'),fsig?.tone||'ok'),
+   body:infoStack([
+    {k:'رقم الملف',v:formatFileNumber(f.fileNumber)||'—',sub:f.fileType||''},
+    {k:'الموكل',v:clientParty?.name||clientParty?.partyName||'غير مرتبط',sub:clientParty?.role||''},
+    {k:'المرحلة الحالية',v:cur?refLabel('cases',cur):'بلا رقم قضائي'},
+    nextH?{k:'الجلسة القادمة',v:`${fmtDate(nextH.hearingDate)} — ${nextH.hearingTime||'بدون وقت'}`,sub:[nextH.court,nextH.chamber].filter(Boolean).join(' · '),tone:sig?.tone||''}: {k:'الجلسة القادمة',v:'لا توجد جلسة قادمة'},
+    {k:'الحالة',html:statusBadge(fsig?.text||label(f.status||'نشط'),fsig?.tone||'ok')+(sig?statusBadge(sig.text==='اليوم'?'جلسة اليوم':sig.text==='غدًا'?'جلسة غدًا':'جلسة '+sig.text,sig.tone):'')+(openProc.length?statusBadge(`${openProc.length} عمل مطلوب`,'warn'):'')}
+   ])+`<div class="snap-actions"><button type="button" class="ghost small" data-tab-jump="hearings">الجلسات</button><button type="button" class="ghost small" data-tab-jump="procedures">الأعمال</button><button type="button" class="ghost small" data-tab-jump="relations">العلاقات</button>${clientParty?.clientId?`<button type="button" class="ghost small" data-route="client:${esc(clientParty.clientId)}">فتح الموكل</button>`:''}</div>`+detailsBlock('عرض التفاصيل الإضافية',`<p class="muted small">الأطراف ${parties.length} · المراحل ${stages.length} · الأعمال المفتوحة ${openProc.length}${last?` · آخر جلسة ${fmtDate(last.hearingDate)}`:''}</p>`)
+  });
+  el.innerHTML=`${snap}<div class="stats-grid"><div class="stat-card"><strong>${stages.length}${stages.length>=500?'+':''}</strong><span>أرقام / مراحل</span></div><div class="stat-card"><strong>${hearings.length}${hearingResult.more?'+':''}</strong><span>جلسات</span></div><div class="stat-card"><strong>${openProc.length}</strong><span>أعمال مفتوحة</span></div><div class="stat-card"><strong>${parties.length}</strong><span>أطراف</span></div></div>
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
-   <div class="grid2 file-hearing-cards"><section class="panel"><div class="panel-head"><h3>الجلسات القادمة</h3><span class="badge">${upcoming.length} / 2</span></div>${upcoming.map((h,i)=>`<button class="hearing-preview" data-open="hearings:${esc(h.id)}"><span class="hearing-order">${i+1}</span><span><b>${fmtDate(h.hearingDate)}</b> ${esc(h.hearingTime||'')}<small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.reason?' — '+esc(h.reason):''}</small></span><span aria-hidden="true">↗</span></button>`).join('')||'<p class="muted empty-inline">لا توجد جلسات قادمة مسجلة.</p>'}</section>
+   <div class="grid2 file-hearing-cards"><section class="panel"><div class="panel-head"><h3>الجلسات القادمة</h3><span class="badge">${upcoming.length} / 2</span></div>${upcoming.map((h,i)=>{const hs=dateSignal(h.hearingDate);return `<button class="hearing-preview" data-open="hearings:${esc(h.id)}"><span class="hearing-order">${i+1}</span><span><b>${fmtDate(h.hearingDate)}</b> ${esc(h.hearingTime||'')}${hs?` <span class="ux-badge ux-badge--${hs.tone}">${hs.text==='اليوم'?'جلسة اليوم':hs.text==='غدًا'?'جلسة غدًا':'جلسة '+esc(hs.text)}</span>`:''}<small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.reason?' — '+esc(h.reason):''}</small></span><span aria-hidden="true">↗</span></button>`}).join('')||'<p class="muted empty-inline">لا توجد جلسات قادمة مسجلة.</p>'}</section>
    <section class="panel"><div class="panel-head"><h3>الجلسة السابقة</h3></div>${last?`<button class="hearing-preview" data-open="hearings:${esc(last.id)}"><span class="hearing-order">‹</span><span><b>${fmtDate(last.hearingDate)}</b><small>${esc(last.result||'لم يُسجل القرار')}${last.adjournedTo?' — التأجيل إلى '+fmtDate(last.adjournedTo):''}</small></span><span aria-hidden="true">↗</span></button>`:'<p class="muted empty-inline">لا توجد جلسات سابقة مسجلة.</p>'}<button class="ghost small" data-show-hearing-cycle>عرض دورة الجلسات</button></section></div>
    ${stages.length?`<section class="panel"><h3>تسلسل المراحل</h3><ol class="stage-chain">${stages.map(s=>`<li><button class="link" data-open-case="${s.id}">${esc(s.stageType||s.numberType||'مرحلة')}<br><small>${esc(s.caseNumber||'بدون رقم')}${s.caseYear?'/'+esc(s.caseYear):''}</small></button></li>`).join('')}</ol></section>`:''}
-   <section class="panel"><div class="panel-head"><h3>البيانات الأساسية</h3><button class="ghost" data-file-edit2>تعديل</button></div>${kvHtml(ENTITIES.files.fields.filter(x=>BASE_KEYS.includes(x.k)),f,refs)}${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — '+esc(f.reopenReason):''}</p>`:''}</section>
+   <section class="panel"><div class="panel-head"><h3>البيانات الأساسية</h3><button class="ghost" data-file-edit2>تعديل</button></div>${detailsBlock('عرض كل الحقول',kvHtml(ENTITIES.files.fields.filter(x=>BASE_KEYS.includes(x.k)),f,refs)+(f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:'')+(f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — '+esc(f.reopenReason):''}</p>`:''))}</section>
    <div class="sec-actions"><button class="ghost danger" data-file-delete>حذف منطقي للملف</button></div>`;
   el.querySelector('[data-file-edit2]').onclick=()=>openEntityForm(app,'files',{id});
+  el.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>{app.__fileTab.tab=b.dataset.tabJump;renderTab(app).catch(e=>app.fail(e))});
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
   el.querySelectorAll('[data-open-case]').forEach(b=>b.onclick=()=>app.go('case:'+b.dataset.openCase));
   el.querySelector('[data-show-hearing-cycle]')?.addEventListener('click',()=>showHearingCycle(app,upcoming[0]?.id||last?.id||''));

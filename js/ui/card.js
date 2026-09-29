@@ -74,6 +74,13 @@ export function cardMenu(items,{attr='data-card-menu'}={}){
 export function statusBadge(text,tone=''){
  return `<span class="ux-badge${tone?` ux-badge--${tone}`:''}">${esc(text)}</span>`;
 }
+/** تسلسل معلومة: عنوان صغير ثم القيمة ثم سطر فرعي. html اختياري للقيمة المنسّقة. */
+export function infoStack(rows=[]){
+ return `<div class="info-stack">${rows.filter(Boolean).map(r=>`<div class="info-row${r.tone?` is-${esc(r.tone)}`:''}"><span class="info-k">${esc(r.k||'')}</span><strong class="info-v">${r.html||esc(r.v||'—')}</strong>${r.sub?`<small class="info-s">${esc(r.sub)}</small>`:''}</div>`).join('')}</div>`;
+}
+export function detailsBlock(summary,html,{open=false}={}){
+ return `<details class="ux-details"${open?' open':''}><summary>${esc(summary)}</summary><div class="ux-details-body">${html}</div></details>`;
+}
 
 /** تفعيل فتح/طي البطاقات + قوائم الإجراءات داخل جذر معيّن. */
 export function bindCards(root=document){

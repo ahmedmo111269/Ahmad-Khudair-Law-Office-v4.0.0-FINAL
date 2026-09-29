@@ -124,7 +124,7 @@ export function runGridUpgradeTests(test,expect){
   g.querySelector('.dg-sel-all').click();
   expect(g.querySelectorAll('.dg-rowchk:checked').length).toBe(3);
   expect(selbar.hidden).toBe(false);
-  expect(selbar.textContent.includes('3')).toBe(true);
+  expect(selbar.textContent.includes('3')||selbar.textContent.includes('٣')).toBe(true);
   expect(grid.getSelection().length).toBe(3);
   // إلغاء صف واحد يزيل علامة «الكل» دون تفريغ البقية
   g.querySelector('.dg-rowchk[data-i="0"]').click();
@@ -185,6 +185,54 @@ export function runGridUpgradeTests(test,expect){
   expect(g.querySelectorAll('tbody tr[data-i]').length).toBe(2);
   expect(g.querySelector('thead .dg-pin-th')).toBe(null);
   expect(g.querySelector('.dg-chips').hidden).toBe(true);
+  g.remove();
+ });
+ test('الجدول: عنوان العمود يفتح لوحة التصفية متعددة الاختيار',()=>{
+  const g=document.createElement('div');document.body.append(g);
+  mountGrid(g,{rows:[{court:'محكمة طوخ'},{court:'محكمة بنها'},{court:'محكمة شبرا'}],columns:[{key:'court',label:'المحكمة'}],storageKey:''});
+  g.querySelector('.dg-coltitle').click();
+  const pop=document.querySelector('.dg-pop');
+  expect(Boolean(pop)).toBe(true);
+  expect(pop.textContent.includes('محكمة طوخ')).toBe(true);
+  expect(pop.textContent.includes('تحديد الكل')).toBe(true);
+  expect(pop.textContent.includes('إلغاء الكل')).toBe(true);
+  pop.querySelector('.dg-x').click();
+  expect(document.querySelector('.dg-pop')).toBe(null);
+  g.remove();
+ });
+ test('الجدول: بحث متعدد الكلمات وعداد النتائج',async()=>{
+  const g=document.createElement('div');document.body.append(g);
+  mountGrid(g,{rows:[{t:'دعوى طوخ مدني'},{t:'طوخ فقط'},{t:'مدني بنها'}],columns:[{key:'t',label:'البيان'}],storageKey:''});
+  const q=g.querySelector('.dg-quick');
+  q.value='طوخ مدني';
+  q.dispatchEvent(new Event('input',{bubbles:true}));
+  await new Promise(r=>setTimeout(r,220));
+  expect(g.querySelectorAll('tbody tr[data-i]').length).toBe(1);
+  expect(g.querySelector('.dg-count').textContent.includes('من أصل')).toBe(true);
+  g.remove();
+ });
+ test('الجدول: إلغاء الفرز وطي الجدول وفلتر أمس',()=>{
+  const g=document.createElement('div');document.body.append(g);
+  const grid=mountGrid(g,{rows:[{t:'أ',d:localDate()},{t:'ب',d:'2001-01-01'}],columns:[{key:'t',label:'T'},{key:'d',label:'التاريخ',type:'date'}],storageKey:'',title:'جلسات'});
+  grid.sortBy('t','asc');
+  expect(g.querySelector('.dg-rank')).toBeTruthy();
+  g.querySelector('.dg-unsort').click();
+  expect(g.querySelector('.dg-rank')).toBe(null);
+  g.querySelector('.dg-shell-toggle').click();
+  expect(g.classList.contains('dg-shell-closed')).toBe(true);
+  expect(g.querySelector('.dg-shell-title').textContent.includes('جلسات')).toBe(true);
+  grid.applyFilter('d','yesterday','');
+  expect(g.querySelectorAll('tbody tr[data-i]').length).toBe(0);
+  g.querySelector('.dg-filter-toggle').click();
+  expect(g.querySelector('.dg-filter-toggle').textContent.includes('عوامل التصفية')).toBe(true);
+  g.remove();
+ });
+ test('الجدول: التمرير الافتراضي لا يرسم كل الصفوف',()=>{
+  const g=document.createElement('div');document.body.append(g);
+  const rows=Array.from({length:800},(_,i)=>({id:String(i),t:'صف '+i}));
+  mountGrid(g,{rows,columns:[{key:'t',label:'T'}],storageKey:''});
+  expect(g.querySelectorAll('tbody tr[data-i]').length<800).toBe(true);
+  expect(g.querySelectorAll('tbody tr[data-i]').length>0).toBe(true);
   g.remove();
  });
  test('الجدول: بحث سريع يميّز النتائج مع التطبيع (خالد/خالدة)',async()=>{

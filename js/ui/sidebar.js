@@ -81,8 +81,32 @@ export function buildSidebar(){
  return sb;
 }
 
+function applyRail(collapsed){
+ document.documentElement.style.setProperty('--sb-current', collapsed?'var(--sb-w-collapsed)':'var(--sb-w)');
+ document.documentElement.dataset.sidebar=collapsed?'collapsed':'open';
+}
+function bindTips(sb){
+ let tip=document.querySelector('#sb-tip');
+ if(!tip){tip=document.createElement('div');tip.id='sb-tip';tip.hidden=true;tip.setAttribute('role','tooltip');document.body.append(tip)}
+ const hide=()=>{tip.hidden=true};
+ const show=el=>{
+  if(!document.body.classList.contains('sidebar-collapsed')||!isDesktop()){hide();return}
+  const label=el?.dataset?.tip;if(!label){hide();return}
+  tip.textContent=label;tip.hidden=false;
+  const r=el.getBoundingClientRect();
+  const rtl=(document.documentElement.dir||'rtl')!=='ltr';
+  tip.style.top=(r.top+r.height/2)+'px';
+  if(rtl){tip.style.left='auto';tip.style.right=Math.max(8,window.innerWidth-r.left+12)+'px'}
+  else {tip.style.right='auto';tip.style.left=Math.max(8,r.right+12)+'px'}
+ };
+ sb.addEventListener('mouseover',e=>show(e.target.closest?.('[data-tip]')));
+ sb.addEventListener('mouseleave',hide);
+ sb.addEventListener('focusin',e=>show(e.target.closest?.('[data-tip]')));
+ sb.addEventListener('focusout',hide);
+}
 function bindSidebar(){
  const sb=document.querySelector('#sidebar');if(!sb)return;
+ bindTips(sb);
  // زر الطي/التوسيع على سطح المكتب
  sb.querySelector('#sb-collapse')?.addEventListener('click',()=>toggleCollapsed());
  // طي/فتح الأقسام مع حفظ التفضيل
@@ -107,6 +131,8 @@ export function isDesktop(){return !window.matchMedia(MOBILE_BP).matches}
 export function toggleCollapsed(force){
  const collapsed=force!==undefined?Boolean(force):!document.body.classList.contains('sidebar-collapsed');
  document.body.classList.toggle('sidebar-collapsed',collapsed);
+ if(collapsed)document.body.classList.add('sidebar-collapsed');else document.body.classList.remove('sidebar-collapsed');
+ applyRail(collapsed);
  if(isDesktop())prefs.set(COLLAPSE_KEY,collapsed);
  const btn=document.querySelector('#sb-collapse');
  if(btn){btn.setAttribute('aria-pressed',String(collapsed));btn.querySelector('.sb-collapse-txt').textContent=collapsed?'توسيع الشريط':'طي الشريط'}
@@ -144,6 +170,7 @@ export function setActiveRoute(navKey){
 export function initSidebarState(){
  const collapsed=isDesktop()&&Boolean(prefs.get(COLLAPSE_KEY,false));
  document.body.classList.toggle('sidebar-collapsed',collapsed);
+ applyRail(collapsed);
  const btn=document.querySelector('#sb-collapse');
  if(btn){btn.setAttribute('aria-pressed',String(collapsed));btn.querySelector('.sb-collapse-txt').textContent=collapsed?'توسيع الشريط':'طي الشريط'}
  document.querySelector('#mobile-menu')?.setAttribute('aria-expanded',String(!collapsed));

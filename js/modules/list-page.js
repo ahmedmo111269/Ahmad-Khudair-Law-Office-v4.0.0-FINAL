@@ -4,9 +4,12 @@ import {esc} from '../ui/dom.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {mountCalendar} from '../ui/calendar.js';
 import {openEntityForm} from '../ui/form.js';
+import {toast} from '../ui/toast.js';
 import {ENTITIES,FILE_TYPE_GROUPS,displayValue,columnType,phonesOf} from '../domain/entities.js';
 import {loadRows,resolveRefs,presetRange,PRESETS,scan,DEFAULT_LIMIT,MAX_LIMIT} from '../services/entity-query.js';
 import {fmtDate} from '../domain/entities.js';
+import {formatFileNumber} from '../core/file-number.js';
+import {prefs} from '../core/preferences.js';
 
 export function columnsFor(store,refs,{extra=[]}={}){
  const ent=ENTITIES[store];
@@ -24,7 +27,7 @@ export function openRow(app,store,row){const r=routeFor(store,row);if(r)app.go(r
 // شبكة داخل قسم (صفحات السجل): صفوف معروفة مسبقًا
 export async function sectionGrid(app,el,store,rows,{storageKey,title,extra=[]}={}){
  const refs=await resolveRefs(app.office,rows,ENTITIES[store].fields);
- return mountGrid(el,{columns:columnsFor(store,refs,{extra}),rows,title:title||ENTITIES[store].plural,storageKey:storageKey||'sec:'+store,pageSize:100,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات.'});
+ return mountGrid(el,{columns:columnsFor(store,refs,{extra}),rows,title:title||ENTITIES[store].plural,storageKey:storageKey||'sec:'+store,pageSize:100,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات.',selectable:true,...gridActions(app,store,()=>app.refresh())});
 }
 
 const state=app=>(app.__lists=app.__lists||{});
@@ -37,7 +40,7 @@ export function listPage(app,store,query){
  const hasDate=Boolean(ent.dateField);
  const presetLabel=store==='procedures'?[...PRESETS.slice(0,1),['overdue','المتأخرة'],...PRESETS.slice(1)]:PRESETS;
  return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
-  <div class="head-actions"><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
+  <div class="head-actions"><button class="ghost" data-qa-custom title="إظهار أو إخفاء إجراءات الصف">إجراءات الصف</button><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
  <div class="list-controls">
   <input id="list-q" type="search" class="list-search" value="${esc(st.q)}" placeholder="بحث فوري شامل…" autocomplete="off" aria-label="بحث">
   ${hasDate?`<div class="preset-bar" role="group" aria-label="الفترة">${presetLabel.map(([k,l])=>`<button type="button" class="chip${st.preset===k?' active':''}" data-preset="${k}">${l}</button>`).join('')}</div>
@@ -64,11 +67,12 @@ export function bindListPage(app,store){
   if(my!==seq)return;
   await resolveRefs(app.office,rows,ENTITIES[store].fields,gridRefs);
   if(my!==seq)return;
-  if(!grid)grid=mountGrid(root.querySelector('#list-grid'),{columns:columnsFor(store,gridRefs),rows,title:ent.plural,storageKey:'list:'+store,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات مطابقة. غيّر البحث أو الفترة، أو أضف سجلًا جديدًا.',selectable:true,exportName:ent.plural});
-  else grid.setRows(rows);
+  if(!grid)grid=mountGrid(root.querySelector('#list-grid'),{columns:columnsFor(store,gridRefs),rows,title:ent.plural,storageKey:'list:'+store,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات مطابقة. غيّر البحث أو الفترة، أو أضف سجلًا جديدًا.',selectable:true,exportName:ent.plural,more,...gridActions(app,store,()=>load().catch(err=>app.fail(err)))});
+  else grid.setRows(rows,{more});
   status.innerHTML=more?`تم عرض أول ${rows.length} سجل. <button type="button" class="link" data-more>تحميل المزيد</button> أو ضيّق البحث/الفترة.`:(st.q||from||to?`${rows.length} نتيجة${from||to?` — الفترة: ${fmtDate(from)||'…'} إلى ${fmtDate(to)||'…'}`:''}`:'');
  }
  root.querySelector('[data-list-add]').onclick=async()=>store==='files'?(await import('./client-file.js')).startNewLegalFile(app):openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
+ root.querySelector('[data-qa-custom]')?.addEventListener('click',()=>customizeRowActions().then(()=>load()).catch(err=>app.fail(err)));
  let t=0;
  root.querySelector('#list-q').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>{st.q=e.target.value;st.limit=DEFAULT_LIMIT;load().catch(err=>app.fail(err))},250)});
  // «/» يقفز لبحث القائمة من أي موضع في الصفحة، وEsc يمسحه
@@ -89,3 +93,88 @@ export function bindListPage(app,store){
  load().catch(err=>app.fail(err));
 }
 function yesterday(){const d=new Date();d.setDate(d.getDate()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+
+const QA_KEY='ui:qa-actions';
+const QA_ALL=[
+ ['open','فتح السجل'],['file','فتح الملف'],['client','فتح الموكل'],
+ ['add-hearing','إضافة جلسة'],['add-procedure','إضافة عمل إداري'],['add-note','إضافة ملاحظة'],
+ ['add-service','إضافة إعلان/محضر'],['add-judgment','إضافة حكم'],['relations','فتح العلاقات'],['copy','نسخ الرقم']
+];
+function qaAllowed(){const saved=prefs.get(QA_KEY);return Array.isArray(saved)&&saved.length?new Set(saved):null}
+export function rowMenuFor(store,row){
+ const allow=qaAllowed();
+ const items=[];
+ const add=(id,label,danger=false)=>{if(!allow||allow.has(id))items.push({id,label,danger})};
+ add('open',store==='files'?'فتح الملف':'فتح السجل');
+ if(row.fileId&&store!=='files')add('file','فتح الملف');
+ if(row.clientId)add('client','فتح الموكل');
+ if(store==='files'||row.fileId){
+  add('add-hearing','إضافة جلسة');
+  add('add-procedure','إضافة عمل إداري');
+  add('add-note','إضافة ملاحظة');
+  add('add-service','إضافة إعلان/محضر');
+  add('add-judgment','إضافة حكم');
+  add('relations','فتح العلاقات');
+ }
+ if(row.fileNumber||row.caseNumber||row.poaNumber)add('copy','نسخ الرقم');
+ return items;
+}
+function fileIdOf(store,row){return store==='files'?row.id:row.fileId||''}
+async function copyText(v){
+ const text=String(v||'').trim();if(!text){toast('لا يوجد رقم لنسخه','error');return}
+ try{await navigator.clipboard.writeText(text);toast('تم النسخ')}catch{
+  const ta=document.createElement('textarea');ta.value=text;document.body.append(ta);ta.select();
+  try{document.execCommand('copy');toast('تم النسخ')}catch{toast('تعذر النسخ','error')}ta.remove();
+ }
+}
+async function handleRowAction(app,store,id,row,reload){
+ const fid=fileIdOf(store,row);
+ if(id==='open')return openRow(app,store,row);
+ if(id==='file'&&fid)return app.go('file:'+fid);
+ if(id==='client'&&row.clientId)return app.go('client:'+row.clientId);
+ if(id==='relations'&&fid){app.__fileTab={id:fid,tab:'relations'};return app.go('file:'+fid)}
+ if(id==='copy')return copyText(formatFileNumber(row.fileNumber)||row.fileNumber||row.caseNumber||row.poaNumber||row.noticeNumber||'');
+ const preset={fileId:fid||undefined,caseId:row.caseId||row.currentStageId||undefined,clientId:row.clientId||undefined};
+ const map={ 'add-hearing':'hearings','add-procedure':'procedures','add-note':'caseNotes','add-service':'serviceRecords','add-judgment':'judgments' };
+ if(map[id]){
+  if(id==='add-hearing'&&!preset.caseId){if(fid){app.__fileTab={id:fid,tab:'hearings'};return app.go('file:'+fid)}toast('أضف الجلسة من ملف له مرحلة قضائية','error');return}
+  if((id==='add-judgment')&&!preset.caseId){toast('الحكم يرتبط بمرحلة قضائية. افتح الملف وأضف المرحلة أولًا.','error');return}
+  return openEntityForm(app,map[id],{preset,onSaved:()=>reload?.()});
+ }
+}
+function bulkFor(store){
+ const items=[{id:'open',label:'فتح المحدد'}];
+ if(store==='files')items.push({id:'archive',label:'أرشفة',danger:true,confirm:'أرشفة الملفات المحددة؟ تبقى كل البيانات محفوظة ويمكن إعادة فتح الملف لاحقًا.',okText:'أرشفة'});
+ if(store==='procedures')items.push({id:'done',label:'تعليم كمنجَز',confirm:'تعليم الأعمال المحددة كمنجَزة؟ يمكن تعديل الحالة لاحقًا من سجل كل عمل.',okText:'تعليم كمنجَز'});
+ return items;
+}
+async function handleBulk(app,store,id,rows,reload){
+ if(id==='open'){
+  const {modal}=await import('../ui/modal.js');
+  const card=modal(`<h2 class="modal-title">السجلات المحددة (${rows.length})</h2><div class="action-stack">${rows.slice(0,30).map(r=>{const route=routeFor(store,r)||'';return `<button type="button" class="ghost" data-open-one="${esc(route)}">${esc(ENTITIES[store].title?.(r)||r.title||r.fullName||'سجل')}</button>`}).join('')}</div><p class="muted small">اختر سجلًا لفتحه. لم يُغيَّر أي بيان.</p>`);
+  card.querySelectorAll('[data-open-one]').forEach(b=>b.onclick=()=>{import('../ui/modal.js').then(m=>m.closeModal());app.go(b.dataset.openOne)});
+  return;
+ }
+ if(id==='archive'&&store==='files'){
+  const {archiveFile}=await import('../services/legal-files.js');
+  let n=0;
+  for(const r of rows){if(r.isArchived)continue;await archiveFile(app.office,r.id,'أرشفة جماعية من الجدول');n++}
+  toast(n?`تمت أرشفة ${n} ملفًا`:'الملفات المحددة مؤرشفة بالفعل');
+  return reload?.();
+ }
+ if(id==='done'&&store==='procedures'){
+  const {saveEntity}=await import('../services/entity-save.js');
+  for(const r of rows)await saveEntity(app.office,'procedures',{...r,status:'done'},r.id);
+  toast('تم تحديث حالة الأعمال المحددة');
+  return reload?.();
+ }
+}
+export function gridActions(app,store,reload){
+ return {rowMenu:row=>rowMenuFor(store,row),onRowAction:(id,row)=>handleRowAction(app,store,id,row,reload),bulkActions:bulkFor(store),onBulk:(id,rows)=>handleBulk(app,store,id,rows,reload)};
+}
+export async function customizeRowActions(){
+ const current=qaAllowed();
+ const card=(await import('../ui/modal.js')).modal(`<h2 class="modal-title">تخصيص إجراءات الصف</h2><p class="muted small">أخفِ ما لا تحتاجه حتى لا يزدحم الصف. النقر بزر الفأرة الأيمن يبقى متاحًا للإجراءات الظاهرة.</p><div class="action-stack">${QA_ALL.map(([id,label])=>`<label><input type="checkbox" value="${id}" ${!current||current.has(id)?'checked':''}> ${label}</label>`).join('')}</div><div class="form-actions"><button type="button" class="primary" data-save-qa>حفظ</button><button type="button" class="ghost" data-reset-qa>إظهار الكل</button></div>`);
+ card.querySelector('[data-save-qa]').onclick=async()=>{const ids=[...card.querySelectorAll('input:checked')].map(i=>i.value);await prefs.set(QA_KEY,ids);(await import('../ui/modal.js')).closeModal();toast('حُفظت إجراءات الصف')};
+ card.querySelector('[data-reset-qa]').onclick=async()=>{await prefs.remove(QA_KEY);(await import('../ui/modal.js')).closeModal();toast('عادت الإجراءات إلى الوضع الكامل')};
+}

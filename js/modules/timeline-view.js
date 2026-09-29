@@ -42,7 +42,7 @@ export function timelineHtml(t,{compact=false}={}){
    <span class="tl-body"><b><span class="tl-kind">${esc(x.type)}</span> ${esc(x.title)}</b>${x.detail?`<small>${esc(x.detail)}</small>`:''}</span>
   </${isOpen?'button':'div'}>`;
  };
- return `<div class="tl-summary">${counts.map(([k,n])=>`<span class="tl-chip" data-tl-filter="${esc(k)}">${iconOf(k)} ${esc(k)} <b>${formatNumber(n)}</b></span>`).join('')}<span class="tl-chip tl-all on" data-tl-filter="">الكل <b>${formatNumber(total)}</b></span></div>
+ return `<div class="tl-modes" role="group" aria-label="عرض الخط الزمني"><button type="button" data-tl-mode="list" class="on">قائمة</button><button type="button" data-tl-mode="compact">مضغوط</button></div><div class="tl-summary">${counts.map(([k,n])=>`<span class="tl-chip" data-tl-filter="${esc(k)}">${iconOf(k)} ${esc(k)} <b>${formatNumber(n)}</b></span>`).join('')}<span class="tl-chip tl-all on" data-tl-filter="">الكل <b>${formatNumber(total)}</b></span></div>
  ${t.truncated?'<div class="notice" role="status">الخط الزمني يعرض حتى 200 حدث أحدث؛ الأحداث الأقدم محفوظة كاملة في قاعدة البيانات.</div>':''}
  ${t.future?`<div class="tl-next">التالي: <button class="link" data-open-rec="${esc(storeOf(t.future.type))}:${esc(t.future.entityId||'')}">${esc(t.future.title)} — ${esc(formatDate(t.future.date))}</button></div>`:''}
  <div class="tl-wrap" data-tl-wrap>
@@ -56,6 +56,10 @@ export function timelineHtml(t,{compact=false}={}){
 export function bindTimeline(root,{onOpen}={}){
  root.querySelectorAll('[data-open-rec]').forEach(b=>b.onclick=()=>{const r=b.dataset.openRec;if(r&&onOpen&&!r.endsWith(':'))onOpen(r)});
  // فلترة بالنوع: إخفاء العناصر المطابقة داخليًا دون إعادة بناء
+ root.querySelectorAll('[data-tl-mode]').forEach(b=>b.onclick=()=>{
+  root.querySelectorAll('[data-tl-mode]').forEach(x=>x.classList.toggle('on',x===b));
+  root.querySelector('[data-tl-wrap]')?.classList.toggle('is-compact',b.dataset.tlMode==='compact');
+ });
  root.querySelectorAll('[data-tl-filter]').forEach(ch=>ch.onclick=()=>{
   const k=ch.dataset.tlFilter;
   root.querySelectorAll('[data-tl-filter]').forEach(x=>x.classList.toggle('on',x===ch));

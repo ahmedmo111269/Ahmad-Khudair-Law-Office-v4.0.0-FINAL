@@ -23,15 +23,26 @@ function highlighter(q){
  const parts=[...normalizeArabic(t)].map(ch=>{if(ch===' ')return '\\s+';if(AR_EQ[ch])return AR_EQ[ch];const d=DIG.indexOf(ch);if(d>=0)return `[${ch}${ADIG[d]}]`;return ch.replace(/[.*+?^${}()|[\]\\\/]/g,'\\$&')});
  try{return new RegExp(parts.join('[\\u064B-\\u065F\\u0670ـ]*'),'gi')}catch{return null}
 }
-const markHtml=(text,re)=>{if(!re)return esc(text);let out='',last=0;const s=String(text);re.lastIndex=0;let m;while((m=re.exec(s))){if(!m[0]){re.lastIndex++;continue}out+=esc(s.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';last=m.index+m[0].length}return out+esc(s.slice(last))};
+function highlighters(q){return String(q||'').trim().split(/\s+/).filter(Boolean).map(highlighter).filter(Boolean)}
+function markHtml(text,re){
+ const res=Array.isArray(re)?re:(re?[re]:[]);
+ if(!res.length)return esc(text);
+ const s=String(text);const ranges=[];
+ for(const rx of res){rx.lastIndex=0;let m;while((m=rx.exec(s))){if(!m[0]){rx.lastIndex++;continue}ranges.push([m.index,m.index+m[0].length])}}
+ if(!ranges.length)return esc(s);
+ ranges.sort((a,b)=>a[0]-b[0]||b[1]-a[1]);
+ const merged=[];for(const r of ranges){const last=merged.at(-1);if(!last||r[0]>last[1])merged.push([r[0],r[1]]);else last[1]=Math.max(last[1],r[1])}
+ let out='',i=0;for(const [a,b] of merged){out+=esc(s.slice(i,a))+'<mark>'+esc(s.slice(a,b))+'</mark>';i=b}return out+esc(s.slice(i));
+}
+const searchTokens=q=>n(q).split(' ').filter(Boolean);
 
 const OPS={
- text:[['contains','يحتوي'],['notContains','لا يحتوي'],['eq','يساوي'],['neq','لا يساوي'],['starts','يبدأ بـ'],['ends','ينتهي بـ'],['empty','فارغ'],['notEmpty','غير فارغ']],
- number:[['eq','='],['neq','≠'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين'],['empty','فارغ'],['notEmpty','غير فارغ']],
- date:[['eq','في يوم'],['before','قبل'],['after','بعد'],['onOrBefore','في أو قبل'],['onOrAfter','في أو بعد'],['between','بين'],['today','اليوم'],['thisWeek','هذا الأسبوع'],['thisMonth','هذا الشهر'],['empty','فارغ'],['notEmpty','غير فارغ']],
+ text:[['contains','يحتوي'],['notContains','لا يحتوي'],['eq','يساوي'],['neq','لا يساوي'],['starts','يبدأ بـ'],['ends','ينتهي بـ'],['allWords','كل الكلمات'],['anyWord','أي كلمة'],['empty','فارغ'],['notEmpty','غير فارغ']],
+ number:[['eq','يساوي'],['neq','لا يساوي'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين'],['empty','فارغ'],['notEmpty','غير فارغ']],
+ date:[['eq','في يوم'],['before','قبل'],['after','بعد'],['onOrBefore','في أو قبل'],['onOrAfter','في أو بعد'],['between','من تاريخ إلى تاريخ'],['today','اليوم'],['yesterday','أمس'],['thisWeek','هذا الأسبوع'],['thisMonth','هذا الشهر'],['thisYear','السنة الحالية'],['empty','فارغ'],['notEmpty','غير فارغ']],
  bool:[['isTrue','نعم'],['isFalse','لا'],['empty','فارغ']]
 };
-const NOVAL=['empty','notEmpty','isTrue','isFalse','today','thisWeek','thisMonth'];
+const NOVAL=['empty','notEmpty','isTrue','isFalse','today','yesterday','thisWeek','thisMonth','thisYear'];
 const n=v=>normalizeArabic(String(v??''));
 const EMPTY='(فارغ)';
 
@@ -45,12 +56,13 @@ function testOp(col,row,op,v1,v2){
  }
  if(type==='date'){
   const d=String(raw||'').slice(0,10);
-  switch(op){case'eq':return d===v1;case'before':return Boolean(d)&&d<v1;case'after':return d>v1;case'onOrBefore':return Boolean(d)&&d<=v1;case'onOrAfter':return d>=v1;case'between':{const [a,b]=[v1||'0000',v2||'9999'].sort();return Boolean(d)&&d>=a&&d<=b}case'today':return d===localDate();case'thisWeek':{const t=localDate(),dow=new Date(t+'T00:00:00').getDay(),monday=addDays(t,dow===0?-6:1-dow);return Boolean(d)&&d>=monday&&d<=addDays(monday,6)}case'thisMonth':return Boolean(d)&&d.slice(0,7)===localDate().slice(0,7);case'empty':return !d;case'notEmpty':return Boolean(d)}
+  switch(op){case'eq':return d===v1;case'before':return Boolean(d)&&d<v1;case'after':return d>v1;case'onOrBefore':return Boolean(d)&&d<=v1;case'onOrAfter':return d>=v1;case'between':{const [a,b]=[v1||'0000',v2||'9999'].sort();return Boolean(d)&&d>=a&&d<=b}case'today':return d===localDate();case'yesterday':return d===addDays(localDate(),-1);case'thisWeek':{const t=localDate(),dow=new Date(t+'T00:00:00').getDay(),monday=addDays(t,dow===0?-6:1-dow);return Boolean(d)&&d>=monday&&d<=addDays(monday,6)}case'thisMonth':return Boolean(d)&&d.slice(0,7)===localDate().slice(0,7);case'thisYear':return Boolean(d)&&d.slice(0,4)===localDate().slice(0,4);case'empty':return !d;case'notEmpty':return Boolean(d)}
   return true;
  }
  if(type==='bool'){const t=raw===true||raw==='true';const f=raw===false||raw==='false';if(op==='isTrue')return t;if(op==='isFalse')return f;if(op==='empty')return !t&&!f;return true}
  const s=n(col.text(row)),q=n(v1);
- switch(op){case'contains':return s.includes(q);case'notContains':return !s.includes(q);case'eq':return s===q;case'neq':return s!==q;case'starts':return s.startsWith(q);case'ends':return s.endsWith(q);case'empty':return !s;case'notEmpty':return Boolean(s)}
+ const words=q.split(' ').filter(Boolean);
+ switch(op){case'contains':return s.includes(q);case'notContains':return !s.includes(q);case'eq':return s===q;case'neq':return s!==q;case'starts':return s.startsWith(q);case'ends':return s.endsWith(q);case'allWords':return words.length?words.every(w=>s.includes(w)):true;case'anyWord':return words.length?words.some(w=>s.includes(w)):true;case'empty':return !s;case'notEmpty':return Boolean(s)}
  return true;
 }
 const cmp=(col,a,b)=>{
@@ -74,48 +86,77 @@ export function mountGrid(root,opts){
  const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map((Array.isArray(saved.filters)?saved.filters:[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f?.set?new Set(f.set):null}])),adv:saved.adv&&Array.isArray(saved.adv.rules)?saved.adv:{logic:'and',rules:[]},quick:saved.quick||'',groupBy:byKey.has(saved.groupBy)?saved.groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),widths:{...(saved.widths||{})},fontSize:['small','medium','large'].includes(saved.fontSize)?saved.fontSize:'medium',filterCollapsed:Boolean(saved.filterCollapsed),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:'',
   pinned:(Array.isArray(saved.pinned)?saved.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS),
   colSearch:saved.colSearch&&typeof saved.colSearch==='object'&&!Array.isArray(saved.colSearch)?{...saved.colSearch}:{},
-  colSearchOn:Boolean(saved.colSearchOn),selected:new Set()};
+  colSearchOn:Boolean(saved.colSearchOn),selected:new Set(),
+  searchCol:byKey.has(saved.searchCol)?saved.searchCol:'',
+  span:['wide','full'].includes(saved.span)?saved.span:'',
+  tableWidth:Math.max(100,Math.min(220,Number(saved.tableWidth)||100)),
+  shellCollapsed:Boolean(saved.shellCollapsed),
+  qaOn:saved.qaOn!==false};
  let hl=null;const collapsed=new Set();
  let view=[];
  root.classList.add('dg');
- root.innerHTML=`<div class="dg-toolbar"><button type="button" class="ghost dg-tools-btn" aria-expanded="false" title="أدوات الجدول">⚙︎ أدوات</button><button type="button" class="ghost dg-filter-toggle" aria-expanded="true" title="إظهار أو إخفاء أدوات التصفية">▾ تصفية</button>
-  <input class="dg-quick" type="search" placeholder="تصفية داخل النتائج… ( / )" aria-label="تصفية داخل النتائج">
+ root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'▸':'▾'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button></div><div class="dg-body"><div class="dg-toolbar"><button type="button" class="ghost dg-tools-btn" aria-expanded="false" title="أدوات الجدول">⚙︎ أدوات</button><button type="button" class="ghost dg-filter-toggle" aria-expanded="true" title="إظهار أو إخفاء عوامل التصفية">عوامل التصفية</button>
+  <input class="dg-quick" type="search" placeholder="بحث فوري في النتائج… ( / )" aria-label="بحث داخل النتائج">
+  <select class="dg-scope" aria-label="نطاق البحث" title="بحث في كل الأعمدة أو عمود محدد"><option value="">كل الأعمدة</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select>
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
   <button type="button" class="ghost dg-csearch-btn" title="صف بحث تحت كل عمود" aria-pressed="${st.colSearchOn}">بحث الأعمدة</button>
   <label class="dg-group-lbl">تجميع حسب <select class="dg-groupby"><option value="">بدون</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select></label>
-  <button type="button" class="ghost dg-cols-btn">الأعمدة</button>
+  <button type="button" class="ghost dg-cols-btn">تخصيص الجدول</button>
   <button type="button" class="ghost dg-views-btn" title="حفظ واسترجاع الفلاتر والفرز باسم">★ طرق العرض</button>
-  <button type="button" class="ghost dg-reset-btn" title="إعادة ضبط كل إعدادات هذا الجدول">⭯ إعادة ضبط</button>
-  <select class="dg-density" aria-label="كثافة العرض" title="كثافة العرض"><option value="">كثافة: حسب الثيم</option><option value="compact">مضغوط</option><option value="normal">عادي</option><option value="comfortable">مريح</option></select>
+  <button type="button" class="ghost dg-unsort" title="إلغاء جميع عمليات الفرز">إلغاء الفرز</button>
+  <button type="button" class="ghost dg-reset-btn" title="إعادة ضبط كل إعدادات هذا الجدول">↺ إعادة ضبط</button>
+  <select class="dg-density" aria-label="كثافة العرض" title="كثافة العرض"><option value="">كثافة: حسب الثيم</option><option value="compact">مضغوط</option><option value="normal">عادي</option><option value="comfortable">مريح</option><option value="mobile">مناسب للموبايل</option></select>
+  <select class="dg-span" aria-label="اتساع الجدول" title="اتساع الجدول"><option value="">عرض عادي</option><option value="wide">عرض واسع</option><option value="full">ملء العرض</option></select>
+  <label class="dg-width-lbl" title="تكبير أو تصغير عرض الجدول يدويًا">العرض <input type="range" class="dg-width" min="100" max="220" step="10" value="${st.tableWidth}" aria-label="عرض الجدول بالنسبة المئوية"></label>
   <select class="dg-font" aria-label="حجم خط الجدول" title="حجم الخط"><option value="small">خط صغير</option><option value="medium">خط متوسط</option><option value="large">خط كبير</option></select>
   <button type="button" class="ghost dg-cards-btn" title="تبديل العرض">بطاقات</button><button type="button" class="ghost dg-fullscreen" title="ملء الشاشة" aria-pressed="false">⛶ ملء الشاشة</button>
-  <button type="button" class="ghost dg-clear" hidden>مسح التصفية</button>
+  <span class="dg-filter-actions"><button type="button" class="primary small dg-filter-apply">تطبيق</button><button type="button" class="ghost small dg-clear" hidden>مسح الكل</button><button type="button" class="ghost small dg-save-filter">حفظ التصفية</button><button type="button" class="ghost small dg-filter-close">إغلاق</button></span>
   <span class="dg-count" aria-live="polite"></span>
   <span class="dg-spacer"></span>
   <button type="button" class="ghost dg-print">طباعة</button>
   <select class="dg-export" aria-label="تصدير"><option value="">تصدير…</option><option value="xls">Excel</option><option value="doc">Word</option><option value="csv">CSV</option><option value="txt">نص TXT</option><optgroup label="يشمل البيانات الحساسة"><option value="xls:full">Excel كامل</option><option value="csv:full">CSV كامل</option></optgroup></select>
  </div>
- <div class="dg-selbar" hidden><b class="dg-sel-count"></b><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>
+ <div class="dg-selbar" hidden><b class="dg-sel-count"></b><span class="dg-bulk-slot"></span><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="ghost small dg-open-sel">فتح المحدد</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>
  <div class="dg-chips" hidden aria-label="التصفية النشطة"></div>
  <div class="dg-adv" hidden></div>
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
- <div class="dg-more"></div>`;
+ <div class="dg-more"></div></div>`;
  const $=s=>root.querySelector(s);
  root.classList.toggle('dg-filter-open',!st.filterCollapsed);
+ root.classList.toggle('dg-shell-closed',st.shellCollapsed);
  $('.dg-quick').value=st.quick;$('.dg-groupby').value=st.groupBy;$('.dg-font').value=st.fontSize;
+ if($('.dg-scope'))$('.dg-scope').value=st.searchCol||'';
+ if($('.dg-span'))$('.dg-span').value=st.span||'';
+ if($('.dg-width'))$('.dg-width').value=st.tableWidth;
  $('.dg-csearch-btn').classList.toggle('dg-chip-active',st.colSearchOn);
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn})};
+ const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,shellCollapsed:st.shellCollapsed,qaOn:st.qaOn})};
  const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards;
  let rowH=0,vStart=-1;
  const allSelected=()=>view.length>0&&view.every(r=>st.selected.has(r));
 
+ const showQa=()=>Boolean(o.rowMenu)&&st.qaOn;
+ const extraCols=()=>(o.selectable?1:0)+(showQa()?1:0);
+ const fmtN=v=>Number(v||0).toLocaleString('ar-EG');
+ function activeFilterCount(){
+  let n=st.filters.size+(st.quick?1:0)+(Object.values(st.colSearch).some(Boolean)?1:0);
+  n+=st.adv.rules.filter(x=>byKey.get(x.key)&&(NOVAL.includes(x.op)||x.v1!=='')).length;
+  return n;
+ }
+ function applyChrome(){
+  root.style.setProperty('--dg-w',(st.tableWidth||100)+'%');
+  root.classList.toggle('dg-span-wide',st.span==='wide'||st.span==='full');
+  root.classList.toggle('dg-span-full',st.span==='full');
+  root.classList.toggle('dg-shell-closed',st.shellCollapsed);
+ }
+ function menuItems(row){try{const items=(typeof o.rowMenu==='function'?o.rowMenu(row):o.rowMenu)||[];return Array.isArray(items)?items:[];}catch{return []}}
  function compute(){
-  const q=n(st.quick);hl=highlighter(st.quick);vStart=-1;
+  const tokens=searchTokens(st.quick);hl=highlighters(st.quick);vStart=-1;
+  const scope=st.searchCol&&byKey.has(st.searchCol)?[byKey.get(st.searchCol)]:cols;
   const vc=cols;
   const csEntries=Object.entries(st.colSearch).filter(([k,v])=>v&&byKey.has(k));
   let out=rows.filter(r=>{
-   if(q&&!vc.some(c=>n(c.text(r)).includes(q)))return false;
+   if(tokens.length&&!tokens.every(tok=>scope.some(c=>n(c.text(r)).includes(tok))))return false;
    for(const [k,f] of st.filters){const c=byKey.get(k);if(!c)continue;if(f.set&&!f.set.has(c.text(r)||EMPTY))return false;if(f.op&&(NOVAL.includes(f.op)||f.v1!==''||f.v2!=='')&&!testOp(c,r,f.op,f.v1,f.v2))return false}
    for(const [k,cv] of csEntries){const c=byKey.get(k);if(!n(c.text(r)).includes(n(cv)))return false}
    const rules=st.adv.rules.filter(x=>byKey.get(x.key)&&(NOVAL.includes(x.op)||x.v1!==''));
@@ -137,12 +178,13 @@ export function mountGrid(root,opts){
   view=out;
  }
  function renderHead(){
-  const sortMark=k=>{const i=st.sort.findIndex(s=>s.key===k);if(i<0)return '';return `<span class="dg-sortmark">${st.sort[i].dir==='asc'?'▲':'▼'}${st.sort.length>1?i+1:''}</span>`};
+  const sortMark=k=>{const i=st.sort.findIndex(s=>s.key===k);if(i<0)return '<span class="dg-sortidle" aria-hidden="true">↕</span>';return `<span class="dg-sortmark">${st.sort[i].dir==='asc'?'▲':'▼'}<b class="dg-rank">${i+1}</b></span>`};
   const vc=visibleCols();
-  const selTh=o.selectable?`<th class="dg-sel-th"><input type="checkbox" class="dg-sel-all" aria-label="تحديد كل الصفوف المعروضة"${allSelected()?' checked':''}${view.length?'':' disabled'}></th>`:'';
+  const selTh=o.selectable?`<th class="dg-sel-th"><input type="checkbox" class="dg-sel-all" aria-label="تحديد كل النتائج الحالية"${allSelected()?' checked':''}${view.length?'':' disabled'}></th>`:'';
+  const qaTh=showQa()?'<th class="dg-qa-th" aria-label="إجراءات"></th>':'';
   $('thead').innerHTML=`<tr class="dg-hrow">${selTh}${vc.map(c=>{const w=Math.max(90,Math.min(900,Number(st.widths[c.key])||0));const pin=st.pinned.includes(c.key);
-   return `<th data-key="${esc(c.key)}" ${w?`style="width:${w}px;min-width:${w}px;max-width:${w}px"`:''} class="${st.filters.has(c.key)?'dg-filtered':''}${pin?' dg-pin-th':''}"><div class="dg-th"><button type="button" class="dg-sort" title="فرز (Shift للفرز المتعدد)">${esc(c.label)} ${sortMark(c.key)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</button><button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية وفرز وتثبيت">▾</button></div><span class="dg-resizer" role="separator" tabindex="0" aria-label="تغيير عرض ${esc(c.label)}"></span></th>`}).join('')}</tr>
-   ${st.colSearchOn?`<tr class="dg-csrow">${o.selectable?'<th class="dg-sel-th"></th>':''}${vc.map(c=>`<th data-cs="${esc(c.key)}"><input type="search" class="dg-cs" data-key="${esc(c.key)}" value="${esc(st.colSearch[c.key]||'')}" placeholder="بحث…" aria-label="بحث في ${esc(c.label)}"></th>`).join('')}</tr>`:''}`;
+   return `<th data-key="${esc(c.key)}" ${w?`style="width:${w}px;min-width:${w}px;max-width:${w}px"`:''} class="${st.filters.has(c.key)?'dg-filtered':''}${pin?' dg-pin-th':''}"><div class="dg-th"><button type="button" class="dg-coltitle" title="تصفية عمود ${esc(c.label)}">${esc(c.label)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</button><button type="button" class="dg-sort" title="فرز: تصاعدي ثم تنازلي ثم إلغاء. Shift للفرز المتعدد" aria-label="فرز ${esc(c.label)}">${sortMark(c.key)}</button><button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية وفرز وتثبيت">▾</button></div><span class="dg-resizer" role="separator" tabindex="0" aria-label="تغيير عرض ${esc(c.label)}"></span></th>`}).join('')}${qaTh}</tr>
+   ${st.colSearchOn?`<tr class="dg-csrow">${o.selectable?'<th class="dg-sel-th"></th>':''}${vc.map(c=>`<th data-cs="${esc(c.key)}"><input type="search" class="dg-cs" data-key="${esc(c.key)}" value="${esc(st.colSearch[c.key]||'')}" placeholder="بحث…" aria-label="بحث في ${esc(c.label)}"></th>`).join('')}${showQa()?'<th></th>':''}</tr>`:''}`;
   const all=$('.dg-sel-all');
   if(all){all.indeterminate=st.selected.size>0&&!allSelected()}
   layoutPins();
@@ -150,7 +192,8 @@ export function mountGrid(root,opts){
  function cellHtml(c,r){const t=c.text(r);return `<td data-k="${esc(c.key)}" data-label="${esc(c.label)}"${c.type==='number'?' class="num"':''} title="${esc(t)}">${hl?markHtml(t,hl):esc(t)}</td>`}
  const rowHtml=(r,i,vc)=>{
   const sel=o.selectable&&st.selected.has(r);
-  return `<tr data-i="${i}" tabindex="0" class="${o.onRowClick?'dg-click':''}${st.sel===i?' dg-selected':''}${sel?' dg-checked':''}">${o.selectable?`<td class="dg-sel-td"><input type="checkbox" class="dg-rowchk" data-i="${i}" aria-label="تحديد الصف"${sel?' checked':''}></td>`:''}${vc.map(c=>cellHtml(c,r)).join('')}</tr>`;
+  const qa=showQa()?`<td class="dg-qa" data-label="إجراءات"><button type="button" class="ghost small dg-qa-btn" data-i="${i}" aria-label="إجراءات سريعة">⋯</button></td>`:'';
+  return `<tr data-i="${i}" tabindex="0" class="${o.onRowClick?'dg-click':''}${st.sel===i?' dg-selected':''}${sel?' dg-checked':''}">${o.selectable?`<td class="dg-sel-td"><input type="checkbox" class="dg-rowchk" data-i="${i}" aria-label="تحديد الصف"${sel?' checked':''}></td>`:''}${vc.map(c=>cellHtml(c,r)).join('')}${qa}</tr>`;
  };
  // تثبيت الأعمدة: إزاحات تراكمية للخلايا المثبتة (تعمل في RTL وLTR عبر inset-inline-start)
  function layoutPins(){
@@ -168,19 +211,22 @@ export function mountGrid(root,opts){
  }
  function renderWindow(force){
   const sc=$('.dg-scroll'),vc=visibleCols();
-  const h=rowH||36,start=Math.max(0,Math.floor(sc.scrollTop/h)-15);
+  const h=rowH||36;
+  const top=Number(sc.scrollTop)||0;
+  const vh=Number(sc.clientHeight)||Number(sc.offsetHeight)||600;
+  const start=Math.max(0,Math.floor(top/h)-15);
   if(!force&&start===vStart)return;vStart=start;
-  const end=Math.min(view.length,start+Math.ceil((sc.clientHeight||600)/h)+30);
-  let html=`<tr class="dg-vpad" aria-hidden="true"><td colspan="${vc.length+(o.selectable?1:0)}" style="height:${start*h}px"></td></tr>`;
+  const end=Math.min(view.length,start+Math.ceil(vh/h)+30);
+  let html=`<tr class="dg-vpad" aria-hidden="true"><td colspan="${vc.length+extraCols()}" style="height:${start*h}px"></td></tr>`;
   for(let i=start;i<end;i++)html+=rowHtml(view[i],i,vc);
-  html+=`<tr class="dg-vpad" aria-hidden="true"><td colspan="${vc.length+(o.selectable?1:0)}" style="height:${(view.length-end)*h}px"></td></tr>`;
+  html+=`<tr class="dg-vpad" aria-hidden="true"><td colspan="${vc.length+extraCols()}" style="height:${(view.length-end)*h}px"></td></tr>`;
   $('tbody').innerHTML=html;
   if(!rowH){const tr=$('tbody tr[data-i]');if(tr&&tr.offsetHeight){rowH=tr.offsetHeight;vStart=-1;renderWindow(true)}}
   layoutPins();
  }
  function renderBody(){
   const vc=visibleCols();
-  const colSpan=vc.length+(o.selectable?1:0);
+  const colSpan=vc.length+extraCols();
   const shown=view.slice(0,st.shown);
   const g=st.groupBy&&byKey.get(st.groupBy);
   let html='',last=null;
@@ -191,24 +237,30 @@ export function mountGrid(root,opts){
   });
   if(!view.length)html=`<tr><td colspan="${Math.max(1,colSpan)}" class="dg-empty">${esc(rows.length?'لا توجد صفوف مطابقة للتصفية.':o.emptyText)}</td></tr>`;
   if(view.length&&virtualOn())renderWindow(true);else{$('tbody').innerHTML=html;layoutPins()}
-  $('.dg-count').textContent=view.length===rows.length?`${rows.length} سجل`:`${view.length} من ${rows.length} سجل`;
+  $('.dg-count').textContent=view.length===rows.length&&!o.more?`${fmtN(rows.length)} نتيجة`:`${fmtN(view.length)} نتيجة من أصل ${fmtN(rows.length)}${o.more?'+':''}`;
+  const shellCount=$('.dg-shell-count');if(shellCount)shellCount.textContent=rows.length?`— ${fmtN(view.length)}`:'';
+  const nFilt=activeFilterCount();
+  $('.dg-filter-toggle').textContent=st.filterCollapsed?`عوامل التصفية (${nFilt})`:'▾ عوامل التصفية';
   const rest=virtualOn()?0:view.length-shown.length;
   $('.dg-more').innerHTML=rest>0?`<button type="button" class="ghost dg-showmore">عرض ${Math.min(rest,o.pageSize)} صف إضافي (متبقٍ ${rest})</button>`:'';
   $('.dg-clear').hidden=!(st.filters.size||st.adv.rules.length||st.quick||st.sort.length);
   renderChips();renderFoot(vc);
   renderSelbar();
   root.classList.toggle('dg-cards',st.cards);
-  ['compact','normal','comfortable'].forEach(d=>root.classList.toggle('dg-d-'+d,st.density===d));$('.dg-density').value=st.density;
+  ['compact','normal','comfortable','mobile'].forEach(d=>root.classList.toggle('dg-d-'+d,st.density===d));$('.dg-density').value=st.density;
+  applyChrome();
   ['small','medium','large'].forEach(d=>root.classList.toggle('dg-font-'+d,st.fontSize===d));$('.dg-font').value=st.fontSize;
   $('.dg-views-btn').classList.toggle('dg-chip-active',Boolean(st.activeView));
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
-  $('.dg-filter-toggle').setAttribute('aria-expanded',String(!st.filterCollapsed));$('.dg-filter-toggle').textContent=st.filterCollapsed?'▸ تصفية':'▾ تصفية';
+  $('.dg-filter-toggle').setAttribute('aria-expanded',String(!st.filterCollapsed));
   $('.dg-fullscreen').setAttribute('aria-pressed',String(root.classList.contains('dg-fullscreen')));$('.dg-fullscreen').textContent=root.classList.contains('dg-fullscreen')?'⛶ خروج من الشاشة':'⛶ ملء الشاشة';
  }
  function renderSelbar(){
   const sb=$('.dg-selbar');const cnt=st.selected.size;
   sb.hidden=!(o.selectable&&cnt);
-  if(cnt){sb.querySelector('.dg-sel-count').textContent=`تم تحديد ${cnt} ${cnt===1?'صف':cnt===2?'صفّين':'صفوف'} — الإجراءات على نتائج العرض الحالية فقط`}
+  if(cnt){sb.querySelector('.dg-sel-count').textContent=`تم تحديد ${fmtN(cnt)} — الإجراءات على النتائج الحالية فقط`}
+  const slot=sb.querySelector('.dg-bulk-slot');
+  if(slot)slot.innerHTML=(o.bulkActions||[]).map(a=>`<button type="button" class="ghost small dg-bulk${a.danger?' danger':''}" data-bulk="${esc(a.id)}">${esc(a.label)}</button>`).join('');
  }
  function renderChips(){
   const chips=[];
@@ -232,9 +284,18 @@ export function mountGrid(root,opts){
 
  // ===== أحداث =====
  let qt=0;
- $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{if(!root.isConnected)return;st.quick=e.target.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
+ $('.dg-quick').addEventListener('input',()=>{const el=$('.dg-quick');clearTimeout(qt);qt=setTimeout(()=>{if(!root.isConnected||!el)return;st.quick=el.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
  $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;persist();render()});
  $('.dg-filter-toggle').addEventListener('click',()=>{st.filterCollapsed=!st.filterCollapsed;root.classList.toggle('dg-filter-open',!st.filterCollapsed);persist();renderBody()});
+ $('.dg-filter-close')?.addEventListener('click',()=>{st.filterCollapsed=true;root.classList.remove('dg-filter-open');persist();renderBody()});
+ $('.dg-filter-apply')?.addEventListener('click',()=>{st.shown=o.pageSize;persist();render();toast('تم تطبيق التصفية')});
+ $('.dg-save-filter')?.addEventListener('click',()=>$('.dg-views-btn')?.click());
+ $('.dg-unsort')?.addEventListener('click',()=>{st.sort=[];st.activeView='';persist();render()});
+ $('.dg-scope')?.addEventListener('change',e=>{st.searchCol=e.target.value;st.shown=o.pageSize;persist();render()});
+ $('.dg-span')?.addEventListener('change',e=>{st.span=e.target.value;persist();applyChrome()});
+ $('.dg-width')?.addEventListener('input',e=>{st.tableWidth=Number(e.target.value)||100;applyChrome()});
+ $('.dg-width')?.addEventListener('change',()=>persist());
+ $('.dg-shell-toggle')?.addEventListener('click',()=>{st.shellCollapsed=!st.shellCollapsed;const b=$('.dg-shell-toggle');b?.setAttribute('aria-expanded',String(!st.shellCollapsed));const c=b?.querySelector('.dg-caret');if(c)c.textContent=st.shellCollapsed?'▸':'▾';persist();applyChrome()});
  $('.dg-font').addEventListener('change',e=>{st.fontSize=e.target.value;persist();renderBody()});
  $('.dg-fullscreen').addEventListener('click',async()=>{if(document.fullscreenElement===root){try{await document.exitFullscreen()}catch{}root.classList.remove('dg-fullscreen')}else if(root.requestFullscreen){try{await root.requestFullscreen()}catch{root.classList.toggle('dg-fullscreen')}}else root.classList.toggle('dg-fullscreen');renderBody()});
  root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});
@@ -284,13 +345,13 @@ export function mountGrid(root,opts){
  $('.dg-reset-btn').addEventListener('click',()=>{
   if(o.storageKey)prefs.remove(PK);
   st.filters.clear();st.adv={logic:'and',rules:[]};st.quick='';st.sort=[];st.groupBy='';st.hidden=new Set(cols.filter(c=>c.hidden).map(c=>c.key));
-  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize='medium';st.density='';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.filterCollapsed=false;
-  root.classList.add('dg-filter-open');$('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-csearch-btn').classList.remove('dg-chip-active');
+  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize='medium';st.density='';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.filterCollapsed=false;st.searchCol='';st.span='';st.tableWidth=100;st.shellCollapsed=false;st.qaOn=true;
+  root.classList.add('dg-filter-open');root.classList.remove('dg-shell-closed');$('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
   renderAdv();render();toast('أُعيد ضبط الجدول إلى الإعدادات الافتراضية');
  });
  $('thead').addEventListener('click',e=>{
   const th=e.target.closest('th');if(!th)return;const key=th.dataset.key;if(!key)return;
-  if(e.target.closest('.dg-fbtn')){openFilter(th,key);return}
+  if(e.target.closest('.dg-fbtn')||e.target.closest('.dg-coltitle')){openFilter(th,key);return}
   if(e.target.closest('.dg-sort')){
    const i=st.sort.findIndex(s=>s.key===key);
    if(e.shiftKey){if(i<0)st.sort.push({key,dir:'asc'});else if(st.sort[i].dir==='asc')st.sort[i].dir='desc';else st.sort.splice(i,1)}
@@ -300,7 +361,7 @@ export function mountGrid(root,opts){
  });
  const selectRow=tr=>{st.sel=Number(tr.dataset.i);root.querySelectorAll('tr.dg-selected').forEach(x=>x.classList.remove('dg-selected'));tr.classList.add('dg-selected')};
  const clickRow=tr=>{selectRow(tr);const r=view[Number(tr.dataset.i)];if(r&&o.onRowClick)o.onRowClick(r)};
- $('tbody').addEventListener('click',e=>{const tr=e.target.closest('tr[data-i]');if(tr&&!e.target.closest('.dg-sel-td'))clickRow(tr)});
+ $('tbody').addEventListener('click',e=>{const qa=e.target.closest('.dg-qa-btn');if(qa){e.stopPropagation();const r=view[Number(qa.dataset.i)];if(r)openMenu(qa,r,qa.getBoundingClientRect().left,qa.getBoundingClientRect().bottom+4);return}const tr=e.target.closest('tr[data-i]');if(tr&&!e.target.closest('.dg-sel-td')&&!e.target.closest('.dg-qa'))clickRow(tr)});
  $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]');if(!tr)return;
   if(e.key==='Enter'&&e.target!==tr){const inp=e.target.closest('input,button,a,select,textarea');if(inp)return}
   if(e.key==='Enter'){clickRow(tr)}
@@ -332,15 +393,20 @@ export function mountGrid(root,opts){
   const distinct=new Map();for(const r of rows){const t=c.text(r)||EMPTY;distinct.set(t,(distinct.get(t)||0)+1)}
   const values=[...distinct.entries()].sort((a,b)=>String(a[0]).localeCompare(String(b[0]),'ar',{numeric:true})).slice(0,1000);
   pop=document.createElement('div');pop.className='dg-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','تصفية '+c.label);
+  const presets=type==='date'?`<div class="dg-presets" aria-label="فترات جاهزة">${[['today','اليوم'],['yesterday','أمس'],['thisWeek','هذا الأسبوع'],['thisMonth','هذا الشهر'],['thisYear','السنة الحالية']].map(([k,l])=>`<button type="button" class="chip" data-preset-op="${k}">${l}</button>`).join('')}</div>`:'';
   pop.innerHTML=`<div class="dg-pop-head"><b>${esc(c.label)}</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
-   <div class="dg-pop-sort"><button type="button" class="ghost" data-dir="asc">فرز تصاعدي ▲</button><button type="button" class="ghost" data-dir="desc">فرز تنازلي ▼</button><button type="button" class="ghost dg-pintoggle" title="يبقى العمود ظاهرًا أثناء التمرير الأفقي">${pinned?'📌 إلغاء التثبيت':'📌 تثبيت العمود'}</button></div>
+   <div class="dg-pop-sort"><button type="button" class="ghost" data-dir="asc">فرز تصاعدي ▲</button><button type="button" class="ghost" data-dir="desc">فرز تنازلي ▼</button><button type="button" class="ghost" data-dir="none">بدون فرز</button><button type="button" class="ghost dg-pintoggle" title="يبقى العمود ظاهرًا أثناء التمرير الأفقي">${pinned?'📌 إلغاء التثبيت':'📌 تثبيت العمود'}</button></div>
+   ${presets}
    <label class="dg-pop-cond">شرط<select class="dg-op">${OPS[type].map(([v,l])=>`<option value="${v}"${v===f.op?' selected':''}>${l}</option>`).join('')}</select></label><div class="dg-vals">${valueInputs(type,f.op,f.v1,f.v2)}</div>
-   <div class="dg-pop-list"><input type="search" class="dg-lsearch" placeholder="بحث في القيم…"><label class="dg-all"><input type="checkbox" class="dg-allbox" ${!f.set?'checked':''}> تحديد الكل</label><div class="dg-checks">${values.map(([v,cnt])=>`<label><input type="checkbox" value="${esc(v)}" ${!f.set||f.set.has(v)?'checked':''}> <span>${esc(v)}</span> <small>${cnt}</small></label>`).join('')}</div>${distinct.size>1000?'<small class="muted">تُعرض أول 1000 قيمة.</small>':''}</div>
+   <div class="dg-pop-list"><input type="search" class="dg-lsearch" placeholder="بحث في القيم…"><div class="dg-list-tools"><button type="button" class="link dg-checkall">تحديد الكل</button><button type="button" class="link dg-checknone">إلغاء الكل</button></div><label class="dg-all"><input type="checkbox" class="dg-allbox" ${!f.set?'checked':''}> تحديد الكل</label><div class="dg-checks">${values.map(([v,cnt])=>`<label><input type="checkbox" value="${esc(v)}" ${!f.set||f.set.has(v)?'checked':''}> <span>${esc(v)}</span> <small>${cnt}</small></label>`).join('')}</div>${distinct.size>1000?'<small class="muted">تُعرض أول 1000 قيمة.</small>':''}</div>
    <div class="dg-pop-actions"><button type="button" class="primary dg-apply">تطبيق</button><button type="button" class="ghost dg-reset">مسح تصفية العمود</button></div>`;
   place(pop,th);
   const q=s=>pop.querySelector(s);
   q('.dg-x').onclick=closePop;
-  pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{st.sort=[{key,dir:b.dataset.dir}];closePop();persist();render()});
+  pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{if(b.dataset.dir==='none')st.sort=st.sort.filter(s=>s.key!==key);else st.sort=[{key,dir:b.dataset.dir}];closePop();persist();render()});
+  pop.querySelectorAll('[data-preset-op]').forEach(b=>b.onclick=()=>{st.filters.set(key,{op:b.dataset.presetOp,v1:'',v2:'',set:null});closePop();st.shown=o.pageSize;persist();render()});
+  q('.dg-checkall').onclick=()=>{pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=true);q('.dg-allbox').checked=true};
+  q('.dg-checknone').onclick=()=>{pop.querySelectorAll('.dg-checks input').forEach(i=>i.checked=false);q('.dg-allbox').checked=false};
   q('.dg-pintoggle').onclick=()=>{togglePin(key);closePop()};
   q('.dg-op').onchange=e=>{q('.dg-vals').innerHTML=valueInputs(type,e.target.value,q('.dg-v1')?.value||'',q('.dg-v2')?.value||'')};
   q('.dg-lsearch').oninput=e=>{const s=n(e.target.value);pop.querySelectorAll('.dg-checks label').forEach(l=>l.hidden=Boolean(s)&&!n(l.textContent).includes(s))};
@@ -368,7 +434,7 @@ export function mountGrid(root,opts){
  $('.dg-cols-btn').addEventListener('click',e=>{
   closePop();pop=document.createElement('div');pop.className='dg-pop';
   const listHtml=()=>order.map((k,i)=>{const c=byKey.get(k);const pinned=st.pinned.includes(k);return `<li draggable="true" data-k="${esc(k)}"><span class="dg-handle" title="اسحب لإعادة الترتيب">⋮⋮</span><label><input type="checkbox" value="${esc(k)}" ${st.hidden.has(k)?'':'checked'}> ${esc(c.label)}</label><button type="button" class="link dg-pinb${pinned?' dg-chip-active':''}" data-pin="${esc(k)}" title="${pinned?'إلغاء تثبيت':'تثبيت'} العمود (${MAX_PINS} كحد أقصى)">📌</button><button type="button" class="link dg-mv" data-mv="-1" ${i===0?'disabled':''} aria-label="تحريك لأعلى">▲</button><button type="button" class="link dg-mv" data-mv="1" ${i===order.length-1?'disabled':''} aria-label="تحريك لأسفل">▼</button></li>`}).join('');
-  pop.innerHTML=`<div class="dg-pop-head"><b>الأعمدة — إظهار وترتيب وتثبيت</b><button type="button" class="link dg-x">✕</button></div><small class="muted">اسحب العمود لتغيير ترتيبه، و📌 لتثبيته أثناء التمرير الأفقي (حتى ${MAX_PINS} أعمدة). يُحفظ كل شيء لهذا الجدول.</small><ul class="dg-cols-list">${listHtml()}</ul><div class="dg-pop-actions"><button type="button" class="ghost dg-allcols">إظهار الكل</button><button type="button" class="ghost dg-resetcols">الترتيب الافتراضي</button></div>`;
+  pop.innerHTML=`<div class="dg-pop-head"><b>الأعمدة — إظهار وترتيب وتثبيت</b><button type="button" class="link dg-x">✕</button></div><small class="muted">اسحب العمود لتغيير ترتيبه، و📌 لتثبيته أثناء التمرير الأفقي (حتى ${MAX_PINS} أعمدة). يُحفظ كل شيء لهذا الجدول.</small><ul class="dg-cols-list">${listHtml()}</ul><div class="dg-pop-actions"><button type="button" class="ghost dg-allcols">إظهار الكل</button><button type="button" class="ghost dg-resetw">إعادة الحجم الافتراضي</button><button type="button" class="ghost dg-resetcols">الترتيب الافتراضي</button></div>`;
   place(pop,e.currentTarget);
   const ul=pop.querySelector('.dg-cols-list');
   const refresh=()=>{ul.innerHTML=listHtml();persist();renderHead();renderBody()};
@@ -382,9 +448,10 @@ export function mountGrid(root,opts){
   ul.addEventListener('drop',ev=>{ev.preventDefault();const to=ev.target.closest('li')?.dataset.k;if(!dragK||!to||dragK===to)return;const from=order.indexOf(dragK),target=order.indexOf(to);order.splice(from,1);order.splice(target,0,dragK);dragK=null;refresh()});
   pop.querySelector('.dg-allcols').onclick=()=>{st.hidden.clear();refresh()};
   pop.querySelector('.dg-resetcols').onclick=()=>{order.splice(0,order.length,...cols.map(c=>c.key));refresh()};
+  pop.querySelector('.dg-resetw')?.addEventListener('click',()=>{st.widths={};refresh()});
  });
  // ===== طرق العرض المحفوظة (فلاتر + فرز + أعمدة باسم) =====
- const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order],widths:{...st.widths},fontSize:st.fontSize,density:st.density,cards:st.cards,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:{...st.colSearch},colSearchOn:st.colSearchOn});
+ const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order],widths:{...st.widths},fontSize:st.fontSize,density:st.density,cards:st.cards,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:{...st.colSearch},colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn});
  function restore(v){
   st.quick=v.quick||'';$('.dg-quick').value=st.quick;
   st.filters=new Map((v.filters||[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f.set?new Set(f.set):null}]));
@@ -393,6 +460,8 @@ export function mountGrid(root,opts){
   if(v.order){const ord=v.order.filter(k=>byKey.has(k));cols.forEach(c=>{if(!ord.includes(c.key))ord.push(c.key)});order.splice(0,order.length,...ord)}
   st.widths={...(v.widths||st.widths)};st.fontSize=['small','medium','large'].includes(v.fontSize)?v.fontSize:st.fontSize;st.density=v.density||st.density;st.cards=v.cards===undefined?st.cards:Boolean(v.cards);st.filterCollapsed=Boolean(v.filterCollapsed);root.classList.toggle('dg-filter-open',!st.filterCollapsed);
   st.pinned=(Array.isArray(v.pinned)?v.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS);st.colSearch=v.colSearch&&typeof v.colSearch==='object'?{...v.colSearch}:{};st.colSearchOn=Boolean(v.colSearchOn);
+  st.searchCol=byKey.has(v.searchCol)?v.searchCol:'';st.span=['wide','full'].includes(v.span)?v.span:'';st.tableWidth=Math.max(100,Math.min(220,Number(v.tableWidth)||100));st.qaOn=v.qaOn!==false;
+  if($('.dg-scope'))$('.dg-scope').value=st.searchCol;if($('.dg-span'))$('.dg-span').value=st.span;if($('.dg-width'))$('.dg-width').value=st.tableWidth;
   st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;persist();render();
  }
  $('.dg-views-btn').addEventListener('click',e=>{
@@ -450,10 +519,40 @@ export function mountGrid(root,opts){
   else if(kind==='doc'){download('\ufeff'+docHtml(false,false,srcRows),base+'.doc','application/msword;charset=utf-8')}
  }
 
+ let menuEl=null;
+ function closeMenu(){menuEl?.remove();menuEl=null}
+ function openMenu(anchor,row,x,y){
+  closeMenu();
+  const items=menuItems(row);if(!items.length)return;
+  menuEl=document.createElement('div');menuEl.className='dg-ctx';menuEl.setAttribute('role','menu');
+  menuEl.innerHTML=items.map(it=>`<button type="button" role="menuitem" data-act="${esc(it.id)}" class="${it.danger?'is-danger':''}">${esc(it.label)}</button>`).join('');
+  document.body.append(menuEl);
+  const w=menuEl.offsetWidth||180,h=menuEl.offsetHeight||items.length*36;
+  menuEl.style.left=Math.max(8,Math.min(x??8,window.innerWidth-w-8))+'px';
+  menuEl.style.top=Math.max(8,Math.min(y??8,window.innerHeight-h-8))+'px';
+  menuEl.addEventListener('click',ev=>{const b=ev.target.closest('[data-act]');if(!b)return;const id=b.dataset.act;closeMenu();o.onRowAction?.(id,row)});
+ }
+ $('tbody').addEventListener('contextmenu',e=>{const tr=e.target.closest('tr[data-i]');if(!tr)return;const row=view[Number(tr.dataset.i)];if(!row||!menuItems(row).length)return;e.preventDefault();openMenu(tr,row,e.clientX,e.clientY)});
+ const onDocDown=e=>{if(!root.isConnected){document.removeEventListener('mousedown',onDocDown,true);document.removeEventListener('keydown',onDocKey);return}if(menuEl&&!menuEl.contains(e.target)&&!e.target.closest?.('.dg-qa-btn'))closeMenu()};
+ const onDocKey=e=>{if(!root.isConnected){document.removeEventListener('mousedown',onDocDown,true);document.removeEventListener('keydown',onDocKey);return}if(e.key==='Escape')closeMenu()};
+ document.addEventListener('mousedown',onDocDown,true);
+ document.addEventListener('keydown',onDocKey);
+ $('.dg-selbar').addEventListener('click',async e=>{
+  const b=e.target.closest('[data-bulk]');if(!b)return;
+  const act=(o.bulkActions||[]).find(a=>a.id===b.dataset.bulk);if(!act)return;
+  const picked=[...st.selected];if(!picked.length)return;
+  if(act.confirm){const {confirmBox}=await import('./modal.js');const ok=await confirmBox(act.confirm,{okText:act.okText||act.label||'تأكيد'});if(!ok)return}
+  try{await o.onBulk?.(act.id,picked)}catch(err){toast(err?.message||'تعذر تنفيذ الإجراء','error')}
+ });
+ $('.dg-open-sel')?.addEventListener('click',async()=>{
+  const picked=[...st.selected].slice(0,20);if(!picked.length)return;
+  if(o.onBulk){try{await o.onBulk('open',picked)}catch(err){toast(err?.message||'تعذر الفتح','error')}return}
+  if(picked[0]&&o.onRowClick)o.onRowClick(picked[0]);
+ });
  renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;
  render();
  return {
-  setRows(r){rows=r||[];st.shown=o.pageSize;render()},
+  setRows(r,meta){rows=r||[];if(meta&&typeof meta==='object'&&'more' in meta)o.more=Boolean(meta.more);st.shown=o.pageSize;render()},
   getView:()=>view,
   get rows(){return rows},
   applyFilter(key,op,v1,v2=''){st.filters.set(key,{op,v1,v2,set:null});render()},

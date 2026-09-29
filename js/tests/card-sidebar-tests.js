@@ -1,6 +1,6 @@
 // اختبارات نظام البطاقات الموحّد وسلامة تكوين الشريط الجانبي (بدون متصفح).
 import {card,cardEmpty,cardError,cardLoading,cardSuccess,statusBadge,CARD_SIZE} from '../ui/card.js';
-import {NAV_GROUPS} from '../ui/sidebar.js';
+import {NAV_GROUPS,buildSidebar,toggleCollapsed,isCollapsed} from '../ui/sidebar.js';
 import {icon,ROUTE_ICONS} from '../ui/icons.js';
 
 export function runCardSidebarTests(test,expect){
@@ -46,6 +46,18 @@ export function runCardSidebarTests(test,expect){
    if(!it.icon||!icon(it.icon))throw Error('أيقونة مفقودة: '+it.route);
   }
   expect(Boolean(ROUTE_ICONS.serviceRecords&&ROUTE_ICONS.bailiffs)).toBe(true);
+ });
+ test('شريط جانبي: الطي يبقي الأيقونات ويحفظ اتساع المحتوى',()=>{
+  if(!document.querySelector('#sidebar'))document.body.insertAdjacentHTML('afterbegin','<aside id="sidebar"></aside>');
+  buildSidebar();
+  toggleCollapsed(true);
+  expect(isCollapsed()).toBe(true);
+  expect(document.querySelectorAll('#sidebar [data-route]').length>10).toBe(true);
+  expect(document.documentElement.dataset.sidebar).toBe('collapsed');
+  expect(String(document.documentElement.style.getPropertyValue('--sb-current')).includes('collapsed')).toBe(true);
+  toggleCollapsed(false);
+  expect(isCollapsed()).toBe(false);
+  expect(document.documentElement.dataset.sidebar).toBe('open');
  });
  test('شريط جانبي: أسماء واضحة بلا تضارب (لا عنصرين بنفس الاسم)',()=>{
   const labels=NAV_GROUPS.flatMap(g=>g.items.map(i=>i.label));

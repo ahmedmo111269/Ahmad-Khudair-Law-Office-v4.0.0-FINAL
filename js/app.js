@@ -102,6 +102,7 @@ class App{
   document.addEventListener('keydown',e=>{
    const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
+   if((e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
    if(e.key==='Escape'&&!document.querySelector('.dg-pop')){
     if(!isDesktop()&&document.querySelector('#sidebar.open')){closeMobile();return}
     if(paletteOpen()){closePalette();return}closeModal();return}
@@ -110,7 +111,7 @@ class App{
   });
  }
  showShortcutsHelp(){
-  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['Shift + نقرة رأس عمود','فرز متعدد المستويات في الجداول'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح الشريط الجانبي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
   modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
  async go(route,opts={}){
@@ -141,6 +142,7 @@ class App{
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
    closeMobile(); // على الهاتف: تُغلق القائمة الجانبية تلقائيًا بعد اختيار الصفحة
+   if(baseRoute!=='dashboard')prefs.set('ui:last-route',{route,title:page.title,at:Date.now()});
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}
  }

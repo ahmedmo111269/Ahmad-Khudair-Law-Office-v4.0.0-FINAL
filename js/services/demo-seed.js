@@ -29,7 +29,7 @@ const FIRST_M=['أحمد','محمد','مصطفى','عبدالرحمن','خالد
 const FIRST_F=['منى','سارة','هدى','فاطمة','إيمان','نهى','رانيا','داليا','مريم','أمل','سهى','جيهان'];
 const LAST=['عبدالسلام','الشاذلي','عبدالله','الجندي','أبوالمجد','سلطان','البدري','عاشور','الحويني','غانم','الدسوقي','عبدالحليم','شلبي','النجار','عبدالعزيز','فرحات','الشرقاوي','مرعي'];
 const GOV=[['القاهرة','مدينة نصر'],['الجيزة','الدقي'],['الإسكندرية','سيدي جابر'],['الدقهلية','المنصورة'],['الشرقية','الزقازيق'],['الغربية','طنطا'],['القليوبية','بنها'],['المنوفية','شبين الكوم']];
-const COURTS=['محكمة شمال القاهرة الابتدائية','محكمة جنوب القاهرة الابتدائية','محكمة الجيزة الابتدائية','محكمة الإسكندرية الابتدائية','محكمة المنصورة الابتدائية','محكمة استئناف القاهرة','محكمة استئناف الإسكندرية','محكمة القضاء الإداري','المحكمة الإدارية العليا','محكمة الأسرة بالمنصورة','محكمة طنطا الاقتصادية'];
+const COURTS=['محكمة طوخ الجزئية','محكمة بنها الابتدائية','محكمة شبرا الخيمة','محكمة قليوب الجزئية','محكمة شمال القاهرة الابتدائية','محكمة جنوب القاهرة الابتدائية','محكمة الجيزة الابتدائية','محكمة الإسكندرية الابتدائية','محكمة المنصورة الابتدائية','محكمة استئناف القاهرة','محكمة استئناف الإسكندرية','محكمة القضاء الإداري','المحكمة الإدارية العليا','محكمة الأسرة بالمنصورة','محكمة طنطا الاقتصادية'];
 const CHAMBERS=['الدائرة 3 مدني','الدائرة 7 تجاري','الدائرة 2 جنح مستأنف','الدائرة 12 كلي','الدائرة 5 أحوال','الدائرة 9 عمال','الدائرة 4 إداري','الدائرة 6 استئناف'];
 const LAWYERS=['أ. أحمد محمد خضير','أ. محمد عبدالمقصود','أ. سارة العدل','أ. كريم فتحي'];
 const OCC=['مهندس','طبيب','مدرس','محاسب','موظف حكومي','تاجر','صاحب شركة','مقاول','ربة منزل','مدير موارد بشرية','صيدلي','سائق'];
@@ -114,6 +114,7 @@ const SUBJECTS={
  'other.consultation':['استشارة عقد مشاركة','استشارة نزاع عمالي'],
  'other.contract':['صياغة عقد إيجار تجاري','صياغة عقد مقاولة']
 };
+export const DEMO_MARK='〔تجريبي〕';
 const NOTE_POOL=['الموكل يطلب متابعة أسبوعية.','تم التواصل مع الموكل وإبلاغه بالمستجدات.','مستندات الملف كاملة ومطابقة.','يُفضَّل عدم التواصل بعد الخامسة مساءً.','الخصم يميل للتسوية الودية.','هناك جلسة قريبة — تجهيز حافظة المستندات.'];
 const STEP_POOL=['مراجعة المستندات','إعداد مذكرة','متابعة القلم','استخراج صورة رسمية','إعلان الخصم'];
 
@@ -210,7 +211,7 @@ export async function seedDemoData(office,{onProgress}={}){
    commercialRegister:isCompany?String(int(1000,99999)):'',taxNumber:isCompany?String(int(100000,999999)):'',
    legalRepresentative:isCompany?personName('ذكر'):'',
    referredBy:chance(.5)?pick(['إحالة من موكل سابق','معارف المكتب','بحث إلكتروني','']):'' ,
-   status:'active',notes:i%4===0?'موكل منذ سنوات — تعامل طويل الأمد.':''
+   status:'active',notes:`${DEMO_MARK} بيانات تجريبية للاختبار — لا تُحذف تلقائيًا. ${i%4===0?'موكل منذ سنوات — تعامل طويل الأمد.':''}`
   });
   // سنة إنشاء حقيقية متفاوتة حتى يظهر ترقيم الملفات لكل سنة
   row.createdAt=iso(yr,int(1,11),int(1,28))+'T09:30:00.000Z';
@@ -268,7 +269,7 @@ export async function seedDemoData(office,{onProgress}={}){
   const subjects=SUBJECTS[typeId]||SUBJECTS['other.contract']||['عمل قانوني'];
   usedSubjects[typeId]=(usedSubjects[typeId]||0)%subjects.length;
   const subject=subjects[usedSubjects[typeId]++];
-  const title=`${subject} — ${client.fullName.split(' ')[0]} ${client.fullName.split(' ')[1]||''}`.trim();
+  const title=`${DEMO_MARK} ${subject} — ${client.fullName.split(' ')[0]} ${client.fullName.split(' ')[1]||''}`.trim();
   const openedAt=iso(year,year===thisYear?int(1,Math.max(1,Number(today.slice(5,7)))):int(1,12),int(1,28));
   const tpl=type?tax.templateFor(type.id):null;
   let steps=(tpl?.steps||[]).map(s=>({name:s.name,stageTypeId:s.stageTypeId||null,optional:Boolean(s.optional)}));
@@ -284,7 +285,7 @@ export async function seedDemoData(office,{onProgress}={}){
     priority:pick(['normal','normal','normal','urgent','critical']),
     openedAt,responsibleLawyer:pick(LAWYERS),clientRole:pick(['موكل','مدعٍ','متهم','مستأنف','طاعن']),
     steps,meta:metaFor(fields,year,openedAt),related,
-    notes:pick(NOTE_POOL)
+    notes:`${DEMO_MARK} بيانات تجريبية للاختبار — لا تُحذف تلقائيًا. ${pick(NOTE_POOL)}`
    });
   }catch(e){console.error('seed file',typeId,e);continue}
   files.push({file,client,year,catId,typeId,steps:steps.length});
@@ -325,7 +326,7 @@ export async function seedDemoData(office,{onProgress}={}){
    try{
     await office.saveCase({id:st.id,fileId:rec.file.id,stageType:st.stageType,numberType:pick(['كلى','جزئي','أحوال','إدارى','تجارى','اقتصادى']),
      caseNumber:String(int(120,24000)),caseYear:String(st.startedAt?Number(String(st.startedAt).slice(0,4)):rec.year),
-     courtId:pick(COURTS),chamber:pick(CHAMBERS),degree:pick(['ابتدائي','استئناف','نقض']),
+     courtId:(()=>{const local=['محكمة طوخ الجزئية','محكمة بنها الابتدائية','محكمة شبرا الخيمة'];return report.stages<15?local[report.stages%3]:pick(COURTS)})(),chamber:pick(CHAMBERS),degree:pick(['ابتدائي','استئناف','نقض']),
      filingDate:st.startedAt||iso(rec.year,int(1,10),int(1,28)),subject:rec.file.title},st.id);
    }catch{}
   }

@@ -28,7 +28,8 @@ async function renderGeneral(app){
  <div class="grid2"><section class="panel"><h3>الإصدار</h3><p>التطبيق: ${esc(app.constants.APP_VERSION)}</p><p>Schema: ${app.constants.SCHEMA_VERSION}</p><p>قاعدة البيانات: ${esc(app.registry.active?.displayName||'')}</p></section>
  <section class="panel"><h3>صيانة (لا تحذف أي بيانات)</h3><div class="action-stack"><button class="ghost" data-maint="preV12">⬇ تنزيل نسخة الأمان التلقائية (قبل ترقية ملف الموكل)</button><button class="ghost" data-maint="index">إعادة بناء فهرس البحث للملفات</button><button class="ghost" data-maint="parties">ترحيل روابط الموكلين القديمة إلى أطراف الملفات</button><button class="ghost" data-maint="seed">استكمال القوائم الافتراضية الناقصة</button></div><p class="muted small" id="maint-status"></p></section>
  <section class="panel"><h3>الخصوصية</h3><p>البيانات مخزنة محليًا في متصفح الجهاز. لا توجد خدمة تحليل أو API خارجية في النسخة الأساسية.</p></section>
- <section class="panel"><h3>البيانات التجريبية</h3><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية بأرقام موزعة على عدة سنوات. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button></div><p class="muted small" id="demo-status"></p></section></div>`;
+ <section class="panel"><h3>الشريط الجانبي</h3><p class="muted small">طي الشريط على سطح المكتب يوسّع مساحة العمل فورًا، وتُحفظ الحالة لهذا المستخدم.</p><button type="button" class="ghost" data-sidebar-toggle>طي / توسيع الشريط</button></section>
+ <section class="panel"><h3>البيانات التجريبية</h3><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا معلَّمة بـ〔تجريبي〕 (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية، ومحاكم من بينها قليوب وطوخ وبنها وشبرا. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم، ولا تُمسح تلقائيًا بعد الاختبار.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button></div><p class="muted small" id="demo-status"></p></section></div>`;
 }
 export function bindSettings(app){
  const root=document.querySelector('#main-content');const cat=app.__lookupCat;
@@ -55,6 +56,7 @@ export function bindSettings(app){
    if(b.dataset.maint==='seed'){const n=await seedLookups(app.office);status.textContent=n?`أضيفت ${n} قيمة افتراضية.`:'كل القوائم مكتملة.'}
   }catch(err){toast(userError(err),'error')}finally{b.disabled=false}
  });
+ root.querySelector('[data-sidebar-toggle]')?.addEventListener('click',async()=>{const {toggleCollapsed,isDesktop,toggleMobile}=await import('../ui/sidebar.js');isDesktop()?toggleCollapsed():toggleMobile();toast('تم تحديث الشريط الجانبي')});
  root.querySelector('[data-demo-seed]')?.addEventListener('click',async e=>{
   const btn=e.currentTarget;const ds=root.querySelector('#demo-status');btn.disabled=true;
   try{

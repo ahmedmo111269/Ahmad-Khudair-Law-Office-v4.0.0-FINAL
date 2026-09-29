@@ -19,6 +19,8 @@ export function enhanceCollapsiblePanels(root, scope = 'page') {
     } else {
       header.classList.add('panel-collapse-head');
     }
+    const looseBadge = [...panel.children].find(el => el.classList?.contains('badge') && !header.contains(el));
+    if (looseBadge) header.append(looseBadge);
     const heading = header.querySelector('h2,h3,h4')?.textContent?.trim() || `بطاقة ${index + 1}`;
     const key = panel.id || `${scope}:${index}:${heading}`;
     panel.dataset.collapseReady = 'true';
