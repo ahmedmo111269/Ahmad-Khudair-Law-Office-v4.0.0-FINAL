@@ -14,6 +14,17 @@
 
 # PROJECT MAP
 
+## v4.7.0 — محرك البحث المركزي والجداول الاحترافية
+- `js/services/search-engine.js` — **المحرك المركزي للبحث** (المصدر الوحيد): `searchAll(office,q,{stores,perStore})` و`searchStore` فوق مخازن `allSearchStores()` (20 مخزنًا) مع تكتيك ثلاثي: فهارس الأكواد (`CL/LF`) → فهارس الأرقام (fileNumber/caseNumber/nationalId) → مسح Cursor مبكر التوقف بحد `perStore` ووسم `more`. صافٍ قابل للاختبار: `tokenizeQuery/normalizeCodeToken/looksLikeCode/codeValue/looksLikeNumber/digitsOf/matchTokens/scoreHit` فوق `core/search-normalizer.js`. سجل البحث والبحوث المحفوظة تفضيلات مستخدم في IDB (`ui:search-history` حد 8، `ui:search-save` حد 20).
+- `js/modules/search.js` — صفحة البحث الشامل: مجموعات مصنفة حسب النوع بشارة عدد و«المزيد»، فتح نتيجة → `app.go(route)` للسجل المرتبط، تمييز `<mark>`، فلاتر (نطاق/فترة/مدى مخصص بحقل التاريخ الصحيح لكل قسم)، سجل + محفوظات + شرائح، تنقل أسهم/Enter. `services/search.js` القديمة احتُفظ بها لخدمة الرئيسية (`relationalContext/relatedTimeline`).
+- `js/ui/palette.js` — لوحة الأوامر تبحث حيًا عبر `searchAll` (استيراد ديناميكي للمحرك عند أول ضغطة) بدل مسح الفهارس الثابت.
+- `js/ui/datagrid.js` — **إعادة بناء كاملة**: فرز متعدد (Shift+نقر) بخطة مفاتيح مسبقة، بحث أعمدة، فلاتر نوعية + شروط AND/OR، تثبيت عمودين، تحديد صفوف + شريط إجراءات جماعية، طرق عرض محفوظة (`grid:<storageKey>` في IDB مع سقوط لـ localStorage)، إعادة ضبط، كثافات/خط/بطاقات/ملء شاشة، تمرير افتراضي >600 صف، تصدير/طباعة «المعروض أو المحدد فقط» خلف بوابة الحساس. `list-page.js` يمرر `selectable:true,exportName`.
+- `js/ui/modal.js` — حصر التركيز داخل النافذة (Tab cycle) واستعادته للزر الاستدعائي عند الإغلاق؛ نفس API.
+- `js/modules/home.js` — شارة عدد عناصر العمل على زر «مركز العمل» بالشريط الجانبي.
+- `css/pro.css` — قسم «16) الجداول الاحترافية v4.7» (شرائط التحديد، التثبيت اللاصق، بحث الأعمدة) و«17) صفحة البحث v4.7» (hero، شرائح النطاق، المحفوظات، مجموعات النتائج) و«18) شارة عناصر العمل».
+- `sw.js` — كاش `v4.7.0-offline1` + `js/services/search-engine.js` في الأصول المسبقة.
+- الاختبارات: `js/tests/search-table-tests.js` (18 اختبارًا: المحرك على قاعدة حقيقية مؤقتة + الجدول على DOM) ضمن `tests.html` → **69/69**؛ E2E تكاملي (`/tmp/pw/e2e-node.mjs`) → **19/19**.
+
 ## v4.6.0 — تجربة استخدام احترافية (UX/UI/أداء، بلا تغيير Schema)
 - `js/ui/palette.js` — لوحة أوامر عالمية (Ctrl+K): أوامر ثابتة (تنقل + إجراءات سريعة)، نتائج حية عبر `services/search.js`، و«آخر ما فُتح»؛ منطق الترشيح/التمييز مفصول (`filterCommands`/`scoreCommand`/`highlightMatch`) لقابلية الاختبار. `modal.js` يبث حدث `modal:closed` لمزامنة أي نافذة.
 - `js/services/recents.js` — حلقة «آخر ما فُتح» (12 عنصرًا) في تفضيلات المستخدم؛ تُسجَّل من صفحات السجل (`record-page.js`، `file-page.js`) وتُعرض في الرئيسية واللوحة والبحث.

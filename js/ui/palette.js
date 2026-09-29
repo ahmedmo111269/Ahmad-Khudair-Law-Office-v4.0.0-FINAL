@@ -4,7 +4,6 @@ import {esc} from './dom.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {icon,ROUTE_ICONS} from './icons.js';
 import {ENTITIES} from '../domain/entities.js';
-import {unifiedSearch} from '../services/search.js';
 import {getRecent} from '../services/recents.js';
 import {closeModal,modal} from './modal.js';
 
@@ -125,7 +124,7 @@ export function openPalette(app){
   list.querySelector('.pal-item.on')?.scrollIntoView({block:'nearest'});
  };
  const runItem=c=>{paletteEl=null;closeModal();try{c.run()}catch(e){console.error('palette action',e);app.fail?.(e)}};
- const build=()=>{
+  const build=()=>{
   const q=input.value.trim();
   const recents=recentCommands().map(c=>({...c,scoreHint:0}));
   if(q.length>=2){
@@ -134,15 +133,11 @@ export function openPalette(app){
    timer=setTimeout(async()=>{
     let live=[];
     try{
-     const r=await unifiedSearch(app.office,q,5);
-     const routeOf={clients:'client',files:'file',cases:'case',opponents:'opponent'};
-     const nameOf={clients:'الموكلون',files:'الملفات',cases:'القضايا',opponents:'الخصوم'};
-     const iconOf={clients:'users',files:'folder',cases:'gavel',opponents:'userX'};
-     live=Object.entries(r).flatMap(([type,rows])=>rows.map(x=>({
-      id:`live:${type}:${x.id}`,group:'نتائج من قاعدة البيانات',iconKey:iconOf[type],icon:'',
-      label:type==='clients'?x.fullName:type==='opponents'?x.name:(x.fileNumber?`${x.fileNumber} — ${x.title||''}`:(x.title||x.caseNumber||x.subject||'بدون عنوان')),
-      sub:type==='cases'?[x.stageType||x.numberType,x.caseYear?`سنة ${x.caseYear}`:'',x.courtId].filter(Boolean).join(' · '):[x.clientCode,x.nationalId,x.phone||x.phone1,x.status].filter(Boolean).join(' · '),
-      run:()=>app.go(`${routeOf[type]}:${x.id}`)
+     const {searchAll,PRIMARY_STORES}=await import('../services/search-engine.js');
+     const r=await searchAll(app.office,q,{stores:PRIMARY_STORES,perStore:3});
+     live=r.groups.flatMap(g=>g.items.map(it=>({
+      id:`live:${g.store}:${it.id}`,group:'نتائج من قاعدة البيانات',iconKey:g.icon,icon:'',
+      label:it.title,sub:it.sub,run:()=>app.go(it.route)
      })));
     }catch{live=[]}
     if(my!==seq)return;

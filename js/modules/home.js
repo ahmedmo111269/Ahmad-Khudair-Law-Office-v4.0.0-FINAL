@@ -9,10 +9,11 @@ import {localDate} from '../core/clock.js';
 import {formatDate,formatNumber,longDateAr,greetingKey,GREETINGS} from '../core/format.js';
 import {getRecent} from '../services/recents.js';
 
+let __lastBrief=null;
 const KPI=(k,n,txt,route,accent='')=>`<button class="kpi${accent?` kpi-${accent}`:''}" data-kpi="${esc(route)}"><b>${formatNumber(n)}${n>=100?'+':''}</b><span>${esc(txt)}</span></button>`;
 export async function homePage(app){
  const {dashboardBrief}=await import('../services/dashboard.js');
- const r=await dashboardBrief(app.office);
+ const r=await dashboardBrief(app.office);__lastBrief=r;
  const d=v=>formatDate(v);
  const today=localDate();
  const [h,m]=today.split('-').map(Number);
@@ -42,6 +43,14 @@ export async function homePage(app){
 }
 
 export function bindHome(app){
+ // شارة عناصر العمل على زر «مركز العمل» في الشريط الجانبي — عدّاد حي من بيانات لوحة اليوم
+ const acBtn=document.querySelector('#sidebar [data-route="actionCenter"]');
+ if(acBtn&&__lastBrief){
+  const b=__lastBrief;
+  const n=b.todayHearings.length+b.overdueProcedures.length+b.appointmentsNext3.length+b.followupsThisWeek.length+b.staleFiles.length;
+  acBtn.querySelector('.nav-badge')?.remove();
+  if(n)acBtn.insertAdjacentHTML('beforeend',`<span class="nav-badge"${n>99?` title="${n}"`:''}>${n>99?'99+':n}</span>`);
+ }
  document.querySelectorAll('[data-dashboard-report]').forEach(b=>b.onclick=()=>{const [type,preset]=b.dataset.dashboardReport.split('|');app.go('reports?type='+encodeURIComponent(type)+'&preset='+encodeURIComponent(preset))});
  document.querySelectorAll('[data-route-report]').forEach(b=>b.onclick=()=>app.go('reports?type='+encodeURIComponent(b.dataset.routeReport)));
  document.querySelectorAll('[data-kpi]').forEach(b=>b.onclick=()=>app.go(b.dataset.kpi));

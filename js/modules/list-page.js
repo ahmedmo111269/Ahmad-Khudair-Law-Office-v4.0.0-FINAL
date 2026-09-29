@@ -64,7 +64,7 @@ export function bindListPage(app,store){
   if(my!==seq)return;
   await resolveRefs(app.office,rows,ENTITIES[store].fields,gridRefs);
   if(my!==seq)return;
-  if(!grid)grid=mountGrid(root.querySelector('#list-grid'),{columns:columnsFor(store,gridRefs),rows,title:ent.plural,storageKey:'list:'+store,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات مطابقة. غيّر البحث أو الفترة، أو أضف سجلًا جديدًا.'});
+  if(!grid)grid=mountGrid(root.querySelector('#list-grid'),{columns:columnsFor(store,gridRefs),rows,title:ent.plural,storageKey:'list:'+store,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات مطابقة. غيّر البحث أو الفترة، أو أضف سجلًا جديدًا.',selectable:true,exportName:ent.plural});
   else grid.setRows(rows);
   status.innerHTML=more?`تم عرض أول ${rows.length} سجل. <button type="button" class="link" data-more>تحميل المزيد</button> أو ضيّق البحث/الفترة.`:(st.q||from||to?`${rows.length} نتيجة${from||to?` — الفترة: ${fmtDate(from)||'…'} إلى ${fmtDate(to)||'…'}`:''}`:'');
  }

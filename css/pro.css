@@ -169,3 +169,64 @@ body:not(.sidebar-collapsed) #main-nav hr{display:none}
 /* ---------- 15) رسم الاتجاه الزمني في الإحصاءات ---------- */
 .trend-svg{width:100%;height:96px;display:block;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--surface)}
 .trend-cap{margin:4px 2px 10px}
+
+/* ---------- 16) الجداول الاحترافية v4.7: تثبيت أعمدة + تحديد + بحث أعمدة ---------- */
+.dg-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--primary-soft);border:1px solid var(--primary-border);border-radius:var(--radius-sm);padding:8px 12px;margin:0 0 8px;animation:selbar-in .18s ease}
+@keyframes selbar-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.dg-selbar b{color:var(--text-strong);font-size:.9rem}
+.dg-selbar .small{padding:6px 10px;font-size:.82rem}
+.dg-table th.dg-sel-th{width:40px;min-width:40px;text-align:center}
+.dg-sel-td{text-align:center;background:var(--surface)}
+.dg-table tbody tr.dg-checked td{background:var(--row-selected)}
+.dg-table tbody tr.dg-checked .dg-sel-td{background:var(--row-selected)}
+/* تثبيت الأعمدة: خلايا لاصقة أفقية تعمل في RTL وLTR */
+.dg-table.dg-has-pin th.dg-pin-cell{z-index:5}
+.dg-table.dg-has-pin td.dg-pin-cell{position:sticky;z-index:2;background:var(--surface);box-shadow:inset -1px 0 0 var(--border)}
+.dg-table.dg-has-pin tr:hover td.dg-pin-cell{background:var(--row-hover)}
+.dg-table.dg-has-pin tr.dg-selected td.dg-pin-cell,tr.dg-checked td.dg-pin-cell{background:var(--row-selected)}
+.dg-pinmark{font-size:.68rem;margin-inline-start:3px}
+.dg-pinb.dg-chip-active{color:var(--primary);font-weight:800}
+/* صف بحث الأعمدة */
+.dg-csrow th{padding:4px 6px;background:var(--surface);box-shadow:inset 0 -2px 0 var(--border-subtle)}
+.dg-csrow .dg-cs{width:100%;min-width:70px;padding:5px 8px;font-size:.8rem;border:1px solid var(--border-subtle);border-radius:6px;background:var(--surface2);color:var(--text);outline:none}
+.dg-csrow .dg-cs:focus{border-color:var(--primary);background:var(--surface)}
+.dg-csearch-btn.dg-chip-active{border-color:var(--primary);color:var(--primary)}
+
+/* ---------- 17) صفحة البحث الشامل v4.7 ---------- */
+.search-hero{display:flex;align-items:center;gap:10px}
+.search-hero .sh-ic{flex:none;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--primary-soft);color:var(--primary)}
+.search-hero .sh-ic .ic{width:22px;height:22px}
+.search-hero input{flex:1;min-width:0;font-size:1.06rem;padding:13px 15px;border:1px solid var(--primary-border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none}
+.search-hero input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.scope-row{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px;max-height:76px;overflow:auto}
+.scope-row .chip{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius-pill);padding:7px 13px;cursor:pointer;font-size:.85rem}
+.scope-row .chip.active{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:700}
+.search-opts{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.search-opts label{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--text-muted)}
+.search-opts select,.search-opts input{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
+.custom-range{display:inline-flex;gap:8px;align-items:center}
+.saved-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 4px;padding-top:8px;border-top:1px dashed var(--border-subtle)}
+.saved-bar .saved-lbl{font-size:.8rem;color:var(--text-muted)}
+.saved-chip{display:inline-flex;align-items:center;gap:2px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-pill);padding:3px 6px 3px 10px}
+.saved-chip .link{padding:2px 4px}
+.save-form{display:inline-flex;gap:6px;align-items:center}
+.save-form input{padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
+.primary.small{padding:6px 12px}
+.search-hint{margin-top:14px}
+.search-hint h4{margin:0 0 6px}
+.hint-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.hint-chips code{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-family:var(--font-mono);font-size:.78rem;direction:ltr;display:inline-block}
+.search-group .group-meta{display:flex;gap:6px;align-items:center}
+.search-result .sr-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.search-result .sr-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-result .sr-main small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-result .sr-go{flex:none;color:var(--text-muted);opacity:0;transition:opacity var(--transition)}
+.search-result:hover .sr-go,.search-result.kbd-focus .sr-go{opacity:1;color:var(--primary)}
+.search-result.kbd-focus{outline:2px solid var(--primary);outline-offset:0}
+#advanced-results .search-group{animation:group-in .2s ease}
+@keyframes group-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.badge.warn{background:var(--warn-soft,var(--surface2));color:var(--warn)}
+
+/* ---------- 18) شارة عناصر العمل في الشريط الجانبي ---------- */
+#main-nav button[data-route]{position:relative}
+.nav-badge{position:absolute;inset-inline-end:10px;top:50%;transform:translateY(-50%);min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:.72rem;font-weight:800;display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.25)}
