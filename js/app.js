@@ -28,11 +28,13 @@ import {renderSettings,bindSettings} from './modules/settings.js';
 import {runMaintenance} from './services/maintenance.js';
 import {initTheme} from './ui/theme.js';
 import {bindThemeMenu} from './ui/theme-menu.js';
+import {enhanceCollapsiblePanels} from './ui/collapsible.js';
+import {prefs} from './core/preferences.js';
 import {decorateNav} from './ui/icons.js';
 import {installDateInputs} from './ui/date-input.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
-const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','appointments','communications','caseNotes','witnesses','expertReports','judgments','execution','fees','feePayments','documentReferences'];
+const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','serviceRecords','appointments','communications','caseNotes','expertReports','judgments','execution','fees','feePayments','documentReferences','bailiffs'];
 const PAGES={
  dashboard:{title:'الرئيسية',render:app=>homePage(app),bind:app=>bindHome(app)},
  search:{title:'البحث',render:app=>renderSearch(app),bind:app=>bindSearch(app)},
@@ -54,16 +56,17 @@ function recordRoute(route){
  m=/^cfile:(.+)$/.exec(route);
  if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
- if(m&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1]};
+ if(m&&m[1]!=='witnesses'&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1]};
  return null;
 }
 
 class App{
- constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});await this.go('dashboard')}catch(e){this.fail(e)}}
+ constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
  bindCrossTab(){if(this.boundCrossTab)return;this.boundCrossTab=true;events.on('db:switched',async p=>{if(!p?.profileId)return;/* local emit from this tab's own switch: manager already holds the target */if(this.manager.current?.profile?.id===p.profileId&&!this.manager.current.closed)return;try{this.registry.reload?.();if(this.registry.active?.id!==p.profileId)return;if(this.ctx?.profile?.id===p.profileId)return;await this.switchDb(p.profileId,{remote:true});toast('تم تبديل قاعدة البيانات من نافذة أخرى');await this.refresh()}catch(e){console.error('remote db switch',e);toast('تعذر مزامنة تبديل قاعدة البيانات من نافذة أخرى','error')}});events.on('db:migration:starting',p=>{if(p?.profileId===this.registry.active?.id&&this.ctx)toast('تجري ترقية قاعدة البيانات...');});events.on('db:closing',p=>{if(p?.profileId===this.ctx?.profile?.id&&this.ctx&&!this.ctx.closed&&this.manager.current===this.ctx){this.ctx.closed=true;toast('تم إغلاق اتصال قاعدة البيانات. أعد فتح القاعدة أو أعد تحميل الصفحة.','error')}});window.addEventListener('storage',e=>{if(e.key===constants.REGISTRY_KEY&&e.newValue){try{this.registry.reload?.();$('#db-badge').textContent=this.registry.active?.displayName||''}catch{}}});}
  bindShell(){
-  $('#mobile-menu').onclick=()=>$('#sidebar').classList.toggle('open');
+  const desktop=!window.matchMedia('(max-width:900px)').matches;const initiallyCollapsed=desktop&&Boolean(prefs.get('ui:sidebar-collapsed',false));document.body.classList.toggle('sidebar-collapsed',initiallyCollapsed);$('#mobile-menu').setAttribute('aria-expanded',String(desktop&&!initiallyCollapsed));
+  $('#mobile-menu').onclick=e=>{const sidebar=$('#sidebar');if(window.matchMedia('(max-width:900px)').matches){const open=sidebar.classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',String(open))}else{const collapsed=document.body.classList.toggle('sidebar-collapsed');e.currentTarget.setAttribute('aria-expanded',String(!collapsed));void prefs.set('ui:sidebar-collapsed',collapsed)}};
   $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
   $('#command-btn').onclick=()=>this.go('search');
   $('#nav-back').onclick=()=>this.back();
@@ -73,6 +76,9 @@ class App{
   document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();this.go('search')}if(e.key==='Escape'&&!document.querySelector('.dg-pop'))closeModal()});
  }
  async go(route,opts={}){
+  // Navigation handlers are bound before the initial IndexedDB open completes. Queue any early click
+  // instead of rendering a page with a null Office context; recovery mode intentionally has no context.
+  if(!this.office&&(this.booting||this.registry.recoveryMode)){if(this.booting)this.pendingRoute=route;return}
   const my=++this.navSeq;
   closeModal();document.querySelectorAll('.dg-pop').forEach(p=>p.remove());
   if(this.route&&this.route!==route&&!opts.replace)this.history.push(this.route);
@@ -90,6 +96,7 @@ class App{
    if(my!==this.navSeq)return; // انتقال أحدث بدأ أثناء التحميل
    main.innerHTML=html;
    await page.bind?.(this,query);
+   enhanceCollapsiblePanels(main,baseRoute);
    main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());

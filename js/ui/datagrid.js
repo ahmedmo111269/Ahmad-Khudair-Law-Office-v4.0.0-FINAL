@@ -6,9 +6,10 @@ import {normalizeArabic} from '../core/search-normalizer.js';
 import {APP_NAME} from '../core/constants.js';
 import {prefs} from '../core/preferences.js';
 import {formatDate} from '../core/format.js';
+import {localDate,addDays} from '../core/clock.js';
 
 // أعمدة لا تُصدَّر افتراضيًا (خصوصية الموكلين) إلا باختيار "تصدير كامل"
-const SENSITIVE=/nationalId|idNumber|passport|phone|mobile|email|address|birth/i;
+const SENSITIVE=/nationalId|idNumber|passport|phone|mobile|email|address|birth|partyName|bailiffName/i;
 const VIRTUAL_THRESHOLD=600;
 // تمييز نتائج البحث مع مراعاة اختلافات الكتابة العربية (أ/ا، ى/ي، ة/ه، التشكيل)
 const AR_EQ={'ا':'[اأإآٱ]','ي':'[يى]','ى':'[يى]','ه':'[هة]','ة':'[هة]','و':'[وؤ]'};
@@ -23,10 +24,10 @@ const markHtml=(text,re)=>{if(!re)return esc(text);let out='',last=0;const s=Str
 const OPS={
  text:[['contains','يحتوي'],['notContains','لا يحتوي'],['eq','يساوي'],['neq','لا يساوي'],['starts','يبدأ بـ'],['ends','ينتهي بـ'],['empty','فارغ'],['notEmpty','غير فارغ']],
  number:[['eq','='],['neq','≠'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين'],['empty','فارغ'],['notEmpty','غير فارغ']],
- date:[['eq','في يوم'],['before','قبل'],['after','بعد'],['between','بين'],['empty','فارغ'],['notEmpty','غير فارغ']],
+ date:[['eq','في يوم'],['before','قبل'],['after','بعد'],['onOrBefore','في أو قبل'],['onOrAfter','في أو بعد'],['between','بين'],['today','اليوم'],['thisWeek','هذا الأسبوع'],['thisMonth','هذا الشهر'],['empty','فارغ'],['notEmpty','غير فارغ']],
  bool:[['isTrue','نعم'],['isFalse','لا'],['empty','فارغ']]
 };
-const NOVAL=['empty','notEmpty','isTrue','isFalse'];
+const NOVAL=['empty','notEmpty','isTrue','isFalse','today','thisWeek','thisMonth'];
 const n=v=>normalizeArabic(String(v??''));
 const EMPTY='(فارغ)';
 
@@ -40,7 +41,7 @@ function testOp(col,row,op,v1,v2){
  }
  if(type==='date'){
   const d=String(raw||'').slice(0,10);
-  switch(op){case'eq':return d===v1;case'before':return Boolean(d)&&d<v1;case'after':return d>v1;case'between':{const [a,b]=[v1||'0000',v2||'9999'].sort();return Boolean(d)&&d>=a&&d<=b}case'empty':return !d;case'notEmpty':return Boolean(d)}
+  switch(op){case'eq':return d===v1;case'before':return Boolean(d)&&d<v1;case'after':return d>v1;case'onOrBefore':return Boolean(d)&&d<=v1;case'onOrAfter':return d>=v1;case'between':{const [a,b]=[v1||'0000',v2||'9999'].sort();return Boolean(d)&&d>=a&&d<=b}case'today':return d===localDate();case'thisWeek':{const t=localDate(),dow=new Date(t+'T00:00:00').getDay(),monday=addDays(t,dow===0?-6:1-dow);return Boolean(d)&&d>=monday&&d<=addDays(monday,6)}case'thisMonth':return Boolean(d)&&d.slice(0,7)===localDate().slice(0,7);case'empty':return !d;case'notEmpty':return Boolean(d)}
   return true;
  }
  if(type==='bool'){const t=raw===true||raw==='true';const f=raw===false||raw==='false';if(op==='isTrue')return t;if(op==='isFalse')return f;if(op==='empty')return !t&&!f;return true}
@@ -66,18 +67,19 @@ export function mountGrid(root,opts){
  const legacy=(()=>{try{return JSON.parse(localStorage.getItem('grid:'+o.storageKey)||'null')}catch{return null}})();
  const saved=(o.storageKey&&prefs.get(PK))||legacy||{};
  const order=(Array.isArray(saved.order)?saved.order:[]).filter(k=>byKey.has(k));cols.forEach(c=>{if(!order.includes(c.key))order.push(c.key)});
- const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map(),adv:{logic:'and',rules:[]},quick:'',groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:''};
+ const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map((Array.isArray(saved.filters)?saved.filters:[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f?.set?new Set(f.set):null}])),adv:saved.adv&&Array.isArray(saved.adv.rules)?saved.adv:{logic:'and',rules:[]},quick:saved.quick||'',groupBy:byKey.has(saved.groupBy)?saved.groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),widths:{...(saved.widths||{})},fontSize:['small','medium','large'].includes(saved.fontSize)?saved.fontSize:'medium',filterCollapsed:Boolean(saved.filterCollapsed),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:''};
  let hl=null;const collapsed=new Set();
  let view=[];
  root.classList.add('dg');
- root.innerHTML=`<div class="dg-toolbar"><button type="button" class="ghost dg-tools-btn" aria-expanded="false" title="أدوات الجدول">⚙︎ أدوات</button>
+ root.innerHTML=`<div class="dg-toolbar"><button type="button" class="ghost dg-tools-btn" aria-expanded="false" title="أدوات الجدول">⚙︎ أدوات</button><button type="button" class="ghost dg-filter-toggle" aria-expanded="true" title="إظهار أو إخفاء أدوات التصفية">▾ تصفية</button>
   <input class="dg-quick" type="search" placeholder="تصفية داخل النتائج…" aria-label="تصفية داخل النتائج">
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
   <label class="dg-group-lbl">تجميع حسب <select class="dg-groupby"><option value="">بدون</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select></label>
   <button type="button" class="ghost dg-cols-btn">الأعمدة</button>
   <button type="button" class="ghost dg-views-btn" title="حفظ واسترجاع الفلاتر والفرز باسم">★ طرق العرض</button>
   <select class="dg-density" aria-label="كثافة العرض" title="كثافة العرض"><option value="">كثافة: حسب الثيم</option><option value="compact">مضغوط</option><option value="normal">عادي</option><option value="comfortable">مريح</option></select>
-  <button type="button" class="ghost dg-cards-btn" title="تبديل العرض">بطاقات</button>
+  <select class="dg-font" aria-label="حجم خط الجدول" title="حجم الخط"><option value="small">خط صغير</option><option value="medium">خط متوسط</option><option value="large">خط كبير</option></select>
+  <button type="button" class="ghost dg-cards-btn" title="تبديل العرض">بطاقات</button><button type="button" class="ghost dg-fullscreen" title="ملء الشاشة" aria-pressed="false">⛶ ملء الشاشة</button>
   <button type="button" class="ghost dg-clear" hidden>مسح التصفية</button>
   <span class="dg-count" aria-live="polite"></span>
   <span class="dg-spacer"></span>
@@ -89,8 +91,10 @@ export function mountGrid(root,opts){
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
  <div class="dg-more"></div>`;
  const $=s=>root.querySelector(s);
+ root.classList.toggle('dg-filter-open',!st.filterCollapsed);
+ $('.dg-quick').value=st.quick;$('.dg-groupby').value=st.groupBy;$('.dg-font').value=st.fontSize;
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views})};
+ const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,filterCollapsed:st.filterCollapsed})};
  const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards;
  let rowH=0,vStart=-1;
 
@@ -111,7 +115,7 @@ export function mountGrid(root,opts){
  }
  function renderHead(){
   const sortMark=k=>{const i=st.sort.findIndex(s=>s.key===k);if(i<0)return '';return `<span class="dg-sortmark">${st.sort[i].dir==='asc'?'▲':'▼'}${st.sort.length>1?i+1:''}</span>`};
-  $('thead').innerHTML=`<tr>${visibleCols().map(c=>`<th data-key="${esc(c.key)}" class="${st.filters.has(c.key)?'dg-filtered':''}"><div class="dg-th"><button type="button" class="dg-sort" title="فرز (Shift للفرز المتعدد)">${esc(c.label)} ${sortMark(c.key)}</button><button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية وفرز">▾</button></div></th>`).join('')}</tr>`;
+  $('thead').innerHTML=`<tr>${visibleCols().map(c=>{const w=Math.max(90,Math.min(900,Number(st.widths[c.key])||0));return `<th data-key="${esc(c.key)}" ${w?`style="width:${w}px;min-width:${w}px;max-width:${w}px"`:''} class="${st.filters.has(c.key)?'dg-filtered':''}"><div class="dg-th"><button type="button" class="dg-sort" title="فرز (Shift للفرز المتعدد)">${esc(c.label)} ${sortMark(c.key)}</button><button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية وفرز">▾</button></div><span class="dg-resizer" role="separator" tabindex="0" aria-label="تغيير عرض ${esc(c.label)}"></span></th>`}).join('')}</tr>`;
  }
  function cellHtml(c,r){const t=c.text(r);return `<td data-label="${esc(c.label)}"${c.type==='number'?' class="num"':''} title="${esc(t)}">${hl?markHtml(t,hl):esc(t)}</td>`}
  const rowHtml=(r,i,vc)=>`<tr data-i="${i}" tabindex="0" class="${o.onRowClick?'dg-click':''}${st.sel===i?' dg-selected':''}">${vc.map(c=>cellHtml(c,r)).join('')}</tr>`;
@@ -145,8 +149,11 @@ export function mountGrid(root,opts){
   renderChips();renderFoot(vc);
   root.classList.toggle('dg-cards',st.cards);
   ['compact','normal','comfortable'].forEach(d=>root.classList.toggle('dg-d-'+d,st.density===d));$('.dg-density').value=st.density;
+  ['small','medium','large'].forEach(d=>root.classList.toggle('dg-font-'+d,st.fontSize===d));$('.dg-font').value=st.fontSize;
   $('.dg-views-btn').classList.toggle('dg-chip-active',Boolean(st.activeView));
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
+  $('.dg-filter-toggle').setAttribute('aria-expanded',String(!st.filterCollapsed));$('.dg-filter-toggle').textContent=st.filterCollapsed?'▸ تصفية':'▾ تصفية';
+  $('.dg-fullscreen').setAttribute('aria-pressed',String(root.classList.contains('dg-fullscreen')));$('.dg-fullscreen').textContent=root.classList.contains('dg-fullscreen')?'⛶ خروج من الشاشة':'⛶ ملء الشاشة';
  }
  function renderChips(){
   const chips=[];
@@ -167,8 +174,14 @@ export function mountGrid(root,opts){
 
  // ===== أحداث =====
  let qt=0;
- $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{st.quick=e.target.value;st.shown=o.pageSize;compute();renderBody()},120)});
- $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;render()});
+ $('.dg-quick').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{st.quick=e.target.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
+ $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;persist();render()});
+ $('.dg-filter-toggle').addEventListener('click',()=>{st.filterCollapsed=!st.filterCollapsed;root.classList.toggle('dg-filter-open',!st.filterCollapsed);persist();renderBody()});
+ $('.dg-font').addEventListener('change',e=>{st.fontSize=e.target.value;persist();renderBody()});
+ $('.dg-fullscreen').addEventListener('click',async()=>{if(document.fullscreenElement===root){try{await document.exitFullscreen()}catch{}root.classList.remove('dg-fullscreen')}else if(root.requestFullscreen){try{await root.requestFullscreen()}catch{root.classList.toggle('dg-fullscreen')}}else root.classList.toggle('dg-fullscreen');renderBody()});
+ root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});
+ $('thead').addEventListener('pointerdown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle)return;e.preventDefault();const th=handle.closest('th'),key=th?.dataset.key;if(!key)return;const startX=e.clientX,startW=th.getBoundingClientRect().width,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl';let w=startW;const move=ev=>{w=Math.max(90,Math.min(900,startW+(rtl?startX-ev.clientX:ev.clientX-startX)));th.style.width=w+'px';th.style.minWidth=w+'px';th.style.maxWidth=w+'px'};const end=()=>{document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',end,true);document.removeEventListener('pointercancel',end,true);st.widths[key]=Math.round(w);persist();renderBody()};document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',end,true);document.addEventListener('pointercancel',end,true)});
+ $('thead').addEventListener('keydown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle||!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const th=handle.closest('th'),key=th.dataset.key,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl',delta=(e.key==='ArrowRight'?1:-1)*(rtl?-1:1)*12,w=Math.max(90,Math.min(900,(Number(st.widths[key])||th.getBoundingClientRect().width)+delta));st.widths[key]=w;persist();renderHead();[...$('thead').querySelectorAll('th')].find(x=>x.dataset.key===key)?.querySelector('.dg-resizer')?.focus()});
  $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.activeView='';persist();$('.dg-quick').value='';renderAdv();render()});
  $('.dg-chips').addEventListener('click',e=>{
   if(e.target.closest('.dg-chips-clear')){$('.dg-clear').click();return}
@@ -238,18 +251,18 @@ export function mountGrid(root,opts){
   place(pop,th);
   const q=s=>pop.querySelector(s);
   q('.dg-x').onclick=closePop;
-  pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{st.sort=[{key,dir:b.dataset.dir}];closePop();render()});
+  pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{st.sort=[{key,dir:b.dataset.dir}];closePop();persist();render()});
   q('.dg-op').onchange=e=>{q('.dg-vals').innerHTML=valueInputs(type,e.target.value,q('.dg-v1')?.value||'',q('.dg-v2')?.value||'')};
   q('.dg-lsearch').oninput=e=>{const s=n(e.target.value);pop.querySelectorAll('.dg-checks label').forEach(l=>l.hidden=Boolean(s)&&!n(l.textContent).includes(s))};
   q('.dg-allbox').onchange=e=>pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=e.target.checked);
-  q('.dg-reset').onclick=()=>{st.filters.delete(key);closePop();st.shown=o.pageSize;render()};
+  q('.dg-reset').onclick=()=>{st.filters.delete(key);closePop();st.shown=o.pageSize;persist();render()};
   q('.dg-apply').onclick=()=>{
    const op=q('.dg-op').value,v1=q('.dg-v1')?.value??'',v2=q('.dg-v2')?.value??'';
    const boxes=[...pop.querySelectorAll('.dg-checks input')];const checked=boxes.filter(b=>b.checked).map(b=>b.value);
    const set=checked.length===boxes.length?null:new Set(checked);
    const hasCond=NOVAL.includes(op)||v1!==''||v2!=='';
    if(!set&&!hasCond)st.filters.delete(key);else st.filters.set(key,{op:hasCond?op:'',v1,v2,set});
-   closePop();st.shown=o.pageSize;render();
+   closePop();st.shown=o.pageSize;persist();render();
   };
   pop.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();if(e.key==='Enter'&&e.target.matches('input:not([type=checkbox])'))q('.dg-apply').click()});
   q('.dg-op').focus();
@@ -274,14 +287,15 @@ export function mountGrid(root,opts){
   pop.querySelector('.dg-resetcols').onclick=()=>{order.splice(0,order.length,...cols.map(c=>c.key));refresh()};
  });
  // ===== طرق العرض المحفوظة (فلاتر + فرز + أعمدة باسم) =====
- const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order]});
+ const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order],widths:{...st.widths},fontSize:st.fontSize,density:st.density,cards:st.cards,filterCollapsed:st.filterCollapsed});
  function restore(v){
   st.quick=v.quick||'';$('.dg-quick').value=st.quick;
   st.filters=new Map((v.filters||[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f.set?new Set(f.set):null}]));
   st.adv=v.adv||{logic:'and',rules:[]};st.sort=(v.sort||[]).filter(x=>byKey.has(x.key));st.groupBy=byKey.has(v.groupBy)?v.groupBy:'';$('.dg-groupby').value=st.groupBy;
   if(v.hidden)st.hidden=new Set(v.hidden);
   if(v.order){const ord=v.order.filter(k=>byKey.has(k));cols.forEach(c=>{if(!ord.includes(c.key))ord.push(c.key)});order.splice(0,order.length,...ord)}
-  st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length;render();
+  st.widths={...(v.widths||st.widths)};st.fontSize=['small','medium','large'].includes(v.fontSize)?v.fontSize:st.fontSize;st.density=v.density||st.density;st.cards=v.cards===undefined?st.cards:Boolean(v.cards);st.filterCollapsed=Boolean(v.filterCollapsed);root.classList.toggle('dg-filter-open',!st.filterCollapsed);
+  st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;persist();render();
  }
  $('.dg-views-btn').addEventListener('click',e=>{
   closePop();pop=document.createElement('div');pop.className='dg-pop';
@@ -306,12 +320,12 @@ export function mountGrid(root,opts){
    <div class="dg-adv-actions"><button type="button" class="ghost dg-radd">+ شرط</button><button type="button" class="primary dg-rapply">تطبيق</button><button type="button" class="ghost dg-rclear">مسح الشروط</button></div>`;
  }
  const readAdv=()=>{const el=$('.dg-adv');st.adv.logic=el.querySelector('.dg-logic')?.value||'and';el.querySelectorAll('.dg-rule').forEach(div=>{const r=st.adv.rules[Number(div.dataset.i)];r.key=div.querySelector('.dg-rkey').value;r.op=div.querySelector('.dg-rop').value;r.v1=div.querySelector('.dg-v1')?.value??'';r.v2=div.querySelector('.dg-v2')?.value??''})};
- $('.dg-adv-btn').addEventListener('click',()=>{const el=$('.dg-adv');el.hidden=!el.hidden;if(!el.hidden){if(!st.adv.rules.length)st.adv.rules.push({key:cols[0].key,op:OPS[cols[0].type||'text'][0][0],v1:'',v2:''});renderAdv()}});
+ $('.dg-adv-btn').addEventListener('click',()=>{const el=$('.dg-adv');el.hidden=!el.hidden;if(!el.hidden){st.filterCollapsed=false;root.classList.add('dg-filter-open');if(!st.adv.rules.length)st.adv.rules.push({key:cols[0].key,op:OPS[cols[0].type||'text'][0][0],v1:'',v2:''});renderAdv()}persist()});
  $('.dg-adv').addEventListener('click',e=>{
   if(e.target.closest('.dg-radd')){readAdv();const c=visibleCols()[0]||cols[0];st.adv.rules.push({key:c.key,op:OPS[c.type||'text'][0][0],v1:'',v2:''});renderAdv()}
   else if(e.target.closest('.dg-rdel')){readAdv();st.adv.rules.splice(Number(e.target.closest('.dg-rule').dataset.i),1);renderAdv()}
-  else if(e.target.closest('.dg-rapply')){readAdv();st.shown=o.pageSize;render()}
-  else if(e.target.closest('.dg-rclear')){st.adv.rules=[];renderAdv();render()}
+  else if(e.target.closest('.dg-rapply')){readAdv();st.shown=o.pageSize;persist();render()}
+  else if(e.target.closest('.dg-rclear')){st.adv.rules=[];renderAdv();persist();render()}
  });
  $('.dg-adv').addEventListener('change',e=>{
   if(e.target.matches('.dg-rkey')){readAdv();const r=st.adv.rules[Number(e.target.closest('.dg-rule').dataset.i)];r.op=OPS[byKey.get(r.key)?.type||'text'][0][0];r.v1='';r.v2='';renderAdv()}
@@ -320,8 +334,8 @@ export function mountGrid(root,opts){
 
  // ===== الطباعة والتصدير =====
  function matrix(full=true){const vc=visibleCols().filter(c=>full||!(c.sensitive||SENSITIVE.test(c.key)));return {head:vc.map(c=>c.label),body:view.map(r=>vc.map(c=>c.text(r)))}}
- function tableHtml(full=true){const {head,body}=matrix(full);return `<table border="1" cellspacing="0" cellpadding="4" dir="rtl"><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
- function docHtml(forPrint){
+ function tableHtml(full=false){const {head,body}=matrix(full);return `<table border="1" cellspacing="0" cellpadding="4" dir="rtl"><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
+ function docHtml(forPrint,full=false){
   const now=new Date();const stamp=`${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
   const filt=[st.quick&&`بحث: ${st.quick}`,...[...st.filters.keys()].map(k=>`تصفية: ${byKey.get(k)?.label}`),st.adv.rules.length&&`شروط مركبة: ${st.adv.rules.length}`,st.groupBy&&`تجميع: ${byKey.get(st.groupBy)?.label}`].filter(Boolean).join(' — ');
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(o.title||'تقرير')}</title><style>body{font-family:"Noto Sans Arabic","Segoe UI",Tahoma,sans-serif;margin:18px;color:#111}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#444}table{border-collapse:collapse;width:100%;font-size:11px;margin-top:10px}th{background:#eef1f5}th,td{border:1px solid #999;padding:4px 6px;text-align:right;vertical-align:top}thead{display:table-header-group}tr{page-break-inside:avoid}${forPrint?'@page{size:A4 landscape;margin:10mm}':''}</style></head><body><h1>${esc(APP_NAME)}</h1><p><b>${esc(o.title||'تقرير')}</b> — عدد السجلات: ${view.length} — تاريخ الطباعة: ${stamp}</p>${filt?`<p>${esc(filt)}</p>`:''}${tableHtml()}${forPrint?'<script>window.onload=()=>{window.print()}<\/script>':''}</body></html>`;
@@ -337,6 +351,7 @@ export function mountGrid(root,opts){
   else if(kind==='doc'){download('\ufeff'+docHtml(false),base+'.doc','application/msword;charset=utf-8')}
  }
 
+ renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;
  render();
  return {
   setRows(r){rows=r||[];st.shown=o.pageSize;render()},

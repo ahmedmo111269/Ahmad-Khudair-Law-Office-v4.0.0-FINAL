@@ -73,7 +73,7 @@ export async function relatedTimeline(office,{fileId=null,caseId=null,limit=100}
  }
  if(caseId){
   add((await office.r.activityLog.byIndex('entityId',caseId,1000)),'نشاط القضية','timestamp');
-  add(await office.r.hearings.byIndex('caseId',caseId,limit),'جلسة','hearingDate');add(await office.r.procedures.byIndex('caseId',caseId,limit),'إجراء','actionDate');add((await office.r.caseNotes.byIndex('caseId',caseId,limit)),'ملاحظة','createdAt');add(await office.r.witnesses.byIndex('caseId',caseId,limit),'شاهد','createdAt');add(await office.r.expertReports.byIndex('caseId',caseId,limit),'تقرير خبير','reportDate');add(await office.r.judgments.byIndex('caseId',caseId,limit),'حكم','judgmentDate');add(await office.r.execution.byIndex('caseId',caseId,limit),'تنفيذ','openedDate');
+  add(await office.r.hearings.byIndex('caseId',caseId,limit),'جلسة','hearingDate');add(await office.r.procedures.byIndex('caseId',caseId,limit),'إجراء','actionDate');add((await office.r.caseNotes.byIndex('caseId',caseId,limit)),'ملاحظة','createdAt');add(await office.r.expertReports.byIndex('caseId',caseId,limit),'تقرير خبير','reportDate');add(await office.r.judgments.byIndex('caseId',caseId,limit),'حكم','judgmentDate');add(await office.r.execution.byIndex('caseId',caseId,limit),'تنفيذ','openedDate');
  }
  return out.filter(x=>x.date).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,limit);
 }

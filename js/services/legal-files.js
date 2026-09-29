@@ -9,6 +9,7 @@ import {events} from '../core/events.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {clientData,fileData,opponentData} from '../domain/normalizers.js';
 import {allFileTypeFields,phonesOf,isClosedFile} from '../domain/entities.js';
+import {PARTY_ROLE_GROUP_MAP} from '../domain/taxonomy-defaults.js';
 
 const FILE_TEXT_FIELDS=['fileNumber','title','fileType','mainCategory','subCategory','status','responsibleLawyer','coLawyers','staff','nextStep','closeReason','archivedReason','notes'];
 const STAGE_TEXT_FIELDS=['caseNumber','caseYear','numberType','stageType','courtId','chamber','degree','status','subject','policeStation','prosecution'];
@@ -19,7 +20,7 @@ export function partyDisplay(p){return `${p.role?p.role+': ':''}${p.name||''}`}
 export async function refreshFileSearchText(office,fileId){
  if(!fileId)return null;
  const f=await office.r.files.get(fileId);if(!f)return null;
- const [parties,stages]=await Promise.all([office.r.fileParties.byIndex('fileId',fileId,500),office.r.cases.byIndex('fileId',fileId,500)]);
+ const [parties,stages]=await Promise.all([office.r.fileParties.byIndexAll('fileId',fileId),office.r.cases.byIndex('fileId',fileId,500)]);
  const bits=[];
  for(const k of FILE_TEXT_FIELDS)bits.push(f[k]);
  for(const fld of allFileTypeFields())if(typeof f[fld.k]==='string')bits.push(f[fld.k]);
@@ -63,7 +64,7 @@ export async function createLegalFile(office,input){
   await request(tx.objectStore(STORE.files).add(row));
   if(client){
    await request(tx.objectStore(STORE.fileClients).put({id:`${row.id}::${client.id}`,fileId:row.id,clientId:client.id,role:'principal',createdAt:now}));
-   await request(tx.objectStore(STORE.fileParties).put({id:uid(),fileId:row.id,partyKind:'client',clientId:client.id,opponentId:null,name:client.fullName,phone:phonesOf(client)[0]||'',role,createdAt:now,updatedAt:now,version:1,isDeleted:false}));
+   await request(tx.objectStore(STORE.fileParties).put({id:uid(),fileId:row.id,partyKind:'client',partyType:'client',clientId:client.id,opponentId:null,name:client.fullName,partyName:client.fullName,phone:phonesOf(client)[0]||'',role,roleGroup:PARTY_ROLE_GROUP_MAP[role]||'موكلو المكتب',sequence:1,isClient:true,isPrimary:true,isActive:true,activeStatus:'active',notes:'',createdAt:now,updatedAt:now,version:1,isDeleted:false,deletedAt:null}));
   }
   await request(tx.objectStore(STORE.activityLog).add(office.activity('files',row.id,'create',row.id)));
   return row;
@@ -73,15 +74,17 @@ export async function createLegalFile(office,input){
  return out;
 }
 
-// حفظ طرف في ملف. الطرف قد يكون موكلًا مسجلًا أو خصمًا مسجلًا أو طرفًا آخر بالاسم فقط.
-// إذا كُتب اسم جديد لموكل/خصم غير مسجل يُنشأ سجله تلقائيًا (بالاسم فقط، وباقي البيانات لاحقًا).
+// Save one party link. Registered clients remain referenced by clientId; external party data stays on this file link.
 export async function saveParty(office,input,id=null){
- const x={...input};const old=id?await office.r.fileParties.get(id):null;
+ const x={...input};const allowDuplicate=Boolean(x.allowDuplicate);delete x.allowDuplicate;const old=id?await office.r.fileParties.get(id):null;
  if(id&&!old)throw new AppError(ERR.NOT_FOUND,'الطرف غير موجود.');
  const fileId=x.fileId||old?.fileId;if(!fileId)throw new AppError(ERR.VALIDATION,'يجب ربط الطرف بملف.',{fileId:'الملف مطلوب'});
  const file=await office.r.files.get(fileId);if(!file||file.isDeleted)throw new AppError(ERR.NOT_FOUND,'الملف غير موجود.');
  const kind=x.partyKind||old?.partyKind||(x.clientId?'client':x.opponentId?'opponent':'other');
- const name=String(x.name||'').trim();const now=Clock.now();
+ const role=String(x.role||old?.role||(kind==='client'?'موكل':kind==='opponent'?'خصم':'طرف آخر')).trim();
+ const roleChanged=Boolean(old&&old.role!==role);const requestedGroup=String(x.roleGroup||'').trim();
+ const group=String(requestedGroup&&!(roleChanged&&requestedGroup===old?.roleGroup)?requestedGroup:(roleChanged?PARTY_ROLE_GROUP_MAP[role]:old?.roleGroup)||PARTY_ROLE_GROUP_MAP[role]||'أطراف أخرى').trim();
+ const name=String(x.partyName||x.name||old?.partyName||old?.name||'').trim();const now=Clock.now();
  let person=null,newPerson=null;
  if(kind==='client'){
   if(x.clientId)person=await office.r.clients.get(x.clientId);
@@ -90,19 +93,44 @@ export async function saveParty(office,input,id=null){
  }else if(kind==='opponent'){
   if(x.opponentId)person=await office.r.opponents.get(x.opponentId);
   else if(name)newPerson={...opponentData({name}),id:uid(),createdAt:now,updatedAt:now,version:1,isArchived:false,isDeleted:false,deletedAt:null,phones:[]};
-  else throw new AppError(ERR.VALIDATION,'اختر الخصم أو اكتب اسمه.',{opponentId:'مطلوب'});
+  else throw new AppError(ERR.VALIDATION,'اختر الخصم أو اكتب اسمه.',{name:'مطلوب'});
  }else if(!name)throw new AppError(ERR.VALIDATION,'اسم الطرف مطلوب.',{name:'مطلوب'});
  if(person&&person.isDeleted)throw new AppError(ERR.NOT_FOUND,'الشخص المختار محذوف.');
- const p=person||newPerson;
- const row={...(old||{}),...x,id:id||uid(),fileId,partyKind:kind,
+ if(x.clientId&&!person)throw new AppError(ERR.NOT_FOUND,'الموكل المختار غير موجود.');
+ if(x.opponentId&&!person)throw new AppError(ERR.NOT_FOUND,'الخصم المختار غير موجود.');
+ const p=person||newPerson;const personId=kind==='client'?p.id:kind==='opponent'?p.id:'';
+ const row={...(old||{}),...x,id:id||uid(),fileId,partyKind:kind,partyType:kind==='other'?'external':kind,
   clientId:kind==='client'?p.id:null,opponentId:kind==='opponent'?p.id:null,
   name:kind==='client'?p.fullName:kind==='opponent'?p.name:name,
-  phone:p?phonesOf(p)[0]||'':(x.phone||old?.phone||''),role:x.role||old?.role||(kind==='client'?'موكل':kind==='opponent'?'خصم':''),
+  partyName:kind==='client'?p.fullName:kind==='opponent'?p.name:name,
+  phone:p?phonesOf(p)[0]||'':(x.phone||old?.phone||''),role,roleGroup:group,
+  isClient:kind==='client',isPrimary:x.isPrimary===undefined?Boolean(old?.isPrimary):Boolean(x.isPrimary),
+  isActive:x.isActive===undefined?(old?.isActive!==false):Boolean(x.isActive),activeStatus:(x.isActive===undefined?(old?.isActive!==false):Boolean(x.isActive))?'active':'inactive',notes:String(x.notes??old?.notes??''),
   createdAt:old?.createdAt||now,updatedAt:now,version:(old?.version||0)+1,isDeleted:false};
  const stores=[STORE.fileParties,STORE.fileClients,STORE.files,STORE.activityLog,STORE.clients,STORE.opponents];
  await transaction(office.ctx,stores,async tx=>{
+  const partyStore=tx.objectStore(STORE.fileParties);
+  if(kind==='client'&&personId&&!allowDuplicate){
+   const dupe=await request(partyStore.index('fileId_clientId_role').get([fileId,personId,role]));
+   if(dupe&&!dupe.isDeleted&&dupe.id!==id)throw new AppError(ERR.CONFLICT,'يوجد الموكل نفسه بهذه الصفة في هذا الملف. يمكن المتابعة إذا كان التكرار مقصودًا.',{duplicateParty:true,partyId:dupe.id});
+  }
   if(newPerson){const st=kind==='client'?STORE.clients:STORE.opponents;await request(tx.objectStore(st).add(newPerson));await request(tx.objectStore(STORE.activityLog).add(office.activity(st,newPerson.id,'create',fileId)))}
-  await request(tx.objectStore(STORE.fileParties).put(row));
+  if(old?.clientId&&old.clientId!==row.clientId){
+   const linked=await request(partyStore.index('fileId').getAll(IDBKeyRange.only(fileId)));
+   const remains=linked.some(p=>p.id!==old.id&&p.clientId===old.clientId&&!p.isDeleted);
+   if(!remains)await request(tx.objectStore(STORE.fileClients).delete(`${fileId}::${old.clientId}`));
+  }
+  const movedGroup=Boolean(old&&old.roleGroup!==group);
+  const sequenceUnchangedWhileMoving=movedGroup&&Number(x.sequence)===Number(old.sequence);
+  if(!Number.isFinite(Number(x.sequence))||Number(x.sequence)<1||sequenceUnchangedWhileMoving){
+   if(old&&!movedGroup&&Number(old.sequence)>0)row.sequence=Number(old.sequence);
+   else{
+    const range=IDBKeyRange.bound([fileId,group,0],[fileId,group,Number.MAX_SAFE_INTEGER]);
+    const last=await request(partyStore.index('fileId_roleGroup_sequence').openCursor(range,'prev'));
+    row.sequence=(Number(last?.value?.sequence)||0)+1;
+   }
+  }else row.sequence=Math.floor(Number(x.sequence));
+  await request(partyStore.put(row));
   if(kind==='client')await request(tx.objectStore(STORE.fileClients).put({id:`${fileId}::${row.clientId}`,fileId,clientId:row.clientId,role:'principal',createdAt:now}));
   file.lastActivityAt=now;file.updatedAt=now;file.version=(file.version||0)+1;await request(tx.objectStore(STORE.files).put(file));
   await request(tx.objectStore(STORE.activityLog).add(office.activity('fileParties',row.id,id?'update':'create',fileId)));
@@ -113,8 +141,9 @@ export async function saveParty(office,input,id=null){
 }
 export async function removeParty(office,id){
  const old=await office.r.fileParties.get(id);if(!old)throw new AppError(ERR.NOT_FOUND,'الطرف غير موجود.');
- const now=Clock.now();old.isDeleted=true;old.deletedAt=now;old.updatedAt=now;old.version=(old.version||0)+1;
- const others=old.clientId?(await office.r.fileParties.byIndex('fileId',old.fileId,500)).filter(p=>p.id!==id&&p.clientId===old.clientId):[];
+ const now=Clock.now();old.isDeleted=true;old.isActive=false;old.activeStatus='inactive';old.deletedAt=now;old.updatedAt=now;old.version=(old.version||0)+1;
+ const all=old.clientId?await office.r.fileParties.byIndexAll('fileId',old.fileId):[];
+ const others=all.filter(p=>p.id!==id&&p.clientId===old.clientId&&!p.isDeleted);
  await transaction(office.ctx,[STORE.fileParties,STORE.fileClients,STORE.activityLog],async tx=>{
   await request(tx.objectStore(STORE.fileParties).put(old));
   if(old.clientId&&!others.length)await request(tx.objectStore(STORE.fileClients).delete(`${old.fileId}::${old.clientId}`));
@@ -123,9 +152,24 @@ export async function removeParty(office,id){
  events.emit('entity:changed',{entityType:'fileParties',id});
  await refreshFileSearchText(office,old.fileId);
 }
+/** ترتيب الطرف داخل مجموعته مع ضغط التسلسل إلى 1..N؛ لا يغير الصفة أو أي سجل شخصي. */
+export async function moveParty(office,id,direction){
+ const party=await office.r.fileParties.get(id);if(!party||party.isDeleted)throw new AppError(ERR.NOT_FOUND,'الطرف غير موجود.');
+ const group=party.roleGroup||PARTY_ROLE_GROUP_MAP[party.role]||'أطراف أخرى';
+ const rows=(await office.r.fileParties.byIndexAll('fileId',party.fileId)).filter(p=>!p.isDeleted&&(p.roleGroup||PARTY_ROLE_GROUP_MAP[p.role]||'أطراف أخرى')===group)
+  .sort((a,b)=>(Number(a.sequence)||Number.MAX_SAFE_INTEGER)-(Number(b.sequence)||Number.MAX_SAFE_INTEGER)||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||String(a.id).localeCompare(String(b.id)));
+ const from=rows.findIndex(p=>p.id===id),to=from+Math.sign(Number(direction)||0);if(from<0||to<0||to>=rows.length)return party;
+ [rows[from],rows[to]]=[rows[to],rows[from]];const now=Clock.now();
+ await transaction(office.ctx,[STORE.fileParties,STORE.activityLog],async tx=>{
+  const s=tx.objectStore(STORE.fileParties);
+  for(let i=0;i<rows.length;i++){rows[i].sequence=i+1;rows[i].roleGroup=group;rows[i].updatedAt=now;rows[i].version=(rows[i].version||0)+1;await request(s.put(rows[i]))}
+  await request(tx.objectStore(STORE.activityLog).add(office.activity('fileParties',id,'reorder',party.fileId)));
+ });
+ events.emit('entity:changed',{entityType:'fileParties',id});return rows[to];
+}
 // أطراف الملف مع دمج روابط الموكلين القديمة (fileClients) التي لم تُرحّل بعد.
 export async function fileParties(office,fileId){
- const [parties,links]=await Promise.all([office.r.fileParties.byIndex('fileId',fileId,500),office.r.fileClients.byIndex('fileId',fileId,500)]);
+ const [parties,links]=await Promise.all([office.r.fileParties.byIndexAll('fileId',fileId),office.r.fileClients.byIndexAll('fileId',fileId)]);
  const have=new Set(parties.map(p=>p.clientId).filter(Boolean));
  const missing=links.filter(l=>!have.has(l.clientId));
  if(missing.length){const cs=await office.r.clients.getMany(missing.map(l=>l.clientId));for(const c of cs)parties.push({id:null,legacy:true,fileId,partyKind:'client',clientId:c.id,name:c.fullName,phone:phonesOf(c)[0]||'',role:'موكل'})}

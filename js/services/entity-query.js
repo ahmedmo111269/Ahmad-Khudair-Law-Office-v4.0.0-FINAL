@@ -124,27 +124,47 @@ export function presetRange(preset,from,to){
 export const PRESETS=[['all','الكل'],['today','اليوم'],['tomorrow','غدًا'],['week','هذا الأسبوع'],['nextWeek','الأسبوع القادم'],['month','هذا الشهر'],['nextMonth','الشهر القادم'],['year','هذه السنة'],['upcoming','القادم'],['past','السابق'],['custom','فترة مخصصة']];
 
 // ===== علاقات السجلات (لصفحات السجل) =====
+// Keep detail-page fan-out bounded even when one person is linked to thousands of files/cases.
+// Lists remain navigable; the page reports when the displayed relation set is capped.
+const RELATED_FILES_LIMIT=200,RELATED_CASES_LIMIT=1000,RELATED_HEARINGS_LIMIT=1000;
+async function relatedChildren(office,store,index,parents,{perParent=20,maxRows=1000,maxParents=RELATED_FILES_LIMIT,batchSize=25}={}){
+ const source=parents.slice(0,maxParents),rows=[],seen=new Set();let more=parents.length>source.length;
+ for(let i=0;i<source.length&&rows.length<maxRows;i+=batchSize){
+  const batch=source.slice(i,i+batchSize),parts=await Promise.all(batch.map(p=>office.r[store].byIndex(index,p.id,perParent)));
+  for(const part of parts){
+   if(part.length>=perParent)more=true;
+   for(const row of part){if(seen.has(row.id))continue;if(rows.length>=maxRows){more=true;break}seen.add(row.id);rows.push(row)}
+   if(rows.length>=maxRows)break;
+  }
+ }
+ if(rows.length>=maxRows)more=true;
+ return {rows,more};
+}
 export async function clientRelated(office,clientId){
- const [parties,links,poas,appts,comms]=await Promise.all([
+ const [parties,links,poas,appointments,communications]=await Promise.all([
   office.r.fileParties.byIndex('clientId',clientId,1000),office.r.fileClients.byIndex('clientId',clientId,1000),
-  office.r.powersOfAttorney.byIndex('clientId',clientId,1000),office.r.appointments.byIndex('clientId',clientId,500),office.r.communications.byIndex('clientId',clientId,500)]);
- const fileIds=[...new Set([...parties.map(p=>p.fileId),...links.map(l=>l.fileId)])];
- const files=await office.r.files.getMany(fileIds);
+  office.r.powersOfAttorney.byIndex('clientId',clientId,500),office.r.appointments.byIndex('clientId',clientId,500),office.r.communications.byIndex('clientId',clientId,500)]);
+ const allFileIds=[...new Set([...parties.map(p=>p.fileId),...links.map(l=>l.fileId)])];
+ const fileIds=allFileIds.slice(0,RELATED_FILES_LIMIT),files=await office.r.files.getMany(fileIds);
  const roleByFile=new Map();for(const p of parties)roleByFile.set(p.fileId,[roleByFile.get(p.fileId),p.role].filter(Boolean).join('، '));
  for(const f of files)f.clientRole=roleByFile.get(f.id)||'موكل';
- const cases=(await Promise.all(files.map(f=>office.r.cases.byIndex('fileId',f.id,200)))).flat();
- const hearings=(await Promise.all(cases.map(c=>office.r.hearings.byIndex('caseId',c.id,500)))).flat();
- return {files,cases,hearings,poas,appointments:appts,communications:comms};
+ const casesResult=await relatedChildren(office,'cases','fileId',files,{perParent:20,maxRows:RELATED_CASES_LIMIT});
+ const hearingsResult=await relatedChildren(office,'hearings','caseId',casesResult.rows,{perParent:10,maxRows:RELATED_HEARINGS_LIMIT,maxParents:RELATED_CASES_LIMIT});
+ return {files,cases:casesResult.rows,hearings:hearingsResult.rows,poas,appointments,communications,
+  more:{files:allFileIds.length>files.length||parties.length>=1000||links.length>=1000,cases:casesResult.more,hearings:hearingsResult.more||casesResult.more,
+   powersOfAttorney:poas.length>=500,appointments:appointments.length>=500,communications:communications.length>=500}};
 }
 export async function opponentRelated(office,opponentId){
  const [parties,links]=await Promise.all([office.r.fileParties.byIndex('opponentId',opponentId,1000),office.r.caseOpponents.byIndex('opponentId',opponentId,1000)]);
  const legacyCases=await office.r.cases.getMany(links.map(l=>l.caseId));
- const fileIds=[...new Set([...parties.map(p=>p.fileId),...legacyCases.map(c=>c.fileId)])];
+ const allFileIds=[...new Set([...parties.map(p=>p.fileId),...legacyCases.map(c=>c.fileId)])],fileIds=allFileIds.slice(0,RELATED_FILES_LIMIT);
  const files=await office.r.files.getMany(fileIds);
  const roleByFile=new Map();for(const p of parties)roleByFile.set(p.fileId,p.role||'خصم');for(const f of files)f.opponentRole=roleByFile.get(f.id)||'خصم';
- const cases=(await Promise.all(files.map(f=>office.r.cases.byIndex('fileId',f.id,200)))).flat();
- const hearings=(await Promise.all(cases.map(c=>office.r.hearings.byIndex('caseId',c.id,500)))).flat();
- return {files,cases,hearings};
+ const casesResult=await relatedChildren(office,'cases','fileId',files,{perParent:20,maxRows:RELATED_CASES_LIMIT});
+ const allCases=[...new Map([...legacyCases,...casesResult.rows].map(c=>[c.id,c])).values()],cases=allCases.slice(0,RELATED_CASES_LIMIT);
+ const hearingsResult=await relatedChildren(office,'hearings','caseId',cases,{perParent:10,maxRows:RELATED_HEARINGS_LIMIT,maxParents:RELATED_CASES_LIMIT});
+ return {files,cases,hearings:hearingsResult.rows,more:{files:allFileIds.length>files.length||parties.length>=1000||links.length>=1000,
+  cases:casesResult.more||legacyCases.length>=1000||allCases.length>cases.length,hearings:hearingsResult.more||casesResult.more||allCases.length>cases.length}};
 }
 export async function fileStages(office,fileId){
  const cases=await office.r.cases.byIndex('fileId',fileId,500);
@@ -153,9 +173,11 @@ export async function fileStages(office,fileId){
 export async function fileChildren(office,fileId,store){
  const stages=await office.r.cases.byIndex('fileId',fileId,500);
  if(['hearings','judgments','witnesses','expertReports','execution'].includes(store)){
-  const lists=await Promise.all(stages.map(c=>office.r[store].byIndex('caseId',c.id,1000)));
-  return lists.flat();
+  const result=await relatedChildren(office,store,'caseId',stages,{perParent:50,maxRows:5000,maxParents:500});
+  result.more=result.more||stages.length>=500;
+  return result;
  }
- return office.r[store].byIndex('fileId',fileId,2000);
+ const rows=await office.r[store].byIndex('fileId',fileId,5000);
+ return {rows,more:rows.length>=5000};
 }
 export {fmtDate,phonesOf};

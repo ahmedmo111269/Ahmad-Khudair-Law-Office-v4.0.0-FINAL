@@ -36,7 +36,7 @@ export function listPage(app,store,query){
  if(query?.get('q')!==null&&query?.get('q')!==undefined)st.q=query.get('q');
  const hasDate=Boolean(ent.dateField);
  const presetLabel=store==='procedures'?[...PRESETS.slice(0,1),['overdue','المتأخرة'],...PRESETS.slice(1)]:PRESETS;
- return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','witnesses','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
+ return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
   <div class="head-actions"><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
  <div class="list-controls">
   <input id="list-q" type="search" class="list-search" value="${esc(st.q)}" placeholder="بحث فوري شامل…" autocomplete="off" aria-label="بحث">

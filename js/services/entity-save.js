@@ -7,6 +7,7 @@ import {savePoa} from './lifecycle.js';
 import {saveGeneric} from './generic.js';
 import {createLegalFile,saveParty,removeParty,saveRelation,refreshFileSearchText} from './legal-files.js';
 import {opponentData} from '../domain/normalizers.js';
+import {saveServiceRecord,saveBailiff} from './service-records.js';
 
 const OPERATIONAL=['hearings','procedures','appointments','communications','caseNotes'];
 const JUDICIAL=['witnesses','expertReports','judgments','execution'];
@@ -21,6 +22,8 @@ export async function saveEntity(office,store,data,id=null,expectedVersion=null)
    if(!data.fileId)throw new AppError(ERR.VALIDATION,'يجب اختيار الملف.',{fileId:'الملف مطلوب'});
    row=id?await office.saveCase(data,id,expectedVersion):await office.createCase(data,[]);
    await refreshFileSearchText(office,row.fileId);break;}
+  case 'serviceRecords':row=await saveServiceRecord(office,data,id);break;
+  case 'bailiffs':row=await saveBailiff(office,data,id);break;
   case 'powersOfAttorney':row=await savePoa(office,data,id);break;
   case 'fees':row=await saveFee(office,data,id);break;
   case 'feePayments':row=id?await saveGeneric(office,'feePayments',{...data,amount:Number(data.amount||0)},id):await addFeePayment(office,data);break;

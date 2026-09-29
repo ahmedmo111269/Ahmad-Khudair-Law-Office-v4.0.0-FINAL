@@ -11,7 +11,7 @@ import {AppError,ERR} from '../core/errors.js';
 import {events} from '../core/events.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {phonesOf,isClosedFile} from '../domain/entities.js';
-import {DEFAULT_TAXONOMY,FIELD_SETS,RELATION_TYPES} from '../domain/taxonomy-defaults.js';
+import {DEFAULT_TAXONOMY,FIELD_SETS,RELATION_TYPES,PARTY_ROLE_GROUP_MAP} from '../domain/taxonomy-defaults.js';
 import {refreshFileSearchText} from './legal-files.js';
 
 const META_TAX='taxonomy',META_MIG='clientFilesV12';
@@ -186,8 +186,8 @@ export async function createLegalFileInClientFile(office,input){
  const type=input.fileTypeId?tax.byId.get(input.fileTypeId):null;if(input.fileTypeId&&(!type||type.parentId!==cat.id))throw new AppError(ERR.VALIDATION,'نوع العمل لا يتبع القسم المختار.');
  const openedAt=input.openedAt||Clock.today();if(!/^\d{4}-\d{2}-\d{2}$/.test(openedAt))throw new AppError(ERR.VALIDATION,'تاريخ الفتح غير صحيح.',{openedAt:'تاريخ غير صحيح'});
  const related=input.related?.fileId?await office.r.files.get(input.related.fileId):null;
- if(input.related?.fileId&&!related)throw new AppError(ERR.NOT_FOUND,'الملف المرتبط غير موجود.');
- const relatedParties=related&&input.related.copyParties!==false?await office.r.fileParties.byIndex('fileId',related.id,500):[];
+ if(input.related?.fileId&&(!related||related.isDeleted))throw new AppError(ERR.NOT_FOUND,'الملف المرتبط غير موجود.');
+ const relatedParties=related&&input.related.copyParties!==false?await office.r.fileParties.byIndexAll('fileId',related.id):[];
  const now=Clock.now(),year=openedAt.slice(0,4);
  const steps=(input.steps||[]).filter(s=>String(s.name||'').trim());
  const file={id:uid(),categoryId:cat.id,fileTypeId:type?.id||null,
@@ -200,6 +200,8 @@ export async function createLegalFileInClientFile(office,input){
  const out=await transaction(office.ctx,[STORE.files,STORE.cases,STORE.clients,STORE.clientFiles,STORE.fileNumberCounters,STORE.fileClients,STORE.fileParties,STORE.fileRelations,STORE.activityLog],async tx=>{
   const client=await request(tx.objectStore(STORE.clients).get(input.clientId));
   if(!client||client.isDeleted)throw new AppError(ERR.NOT_FOUND,'الموكل غير موجود.');
+  const relatedRow=related?await request(tx.objectStore(STORE.files).get(related.id)):null;
+  if(related&&(!relatedRow||relatedRow.isDeleted))throw new AppError(ERR.CONFLICT,'الملف الأصلي المرتبط لم يعد متاحًا.');
   const cf=await ensureClientFileTx(office,tx,client,now);
   file.clientFileId=cf.id;
   file.fileNumber=`LF-${year}-${pad(await nextCounter(tx,'lf',year))}`;
@@ -215,19 +217,36 @@ export async function createLegalFileInClientFile(office,input){
   await request(tx.objectStore(STORE.files).add(file));
   await request(tx.objectStore(STORE.fileClients).put({id:`${file.id}::${client.id}`,fileId:file.id,clientId:client.id,role:'principal',createdAt:now}));
   const fp=tx.objectStore(STORE.fileParties);
-  await request(fp.put({id:uid(),fileId:file.id,partyKind:'client',clientId:client.id,opponentId:null,name:client.fullName,phone:phonesOf(client)[0]||'',role,createdAt:now,updatedAt:now,version:1,isDeleted:false}));
-  // نسخ روابط الأطراف من الملف الأصل (روابط لنفس الأشخاص، لا نسخ لبياناتهم)
-  for(const p of relatedParties){if(p.partyKind==='client'&&p.clientId===client.id)continue;await request(fp.put({...p,id:uid(),fileId:file.id,createdAt:now,updatedAt:now,version:1,copiedFrom:p.id}))}
+  const clientGroup=PARTY_ROLE_GROUP_MAP[role]||'موكلو المكتب';
+  await request(fp.put({id:uid(),fileId:file.id,partyKind:'client',partyType:'client',clientId:client.id,opponentId:null,name:client.fullName,partyName:client.fullName,phone:phonesOf(client)[0]||'',role,roleGroup:clientGroup,sequence:1,isClient:true,isPrimary:true,isActive:true,activeStatus:'active',notes:'',createdAt:now,updatedAt:now,version:1,isDeleted:false,deletedAt:null}));
+  // نسخ روابط الأطراف كروابط مستقلة دون نسخ سجلات الأشخاص؛ تُحفظ أيضًا علاقات الموكلين المنسوخة.
+  const groupSequence=new Map([[clientGroup,1]]);
+  for(const p of relatedParties){
+   const kind=p.partyKind||(p.clientId?'client':p.opponentId?'opponent':'other');
+   if(kind==='client'){
+    if(!p.clientId||p.clientId===client.id&&p.role===role)continue;
+    const linkedClient=await request(tx.objectStore(STORE.clients).get(p.clientId));
+    if(!linkedClient||linkedClient.isDeleted)continue;
+   }
+   const group=p.roleGroup||PARTY_ROLE_GROUP_MAP[p.role]||'أطراف أخرى';const sequence=(groupSequence.get(group)||0)+1;groupSequence.set(group,sequence);
+   const copied={...p,id:uid(),fileId:file.id,partyKind:kind,partyType:p.partyType||(kind==='other'?'external':kind),partyName:p.partyName||p.name||'',roleGroup:group,sequence,isClient:p.isClient??(kind==='client'),isPrimary:Boolean(p.isPrimary),isActive:p.isActive!==false,activeStatus:p.isActive===false?'inactive':'active',notes:p.notes||'',createdAt:now,updatedAt:now,version:1,isDeleted:false,deletedAt:null,copiedFrom:p.id};
+   await request(fp.put(copied));
+   if(kind==='client')await request(tx.objectStore(STORE.fileClients).put({id:`${file.id}::${copied.clientId}`,fileId:file.id,clientId:copied.clientId,role:'principal',createdAt:now}));
+  }
   if(related){
    const code=RELATION_TYPES[input.related.relationCode]?input.related.relationCode:'RELATED_TO';
-   await request(tx.objectStore(STORE.fileRelations).put({id:uid(),sourceFileId:file.id,targetFileId:related.id,relationCode:code,relationType:RELATION_TYPES[code].label,notes:input.related.notes||'',createdAt:now,updatedAt:now,version:1,isDeleted:false}));
-   await request(tx.objectStore(STORE.activityLog).add(office.activity('fileRelations',related.id,'link',related.id)));
+   const relation={id:uid(),sourceFileId:file.id,targetFileId:related.id,relationCode:code,relationType:RELATION_TYPES[code].label,notes:input.related.notes||'',createdAt:now,updatedAt:now,version:1,isDeleted:false};
+   await request(tx.objectStore(STORE.fileRelations).put(relation));
+   relatedRow.lastActivityAt=now;relatedRow.updatedAt=now;relatedRow.version=(relatedRow.version||0)+1;
+   await request(tx.objectStore(STORE.files).put(relatedRow));
+   await request(tx.objectStore(STORE.activityLog).add(office.activity('fileRelations',relation.id,'link',related.id)));
   }
   cf.lastActivityAt=now;cf.updatedAt=now;await request(tx.objectStore(STORE.clientFiles).put(cf));
   await request(tx.objectStore(STORE.activityLog).add(office.activity('files',file.id,'create',file.id)));
   return file;
  });
  events.emit('entity:changed',{entityType:'files',id:out.id});
+ if(related)events.emit('entity:changed',{entityType:'files',id:related.id});
  await refreshFileSearchText(office,out.id);
  return out;
 }

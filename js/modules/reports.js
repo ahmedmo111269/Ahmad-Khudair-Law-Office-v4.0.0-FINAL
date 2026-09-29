@@ -6,17 +6,23 @@ import {ENTITIES,FILE_TYPE_GROUPS,fmtDate,label} from '../domain/entities.js';
 import {loadRows,resolveRefs,presetRange,PRESETS,agenda} from '../services/entity-query.js';
 import {columnsFor,openRow} from './list-page.js';
 import {localDate} from '../core/clock.js';
+import {prefs} from '../core/preferences.js';
+import {modal,closeModal,confirmBox} from '../ui/modal.js';
+import {toast} from '../ui/toast.js';
 
 const GROUPS=[
  ['الملفات والأشخاص',['files','clients','opponents','fileParties','fileRelations','powersOfAttorney']],
- ['القضايا والجلسات',['cases','hearings','judgments','expertReports','witnesses','execution']],
- ['الأعمال والمتابعة',['procedures','appointments','communications','caseNotes']],
+ ['القضايا والجلسات',['cases','hearings','judgments','expertReports','execution']],
+ ['الأعمال والمتابعة',['procedures','appointments','communications','caseNotes','serviceRecords']],
+ ['المحضرون والمرجعيات',['bailiffs']],
  ['المالية والمستندات والنشاط',['fees','feePayments','documentReferences','activityLog']]
 ];
+const readSavedReports=()=>{const value=prefs.get('reports:saved',[]);return Array.isArray(value)?value.filter(r=>r&&r.id&&r.name&&r.definition):[]};
 const dateFields=store=>{const e=ENTITIES[store];const fs=[...e.fields,...(store==='files'?Object.values(FILE_TYPE_GROUPS).flatMap(g=>g.fields):[])].filter(f=>f.t==='date'||f.dt==='date'||f.dt==='datetime').map(f=>[f.k,f.l]);for(const [k,l] of [['createdAt','تاريخ الإنشاء'],['updatedAt','تاريخ آخر تعديل']])if(!fs.some(x=>x[0]===k))fs.push([k,l]);return fs};
 
 export async function reportsPage(app,query){
  const st=app.__report=app.__report||{type:'hearings',preset:'week',from:'',to:'',q:'',limit:2000,dateField:'',title:''};
+ const savedReports=readSavedReports();
  if(query?.get('type')){st.type=query.get('type');st.preset=query.get('preset')||'all';st.from=query.get('from')||'';st.to=query.get('to')||'';st.q=query.get('q')||'';st.dateField='';st.auto=true}
  if(st.type!=='agenda'&&!ENTITIES[st.type])st.type='hearings';
  const df=st.type==='agenda'?[]:dateFields(st.type);
@@ -34,6 +40,7 @@ export async function reportsPage(app,query){
   <label>عنوان التقرير<input name="title" value="${esc(st.title)}" placeholder="يُكوَّن تلقائيًا"></label>
   <div class="filter-actions"><button class="primary" type="submit">عرض التقرير</button></div>
  </form></section>
+ <section class="panel saved-report-panel"><div><b>التقارير المحفوظة</b><p class="muted small">تُحفظ تعريفات التقرير محليًا كتفضيلات للمستخدم، ولا تتضمن نسخًا من السجلات.</p></div><div class="saved-report-controls"><select id="saved-report" aria-label="التقرير المحفوظ"><option value="">اختر تقريرًا محفوظًا</option>${savedReports.map(r=>`<option value="${esc(r.id)}"${st.savedReportId===r.id?' selected':''}>${esc(r.name)}</option>`).join('')}</select><button type="button" class="ghost" data-report-load>تحميل</button><button type="button" class="ghost" data-report-save>حفظ الشروط الحالية</button><button type="button" class="ghost danger" data-report-delete>حذف التعريف</button></div></section>
  <div id="report-status" class="report-result-note" aria-live="polite" hidden></div>
  <div id="report-grid"></div>`;
 }
@@ -43,8 +50,22 @@ export function bindReports(app){
  const sync=()=>{const custom=form.preset.value==='custom';form.querySelectorAll('.rng').forEach(l=>l.hidden=!custom)};
  form.preset.addEventListener('change',sync);sync();
  form.type.addEventListener('change',()=>{st.type=form.type.value;st.dateField='';st.preset=form.preset.value;app.refresh()});
- form.addEventListener('submit',e=>{e.preventDefault();Object.assign(st,{type:form.type.value,dateField:form.dateField?.value||'',preset:form.preset.value,from:form.from.value,to:form.to.value,q:form.q.value,limit:Number(form.limit.value),title:form.title.value});run(app).catch(err=>app.fail(err))});
+ form.addEventListener('submit',e=>{e.preventDefault();Object.assign(st,reportDefinitionFromForm(form));run(app).catch(err=>app.fail(err))});
+ document.querySelector('[data-report-save]')?.addEventListener('click',()=>saveReportDefinition(app,form));
+ document.querySelector('[data-report-load]')?.addEventListener('click',async()=>{const id=document.querySelector('#saved-report').value;const saved=readSavedReports().find(r=>r.id===id);if(!saved){toast('اختر تقريرًا محفوظًا أولًا.','error');return}Object.assign(st,saved.definition,{auto:true,savedReportId:id});await app.refresh()});
+ document.querySelector('[data-report-delete]')?.addEventListener('click',async()=>{const select=document.querySelector('#saved-report'),id=select.value;if(!id){toast('اختر تقريرًا محفوظًا أولًا.','error');return}if(!await confirmBox('حذف تعريف التقرير المحفوظ؟ لا تُحذف أي سجلات.',{okText:'حذف التعريف'}))return;const list=readSavedReports().filter(r=>r.id!==id);await prefs.set('reports:saved',list);if(st.savedReportId===id)st.savedReportId='';toast('تم حذف تعريف التقرير');await app.refresh()});
  if(st.auto){st.auto=false;run(app).catch(err=>app.fail(err))}
+}
+
+function reportDefinitionFromForm(form){
+ const get=name=>form.elements.namedItem(name)?.value||'';
+ return {type:get('type'),dateField:get('dateField'),preset:get('preset')||'all',from:get('from'),to:get('to'),q:get('q'),limit:Number(get('limit'))||2000,title:get('title')};
+}
+async function saveReportDefinition(app,form){
+ const definition=reportDefinitionFromForm(form);
+ const card=modal(`<h2 class="modal-title">حفظ تعريف التقرير</h2><form id="saved-report-form" class="entity-form"><label>اسم التقرير<input name="name" maxlength="100" required placeholder="مثال: جلسات الأسبوع الحالي"></label><p class="muted small">سيُحفظ نوع البيانات والفترة والبحث والحد وعنوان التقرير فقط، دون نسخ سجلات قاعدة المكتب. استخدام اسم محفوظ سابقًا يستبدل تعريفه.</p><div class="form-actions"><button class="primary">حفظ التعريف</button><button type="button" class="ghost" data-cancel>إلغاء</button></div></form>`);
+ const saveForm=card.querySelector('#saved-report-form');card.querySelector('[data-cancel]').onclick=closeModal;
+ saveForm.onsubmit=async event=>{event.preventDefault();const name=saveForm.elements.name.value.trim();if(!name)return;const list=readSavedReports();const found=list.find(r=>r.name.toLocaleLowerCase()===name.toLocaleLowerCase());const record={id:found?.id||`report-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,name,definition,updatedAt:new Date().toISOString()};if(found)list[list.indexOf(found)]=record;else list.unshift(record);await prefs.set('reports:saved',list);app.__report.savedReportId=record.id;closeModal();const select=document.querySelector('#saved-report');if(select){select.innerHTML='<option value="">اختر تقريرًا محفوظًا</option>'+list.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');select.value=record.id}toast('تم حفظ تعريف التقرير محليًا')};
 }
 
 async function run(app){
