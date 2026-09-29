@@ -23,6 +23,13 @@ export function section(key,title,count,body,{open=true,add=''}={}){
  return `<details class="rec-section" data-sec="${esc(key)}" ${open?'open':''}><summary><span>${esc(title)}</span>${count!==null&&count!==undefined?`<span class="count">${count}</span>`:''}</summary>${add?`<div class="sec-actions">${add}</div>`:''}<div class="sec-body">${body}</div></details>`;
 }
 const refRoute={files:'file',cases:'case',clients:'client',opponents:'opponent'};
+function relatedCount(r,key,rows){return `${rows.length}${r.more?.[key]?'+':''}`}
+function relatedLimitNotice(r){
+ const labels={files:'الملفات',cases:'القضايا',hearings:'الجلسات',powersOfAttorney:'التوكيلات',appointments:'المواعيد',communications:'الاتصالات'};
+ const limited=Object.keys(labels).filter(key=>r.more?.[key]);
+ if(!limited.length)return '';
+ return `<div class="notice" role="status"><b>عرض محدود:</b> قد توجد سجلات مرتبطة إضافية. عُرضت ${limited.map(key=>esc(labels[key])).join('، ')} حتى حد الصفحة؛ استخدم القوائم والبحث العام للوصول إلى بقية السجلات. لم تُحذف أو تُغيّر أي بيانات.</div>`;
+}
 const CLIENT_SECTIONS=[['data','البيانات الكاملة'],['files','الملفات'],['cases','القضايا والمراحل'],['poa','التوكيلات'],['hearings','الجلسات'],['appointments','المواعيد'],['communications','الاتصالات']];
 function orderedClientSectionKeys(){const saved=prefs.get('client-sections:order',[]),valid=new Set(CLIENT_SECTIONS.map(x=>x[0])),order=Array.isArray(saved)?saved.filter((k,i)=>valid.has(k)&&saved.indexOf(k)===i):[];return [...order,...CLIENT_SECTIONS.map(x=>x[0]).filter(k=>!order.includes(k))]}
 function clientSectionOrderDialog(app){
@@ -47,15 +54,15 @@ export async function clientPage(app,id){
  const refs=await resolveRefs(app.office,[c],ENTITIES.clients.fields);
  const parts={
   data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.clients.fields,c,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:false}),
-  files:section('files','الملفات',r.files.length,'<div data-grid="files"></div>',{add:'<button class="ghost" data-add="files">+ ملف جديد لهذا الموكل</button>'}),
-  cases:section('cases','القضايا والمراحل',r.cases.length,'<div data-grid="cases"></div>'),
-  poa:section('poa','التوكيلات',r.poas.length,'<div data-grid="powersOfAttorney"></div>',{add:'<button class="ghost" data-add="powersOfAttorney">+ توكيل</button>'}),
-  hearings:section('hearings','الجلسات',r.hearings.length,'<div data-grid="hearings"></div>'),
-  appointments:section('appointments','المواعيد',r.appointments.length,'<div data-grid="appointments"></div>',{open:false,add:'<button class="ghost" data-add="appointments">+ موعد</button>'}),
-  communications:section('communications','الاتصالات',r.communications.length,'<div data-grid="communications"></div>',{open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
+  files:section('files','الملفات',relatedCount(r,'files',r.files),'<div data-grid="files"></div>',{add:'<button class="ghost" data-add="files">+ ملف جديد لهذا الموكل</button>'}),
+  cases:section('cases','القضايا والمراحل',relatedCount(r,'cases',r.cases),'<div data-grid="cases"></div>'),
+  poa:section('poa','التوكيلات',relatedCount(r,'powersOfAttorney',r.poas),'<div data-grid="powersOfAttorney"></div>',{add:'<button class="ghost" data-add="powersOfAttorney">+ توكيل</button>'}),
+  hearings:section('hearings','الجلسات',relatedCount(r,'hearings',r.hearings),'<div data-grid="hearings"></div>'),
+  appointments:section('appointments','المواعيد',relatedCount(r,'appointments',r.appointments),'<div data-grid="appointments"></div>',{open:false,add:'<button class="ghost" data-add="appointments">+ موعد</button>'}),
+  communications:section('communications','الاتصالات',relatedCount(r,'communications',r.communications),'<div data-grid="communications"></div>',{open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
  };
  return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?`<span class="badge type mono">${esc(c.clientCode)}</span>`:''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
- <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-order-client-sections>⚙ ترتيب الأقسام</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
+ <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-order-client-sections>⚙ ترتيب الأقسام</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
 }
 export async function bindClientPage(app,id){
  const root=document.querySelector('#main-content');const r=app.__rec.related;
@@ -84,9 +91,9 @@ export async function opponentPage(app,id){
  return `<div class="record-head"><div><small class="muted">خصم</small><h2>${esc(o.name)}</h2><p class="badges">${phonesOf(o).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${o.capacity?`<span class="badge">${esc(o.capacity)}</span>`:''}</p></div>
  <div class="head-actions"><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:false})}
- ${section('files','الملفات',r.files.length,'<div data-grid="files"></div>')}
- ${section('cases','القضايا والمراحل',r.cases.length,'<div data-grid="cases"></div>')}
- ${section('hearings','الجلسات',r.hearings.length,'<div data-grid="hearings"></div>')}`;
+ ${relatedLimitNotice(r)}${section('files','الملفات',relatedCount(r,'files',r.files),'<div data-grid="files"></div>')}
+ ${section('cases','القضايا والمراحل',relatedCount(r,'cases',r.cases),'<div data-grid="cases"></div>')}
+ ${section('hearings','الجلسات',relatedCount(r,'hearings',r.hearings),'<div data-grid="hearings"></div>')}`;
 }
 export async function bindOpponentPage(app,id){
  const root=document.querySelector('#main-content');const r=app.__rec.related;

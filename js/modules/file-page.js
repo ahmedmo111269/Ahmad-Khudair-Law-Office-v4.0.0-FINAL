@@ -96,12 +96,14 @@ async function renderTabContent(app){
  const needStage=what=>`<div class="notice">لإضافة ${what} يجب أولًا إضافة رقم قضائي / مرحلة في تبويب «البيانات القضائية». الملف نفسه لا يحتاج قضية.</div>`;
  if(tab==='summary'){
   const today=localDate();
-  const [hearings,procedures]=await Promise.all([fileChildren(office,id,'hearings'),office.r.procedures.byIndex('fileId',id,2000)]);
+  const [hearingResult,procedures]=await Promise.all([fileChildren(office,id,'hearings'),office.r.procedures.byIndex('fileId',id,2000)]);
+  const hearings=hearingResult.rows;
   const upcoming=hearings.filter(h=>h.hearingDate>=today).sort((a,b)=>String(a.hearingDate||'').localeCompare(String(b.hearingDate||''))||String(a.hearingTime||'').localeCompare(String(b.hearingTime||''))).slice(0,2);
   const last=hearings.filter(h=>h.hearingDate<today).sort((a,b)=>String(b.hearingDate||'').localeCompare(String(a.hearingDate||'')))[0];
   const openProc=procedures.filter(p=>!p.status||['open','pending'].includes(p.status));
   const refs=new Map();
-  el.innerHTML=`<div class="stats-grid"><div class="stat-card"><strong>${stages.length}</strong><span>أرقام / مراحل</span></div><div class="stat-card"><strong>${hearings.length}</strong><span>جلسات</span></div><div class="stat-card"><strong>${openProc.length}</strong><span>أعمال مفتوحة</span></div><div class="stat-card"><strong>${parties.length}</strong><span>أطراف</span></div></div>
+  el.innerHTML=`<div class="stats-grid"><div class="stat-card"><strong>${stages.length}${stages.length>=500?'+':''}</strong><span>أرقام / مراحل</span></div><div class="stat-card"><strong>${hearings.length}${hearingResult.more?'+':''}</strong><span>جلسات</span></div><div class="stat-card"><strong>${openProc.length}</strong><span>أعمال مفتوحة</span></div><div class="stat-card"><strong>${parties.length}</strong><span>أطراف</span></div></div>
+   ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
    <div class="grid2 file-hearing-cards"><section class="panel"><div class="panel-head"><h3>الجلسات القادمة</h3><span class="badge">${upcoming.length} / 2</span></div>${upcoming.map((h,i)=>`<button class="hearing-preview" data-open="hearings:${esc(h.id)}"><span class="hearing-order">${i+1}</span><span><b>${fmtDate(h.hearingDate)}</b> ${esc(h.hearingTime||'')}<small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.reason?' — '+esc(h.reason):''}</small></span><span aria-hidden="true">↗</span></button>`).join('')||'<p class="muted empty-inline">لا توجد جلسات قادمة مسجلة.</p>'}</section>
    <section class="panel"><div class="panel-head"><h3>الجلسة السابقة</h3></div>${last?`<button class="hearing-preview" data-open="hearings:${esc(last.id)}"><span class="hearing-order">‹</span><span><b>${fmtDate(last.hearingDate)}</b><small>${esc(last.result||'لم يُسجل القرار')}${last.adjournedTo?' — التأجيل إلى '+fmtDate(last.adjournedTo):''}</small></span><span aria-hidden="true">↗</span></button>`:'<p class="muted empty-inline">لا توجد جلسات سابقة مسجلة.</p>'}<button class="ghost small" data-show-hearing-cycle>عرض دورة الجلسات</button></section></div>
    ${stages.length?`<section class="panel"><h3>تسلسل المراحل</h3><ol class="stage-chain">${stages.map(s=>`<li><button class="link" data-open-case="${s.id}">${esc(s.stageType||s.numberType||'مرحلة')}<br><small>${esc(s.caseNumber||'بدون رقم')}${s.caseYear?'/'+esc(s.caseYear):''}</small></button></li>`).join('')}</ol></section>`:''}
@@ -136,9 +138,10 @@ async function renderTabContent(app){
   return;
  }
  if(tab==='hearings'||tab==='judgments'){
-  const store=tab;const rows=await fileChildren(office,id,store);
+  const store=tab,childResult=await fileChildren(office,id,store),rows=childResult.rows;
   const what=store==='hearings'?'جلسة':'حكم';
-  el.innerHTML=stages.length?`<div class="sec-actions"><button class="primary" data-add>+ ${what}</button>${store==='hearings'?'<button class="ghost" data-hearing-cycle>عرض دورة الجلسات</button>':''}</div><div data-grid></div>`:`${needStage(what)}<div data-grid></div>`;
+  const limitNotice=childResult.more?'<div class="notice" role="status">تعرض الصفحة حتى 5,000 سجل مرتبط؛ قد توجد سجلات إضافية. لم تُحذف أو تُغيّر أي بيانات.</div>':'';
+  el.innerHTML=stages.length?`${limitNotice}<div class="sec-actions"><button class="primary" data-add>+ ${what}</button>${store==='hearings'?'<button class="ghost" data-hearing-cycle>عرض دورة الجلسات</button>':''}</div><div data-grid></div>`:`${needStage(what)}${limitNotice}<div data-grid></div>`;
   el.querySelector('[data-add]')?.addEventListener('click',()=>{const cur=stages.at(-1);openEntityForm(app,store,{stageOptions:stageOptions(stages),preset:{caseId:cur?.id||'',...(store==='hearings'?{fileId:id,court:cur?.courtId||'',chamber:cur?.chamber||''}:{fileId:id,court:cur?.courtId||'',chamber:cur?.chamber||'',stage:cur?.stageType||''})},onSaved:()=>reload(app)})});
   el.querySelector('[data-hearing-cycle]')?.addEventListener('click',()=>showHearingCycle(app,rows[0]?.id||''));
   rows.sort((a,b)=>String(b[store==='hearings'?'hearingDate':'judgmentDate']||'').localeCompare(String(a[store==='hearings'?'hearingDate':'judgmentDate']||'')));
