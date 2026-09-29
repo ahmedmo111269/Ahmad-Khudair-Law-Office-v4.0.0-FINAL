@@ -8,11 +8,18 @@ export const DEFAULT_LIMIT=1000;
 export const MAX_LIMIT=5000;
 
 const SKIP=/^(id|version|isDeleted|isArchived)$|Id$|Normalized$|^searchText$/;
+// مذكّرة لكل كائن صف: البحث الفوري يعيد تقييم نفس الصفوف عشرات المرات أثناء الكتابة.
+const ROW_TEXT=new WeakMap();
 export function rowText(row){
+ if(!row||typeof row!=='object')return '';
+ let t=ROW_TEXT.get(row);
+ if(t!==undefined)return t;
  const bits=[];
- for(const [k,v] of Object.entries(row||{})){if(SKIP.test(k)||v===null||v===undefined||v==='')continue;if(Array.isArray(v))bits.push(v.join(' '));else if(typeof v!=='object')bits.push(String(v))}
- if(row?.searchText)bits.push(row.searchText);
- return normalizeArabic(bits.join(' '));
+ for(const [k,v] of Object.entries(row)){if(SKIP.test(k)||v===null||v===undefined||v==='')continue;if(Array.isArray(v))bits.push(v.join(' '));else if(typeof v!=='object')bits.push(String(v))}
+ if(row.searchText)bits.push(row.searchText);
+ t=normalizeArabic(bits.join(' '));
+ try{ROW_TEXT.set(row,t)}catch{}
+ return t;
 }
 export const normQ=q=>normalizeArabic(normalizeDigits(String(q||''))).trim();
 

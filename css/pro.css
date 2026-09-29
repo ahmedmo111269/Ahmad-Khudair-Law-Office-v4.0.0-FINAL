@@ -1,0 +1,167 @@
+/* =========================================================================
+   pro.css — طبقة تجربة الاستخدام الاحترافية (v4.6)
+   إشعارات، لوحة أوامر، هياكل تحميل، مؤشرات الرئيسية، آخر ما فُتح،
+   الخط الزمني الموحد، إمكانية الوصول، وتحسينات الهاتف — كلها من التوكنز.
+   ========================================================================= */
+
+/* ---------- 1) التركيز وإمكانية الوصول ---------- */
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+.dg-table tbody tr:focus-visible,.dg-table tbody tr:focus{outline:2px solid var(--primary);outline-offset:-2px}
+.skip:focus{z-index:999}
+
+/* ---------- 2) الإشعارات (Toasts) ---------- */
+#toast-stack{position:fixed;bottom:18px;inset-inline-start:18px;display:flex;flex-direction:column;gap:8px;z-index:1000;max-width:min(420px,calc(100vw - 32px));pointer-events:none}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:10px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-inline-start:4px solid var(--info);border-radius:var(--radius-sm);padding:11px 13px;box-shadow:var(--shadow-md);font-size:.92rem;opacity:0;transform:translateY(8px);transition:opacity .18s ease,transform .18s ease}
+.toast.toast-in{opacity:1;transform:none}
+.toast.toast-out{opacity:0;transform:translateY(6px)}
+.toast .toast-msg{flex:1;overflow-wrap:anywhere}
+.toast .toast-ic{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:.8rem;background:var(--info-soft,var(--surface2));color:var(--info)}
+.toast.t-ok{border-inline-start-color:var(--success)}.toast.t-ok .toast-ic{background:var(--success-soft,var(--surface2));color:var(--success)}
+.toast.t-error{border-inline-start-color:var(--danger)}.toast.t-error .toast-ic{background:var(--danger-soft,var(--surface2));color:var(--danger)}
+.toast.t-warn{border-inline-start-color:var(--warn)}.toast.t-warn .toast-ic{background:var(--warn-soft,var(--surface2));color:var(--warn)}
+.toast .toast-x{flex:none;border:0;background:transparent;color:var(--text-muted);cursor:pointer;padding:2px 4px;border-radius:6px;font-size:.8rem}
+.toast .toast-x:hover{color:var(--text);background:var(--surface2)}
+
+/* ---------- 3) هياكل التحميل (Skeletons) ---------- */
+.skel-page{padding:8px 0}
+.skel{position:relative;overflow:hidden;background:var(--surface2);border-radius:var(--radius-sm)}
+.skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text) 6%,transparent),transparent);animation:skel-sweep 1.3s infinite}
+@keyframes skel-sweep{to{transform:translateX(100%)}}
+.skel-hero{height:92px;margin-bottom:16px}
+.skel-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.skel-card{height:110px}
+.skel-block{height:180px;margin-bottom:16px}
+@media(max-width:800px){.skel-row{grid-template-columns:repeat(2,1fr)}}
+
+/* ---------- 4) الرئيسية: تحية + مؤشرات + آخر ما فُتح ---------- */
+.hero-home{flex-wrap:wrap;gap:14px}
+.hero-home h2{margin:0}
+.hero-date{margin:6px 0 0;opacity:.85;font-size:.95rem}
+.hero-quick{display:flex;gap:8px;flex-wrap:wrap}
+.kpi-strip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 10px;text-align:center;cursor:pointer;transition:border-color var(--transition),transform var(--transition)}
+.kpi:hover{border-color:var(--primary);transform:translateY(-1px)}
+.kpi b{display:block;font-size:1.45rem;line-height:1.2;color:var(--text-strong)}
+.kpi span{font-size:.78rem;color:var(--text-muted)}
+.kpi-warn b{color:var(--warn)}
+@media(max-width:1100px){.kpi-strip{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:640px){.kpi-strip{grid-template-columns:repeat(2,1fr)}}
+.recents-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.recents-lbl{font-size:.85rem;color:var(--text-muted);flex:none}
+.recents-chips{display:flex;gap:8px;flex-wrap:wrap}
+.recent-chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-pill);padding:7px 13px;font-size:.86rem;cursor:pointer;max-width:280px;transition:border-color var(--transition)}
+.recent-chip:hover{border-color:var(--primary);background:var(--primary-soft)}
+.recent-chip .rc-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.work-click{width:100%;text-align:start;border:0;background:transparent;color:var(--text);font:inherit;border-radius:var(--radius-sm);transition:background var(--transition)}
+.work-click:hover{background:var(--row-hover)}
+.work-click b{color:var(--text-strong)}
+
+/* ---------- 5) لوحة الأوامر ---------- */
+.palette-card{width:min(640px,100%);padding:14px 16px 10px}
+.palette-card .modal-nav{display:none}
+.pal-title{display:flex;align-items:center;gap:8px;font-size:1.05rem}
+.pal-title .ic{width:18px;height:18px;color:var(--primary)}
+.pal-wrap{display:grid;gap:8px}
+.pal-q{width:100%;padding:12px 14px;font-size:1.02rem;border:1px solid var(--primary-border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);outline:none}
+.pal-q:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+.pal-list{max-height:min(52vh,420px);overflow:auto;display:flex;flex-direction:column;gap:2px;min-height:120px}
+.pal-group{font-size:.72rem;font-weight:700;color:var(--text-muted);padding:10px 6px 3px;text-transform:uppercase;letter-spacing:.4px}
+.pal-item{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:10px;width:100%;text-align:start;border:0;background:transparent;color:var(--text);padding:9px 8px;border-radius:var(--radius-sm);cursor:pointer}
+.pal-item .ic{width:18px;height:18px;color:var(--text-muted)}
+.pal-item.on,.pal-item:hover{background:var(--row-selected)}
+.pal-item.on .ic,.pal-item:hover .ic{color:var(--primary)}
+.pal-item mark{background:transparent;color:var(--primary);font-weight:800}
+.pal-label{display:flex;flex-direction:column;min-width:0}
+.pal-label b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pal-label small{color:var(--text-muted);font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pal-item kbd{flex:none}
+.pal-empty{padding:22px;text-align:center}
+.pal-foot{display:flex;gap:14px;padding:6px 4px 2px;border-top:1px solid var(--border-subtle)}
+kbd{display:inline-block;padding:2px 7px;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;background:var(--surface2);color:var(--text);font-family:var(--font-mono);font-size:.72rem}
+.kbd-help{display:grid;gap:4px;margin:10px 0}
+.kbd-row{display:grid;grid-template-columns:170px 1fr;gap:12px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--border-subtle)}
+.kbd-row:last-child{border-bottom:0}
+@media(max-width:640px){.kbd-row{grid-template-columns:1fr;gap:4px}}
+
+/* ---------- 6) الإضافة السريعة ---------- */
+.quick-card .qa-filter{width:100%;padding:11px 13px;margin-bottom:4px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
+.quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.quick-item{display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);padding:14px 8px;cursor:pointer;transition:border-color var(--transition),background var(--transition)}
+.quick-item:hover{border-color:var(--primary);background:var(--primary-soft)}
+.quick-ic .ic{width:24px;height:24px;color:var(--primary)}
+@media(max-width:640px){.quick-grid{grid-template-columns:repeat(3,1fr)}}
+
+/* ---------- 7) الخط الزمني الموحد ---------- */
+.tl-panel .tl-summary{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+.tl-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface2);border-radius:var(--radius-pill);padding:6px 12px;font-size:.8rem;cursor:pointer}
+.tl-chip b{color:var(--text-strong)}
+.tl-chip.on{background:var(--primary-soft);border-color:var(--primary-border)}
+.tl-next{background:var(--primary-soft);border:1px solid var(--primary-border);border-radius:var(--radius-sm);padding:10px 13px;margin-bottom:14px;font-size:.9rem}
+.tl-wrap{position:relative;padding-inline-start:18px}
+.tl-wrap::before{content:'';position:absolute;inset-inline-start:5px;top:6px;bottom:6px;width:2px;background:var(--border);border-radius:2px}
+.tl-seg{margin:12px 0 6px;font-size:.8rem;color:var(--text-muted)}
+.tl-item{position:relative;display:grid;grid-template-columns:110px 1fr;gap:12px;width:calc(100% - 4px);text-align:start;border:0;background:transparent;color:var(--text);font:inherit;padding:8px 8px 8px 8px;border-radius:var(--radius-sm);margin:2px 0}
+.tl-item::before{content:'';position:absolute;inset-inline-start:-17px;top:16px;width:9px;height:9px;border-radius:50%;background:var(--text-muted);box-shadow:0 0 0 3px var(--surface)}
+.tl-open{cursor:pointer}
+.tl-open:hover{background:var(--row-hover)}
+.tl-open:hover::before{background:var(--primary)}
+.tl-ff::before{background:var(--primary)}
+.tl-dot{display:none}
+.tl-when time{font-size:.8rem;color:var(--text-muted);font-family:var(--font-mono);direction:ltr;display:inline-block}
+.tl-body b{font-weight:600;color:var(--text-strong)}
+.tl-kind{display:inline-block;font-size:.7rem;font-weight:800;color:var(--primary);background:var(--primary-soft);border-radius:6px;padding:1px 7px;margin-inline-end:6px}
+.tl-body small{display:block;color:var(--text-muted);margin-top:3px;font-size:.82rem}
+.tl-now{position:relative;margin:10px 0;height:20px}
+.tl-now span{position:absolute;inset-inline-start:-90px;top:2px;font-size:.68rem;font-weight:800;color:var(--warn);background:var(--warn-soft,var(--surface2));border-radius:var(--radius-pill);padding:2px 9px}
+@media(max-width:640px){.tl-item{grid-template-columns:1fr;gap:2px}.tl-when{order:2}.tl-wrap::before{inset-inline-start:-11px}}
+
+/* ---------- 8) نتائج البحث ---------- */
+.sr-ic{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--primary-soft);color:var(--primary)}
+.sr-ic .ic{width:18px;height:18px}
+.search-result{transition:border-color var(--transition),background var(--transition)}
+.search-result:hover{border-color:var(--primary-border)}
+.search-result mark{background:color-mix(in srgb,var(--primary) 30%,transparent);color:var(--text-strong);border-radius:3px;padding:0 1px}
+.search-result.kbd-focus{outline:2px solid var(--primary);outline-offset:0}
+#advanced-results .search-result{cursor:pointer}
+
+/* ---------- 9) الشريط الجانبي: مجموعات قابلة للطي ---------- */
+#main-nav .nav-sep{display:flex;align-items:center;justify-content:space-between;gap:6px;color:var(--chrome-text);opacity:.65;font-size:.74rem;font-weight:800;margin:10px 0 2px;padding:4px 8px;cursor:pointer;user-select:none;border-radius:var(--radius-sm)}
+#main-nav .nav-sep::after{content:'▾';font-size:.7rem;transition:transform var(--transition)}
+#main-nav .nav-sep.collapsed::after{transform:rotate(-90deg)}
+#main-nav .nav-sep:hover{opacity:1;background:var(--chrome-hover)}
+body:not(.sidebar-collapsed) #main-nav hr{display:none}
+
+/* ---------- 10) خلفية الشريط الجانبي على الهاتف ---------- */
+#sidebar-backdrop{position:fixed;inset:0;background:var(--overlay,rgba(0,0,0,.45));z-index:29;backdrop-filter:blur(2px)}
+@media(min-width:901px){#sidebar-backdrop{display:none}}
+
+/* ---------- 11) الهاتف: شريط علوي مضغوط مع تنقل حاضر ---------- */
+@media(max-width:1200px){
+  .top-actions #nav-back span,.top-actions #nav-close span,.top-actions #nav-home span{display:none}
+  .top-actions #command-btn span,.top-actions #command-btn kbd{display:none}
+}
+@media(max-width:900px){
+  .topbar{height:60px;padding:8px 10px}
+  .topbar h1{font-size:16px}
+  /* إظهار التنقل الأساسي دائمًا على الهاتف (كان مخفيًا تمامًا) */
+  .top-actions #nav-back,.top-actions #nav-home,.top-actions #command-btn{display:inline-flex!important}
+  .top-actions #nav-back span,.top-actions #nav-home span,.top-actions #command-btn span,.top-actions #command-btn kbd{display:none}
+  .top-actions #nav-close{display:none!important}
+  .top-actions #quick-add{padding:8px 12px}
+  #toast-stack{inset-inline-start:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  #main-content{padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
+}
+
+/* ---------- 12) أداء الرسم في الصفحات الطويلة ---------- */
+.rec-section{content-visibility:auto;contain-intrinsic-size:auto 120px}
+.dashboard-grid>.panel{content-visibility:auto;contain-intrinsic-size:auto 320px}
+
+/* ---------- 13) حركات محترمة: تفضيل تقليل الحركة ووضع بلا مؤثرات ---------- */
+@media(prefers-reduced-motion:reduce){
+  .skel::after,.toast,.modal-card,.modal-backdrop{animation:none!important;transition:none!important}
+}
+:root[data-effects="off"] .skel::after{animation:none;display:none}
+:root[data-effects="off"] .toast,:root[data-effects="off"] .kpi,:root[data-effects="off"] .recent-chip,:root[data-effects="off"] .work-click{transition:none}
+
+/* ---------- 14) طباعة: أخفِ مكونات الشاشة فقط ---------- */
+@media print{#toast-stack,#sidebar-backdrop,.palette-card,.pal-wrap,.kbd-help{display:none!important}}

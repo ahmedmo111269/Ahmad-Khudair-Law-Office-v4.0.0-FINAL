@@ -14,6 +14,9 @@ import {hearingCycle} from '../services/operations.js';
 import {serviceCycle} from '../services/service-records.js';
 import {createReannouncement} from './service-records.js';
 import {openLegalFileWizard} from './client-file.js';
+import {buildCaseTimeline} from '../services/timeline.js';
+import {timelineHtml,bindTimeline} from './timeline-view.js';
+import {trackRecent} from '../services/recents.js';
 
 export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
  const items=fields.map(f=>{const v=displayValue(f,row,refs);if(skipEmpty&&!v)return '';const link=f.ref&&row[f.k]?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}</dd></div>`}).join('');
@@ -49,6 +52,7 @@ async function confirmDelete(app,store,id){
 export async function clientPage(app,id){
  const c=await app.office.r.clients.get(id);
  if(!c||c.isDeleted)return notFound('الموكل');
+ trackRecent('client:'+id,c.fullName||'موكل',{icon:'users',sub:c.clientCode||''});
  app.__rec={store:'clients',id,related:await clientRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[c],ENTITIES.clients.fields);
@@ -85,6 +89,7 @@ export async function bindClientPage(app,id){
 export async function opponentPage(app,id){
  const o=await app.office.r.opponents.get(id);
  if(!o||o.isDeleted)return notFound('الخصم');
+ trackRecent('opponent:'+id,o.name||'خصم',{icon:'userX',sub:o.capacity||''});
  app.__rec={store:'opponents',id,related:await opponentRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[o],ENTITIES.opponents.fields);
@@ -126,7 +131,9 @@ export async function recordPage(app,store,id){
  if(store==='cases')await Promise.all(CASE_CHILDREN.map(async([s])=>{children[s]=await app.office.r[s].byIndex('caseId',id,2000)}));
  if(store==='fees')children.feePayments=await app.office.r.feePayments.byIndex('feeId',id,2000);
  const activity=await app.office.r.activityLog.byIndex('entityId',id,200);
- app.__rec={store,id,row,children,activity,hearingSequence,serviceSequence};
+ const caseTimeline=store==='cases'?await buildCaseTimeline(app.office,id):null;
+ app.__rec={store,id,row,children,activity,hearingSequence,serviceSequence,caseTimeline};
+ trackRecent(`rec:${store}:${id}`,ent.title(row)||ent.label,{icon:{hearings:'calendar',appointments:'clock',communications:'phone',fees:'wallet',judgments:'landmark',procedures:'clipboard',caseNotes:'note',serviceRecords:'file',expertReports:'microscope',execution:'hammer'}[store]||'file',sub:ent.label});
  const parentBtns=ent.fields.filter(f=>f.ref&&row[f.k]).map(f=>`<button class="ghost" data-open-ref="${esc(f.ref)}:${esc(row[f.k])}">فتح ${esc(f.l.replace(/\s*\(.*\)/,''))}: ${esc(refs.get(row[f.k])||'')}</button>`).join('');
  const extraBtns=[
   store==='hearings'?'<button class="ghost" data-show-hearing-cycle>عرض دورة الجلسات</button><button class="ghost" data-next-hearing>+ الجلسة التالية</button><button class="ghost" data-hearing-service>+ إعلان مرتبط بالجلسة</button>':'',
@@ -140,6 +147,7 @@ export async function recordPage(app,store,id){
  ${section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:true})}
  ${store==='hearings'?section('hearing-cycle','دورة الجلسات',hearingSequence?.items.length||0,`<ol class="hearing-cycle">${(hearingSequence?.items||[]).map((h,i)=>`<li style="--depth:${Math.min(6,h.__depth||0)}"><button type="button" data-cycle-hearing="${esc(h.id)}"><time>${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(h.hearingTime):''}</time><b>${esc(h.type||'جلسة')}</b><small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></button>${i<(hearingSequence?.items.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
  ${store==='serviceRecords'?section('service-cycle','دورة الإعلان / الإنذار',serviceSequence?.records.length||0,`${serviceSequence?.hasBranches?'<p class="notice">توجد أكثر من إعادة مرتبطة بسجل واحد؛ عُرضت الفروع كما سُجلت.</p>':''}${serviceSequence?.more?'<p class="notice">تعرض دورة الملف أول 5000 سجل نشط؛ استخدم التقرير العام لتضييق نطاق السجلات الأقدم.</p>':''}<ol class="hearing-cycle service-cycle">${(serviceSequence?.records||[]).map((r,i)=>`<li style="--depth:${Math.min(6,r.__depth||0)}"><button type="button" data-cycle-service="${esc(r.id)}"><time>${fmtDate(r.createdAt)||'بدون تاريخ'}${r.serviceDate?' — '+fmtDate(r.serviceDate):''}</time><b>${esc(r.actionType||r.type||'إعلان')} · ${esc(r.internalNumber||'')}</b><small>${esc(r.partyName||'')} ${r.partyRole?'— '+esc(r.partyRole):''} · ${esc(r.status||'')}</small></button>${i<(serviceSequence?.records.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
+ ${store==='cases'?section('case-timeline','الخط الزمني الموحد للقضية',caseTimeline?.timeline.length||0,`<div data-case-timeline>${timelineHtml(caseTimeline,{compact:true})}</div>`,{open:Boolean(caseTimeline&&caseTimeline.timeline.length>0)}):''}
  ${store==='cases'?CASE_CHILDREN.map(([s,l])=>section(s,l,children[s].length,`<div data-grid="${s}"></div>`,{open:children[s].length>0,add:`<button class="ghost" data-add="${s}">+ إضافة</button>`})).join(''):''}
  ${store==='fees'?section('payments','الدفعات',children.feePayments.length,'<div data-grid="feePayments"></div>',{add:'<button class="ghost" data-add="feePayments">+ دفعة</button>'}):''}
  ${section('activity','سجل النشاط',activity.length,'<div data-grid="activityLog"></div>',{open:false})}`;
@@ -157,6 +165,7 @@ export async function bindRecordPage(app,store,id){
  root.querySelector('[data-hearing-service]')?.addEventListener('click',()=>openEntityForm(app,'serviceRecords',{preset:{fileId:row.fileId,caseId:row.caseId,hearingId:id},onSaved:()=>app.refresh()}));
  root.querySelector('[data-case-service]')?.addEventListener('click',()=>openEntityForm(app,'serviceRecords',{preset:{fileId:row.fileId,caseId:id},onSaved:()=>app.refresh()}));
  root.querySelector('[data-create-related-file]')?.addEventListener('click',()=>createRelatedFromRecord(app,row,store));
+ bindTimeline(root.querySelector('[data-case-timeline]')||root,{onOpen:r=>app.go(r.startsWith('rec:')?r:'rec:'+r)});
  root.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const s=b.dataset.add;const preset=store==='cases'?{caseId:id,fileId:row.fileId,...(s==='hearings'?{court:row.courtId||'',chamber:row.chamber||''}:{}),...(s==='judgments'?{court:row.courtId||'',chamber:row.chamber||'',stage:row.stageType||''}:{})}:store==='fees'?{feeId:id}:{};openEntityForm(app,s,{preset})});
  root.querySelector('[data-next-hearing]')?.addEventListener('click',()=>openEntityForm(app,'hearings',{preset:{fileId:row.fileId,caseId:row.caseId,previousHearingId:row.id,hearingDate:row.adjournedTo||'',court:row.court||'',chamber:row.chamber||'',type:row.type||'',reason:row.nextAction||row.reason||'',relatedPartyIds:row.relatedPartyIds||[]},title:'إضافة الجلسة التالية'}));
  const jobs=[];

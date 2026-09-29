@@ -7,7 +7,7 @@ export function modal(html){
  root.querySelector('[data-modal-home]')?.addEventListener('click',()=>{closeModal();window.__LAW_OFFICE_APP__?.go('dashboard')});
  return root.querySelector('.modal-card');
 }
-export function closeModal(){document.querySelector('#modal-root').innerHTML=''}
+export function closeModal(){document.querySelector('#modal-root').innerHTML='';try{document.dispatchEvent(new CustomEvent('modal:closed'))}catch{}}
 export function confirmBox(message,{okText='تأكيد',input=false,placeholder='',label='السبب / ملاحظة',value=''}={}){
  return new Promise(resolve=>{
   const card=modal(`<h2 class="modal-title">تأكيد</h2><p>${message}</p>${input?`<label>${label}<textarea class="confirm-input" rows="2" placeholder="${placeholder}">${String(value).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"})[c])}</textarea></label>`:''}<div class="form-actions"><button class="primary" type="button" data-ok>${okText}</button><button class="ghost" type="button" data-cancel>إلغاء</button></div>`);

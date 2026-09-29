@@ -14,6 +14,18 @@
 
 # PROJECT MAP
 
+## v4.6.0 — تجربة استخدام احترافية (UX/UI/أداء، بلا تغيير Schema)
+- `js/ui/palette.js` — لوحة أوامر عالمية (Ctrl+K): أوامر ثابتة (تنقل + إجراءات سريعة)، نتائج حية عبر `services/search.js`، و«آخر ما فُتح»؛ منطق الترشيح/التمييز مفصول (`filterCommands`/`scoreCommand`/`highlightMatch`) لقابلية الاختبار. `modal.js` يبث حدث `modal:closed` لمزامنة أي نافذة.
+- `js/services/recents.js` — حلقة «آخر ما فُتح» (12 عنصرًا) في تفضيلات المستخدم؛ تُسجَّل من صفحات السجل (`record-page.js`، `file-page.js`) وتُعرض في الرئيسية واللوحة والبحث.
+- `js/modules/timeline-view.js` — عارض الخط الزمني الموحد فوق `services/timeline.js` (التي كانت خدمة بلا واجهة): تبويب في صفحة الملف + قسم في صفحة القضية، فلاتر بالنوع، فاصل «الآن»، فتح الحدث بنقرة.
+- `js/modules/home.js` + `services/dashboard.js` — تحية حسب الوقت (`format.js: greetingKey/longDateAr`)، شريط 7 مؤشرات تفاعلية، صفوف عمل قابلة للنقر، واستعلامات مواعيد/متابعات/ملفات صامتة إضافية بحدود معلنة.
+- `css/pro.css` — طبقة مكونات 4.6 كلها من التوكنز: إشعارات (`ui/toast.js` أُعيد بناؤه: حاوية/أيقونات/إغلاق/تراكم)، هياكل تحميل (Skeletons في `app.js` و`file-page.js`)، KPI، شرائح آخر ما فُتح، الخط الزمني، لوحة الأوامر، كيبورد `kbd`، تركيز `:focus-visible`، خلفية الشريط الجانبي، ظهور أزرار التنقل على الهاتف، `content-visibility` للأداء، واحترام `prefers-reduced-motion` و`data-effects=off`.
+- `js/app.js` — Ctrl+K للوحة (بدل الانتقال لصفحة البحث)، `?` مساعدة اختصارات، Alt+1…9 تنقل سريع، طي مجموعات الشريط الجانبي (`ui:nav-groups`)، `aria-current`، عنوان تبويب ديناميكي، خلفية جوال للقائمة.
+- `js/ui/form.js` — حفظ بـ Ctrl+Enter وتركيز أول خطأ؛ `js/services/entity-query.js` — مذكّرة `rowText` (WeakMap) لتسريع البحث الفوري؛ `js/modules/search.js` — أسهم/Enter وتمييز مطابقة وآخر ما فُتح في الفراغ؛ `js/modules/quick-add.js` — أيقونات Lucide وفلترة فورية.
+- `sw.js` — كاش v4.6.0 + أصول جديدة (pro.css, palette, recents, timeline-view, pagination.js الذي كان غائبًا عن التخزين المسبق).
+- الاختبارات: `js/tests/ux-tests.js` (11 اختبارًا جديدًا) ضمن `tests.html` → 51 اختبارًا.
+
+
 ## v4.5.0 — Parties, Hearing Chains, Bailiffs and Service Records (schema v13)
 - `js/services/legal-files.js` — party groups, role/sequence ordering, explicit duplicate-client confirmation, safe removal and file relationships.
 - `js/services/operations.js` — predecessor-linked hearing cycles and atomic independent follow-up session creation on adjournment dates.
@@ -38,7 +50,7 @@
 - `css/client-file.css` — styles for the above. Stores added: clientFiles, taxonomy, caseTemplates, assets, fileAssets.
 
 ## Current release
-4.5.0 — Flexible parties, hearing cycles, bailiff/service-record lifecycle, saved reports and configurable grids. `APP_VERSION=4.5.0`, `SCHEMA_VERSION=13`.
+4.6.0 — تجربة استخدام احترافية: لوحة أوامر، خط زمني موحد، آخر ما فُتح، رئيسية تفاعلية، هاتف أفضل، إشعارات وهيكل تحميل. `APP_VERSION=4.6.0`, `SCHEMA_VERSION=13`.
 
 ## Architecture
 `UI → App/Services → Domain → Repository → IndexedDB`
