@@ -84,8 +84,8 @@ class App{
  }
  bindCrossTab(){if(this.boundCrossTab)return;this.boundCrossTab=true;events.on('db:switched',async p=>{if(!p?.profileId)return;/* local emit from this tab's own switch: manager already holds the target */if(this.manager.current?.profile?.id===p.profileId&&!this.manager.current.closed)return;try{this.registry.reload?.();if(this.registry.active?.id!==p.profileId)return;if(this.ctx?.profile?.id===p.profileId)return;await this.switchDb(p.profileId,{remote:true});toast('تم تبديل قاعدة البيانات من نافذة أخرى');await this.refresh()}catch(e){console.error('remote db switch',e);toast('تعذر مزامنة تبديل قاعدة البيانات من نافذة أخرى','error')}});events.on('db:migration:starting',p=>{if(p?.profileId===this.registry.active?.id&&this.ctx)toast('تجري ترقية قاعدة البيانات...');});events.on('db:closing',p=>{if(p?.profileId===this.ctx?.profile?.id&&this.ctx&&!this.ctx.closed&&this.manager.current===this.ctx){this.ctx.closed=true;toast('تم إغلاق اتصال قاعدة البيانات. أعد فتح القاعدة أو أعد تحميل الصفحة.','error')}});window.addEventListener('storage',e=>{if(e.key===constants.REGISTRY_KEY&&e.newValue){try{this.registry.reload?.();$('#db-badge').textContent=this.registry.active?.displayName||''}catch{}}});}
  bindShell(){
-  // الشريط الجانبي الموحّد v5: يُبنى من تعريف واحد (ui/sidebar.js) مع مجموعات
-  // قابلة للطي، ووضع مطوي بتلميحات على سطح المكتب، وقائمة منزلقة على الهاتف.
+  // شريط التنقل العلوي الموحّد v6: يُبنى من تعريف واحد (ui/nav-model.js) كتبويبات
+  // أفقية بعرض مساحة البرنامج، مع لوحات منظمة لكل تبويب، وطي، وتخصيص كامل.
   buildSidebar();initSidebarState();
   $('#mobile-menu').onclick=()=>{isDesktop()?toggleCollapsed():toggleMobile()};
   $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
@@ -94,7 +94,8 @@ class App{
   $('#nav-back').onclick=()=>this.back();
   $('#nav-close').onclick=()=>this.closePage();
   $('#nav-home').onclick=()=>this.go('dashboard');
-  document.querySelectorAll('#sidebar [data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
+  // تفويض واحد لكل عناصر التنقل، فيبقى صالحًا بعد أي إعادة رسم للشريط (التخصيص مثلًا)
+  $('#sidebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
   this.initShortcuts();
  }
  // اختصارات لوحة المفاتيح: Ctrl+K اللوحة، ? المساعدة، Alt+رقم للتنقل السريع
@@ -104,14 +105,14 @@ class App{
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
    if((e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
    if(e.key==='Escape'&&!document.querySelector('.dg-pop')){
-    if(!isDesktop()&&document.querySelector('#sidebar.open')){closeMobile();return}
+    if(!isDesktop()&&closeMobile())return; // إغلاق لوحة تنقل الهاتف المفتوحة إن وُجدت
     if(paletteOpen()){closePalette();return}closeModal();return}
    if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
    if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
   });
  }
  showShortcutsHelp(){
-  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح الشريط الجانبي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
   modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
  async go(route,opts={}){
@@ -124,7 +125,7 @@ class App{
   this.history=this.history.slice(-50);this.route=route;appStore.set({route});
   const baseRoute=route.split('?')[0];const query=new URLSearchParams(route.includes('?')?route.split('?')[1]:'');
   const page=recordRoute(baseRoute)||PAGES[baseRoute]||PAGES.dashboard;
-  const navKey=page.store||baseRoute; // صفحة السجل تُبرز قائمة كيانها في الشريط الجانبي
+  const navKey=page.store||baseRoute; // صفحة السجل تُبرز قائمة كيانها في شريط التنقل العلوي
   setActiveRoute(navKey);
   $('#page-title').textContent=page.title;
   document.title=`${page.title} — ${constants.APP_NAME}`;
@@ -141,7 +142,7 @@ class App{
    main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
-   closeMobile(); // على الهاتف: تُغلق القائمة الجانبية تلقائيًا بعد اختيار الصفحة
+   closeMobile(); // على الهاتف: تُغلق لوحة التنقل تلقائيًا بعد اختيار الصفحة
    if(baseRoute!=='dashboard')prefs.set('ui:last-route',{route,title:page.title,at:Date.now()});
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}
