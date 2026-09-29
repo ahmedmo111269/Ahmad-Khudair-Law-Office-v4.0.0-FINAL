@@ -106,7 +106,7 @@ select option{background:var(--surface);color:var(--text)}
 .dg-tools-btn{display:none}
 @media (max-width:760px){
  .dg-tools-btn{display:inline-flex}
- .dg:not(.dg-tools-open) .dg-toolbar>:is(.dg-adv-btn,.dg-group-lbl,.dg-cols-btn,.dg-views-btn,.dg-density,.dg-print,.dg-export,.dg-spacer){display:none}
+ .dg:not(.dg-tools-open) .dg-toolbar>:is(.dg-adv-btn,.dg-group-lbl,.dg-cols-btn,.dg-views-btn,.dg-density,.dg-font,.dg-print,.dg-export,.dg-fullscreen,.dg-spacer){display:none}
  .dg-toolbar .dg-quick{flex:1 1 140px;min-width:0}
  .dg-table tfoot{display:none}
 }

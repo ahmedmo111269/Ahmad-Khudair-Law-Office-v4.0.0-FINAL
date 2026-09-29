@@ -10,7 +10,9 @@ const REQUIRED={
   appointments:['id','date'],communications:['id','fileId'],caseNotes:['id','fileId','content'],
   witnesses:['id','caseId','name'],expertReports:['id','caseId','reportDate'],judgments:['id','caseId','judgmentDate'],
   execution:['id','caseId','status'],fees:['id','fileId','agreedAmount'],feePayments:['id','feeId','amount','date'],
-  documentReferences:['id','fileId','title'],powersOfAttorney:['id','clientId'],activityLog:['id','entityType','entityId','action','timestamp']
+  documentReferences:['id','fileId','title'],powersOfAttorney:['id','clientId'],activityLog:['id','entityType','entityId','action','timestamp'],
+  fileParties:['id','fileId','partyKind','role'],fileRelations:['id','sourceFileId','targetFileId'],
+  serviceRecords:['id','fileId','actionType','status'],bailiffs:['id','name']
 };
 const OPEN=(db,name,mode='readonly')=>db.transaction(name,mode).objectStore(name);
 const scan=(db,name,visit,{maxRows=Infinity}={})=>new Promise((resolve,reject)=>{const s=OPEN(db,name);const c=s.openCursor();let n=0;c.onerror=()=>reject(c.error);c.onsuccess=()=>{const cur=c.result;if(!cur||n>=maxRows){resolve(n);return}n++;try{visit(cur.value);cur.continue()}catch(e){reject(e)}}});
@@ -27,12 +29,17 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
   }
   if(scanRows){
     const sets={};
-    for(const n of ['clients','files','cases','opponents','fees','staff']){sets[n]=new Set();if(!out.schemaIssues.some(x=>x.store===n&&x.type==='missing-store'))await scan(ctx.db,n,row=>{if(row?.id)sets[n].add(row.id)})}
+    for(const n of ['clients','files','cases','opponents','fees','staff','fileParties','fileRelations','hearings','serviceRecords','bailiffs']){sets[n]=new Set();if(!out.schemaIssues.some(x=>x.store===n&&x.type==='missing-store'))await scan(ctx.db,n,row=>{if(row?.id)sets[n].add(row.id)})}
     const relationRules=[
       ['fileClients','fileId','files','clientId','clients'],['caseClients','caseId','cases','clientId','clients'],['caseOpponents','caseId','cases','opponentId','opponents'],
-      ['caseRelations','sourceCaseId','cases','targetCaseId','cases'],['powersOfAttorney','clientId','clients','fileId','files'],['hearings','caseId','cases'],
+      ['caseRelations','sourceCaseId','cases','targetCaseId','cases'],['powersOfAttorney','clientId','clients','fileId','files'],
+      ['fileParties','fileId','files','clientId','clients'],['fileParties','opponentId','opponents'],
+      ['fileRelations','sourceFileId','files','targetFileId','files'],
+      ['hearings','caseId','cases','fileId','files'],['hearings','previousHearingId','hearings'],
       ['procedures','fileId','files','caseId','cases'],['appointments','clientId','clients','fileId','files'],['communications','clientId','clients','fileId','files'],
-      ['caseNotes','fileId','files'],['witnesses','caseId','cases'],['expertReports','caseId','cases'],['judgments','caseId','cases'],['execution','caseId','cases'],
+      ['caseNotes','fileId','files','caseId','cases'],['witnesses','caseId','cases'],['expertReports','caseId','cases'],['judgments','caseId','cases'],['execution','caseId','cases'],
+      ['serviceRecords','fileId','files','caseId','cases'],['serviceRecords','hearingId','hearings','partyId','fileParties'],
+      ['serviceRecords','previousServiceId','serviceRecords','bailiffId','bailiffs'],
       ['fees','fileId','files'],['feePayments','feeId','fees'],['documentReferences','fileId','files']
     ];
     for(const rule of relationRules){

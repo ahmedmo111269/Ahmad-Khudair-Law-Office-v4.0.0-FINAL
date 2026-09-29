@@ -14,6 +14,18 @@
 
 # PROJECT MAP
 
+## v4.5.0 — Parties, Hearing Chains, Bailiffs and Service Records (schema v13)
+- `js/services/legal-files.js` — party groups, role/sequence ordering, explicit duplicate-client confirmation, safe removal and file relationships.
+- `js/services/operations.js` — predecessor-linked hearing cycles and atomic independent follow-up session creation on adjournment dates.
+- `js/services/service-records.js` — transactional service/notice records, internal numbering, bailiff registry, relaunch links, and bounded file-scoped cycle reads.
+- `js/modules/service-records.js` — file tab, quick filters, status summaries, bailiff administration and service-history UI.
+- `js/modules/file-page.js` / `record-page.js` — grouped/reorderable parties, upcoming/prior hearings, hearing/service timelines, related-file creation, configurable file-tab order, and saved client-record section order.
+- `js/modules/reports.js` — local saved report definitions, with service-record/bailiff datasets.
+- `js/ui/datagrid.js` — persisted filter state, date predicates, resizable columns, font sizing and fullscreen controls; `js/ui/collapsible.js` persists card collapse preferences.
+- `js/services/maintenance.js` — resumable, additive schema-13 backfill; `witnesses` store remains intact while its UI/navigation is retired.
+- `js/services/integrity.js` — deep-health checks cover new party/file/service/bailiff relations; `js/services/backup.js` export/inspect/replace-restore keeps the same safety contract.
+- Regression suites: `js/tests/service-and-relations-tests.js` and `js/tests/backup-and-integrity-tests.js`, invoked by `tests.html`. Actual outcomes and environment limits are in `TEST-REPORT.md`.
+
 ## v4.4.0 polish
 - `js/ui/combobox.js` — global styled dropdown for every `<input list>` (delegated, initialized in app.js).
 - Datagrid: filter chips, collapsible groups, totals footer, mobile tools toggle. Themes: 9 presets (`LIGHT_PRESETS`).
@@ -26,16 +38,16 @@
 - `css/client-file.css` — styles for the above. Stores added: clientFiles, taxonomy, caseTemplates, assets, fileAssets.
 
 ## Current release
-2.5.0 — Relational Reports & Workflow Intelligence.
+4.5.0 — Flexible parties, hearing cycles, bailiff/service-record lifecycle, saved reports and configurable grids. `APP_VERSION=4.5.0`, `SCHEMA_VERSION=13`.
 
 ## Architecture
 `UI → App/Services → Domain → Repository → IndexedDB`
 
 ## Stores
-clients, staff, files, cases, fileClients, caseClients, opponents, caseOpponents, caseRelations, powersOfAttorney, hearings, procedures, appointments, communications, caseNotes, witnesses, expertReports, judgments, execution, fees, feePayments, documentReferences, activityLog, lookups, settings, fileNumberCounters, meta.
+36 IndexedDB stores: clients, staff, files, cases, fileClients, caseClients, opponents, caseOpponents, caseRelations, powersOfAttorney, hearings, procedures, appointments, communications, caseNotes, witnesses (historical only; UI retired), expertReports, judgments, execution, fees, feePayments, documentReferences, activityLog, lookups, settings, fileNumberCounters, meta, fileParties, fileRelations, clientFiles, taxonomy, caseTemplates, assets, fileAssets, serviceRecords, bailiffs. Schema v13 declares 159 indexes; integrity audit verifies each declaration at runtime.
 
 ## Completed operational areas
-Clients / Files / Cases / Opponents / POA / Hearings / Procedures / Appointments / Communications / Notes / Witnesses / Expert Reports / Judgments / Execution / Fees / Payments / Document References / Search / Backup / Multi-DB / Doctor / PWA shell.
+Clients / Files / Cases / Opponents / POA / Hearings / Procedures / Appointments / Communications / Notes / Expert Reports / Judgments / Execution / Fees / Payments / Document References / File Parties & Relations / Bailiffs & Service Records / Search / Reports / Backup / Multi-DB / Doctor / PWA shell. Witness records remain in the database for history/integrity but are absent from user-facing routes and lists.
 
 ## Important constraints
 - No legal-deadline calculators in this application.

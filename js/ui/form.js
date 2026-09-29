@@ -1,13 +1,14 @@
 // منشئ النماذج العام: يبني نموذج أي كيان من تعريفه في domain/entities.js.
 // القوائم من lookups (قابلة للكتابة الحرة أيضًا)، أرقام هاتف متعددة، حقول نوع الملف تتغير تلقائيًا بتغير النوع.
 import {esc} from './dom.js';
-import {modal,closeModal} from './modal.js';
+import {modal,closeModal,confirmBox} from './modal.js';
 import {toast} from './toast.js';
 import {lookupField,bindLookups} from './lookup.js';
 import {ENTITIES,FILE_TYPE_GROUPS,fileTypeGroup,phonesOf} from '../domain/entities.js';
 import {getLookups} from '../services/lookups.js';
 import {resolveRefs} from '../services/entity-query.js';
 import {saveEntity} from '../services/entity-save.js';
+import {fileParties} from '../services/legal-files.js';
 import {Clock} from '../core/clock.js';
 import {userError,normalizeError} from '../core/errors.js';
 
@@ -35,11 +36,15 @@ export function formFields(store,{isNew=false,only=null}={}){
  return f;
 }
 
-export function fieldHtml(f,value,{refLabels=new Map(),lookups={},stageOptions=null,error=''}={}){
+export function fieldHtml(f,value,{refLabels=new Map(),lookups={},stageOptions=null,hearingOptions=[],partyOptions=[],bailiffOptions=[],serviceOptions=[],error=''}={}){
  const req=f.req?' <b class="req" title="مطلوب">*</b>':'';
  const err=error?`<small class="field-error" role="alert">${esc(error)}</small>`:'';
  const wrap=(inner,cls='')=>`<div class="field${cls}${f.t==='textarea'||f.t==='phones'?' span2':''}" data-field="${esc(f.k)}">${inner}${err}</div>`;
  const v=value??'';
+ if(f.t==='hearingSelect')return wrap(`<label>${esc(f.l)}${req}<select name="${esc(f.k)}"><option value="">— لا توجد جلسة مرتبطة —</option>${hearingOptions.map(o=>`<option value="${esc(o.id)}"${o.id===v?' selected':''}>${esc(o.label)}</option>`).join('')}</select></label>`);
+ if(f.t==='partySelect')return wrap(`<label>${esc(f.l)}${req}<select name="${esc(f.k)}"><option value="">— طرف خارجي / دون ربط —</option>${partyOptions.map(o=>`<option value="${esc(o.id)}"${o.id===v?' selected':''}>${esc(o.label||o.name||'')}</option>`).join('')}</select></label>`);
+ if(f.t==='bailiffSelect')return wrap(`<label>${esc(f.l)}${req}<select name="${esc(f.k)}"><option value="">— دون تحديد —</option>${bailiffOptions.map(o=>`<option value="${esc(o.id)}"${o.id===v?' selected':''}>${esc(o.label||o.name||'')}</option>`).join('')}</select></label>`);
+ if(f.t==='serviceSelect')return wrap(`<label>${esc(f.l)}${req}<select name="${esc(f.k)}"><option value="">— ليس إعادة إعلان —</option>${serviceOptions.map(o=>`<option value="${esc(o.id)}"${o.id===v?' selected':''}>${esc(o.label||o.internalNumber||'')}</option>`).join('')}</select></label>`);
  if(f.t==='ref'){
   if(f.k==='caseId'&&stageOptions){return wrap(`<label>${esc(f.l)}${req}<select name="caseId"><option value="">— اختر المرحلة —</option>${stageOptions.map(o=>`<option value="${esc(o.id)}"${o.id===v?' selected':''}>${esc(o.label)}</option>`).join('')}</select></label>`)}
   if(!SEARCH_INDEX[f.ref]){return wrap(`<label>${esc(f.l)}${req}<input type="hidden" name="${esc(f.k)}" value="${esc(v)}"><input value="${esc(refLabels.get(v)||'')}" readonly></label>`)}
@@ -95,7 +100,7 @@ function typeGroupHtml(type,values,ctx){
  * فتح نموذج إضافة/تعديل لأي كيان داخل نافذة.
  * preset: قيم مبدئية (مثل fileId عند الإضافة من داخل الملف). stageOptions: مراحل الملف لاختيار القضية.
  */
-export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,title=null,only=null,stageOptions=null,typeFieldsOnly=false}={}){
+export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,title=null,only=null,stageOptions=null,hearingOptions=null,partyOptions=null,bailiffOptions=null,serviceOptions=null,typeFieldsOnly=false}={}){
  const office=app.office;const ent=ENTITIES[store];
  const old=id?await office.r[store].get(id):null;
  const isNew=!old;
@@ -104,15 +109,30 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
   if(store==='files'){values.openedAt=values.openedAt||Clock.today();values.status=values.status||'مفتوح';values.priority=values.priority||'normal';values.clientRole=values.clientRole||'موكل'}
   if(store==='clients')values.status=values.status||'active';
   if(store==='procedures'){values.status=values.status||'open';values.priority=values.priority||'normal'}
-  if(store==='fileParties')values.partyKind=values.partyKind||'client';
+  if(store==='fileParties'){values.partyKind=values.partyKind||'client';values.isActive=values.isActive??true;values.isPrimary=values.isPrimary??false;}
+  if(store==='hearings')values.status=values.status||'مجدولة';
+  if(store==='serviceRecords'){values.actionType=values.actionType||'إعلان';values.status=values.status||'مسودة';values.year=values.year||Number(Clock.today().slice(0,4))}
+  if(store==='bailiffs'&&values.isActive===undefined)values.isActive=true;
   if(store==='fees')values.currency=values.currency||'جنيه';
   if(['appointments','communications','feePayments','documentReferences'].includes(store))values.date=values.date||Clock.today();
+ }
+ const targetFileId=values.fileId||(values.caseId?(await office.r.cases.get(values.caseId))?.fileId:'');
+ if((store==='hearings'||store==='serviceRecords')&&hearingOptions===null){
+  let hearingRows=[];
+  if(targetFileId)hearingRows=await office.r.hearings.byIndex('fileId',targetFileId,5000);
+  if(!hearingRows.length&&values.caseId)hearingRows=await office.r.hearings.byIndex('caseId',values.caseId,1000);
+  hearingOptions=hearingRows.filter(h=>h.id!==id).map(h=>({id:h.id,label:`${h.hearingDate||'بدون تاريخ'}${h.hearingTime?' '+h.hearingTime:''} — ${h.court||''}${h.result?' · '+h.result:''}`}));
+ }
+ if(store==='serviceRecords'){
+  if(partyOptions===null)partyOptions=targetFileId?(await fileParties(office,targetFileId)).filter(p=>p.id):[];
+  if(bailiffOptions===null)bailiffOptions=await office.r.bailiffs.byIndex('activeStatus','active',1000);
+  if(serviceOptions===null)serviceOptions=targetFileId?await office.r.serviceRecords.byIndexKey('fileId_recordState',[targetFileId,'active'],5000):[];
  }
  let fields=typeFieldsOnly?[]:formFields(store,{isNew,only});
  const typeFields=store==='files'&&(typeFieldsOnly||!only);
  const cats=[...fields,...(typeFields?Object.values(FILE_TYPE_GROUPS).flatMap(g=>g.fields):[])].filter(f=>f.lk).map(f=>f.lk);
  const [lookups,refLabels]=await Promise.all([getLookups(office,cats),resolveRefs(office,[values],fields)]);
- const ctx={refLabels,lookups,stageOptions};
+ const ctx={refLabels,lookups,stageOptions,hearingOptions,partyOptions,bailiffOptions,serviceOptions};
  const heading=title||(isNew?`إضافة ${ent.label}`:`تعديل ${ent.label}`);
  const typeBlock=typeFields?`<details class="form-group type-group" ${typeFieldsOnly||!isNew?'open':''}><summary>بيانات حسب نوع الملف ${isNew?'(اختياري)':''}</summary><div data-typegroup>${typeGroupHtml(values.fileType,values,ctx)}</div></details>`:'';
  const card=modal(`<h2 class="modal-title">${esc(heading)}</h2>
@@ -135,6 +155,28 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
   const sync=()=>{const k=kindSel.value||'client';form.querySelector('[data-field="clientId"]').hidden=k!=='client';form.querySelector('[data-field="opponentId"]').hidden=k!=='opponent';const nameLbl=form.querySelector('[data-field="name"] label');if(nameLbl)nameLbl.firstChild.textContent=k==='other'?'اسم الطرف ':k==='client'?'أو اسم موكل جديد ':'أو اسم خصم جديد '};
   kindSel.addEventListener('change',sync);sync();
  }
+ if(store==='serviceRecords'){
+  form.querySelector('[name="partyId"]')?.addEventListener('change',e=>{
+   const p=(partyOptions||[]).find(x=>x.id===e.target.value);if(!p)return;
+   const name=form.querySelector('[name="partyName"]'),role=form.querySelector('[name="partyRole"]');
+   if(name)name.value=p.partyName||p.name||'';if(role)role.value=p.role||'';
+  });
+ }
+ const updateFileOptions=async fileId=>{
+  const sessions=fileId?await office.r.hearings.byIndex('fileId',fileId,5000):[];
+  const fill=(selector,first,options)=>{const select=form.querySelector(selector);if(!select)return;const value=select.value;select.innerHTML=`<option value="">${first}</option>`+options.map(o=>`<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');if(value&&[...select.options].some(x=>x.value===value))select.value=value};
+  const hearingItems=sessions.filter(h=>h.id!==id).map(h=>({id:h.id,label:`${h.hearingDate||'بدون تاريخ'}${h.hearingTime?' '+h.hearingTime:''} — ${h.court||''}${h.result?' · '+h.result:''}`}));
+  fill('[name="previousHearingId"]','— لا توجد جلسة سابقة —',hearingItems);
+  fill('[name="hearingId"]','— لا توجد جلسة مرتبطة —',sessions.map(h=>({id:h.id,label:`${h.hearingDate||'بدون تاريخ'}${h.hearingTime?' '+h.hearingTime:''} — ${h.court||''}`})));
+  if(store==='serviceRecords'){
+   partyOptions=fileId?await fileParties(office,fileId):[];
+   serviceOptions=fileId?await office.r.serviceRecords.byIndexKey('fileId_recordState',[fileId,'active'],5000):[];
+   fill('[name="partyId"]','— طرف خارجي / دون ربط —',partyOptions.filter(p=>p.id).map(p=>({id:p.id,label:`${p.partyName||p.name||'طرف'} — ${p.role||''}`})));
+   fill('[name="previousServiceId"]','— ليس إعادة إعلان —',serviceOptions.filter(s=>s.id!==id).map(s=>({id:s.id,label:`${s.internalNumber||'إعلان'} — ${s.partyName||''} — ${s.status||''}`})));
+  }
+ };
+ const fileLookup=form.querySelector('.lookup-input[data-lookup-name="fileId"]');
+ if(fileLookup&&(store==='hearings'||store==='serviceRecords'))fileLookup.addEventListener('change',()=>{const fileId=form.querySelector('[name="fileId"]')?.value||'';updateFileOptions(fileId).catch(()=>{})});
  form.querySelector('input:not([type=hidden]):not([readonly]),select,textarea')?.focus();
  form.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -144,8 +186,18 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
    const tf=typeFields?allTypeFieldsOf(fileTypeGroup(form.querySelector('[name="fileType"]')?.value??values.fileType)):[];
    const data={...preset,...readFields(form,[...fields,...tf])};
    if(store==='fileParties'){if(data.partyKind!=='client')data.clientId='';if(data.partyKind!=='opponent')data.opponentId=''}
-   const row=await saveEntity(office,store,data,old?.id||null,old?.version??null);
-   closeModal();toast(isNew?'تمت الإضافة':'تم الحفظ');
+   let row;
+   try{row=await saveEntity(office,store,data,old?.id||null,old?.version??null)}
+   catch(err){
+    if(store!=='fileParties'||!err?.details?.duplicateParty)throw err;
+    const allowed=await confirmBox('هذا الموكل مسجل بالفعل في الملف بالصفة نفسها. قد يكون التكرار مقصودًا في بعض الوقائع؛ هل تريد إضافة رابط طرف مكرر؟',{okText:'إضافة رغم التكرار'});
+    if(!allowed){btn.disabled=false;return}
+    row=await saveEntity(office,store,{...data,allowDuplicate:true},old?.id||null,old?.version??null);
+   }
+   closeModal();
+   if(store==='hearings'&&row.__followUpCreated)toast(`تم حفظ الجلسة وإنشاء جلسة تالية بتاريخ ${data.adjournedTo}`);
+   else if(store==='hearings'&&row.__followUpUpdated)toast(`تم حفظ الجلسة وتحديث تاريخ جلستها التالية إلى ${data.adjournedTo}`);
+   else toast(isNew?'تمت الإضافة':'تم الحفظ');
    if(onSaved)await onSaved(row,isNew);
    else if(isNew&&store==='files')await app.go('file:'+row.id);
    else await app.refresh();

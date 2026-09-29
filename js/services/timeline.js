@@ -58,21 +58,20 @@ export async function buildFileTimeline(office,fileId){
 export async function buildCaseTimeline(office,caseId){
   const r=office.r;
   const c=await r.cases.get(caseId); if(!c) return null;
-  const [h,p,w,e,j,x,a]=await Promise.all([
-    idx(r,STORE.hearings,'caseId',caseId),idx(r,STORE.procedures,'caseId',caseId),idx(r,STORE.witnesses,'caseId',caseId),
+  const [h,p,e,j,x,a]=await Promise.all([
+    idx(r,STORE.hearings,'caseId',caseId),idx(r,STORE.procedures,'caseId',caseId),
     idx(r,STORE.expertReports,'caseId',caseId),idx(r,STORE.judgments,'caseId',caseId),idx(r,STORE.execution,'caseId',caseId),idx(r,STORE.activityLog,'entityId',caseId)
   ]);
   const timeline=[];
   h.forEach(v=>timeline.push(item(v.hearingDate+'T'+(v.hearingTime||'00:00'),'جلسة',`جلسة ${formatDate(v.hearingDate)}`,[v.reason,v.result,v.whatHappened,v.nextAction].filter(Boolean).join(' — '),v.id)));
   p.forEach(v=>timeline.push(item(v.actionDate||v.createdAt,'إجراء/مهمة',v.description||v.type||'إجراء',`الحالة: ${v.status||''}${v.internalDueDate?' — الاستحقاق: '+d(v.internalDueDate):''}`,v.id)));
-  w.forEach(v=>timeline.push(item(v.createdAt,'شاهد',v.name||'شاهد',v.side||'',v.id)));
   e.forEach(v=>timeline.push(item(v.reportDate,'خبير',v.expertName||'تقرير خبير',v.summary||'',v.id)));
   j.forEach(v=>timeline.push(item(v.judgmentDate,'حكم',v.judgmentNumber||'حكم',v.operativeSummary||'',v.id)));
   x.forEach(v=>timeline.push(item(v.openedDate||v.createdAt,'تنفيذ',v.executionNumber||'تنفيذ',[v.status,v.stage,v.lastAction,v.nextAction].filter(Boolean).join(' — '),v.id)));
   a.forEach(v=>timeline.push(item(v.timestamp,'نشاط',v.summary||v.action||'نشاط','سجل النظام',v.id)));
   const future=timeline.filter(v=>v.date&&new Date(v.date)>=new Date()).sort((a,b)=>String(a.date).localeCompare(String(b.date)))[0]||null;
   const last=timeline.filter(v=>v.date&&new Date(v.date)<new Date()).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0]||null;
-  return {case:c,timeline:sortTimeline(timeline),last,future,counts:{hearings:h.length,procedures:p.length,witnesses:w.length,experts:e.length,judgments:j.length,execution:x.length}};
+  return {case:c,timeline:sortTimeline(timeline),last,future,counts:{hearings:h.length,procedures:p.length,experts:e.length,judgments:j.length,execution:x.length}};
 }
 
 export {d,dt};
