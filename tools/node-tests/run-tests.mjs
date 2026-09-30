@@ -1,6 +1,6 @@
 // تشغيل كل مجموعات الاختبار داخل Node (بدون متصفح) عبر fake-indexeddb + linkedom.
 import './harness.mjs';
-const R=process.cwd().includes('node-tests')?'../../js':'./js';
+const R=new URL('../../js',import.meta.url).href;
 const {test,expect,run}=await import(`${R}/tests/runner.js`);
 const {normalizeArabic,normalizeDigits}=await import(`${R}/core/search-normalizer.js`);
 const {validateClient}=await import(`${R}/domain/validators.js`);
@@ -19,6 +19,7 @@ const {runFileNumberTests}=await import(`${R}/tests/file-number-tests.js`);
 const {runCardSidebarTests}=await import(`${R}/tests/card-sidebar-tests.js`);
 const {runTopNavTests}=await import(`${R}/tests/topnav-tests.js`);
 const {runDemoSeedTests}=await import(`${R}/tests/demo-seed-tests.js`);
+const {runCollapseStateTests}=await import(`${R}/tests/collapse-state-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -46,6 +47,7 @@ await runTopNavTests(test,expect);
 try{await runSearchTableTests(test,expect)}catch(e){test('search-table suite import/setup',()=>{throw e})}
 try{await runGridUpgradeTests(test,expect)}catch(e){test('grid-upgrade suite import/setup',()=>{throw e})}
 await runDemoSeedTests(test,expect);
+await runCollapseStateTests(test,expect);
 
 const r=await run();
 for(const [status,name,msg] of r.results){

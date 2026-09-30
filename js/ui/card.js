@@ -7,12 +7,14 @@
 // البناء البصري: العنوان ← المعلومة الأساسية ← التفاصيل ← الإجراءات.
 // الأحجام: sm (معلومة سريعة) • md (تشغيلية) • lg (تفاصيل) • full (عرض كامل).
 // الحالات: loading / empty / error / success.
-// الفتح والطي يُحفظ في تفضيلات المستخدم (مفتاح 'ui:cards').
+// الفتح والطي يُحفظان مركزيًا لكل بطاقة في تفضيلات المستخدم (ui:collapse-state)، مع ترحيل قراءة المفتاح القديم ui:cards.
 import {esc} from './dom.js';
 import {icon} from './icons.js';
 import {prefs} from '../core/preferences.js';
+import {resolveCollapseState,saveCollapseState,isCollapsePinned} from './collapse-state.js';
+import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
 
-const PREF_KEY='ui:cards';
+const LEGACY_PREF_KEY='ui:cards';
 
 /** حجم افتراضي منطقي لكل سياق استخدام — يحمي من «بطاقة ضخمة لمعلومة بسيطة». */
 export const CARD_SIZE={sm:'ux-card--sm',md:'ux-card--md',lg:'ux-card--lg',full:'ux-card--full'};
@@ -21,7 +23,8 @@ export const CARD_SIZE={sm:'ux-card--sm',md:'ux-card--md',lg:'ux-card--lg',full:
  * بناء بطاقة موحدة.
  * opts: {title, icon, badge (html), actions (html), body (html), footer (html),
  *        size: 'sm'|'md'|'lg'|'full', tone: ''|'warn'|'danger'|'ok',
- *        collapsible: bool, persistKey: string, collapsed: bool, id, cls, dense}
+ *        collapsible: false disables collapsing (enabled by default), persistKey: stable key,
+ *        collapsed: explicit initial state, id, cls, dense, summary}
  */
 export function card(o={}){
  const size=CARD_SIZE[o.size]||CARD_SIZE.md;
@@ -29,17 +32,22 @@ export function card(o={}){
  if(o.tone)parts.push(`ux-card--${o.tone}`);
  if(o.dense)parts.push('ux-card--dense');
  if(o.cls)parts.push(o.cls);
- const collapseId=o.persistKey||o.id||'';
- const persisted=o.collapsible&&collapseId?prefs.get(PREF_KEY,{})?.[collapseId]:null;
- const collapsed=o.collapsible&&(persisted??Boolean(o.collapsed));
+ const collapsible=o.collapsible!==false;
+ const collapseId=o.persistKey||o.id||`card:${String(o.title||'محتوى').trim()}`;
+ const collapseKey=`card:${collapseId}`;
+ const old=prefs.get(LEGACY_PREF_KEY,{})||{};
+ const legacy=typeof old[collapseId]==='boolean'?old[collapseId]:undefined;
+ const collapsed=collapsible?resolveCollapseState(collapseKey,{fallback:o.collapsed??true,legacy,configured:o.collapsed!==undefined}):false;
+ const pinned=collapsible&&isCollapsePinned(collapseKey);
  if(collapsed)parts.push('is-collapsed');
- const head=`<header class="ux-card-head"${o.collapsible?` data-card-head="${esc(collapseId)}"`:''}>
-  <div class="ux-card-title">${o.icon?`<span class="ux-card-ic" aria-hidden="true">${o.icon.startsWith('<')?o.icon:icon(o.icon)}</span>`:''}<h3>${esc(o.title||'')}</h3>${o.badge?`<span class="ux-card-badge">${o.badge}</span>`:''}</div>
+ const bodyId=`ux-card-body-${String(collapseId).replace(/[^\p{L}\p{N}_-]/gu,'-')}`;
+ const head=`<header class="ux-card-head"${collapsible?` data-card-head="${esc(collapseId)}"`:''}>
+  <div class="ux-card-title">${o.icon?`<span class="ux-card-ic" aria-hidden="true">${o.icon.startsWith('<')?o.icon:icon(o.icon)}</span>`:''}<h3>${esc(o.title||'')}</h3>${o.badge?`<span class="ux-card-badge">${o.badge}</span>`:''}${o.summary?`<span class="ux-card-summary muted small">${esc(o.summary)}</span>`:''}</div>
   ${o.actions?`<div class="ux-card-actions">${o.actions}</div>`:''}
-  ${o.collapsible?`<button type="button" class="ux-card-toggle" aria-expanded="${!collapsed}" aria-label="${collapsed?'توسيع':'طي'} البطاقة: ${esc(o.title||'')}">${icon('chevron')}</button>`:''}
+  ${collapsible?`${collapsePinMarkup(collapseKey,pinned,'collapse-pin ux-card-pin')}<button type="button" class="ux-card-toggle" aria-expanded="${!collapsed}" aria-controls="${esc(bodyId)}" aria-label="${collapsed?'توسيع':'طي'} البطاقة: ${esc(o.title||'')}">${icon('chevron')}</button>`:''}
  </header>`;
- return `<section class="${parts.join(' ')}"${o.id?` id="${esc(o.id)}"`:''}${collapseId&&o.collapsible?` data-card-key="${esc(collapseId)}"`:''}>
-  ${head}<div class="ux-card-body">${o.body??''}</div>${o.footer?`<footer class="ux-card-foot">${o.footer}</footer>`:''}</section>`;
+ return `<section class="${parts.join(' ')}"${o.id?` id="${esc(o.id)}"`:''}${collapsible?` data-card-key="${esc(collapseId)}" data-collapse-key="${esc(collapseKey)}" data-collapse-type="card" data-collapse-ready="true" data-collapse-collapsed="${collapsed}"`:''}>
+  ${head}<div class="ux-card-body"${collapsible?` id="${esc(bodyId)}" aria-hidden="${collapsed}"`:''}>${o.body??''}</div>${o.footer?`<footer class="ux-card-foot"${collapsible?` aria-hidden="${collapsed}"`:''}>${o.footer}</footer>`:''}</section>`;
 }
 
 /** حالة تحميل داخل بطاقة (هيكل عظمي). */
@@ -87,18 +95,38 @@ export function bindCards(root=document){
  root.querySelectorAll('.ux-card-toggle').forEach(btn=>{
   if(btn.dataset.bound)return;btn.dataset.bound='1';
   btn.addEventListener('click',()=>{
-   const cardEl=btn.closest('.ux-card');const key=cardEl?.dataset.cardKey||'';
+   const cardEl=btn.closest('.ux-card');const key=cardEl?.dataset.collapseKey||'';
    const next=!cardEl.classList.contains('is-collapsed');
    cardEl.classList.toggle('is-collapsed',next);
+   cardEl.dataset.collapseCollapsed=String(next);
+   const body=cardEl.querySelector('.ux-card-body');const foot=cardEl.querySelector('.ux-card-foot');
+   body?.setAttribute('aria-hidden',String(next));foot?.setAttribute('aria-hidden',String(next));
    btn.setAttribute('aria-expanded',String(!next));
-   if(key){const state=prefs.get(PREF_KEY,{})||{};if(next)state[key]=true;else delete state[key];prefs.set(PREF_KEY,state)}
+   btn.setAttribute('aria-label',`${next?'توسيع':'طي'} البطاقة: ${cardEl.querySelector('h3')?.textContent?.trim()||''}`);
+   if(key){saveCollapseState(key,next);syncCollapsePin(cardEl.querySelector('.ux-card-pin'),key)}
   });
+ });
+ root.querySelectorAll('.ux-card[data-collapse-key]').forEach(cardEl=>{
+  if(cardEl.dataset.bulkCollapseBound)return;cardEl.dataset.bulkCollapseBound='true';
+  cardEl.addEventListener('collapse:bulk',event=>{
+   const detail=event.detail||{};const next=Boolean(detail.collapsed);
+   cardEl.classList.toggle('is-collapsed',next);cardEl.dataset.collapseCollapsed=String(next);
+   const body=cardEl.querySelector('.ux-card-body'),foot=cardEl.querySelector('.ux-card-foot'),toggle=cardEl.querySelector('.ux-card-toggle');
+   body?.setAttribute('aria-hidden',String(next));foot?.setAttribute('aria-hidden',String(next));
+   toggle?.setAttribute('aria-expanded',String(!next));
+   toggle?.setAttribute('aria-label',`${next?'توسيع':'طي'} البطاقة: ${cardEl.querySelector('h3')?.textContent?.trim()||''}`);
+   if(detail.persist!==false){saveCollapseState(cardEl.dataset.collapseKey,next);syncCollapsePin(cardEl.querySelector('.ux-card-pin'),cardEl.dataset.collapseKey)}
+  });
+ });
+ root.querySelectorAll('.ux-card-pin').forEach(button=>{
+  const cardEl=button.closest('.ux-card');const key=cardEl?.dataset.collapseKey||'';
+  bindCollapsePin(button,key,()=>cardEl?.classList.contains('is-collapsed'));
  });
  // النقر على عنوان بطاقة قابلة للطي يفتحها/يطويها أيضًا
  root.querySelectorAll('.ux-card-head[data-card-head]').forEach(head=>{
   if(head.dataset.bound)return;head.dataset.bound='1';
   head.addEventListener('click',e=>{
-   if(e.target.closest('button,a,input,select,textarea'))return;
+   if(e.target.closest('button,a,input,select,textarea,[data-no-collapse]'))return;
    head.querySelector('.ux-card-toggle')?.click();
   });
  });

@@ -40,7 +40,7 @@ export async function homePage(app){
  return `${demoBanner}<div class="hero hero-home"><div><h2>${g}، مكتب الأستاذ أحمد محمد خضير</h2><p class="hero-date">${longDateAr()}</p></div>
   <div class="hero-quick"><button class="primary" data-quick-add>+ إضافة</button><button class="ghost" data-goto="actionCenter">مركز العمل</button><button class="ghost" data-goto="reports?type=hearings&preset=today">تقرير اليوم</button>${last?.route&&last.route!=='dashboard'?`<button class="ghost resume-chip" data-goto="${esc(last.route)}">متابعة: ${esc(last.title||'آخر صفحة')}</button>`:''}</div></div>
  ${favs.length?card({icon:'folder',title:'مثبّتات',size:'full',collapsible:true,persistKey:'home:favs',badge:statusBadge(String(favs.length),'info'),body:`<div class="fav-row">${favs.map(x=>`<button class="recent-chip" data-goto="${esc(x.route)}">${esc(x.title)}</button>`).join('')}</div>`}):''}
- <div class="kpi-strip" role="group" aria-label="ملخص العمل">${kpis.join('')}</div>
+ <section class="panel kpi-panel" data-collapse-id="home-kpis"><div class="panel-head"><h3>ملخص العمل</h3><span class="badge">${kpis.length} مؤشرات</span></div><div class="kpi-strip" role="group" aria-label="ملخص العمل">${kpis.join('')}</div></section>
  ${recents.length?`<section class="recents-bar" aria-label="آخر ما فُتح"><span class="recents-lbl">آخر ما فُتح:</span><div class="recents-chips">${recents.map(x=>`<button class="recent-chip" data-recent="${esc(x.route)}"><span class="rc-ic" aria-hidden="true">${esc(x.icon==='calendar'?'📅':x.icon==='users'?'👤':x.icon==='gavel'?'⚖':'📁')}</span><span class="rc-t">${esc(x.title)}</span></button>`).join('')}</div></section>`:''}
  <div class="dashboard-grid ux-grid ux-grid--2">
   ${card({icon:'calendar',title:'جلسات اليوم',tone:r.todayHearings.length?'':'',badge:statusBadge(String(r.todayHearings.length),r.todayHearings.length?'info':''),actions:`<button class="link" data-dashboard-report="hearings|today">تقرير الجلسات</button>`,collapsible:true,persistKey:'home:todayHearings',
@@ -81,7 +81,7 @@ export function bindHome(app){
   {key:'title',label:'البيان'},{key:'details',label:'التفاصيل'},{key:'status',label:'الحالة',text:r=>label(r.status)||''},
   {key:'fileId',label:'الملف',get:r=>refs.get(r.fileId)||'',text:r=>refs.get(r.fileId)||''},
   {key:'caseId',label:'القضية / المرحلة',get:r=>refs.get(r.caseId)||'',text:r=>refs.get(r.caseId)||''}];
- const grid=mountGrid(document.querySelector('#agenda-grid'),{columns:cols,rows:[],title:'الأجندة',storageKey:'home:agenda',emptyText:'لا توجد عناصر في هذه الفترة.',
+ const grid=mountGrid(document.querySelector('#agenda-grid'),{columns:cols,rows:[],title:'الأجندة',storageKey:'home:agenda',collapseKey:'home:agenda:grid',emptyText:'لا توجد عناصر في هذه الفترة.',
   onRowClick:r=>app.go(r.store==='files'?'file:'+r.id:`rec:${r.store}:${r.id}`)});
  app.__agendaDay=app.__agendaDay||localDate();
  app.__agendaMode=app.__agendaMode||prefs.get('ui:agenda-mode','day')||'day';

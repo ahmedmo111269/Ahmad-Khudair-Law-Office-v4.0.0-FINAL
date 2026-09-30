@@ -19,6 +19,16 @@ const GROUPS=[
 ];
 const readSavedReports=()=>{const value=prefs.get('reports:saved',[]);return Array.isArray(value)?value.filter(r=>r&&r.id&&r.name&&r.definition):[]};
 const dateFields=store=>{const e=ENTITIES[store];const fs=[...e.fields,...(store==='files'?Object.values(FILE_TYPE_GROUPS).flatMap(g=>g.fields):[])].filter(f=>f.t==='date'||f.dt==='date'||f.dt==='datetime').map(f=>[f.k,f.l]);for(const [k,l] of [['createdAt','تاريخ الإنشاء'],['updatedAt','تاريخ آخر تعديل']])if(!fs.some(x=>x[0]===k))fs.push([k,l]);return fs};
+function reportFilterSummary(st){
+ const type=st.type==='agenda'?'الأجندة الموحدة':ENTITIES[st.type]?.plural||st.type;
+ const period=st.preset==='overdue'?'المتأخرة':PRESETS.find(([key])=>key===st.preset)?.[1]||'كل الفترات';
+ const dateField=st.type==='agenda'?'':dateFields(st.type).find(([key])=>key===st.dateField)?.[1]||'';
+ const parts=[type,period];
+ if(dateField)parts.push(dateField);
+ if(st.preset==='custom'&&(st.from||st.to))parts.push(`${st.from||'…'} — ${st.to||'…'}`);
+ if(st.q?.trim())parts.push(`بحث: ${st.q.trim()}`);
+ return parts.join(' · ');
+}
 
 export async function reportsPage(app,query){
  const st=app.__report=app.__report||{type:'hearings',preset:'week',from:'',to:'',q:'',limit:2000,dateField:'',title:''};
@@ -29,7 +39,7 @@ export async function reportsPage(app,query){
  if(!st.dateField||!df.some(x=>x[0]===st.dateField))st.dateField=st.type==='agenda'?'':ENTITIES[st.type].dateField||df[0]?.[0]||'createdAt';
  const presets=st.type==='procedures'?[...PRESETS,['overdue','المتأخرة (مفتوحة)']]:PRESETS;
  return `<div class="page-head"><div><h2>التقارير الشاملة</h2><p class="muted small">اختر البيانات والفترة ثم اعرض التقرير. من الجدول: فرز وتصفية لكل عمود (▾)، تصفية مركبة (و/أو)، تجميع، اختيار الأعمدة، طباعة وتصدير.</p></div></div>
- <section class="panel report-builder"><form id="report-form" class="filter-grid">
+ <section class="panel report-builder" data-collapse-id="report-filters"><div class="panel-head"><h3>عوامل التقرير والفترة</h3><span class="badge" data-report-filter-summary>${esc(reportFilterSummary(st))}</span></div><form id="report-form" class="filter-grid">
   <label>البيانات<select name="type"><option value="agenda"${st.type==='agenda'?' selected':''}>الأجندة الموحدة (كل ما له تاريخ)</option>${GROUPS.map(([g,list])=>`<optgroup label="${esc(g)}">${list.map(s=>`<option value="${s}"${s===st.type?' selected':''}>${esc(ENTITIES[s].plural)}</option>`).join('')}</optgroup>`).join('')}</select></label>
   ${st.type==='agenda'?'':`<label>حقل التاريخ<select name="dateField">${df.map(([k,l])=>`<option value="${k}"${k===st.dateField?' selected':''}>${esc(l)}</option>`).join('')}</select></label>`}
   <label>الفترة<select name="preset">${presets.map(([k,l])=>`<option value="${k}"${k===st.preset?' selected':''}>${l}</option>`).join('')}</select></label>
@@ -40,17 +50,19 @@ export async function reportsPage(app,query){
   <label>عنوان التقرير<input name="title" value="${esc(st.title)}" placeholder="يُكوَّن تلقائيًا"></label>
   <div class="filter-actions"><button class="primary" type="submit">عرض التقرير</button></div>
  </form></section>
- <section class="panel saved-report-panel"><div><b>التقارير المحفوظة</b><p class="muted small">تُحفظ تعريفات التقرير محليًا كتفضيلات للمستخدم، ولا تتضمن نسخًا من السجلات.</p></div><div class="saved-report-controls"><select id="saved-report" aria-label="التقرير المحفوظ"><option value="">اختر تقريرًا محفوظًا</option>${savedReports.map(r=>`<option value="${esc(r.id)}"${st.savedReportId===r.id?' selected':''}>${esc(r.name)}</option>`).join('')}</select><button type="button" class="ghost" data-report-load>تحميل</button><button type="button" class="ghost" data-report-save>حفظ الشروط الحالية</button><button type="button" class="ghost danger" data-report-delete>حذف التعريف</button></div></section>
+ <section class="panel saved-report-panel" data-collapse-id="saved-reports"><div class="panel-head"><div><h3>التقارير المحفوظة</h3><p class="muted small">تُحفظ تعريفات التقرير محليًا كتفضيلات للمستخدم، ولا تتضمن نسخًا من السجلات.</p></div></div><div class="saved-report-controls"><select id="saved-report" aria-label="التقرير المحفوظ"><option value="">اختر تقريرًا محفوظًا</option>${savedReports.map(r=>`<option value="${esc(r.id)}"${st.savedReportId===r.id?' selected':''}>${esc(r.name)}</option>`).join('')}</select><button type="button" class="ghost" data-report-load>تحميل</button><button type="button" class="ghost" data-report-save>حفظ الشروط الحالية</button><button type="button" class="ghost danger" data-report-delete>حذف التعريف</button></div></section>
  <div id="report-status" class="report-result-note" aria-live="polite" hidden></div>
  <div id="report-grid"></div>`;
 }
 
 export function bindReports(app){
  const st=app.__report;const form=document.querySelector('#report-form');
- const sync=()=>{const custom=form.preset.value==='custom';form.querySelectorAll('.rng').forEach(l=>l.hidden=!custom)};
- form.preset.addEventListener('change',sync);sync();
+ const summary=document.querySelector('[data-report-filter-summary]');
+ const syncSummary=()=>{if(summary)summary.textContent=reportFilterSummary({...st,...reportDefinitionFromForm(form)})};
+ const sync=()=>{const custom=form.preset.value==='custom';form.querySelectorAll('.rng').forEach(l=>l.hidden=!custom);syncSummary()};
+ form.preset.addEventListener('change',sync);form.addEventListener('input',syncSummary);form.addEventListener('change',syncSummary);sync();
  form.type.addEventListener('change',()=>{st.type=form.type.value;st.dateField='';st.preset=form.preset.value;app.refresh()});
- form.addEventListener('submit',e=>{e.preventDefault();Object.assign(st,reportDefinitionFromForm(form));run(app).catch(err=>app.fail(err))});
+ form.addEventListener('submit',e=>{e.preventDefault();Object.assign(st,reportDefinitionFromForm(form));syncSummary();run(app).catch(err=>app.fail(err))});
  document.querySelector('[data-report-save]')?.addEventListener('click',()=>saveReportDefinition(app,form));
  document.querySelector('[data-report-load]')?.addEventListener('click',async()=>{const id=document.querySelector('#saved-report').value;const saved=readSavedReports().find(r=>r.id===id);if(!saved){toast('اختر تقريرًا محفوظًا أولًا.','error');return}Object.assign(st,saved.definition,{auto:true,savedReportId:id});await app.refresh()});
  document.querySelector('[data-report-delete]')?.addEventListener('click',async()=>{const select=document.querySelector('#saved-report'),id=select.value;if(!id){toast('اختر تقريرًا محفوظًا أولًا.','error');return}if(!await confirmBox('حذف تعريف التقرير المحفوظ؟ لا تُحذف أي سجلات.',{okText:'حذف التعريف'}))return;const list=readSavedReports().filter(r=>r.id!==id);await prefs.set('reports:saved',list);if(st.savedReportId===id)st.savedReportId='';toast('تم حذف تعريف التقرير');await app.refresh()});
@@ -80,7 +92,7 @@ async function run(app){
   if(st.q){const {rowText,normQ}=await import('../services/entity-query.js');const q=normQ(st.q);rows=rows.filter(r=>rowText(r).includes(q))}
   const refs=await resolveRefs(app.office,rows,[{k:'fileId',ref:'files'},{k:'caseId',ref:'cases'}]);
   const title=st.title||`الأجندة الموحدة (${periodTxt})`;
-  mountGrid(el,{title,storageKey:'report:agenda',rows,onRowClick:r=>app.go(r.store==='files'?'file:'+r.id:`rec:${r.store}:${r.id}`),columns:[
+  mountGrid(el,{title,storageKey:'report:agenda',collapseKey:'reports:agenda-grid',rows,onRowClick:r=>app.go(r.store==='files'?'file:'+r.id:`rec:${r.store}:${r.id}`),columns:[
    {key:'kind',label:'النوع'},{key:'date',label:'التاريخ',type:'date',text:r=>fmtDate(r.date)},{key:'time',label:'الوقت'},{key:'title',label:'البيان'},{key:'details',label:'التفاصيل'},{key:'status',label:'الحالة',text:r=>label(r.status)||''},
    {key:'fileId',label:'الملف',get:r=>refs.get(r.fileId)||'',text:r=>refs.get(r.fileId)||''},{key:'caseId',label:'القضية / المرحلة',get:r=>refs.get(r.caseId)||'',text:r=>refs.get(r.caseId)||''}]});
   status.textContent=`${title}: ${rows.length} عنصر`;return;
@@ -91,7 +103,7 @@ async function run(app){
  const refs=await resolveRefs(app.office,rows,ent.fields);
  const dfl=dateFields(st.type).find(x=>x[0]===st.dateField)?.[1]||'';
  const title=st.title||`تقرير ${ent.plural}${from||to?` — ${dfl}: ${periodTxt}`:''}${st.q?` — بحث: ${st.q}`:''}`;
- const grid=mountGrid(el,{title,storageKey:'report:'+st.type,rows,columns:columnsFor(st.type,refs),onRowClick:r=>openRow(app,st.type,r),emptyText:'لا توجد سجلات مطابقة لشروط التقرير.'});
+ const grid=mountGrid(el,{title,storageKey:'report:'+st.type,collapseKey:`reports:${st.type}:grid`,rows,columns:columnsFor(st.type,refs),onRowClick:r=>openRow(app,st.type,r),emptyText:'لا توجد سجلات مطابقة لشروط التقرير.'});
  if(st.dateField&&(from||to))grid.sortBy(st.dateField,'asc');
  status.innerHTML=`<b>${esc(title)}</b>: ${rows.length} سجل${more?` — <span class="warn-text">وصل التقرير إلى الحد الأقصى (${st.limit}). ضيّق الفترة أو البحث أو ارفع الحد.</span>`:''}`;
 }
