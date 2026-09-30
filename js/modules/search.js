@@ -9,6 +9,7 @@ import {ENTITIES,label as statusLabel} from '../domain/entities.js';
 import {SEARCH_SOURCES,PRIMARY_STORES,allSearchStores,searchAll,searchStore,
  getHistory,pushHistory,clearHistory,getSavedSearches,saveSearch,removeSavedSearch} from '../services/search-engine.js';
 import {localDate} from '../core/clock.js';
+import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 
 const ALL=SEARCH_SOURCES.map(s=>s.store);
 const state=app=>(app.__searchState=app.__searchState||{q:'',scope:'all',period:'all',from:'',to:''});
@@ -30,6 +31,7 @@ export async function renderSearch(app){
    <input id="advanced-q" autocomplete="off" autofocus spellcheck="false" value="${esc(st.q)}" placeholder="اكتب اسمًا أو جزءًا منه، أو رقم ملف مثل 2/2026، أو رقم قضية، أو رقمًا قوميًا — وكلمات متعددة للبحث الدقيق">
    <button class="ghost" id="search-clear" title="مسح (Esc)">مسح</button>
   </div>
+  <section class="panel search-filter-panel" data-collapse-id="search-filters"><div class="panel-head"><h3>عوامل التصفية والفترة</h3><span class="badge" data-search-filter-summary>لا توجد فلاتر نشطة</span></div>
   <div class="scope-row" role="tablist" aria-label="نطاق البحث">
    <button class="chip ${st.scope==='all'?'active':''}" data-scope="all">الكل</button>
    ${sources.map(s=>`<button class="chip ${st.scope===s.v?'active':''}" data-scope="${s.v}"><span aria-hidden="true">${esc(s.l)}</span></button>`).join('')}
@@ -45,7 +47,7 @@ export async function renderSearch(app){
    </span>
    <span class="muted small">كل الكلمات يجب أن توجد معًا (AND) — التطبيع يتعامل مع أ/إ/آ وة/ه وى/ي تلقائيًا.</span>
   </div>
-  <div class="saved-bar" id="saved-bar"></div>
+  <div class="saved-bar" id="saved-bar"></div></section>
   <div id="advanced-status" class="muted small" aria-live="polite"></div>
   <div id="advanced-results"></div>
  </section>`;
@@ -82,6 +84,16 @@ export function bindSearch(app){
  const input=root.querySelector('#advanced-q'),out=root.querySelector('#advanced-results'),status=root.querySelector('#advanced-status'),clear=root.querySelector('#search-clear');
  const st=state(app);
  let seq=0,timer=0;
+ const filterSummary=root.querySelector('[data-search-filter-summary]');
+ const syncFilterSummary=()=>{
+  if(!filterSummary)return;
+  const active=[];
+  if(st.scope!=='all')active.push(ENTITIES[st.scope]?.plural||st.scope);
+  if(st.period==='y')active.push('هذه السنة');
+  else if(st.period==='custom')active.push(st.from||st.to?`${st.from||'…'} — ${st.to||'…'}`:'فترة مخصصة');
+  filterSummary.textContent=active.length?`${active.length} فلاتر نشطة · ${active.join(' · ')}`:'لا توجد فلاتر نشطة';
+ };
+ syncFilterSummary();
  const savedBar=root.querySelector('#saved-bar');
  const drawSaved=()=>{
   const sv=getSavedSearches();
@@ -90,7 +102,8 @@ export function bindSearch(app){
  };
  drawSaved();
 
- const renderGroups=(groups,q,{withMore=false}={})=>{out.innerHTML=groups.map(g=>groupHtml(g,q,{withMore})).join('')||`<div class="empty"><h3>لا نتائج مطابقة</h3><p>جرّب كلمات أقل أو جزءًا من الاسم، أو تحقق من الكتابة (أ/إ وة/ه تُعامل تلقائيًا كواحدة).</p></div>`};
+ const renderGroups=(groups,q,{withMore=false}={})=>{out.innerHTML=groups.map(g=>groupHtml(g,q,{withMore})).join('')||`<div class="empty"><h3>لا نتائج مطابقة</h3><p>جرّب كلمات أقل أو جزءًا من الاسم، أو تحقق من الكتابة (أ/إ وة/ه تُعامل تلقائيًا كواحدة).</p></div>`;enhanceCollapsiblePanels(out,'search:results',{bulk:false});enhanceCollapsiblePanels(root,'search')};
+ const renderIdle=()=>{out.innerHTML=idleHtml();enhanceCollapsiblePanels(out,'search:idle',{bulk:false});enhanceCollapsiblePanels(root,'search')};
 
  const run=async()=>{
   const q=input.value.trim();st.q=q;
@@ -99,7 +112,7 @@ export function bindSearch(app){
   const periodFilter=it=>inPeriod(it.row,ENTITIES[it.store]?.dateField||'createdAt',st.period==='y'?`${localDate().slice(0,4)}-01-01`:st.from,st.period==='y'?`${localDate().slice(0,4)}-12-31`:st.to);
   if(q.length<2){
    status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.';
-   out.innerHTML=idleHtml();
+   renderIdle();
    return;
   }
   const scoped=st.scope!=='all';
@@ -133,7 +146,7 @@ export function bindSearch(app){
   else if(b.matches('[data-save-cancel]')){savedBar.querySelector('.save-form').hidden=true}
   else if(b.matches('[data-saved]')){const sv=getSavedSearches().find(x=>x.name===b.dataset.saved);if(sv){input.value=sv.q;run().catch(err=>app.fail(err))}}
   else if(b.matches('[data-saved-del]')){removeSavedSearch(b.dataset.savedDel);drawSaved()}
-  else if(b.matches('[data-clear-history]')){clearHistory();out.innerHTML=idleHtml()}
+  else if(b.matches('[data-clear-history]')){clearHistory();renderIdle()}
   else if(b.matches('[data-hist]')){input.value=b.dataset.hist;run().catch(err=>app.fail(err))}
  });
  function toastSaved(m){import('../ui/toast.js').then(t=>t.toast(m,'ok'))}
@@ -152,10 +165,10 @@ export function bindSearch(app){
  });
 
  // فلاتر النطاق والفترة
- root.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>{st.scope=b.dataset.scope;root.querySelectorAll('[data-scope]').forEach(x=>x.classList.toggle('active',x===b));run().catch(err=>app.fail(err))});
- root.querySelector('#search-period').onchange=e=>{st.period=e.target.value;root.querySelector('.custom-range').hidden=st.period!=='custom';run().catch(err=>app.fail(err))};
- root.querySelector('#search-from').onchange=e=>{st.from=e.target.value;run().catch(err=>app.fail(err))};
- root.querySelector('#search-to').onchange=e=>{st.to=e.target.value;run().catch(err=>app.fail(err))};
+ root.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>{st.scope=b.dataset.scope;root.querySelectorAll('[data-scope]').forEach(x=>x.classList.toggle('active',x===b));syncFilterSummary();run().catch(err=>app.fail(err))});
+ root.querySelector('#search-period').onchange=e=>{st.period=e.target.value;root.querySelector('.custom-range').hidden=st.period!=='custom';syncFilterSummary();run().catch(err=>app.fail(err))};
+ root.querySelector('#search-from').onchange=e=>{st.from=e.target.value;syncFilterSummary();run().catch(err=>app.fail(err))};
+ root.querySelector('#search-to').onchange=e=>{st.to=e.target.value;syncFilterSummary();run().catch(err=>app.fail(err))};
 
  // لوحة المفاتيح: ↑↓ للتنقل، Enter للفتح أو لحفظ البحث في السجل والمسار، Esc للمسح
  input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>run().catch(err=>app.fail(err)),250)});
@@ -172,9 +185,9 @@ export function bindSearch(app){
    if(cur)cur.click();else commit();
   }
  });
- clear.onclick=()=>{input.value='';seq++;clearTimeout(timer);st.q='';out.innerHTML=idleHtml();status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.';input.focus()};
+ clear.onclick=()=>{input.value='';seq++;clearTimeout(timer);st.q='';renderIdle();status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.';input.focus()};
  root.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.activeElement===input&&input.value){clear.click()}});
  if(st.q.trim().length>=2){run().catch(err=>app.fail(err))}
- else{out.innerHTML=idleHtml();status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.'}
+ else{renderIdle();status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.'}
  setTimeout(()=>input.focus(),30);
 }

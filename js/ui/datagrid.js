@@ -10,6 +10,10 @@ import {prefs} from '../core/preferences.js';
 import {formatDate} from '../core/format.js';
 import {localDate,addDays} from '../core/clock.js';
 import {toast} from './toast.js';
+import {resolveCollapseState,saveCollapseState,clearCollapseState,getCollapseRecord,isCollapsePinned,getCollapsePreferences} from './collapse-state.js';
+import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
+
+let gridInstance=0;
 
 // أعمدة لا تُصدَّر افتراضيًا (خصوصية الموكلين) إلا باختيار "تصدير كامل"
 const SENSITIVE=/nationalId|idNumber|passport|phone|mobile|email|address|birth|partyName|bailiffName/i;
@@ -79,23 +83,39 @@ export function mountGrid(root,opts){
  const cols=o.columns.map(c=>({type:'text',get:r=>r[c.key],text:r=>String(c.get?c.get(r)??'':r[c.key]??''),...c}));
  const byKey=new Map(cols.map(c=>[c.key,c]));
  let rows=o.rows||[];
+ const instance=++gridInstance;
  const PK='grid:'+(o.storageKey||'');
  const legacy=(()=>{try{return JSON.parse(localStorage.getItem('grid:'+o.storageKey)||'null')}catch{return null}})();
  const saved=(o.storageKey&&prefs.get(PK))||legacy||{};
+ const collapseScope=String(o.collapseKey||o.storageKey||`anonymous:${instance}`);
+ const shellCollapseKey=`datagrid:${collapseScope}:section`;
+ const toolsCollapseKey=`datagrid:${collapseScope}:tools`;
+ const filterCollapseKey=`datagrid:${collapseScope}:filters`;
  const order=(Array.isArray(saved.order)?saved.order:[]).filter(k=>byKey.has(k));cols.forEach(c=>{if(!order.includes(c.key))order.push(c.key)});
- const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map((Array.isArray(saved.filters)?saved.filters:[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f?.set?new Set(f.set):null}])),adv:saved.adv&&Array.isArray(saved.adv.rules)?saved.adv:{logic:'and',rules:[]},quick:saved.quick||'',groupBy:byKey.has(saved.groupBy)?saved.groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),widths:{...(saved.widths||{})},fontSize:['small','medium','large'].includes(saved.fontSize)?saved.fontSize:'medium',filterCollapsed:Boolean(saved.filterCollapsed),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:'',
+ const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map((Array.isArray(saved.filters)?saved.filters:[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f?.set?new Set(f.set):null}])),adv:saved.adv&&Array.isArray(saved.adv.rules)?saved.adv:{logic:'and',rules:[]},quick:saved.quick||'',groupBy:byKey.has(saved.groupBy)?saved.groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),widths:{...(saved.widths||{})},fontSize:['small','medium','large'].includes(saved.fontSize)?saved.fontSize:'medium',filterCollapsed:resolveCollapseState(filterCollapseKey,{fallback:true,legacy:typeof saved.filterCollapsed==='boolean'?saved.filterCollapsed:undefined}),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:String(saved.activeView||''),
   pinned:(Array.isArray(saved.pinned)?saved.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS),
   colSearch:saved.colSearch&&typeof saved.colSearch==='object'&&!Array.isArray(saved.colSearch)?{...saved.colSearch}:{},
   colSearchOn:Boolean(saved.colSearchOn),selected:new Set(),
   searchCol:byKey.has(saved.searchCol)?saved.searchCol:'',
   span:['wide','full'].includes(saved.span)?saved.span:'',
   tableWidth:Math.max(100,Math.min(220,Number(saved.tableWidth)||100)),
-  shellCollapsed:Boolean(saved.shellCollapsed),
+  shellCollapsed:resolveCollapseState(shellCollapseKey,{fallback:false,legacy:typeof saved.shellCollapsed==='boolean'?saved.shellCollapsed:undefined,primary:true}),
+  toolsCollapsed:resolveCollapseState(toolsCollapseKey,{fallback:true,legacy:typeof saved.toolsCollapsed==='boolean'?saved.toolsCollapsed:undefined}),
   qaOn:saved.qaOn!==false};
+ if(!st.views.some(v=>v?.name===st.activeView))st.activeView='';
+ // One-time migration of pre-central grid collapse settings. After this point the
+ // shared store is authoritative, so temporary bulk changes cannot leak through
+ // the older grid-view preference object.
+ const migrateLegacyCollapse=!getCollapsePreferences().legacyDisabled;
+ for(const [key,field,property] of [[filterCollapseKey,'filterCollapsed','filterCollapsed'],[toolsCollapseKey,'toolsCollapsed','toolsCollapsed'],[shellCollapseKey,'shellCollapsed','shellCollapsed']]){
+  if(migrateLegacyCollapse&&!getCollapseRecord(key)&&typeof saved[field]==='boolean')saveCollapseState(key,st[property]);
+ }
  let hl=null;const collapsed=new Set();
  let view=[];
  root.classList.add('dg');
- root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'▸':'▾'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button></div><div class="dg-body"><div class="dg-toolbar"><button type="button" class="ghost dg-tools-btn" aria-expanded="false" title="أدوات الجدول">⚙︎ أدوات</button><button type="button" class="ghost dg-filter-toggle" aria-expanded="true" title="إظهار أو إخفاء عوامل التصفية">عوامل التصفية</button>
+ const bodyId=`dg-body-${instance}`,toolsId=`dg-tools-${instance}`;
+ root.dataset.collapseReady='true';root.dataset.collapseType='grid';root.dataset.collapseKey=shellCollapseKey;root.dataset.collapseCollapsed=String(st.shellCollapsed);
+ root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}" aria-controls="${bodyId}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'›':'⌄'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button>${collapsePinMarkup(shellCollapseKey,isCollapsePinned(shellCollapseKey),'collapse-pin dg-shell-pin')}</div><div class="dg-body" id="${bodyId}"><div class="dg-tools-summary"><button type="button" class="dg-tools-summary-toggle" aria-expanded="${st.toolsCollapsed?'false':'true'}" aria-controls="${toolsId}"><span class="dg-tools-label">🔍 عوامل التصفية والتخصيص</span><span class="dg-tools-active"></span><span class="dg-tools-view"></span><span class="dg-tools-caret" aria-hidden="true">${st.toolsCollapsed?'›':'⌄'}</span></button>${collapsePinMarkup(toolsCollapseKey,isCollapsePinned(toolsCollapseKey),'collapse-pin dg-tools-pin')}</div><div class="dg-tools-panel" id="${toolsId}"${st.toolsCollapsed?' hidden':''}><div class="dg-toolbar"><button type="button" class="ghost dg-filter-toggle" aria-expanded="${!st.filterCollapsed}" aria-label="${st.filterCollapsed?'فتح':'طي'} عوامل التصفية" title="إظهار أو إخفاء عوامل التصفية">${st.filterCollapsed?'›':'⌄'} عوامل التصفية</button>${collapsePinMarkup(filterCollapseKey,isCollapsePinned(filterCollapseKey),'collapse-pin dg-filter-pin')}
   <input class="dg-quick" type="search" placeholder="بحث فوري في النتائج… ( / )" aria-label="بحث داخل النتائج">
   <select class="dg-scope" aria-label="نطاق البحث" title="بحث في كل الأعمدة أو عمود محدد"><option value="">كل الأعمدة</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select>
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
@@ -118,19 +138,20 @@ export function mountGrid(root,opts){
  </div>
  <div class="dg-selbar" hidden><b class="dg-sel-count"></b><span class="dg-bulk-slot"></span><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="ghost small dg-open-sel">فتح المحدد</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>
  <div class="dg-chips" hidden aria-label="التصفية النشطة"></div>
- <div class="dg-adv" hidden></div>
+ <div class="dg-adv" hidden></div></div>
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
  <div class="dg-more"></div></div>`;
  const $=s=>root.querySelector(s);
  root.classList.toggle('dg-filter-open',!st.filterCollapsed);
  root.classList.toggle('dg-shell-closed',st.shellCollapsed);
+ root.classList.toggle('dg-tools-collapsed',st.toolsCollapsed);
  $('.dg-quick').value=st.quick;$('.dg-groupby').value=st.groupBy;$('.dg-font').value=st.fontSize;
  if($('.dg-scope'))$('.dg-scope').value=st.searchCol||'';
  if($('.dg-span'))$('.dg-span').value=st.span||'';
  if($('.dg-width'))$('.dg-width').value=st.tableWidth;
  $('.dg-csearch-btn').classList.toggle('dg-chip-active',st.colSearchOn);
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,shellCollapsed:st.shellCollapsed,qaOn:st.qaOn})};
+ const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn})};
  const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards;
  let rowH=0,vStart=-1;
  const allSelected=()=>view.length>0&&view.every(r=>st.selected.has(r));
@@ -140,14 +161,42 @@ export function mountGrid(root,opts){
  const fmtN=v=>Number(v||0).toLocaleString('ar-EG');
  function activeFilterCount(){
   let n=st.filters.size+(st.quick?1:0)+(Object.values(st.colSearch).some(Boolean)?1:0);
-  n+=st.adv.rules.filter(x=>byKey.get(x.key)&&(NOVAL.includes(x.op)||x.v1!=='')).length;
+  n+=st.adv.rules.filter(x=>byKey.get(x.key)&&(NOVAL.includes(x.op)||x.v1!==''||x.v2!=='')).length;
   return n;
+ }
+ function updateCollapseSummary(count=activeFilterCount()){
+  const n=Number(count)||0;
+  const active=$('.dg-tools-active');if(active)active.textContent=n?`— ${fmtN(n)} فلاتر نشطة`:'— لا توجد فلاتر نشطة';
+  const currentView=$('.dg-tools-view');if(currentView)currentView.textContent=`العرض: ${st.activeView||'الافتراضي'}`;
+  const shellCount=$('.dg-shell-count');
+  if(shellCount)shellCount.textContent=`— ${fmtN(view.length)} نتيجة${n?` · ${fmtN(n)} فلاتر نشطة`:''}${st.activeView?` · ${st.activeView}`:''}`;
  }
  function applyChrome(){
   root.style.setProperty('--dg-w',(st.tableWidth||100)+'%');
   root.classList.toggle('dg-span-wide',st.span==='wide'||st.span==='full');
   root.classList.toggle('dg-span-full',st.span==='full');
   root.classList.toggle('dg-shell-closed',st.shellCollapsed);
+  root.classList.toggle('dg-tools-collapsed',st.toolsCollapsed);
+  root.classList.toggle('dg-tools-open',!st.toolsCollapsed);
+  root.classList.toggle('dg-filter-open',!st.filterCollapsed);
+  root.dataset.collapseCollapsed=String(st.shellCollapsed);
+  const shellButton=$('.dg-shell-toggle');
+  shellButton?.setAttribute('aria-expanded',String(!st.shellCollapsed));
+  const shellCaret=shellButton?.querySelector('.dg-caret');if(shellCaret)shellCaret.textContent=st.shellCollapsed?'›':'⌄';
+  const shellBody=$('.dg-body');if(shellBody){shellBody.setAttribute('aria-hidden',String(st.shellCollapsed));if(st.shellCollapsed)shellBody.setAttribute('inert','');else shellBody.removeAttribute('inert')}
+  const toolsPanel=$('.dg-tools-panel');if(toolsPanel){toolsPanel.hidden=st.toolsCollapsed;toolsPanel.setAttribute('aria-hidden',String(st.toolsCollapsed));if(st.toolsCollapsed)toolsPanel.setAttribute('inert','');else toolsPanel.removeAttribute('inert')}
+  const toolsButton=$('.dg-tools-summary-toggle');
+  toolsButton?.setAttribute('aria-expanded',String(!st.toolsCollapsed));
+  const activeSummary=$('.dg-tools-active')?.textContent?.trim()||'لا توجد فلاتر نشطة';
+  const viewSummary=$('.dg-tools-view')?.textContent?.trim()||`العرض: ${st.activeView||'الافتراضي'}`;
+  toolsButton?.setAttribute('aria-label',`${st.toolsCollapsed?'فتح':'طي'} عوامل التصفية والتخصيص؛ ${activeSummary}؛ ${viewSummary}`);
+  const filterButton=$('.dg-filter-toggle');
+  const nFilt=activeFilterCount();
+  if(filterButton){filterButton.setAttribute('aria-expanded',String(!st.filterCollapsed));filterButton.setAttribute('aria-label',`${st.filterCollapsed?'فتح':'طي'} عوامل التصفية؛ ${nFilt?`${fmtN(nFilt)} فلاتر نشطة`:'لا توجد فلاتر نشطة'}`);filterButton.textContent=`${st.filterCollapsed?'›':'⌄'} عوامل التصفية${nFilt?` (${fmtN(nFilt)} نشطة)`:''}`}
+  const toolsCaret=$('.dg-tools-caret');if(toolsCaret)toolsCaret.textContent=st.toolsCollapsed?'›':'⌄';
+  syncCollapsePin($('.dg-shell-pin'),shellCollapseKey);
+  syncCollapsePin($('.dg-tools-pin'),toolsCollapseKey);
+  syncCollapsePin($('.dg-filter-pin'),filterCollapseKey);
  }
  function menuItems(row){try{const items=(typeof o.rowMenu==='function'?o.rowMenu(row):o.rowMenu)||[];return Array.isArray(items)?items:[];}catch{return []}}
  function compute(){
@@ -238,9 +287,8 @@ export function mountGrid(root,opts){
   if(!view.length)html=`<tr><td colspan="${Math.max(1,colSpan)}" class="dg-empty">${esc(rows.length?'لا توجد صفوف مطابقة للتصفية.':o.emptyText)}</td></tr>`;
   if(view.length&&virtualOn())renderWindow(true);else{$('tbody').innerHTML=html;layoutPins()}
   $('.dg-count').textContent=view.length===rows.length&&!o.more?`${fmtN(rows.length)} نتيجة`:`${fmtN(view.length)} نتيجة من أصل ${fmtN(rows.length)}${o.more?'+':''}`;
-  const shellCount=$('.dg-shell-count');if(shellCount)shellCount.textContent=rows.length?`— ${fmtN(view.length)}`:'';
-  const nFilt=activeFilterCount();
-  $('.dg-filter-toggle').textContent=st.filterCollapsed?`عوامل التصفية (${nFilt})`:'▾ عوامل التصفية';
+  const nFilt=activeFilterCount();updateCollapseSummary(nFilt);
+  $('.dg-filter-toggle').textContent=`${st.filterCollapsed?'›':'⌄'} عوامل التصفية${nFilt?` (${fmtN(nFilt)} نشطة)`:''}`;
   const rest=virtualOn()?0:view.length-shown.length;
   $('.dg-more').innerHTML=rest>0?`<button type="button" class="ghost dg-showmore">عرض ${Math.min(rest,o.pageSize)} صف إضافي (متبقٍ ${rest})</button>`:'';
   $('.dg-clear').hidden=!(st.filters.size||st.adv.rules.length||st.quick||st.sort.length);
@@ -286,8 +334,8 @@ export function mountGrid(root,opts){
  let qt=0;
  $('.dg-quick').addEventListener('input',()=>{const el=$('.dg-quick');clearTimeout(qt);qt=setTimeout(()=>{if(!root.isConnected||!el)return;st.quick=el.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
  $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;persist();render()});
- $('.dg-filter-toggle').addEventListener('click',()=>{st.filterCollapsed=!st.filterCollapsed;root.classList.toggle('dg-filter-open',!st.filterCollapsed);persist();renderBody()});
- $('.dg-filter-close')?.addEventListener('click',()=>{st.filterCollapsed=true;root.classList.remove('dg-filter-open');persist();renderBody()});
+ $('.dg-filter-toggle').addEventListener('click',()=>{st.filterCollapsed=!st.filterCollapsed;if(st.filterCollapsed)closePop();saveCollapseState(filterCollapseKey,st.filterCollapsed);persist();applyChrome()});
+ $('.dg-filter-close')?.addEventListener('click',()=>{st.filterCollapsed=true;closePop();saveCollapseState(filterCollapseKey,true);persist();applyChrome()});
  $('.dg-filter-apply')?.addEventListener('click',()=>{st.shown=o.pageSize;persist();render();toast('تم تطبيق التصفية')});
  $('.dg-save-filter')?.addEventListener('click',()=>$('.dg-views-btn')?.click());
  $('.dg-unsort')?.addEventListener('click',()=>{st.sort=[];st.activeView='';persist();render()});
@@ -295,7 +343,19 @@ export function mountGrid(root,opts){
  $('.dg-span')?.addEventListener('change',e=>{st.span=e.target.value;persist();applyChrome()});
  $('.dg-width')?.addEventListener('input',e=>{st.tableWidth=Number(e.target.value)||100;applyChrome()});
  $('.dg-width')?.addEventListener('change',()=>persist());
- $('.dg-shell-toggle')?.addEventListener('click',()=>{st.shellCollapsed=!st.shellCollapsed;const b=$('.dg-shell-toggle');b?.setAttribute('aria-expanded',String(!st.shellCollapsed));const c=b?.querySelector('.dg-caret');if(c)c.textContent=st.shellCollapsed?'▸':'▾';persist();applyChrome()});
+ $('.dg-shell-toggle')?.addEventListener('click',()=>{st.shellCollapsed=!st.shellCollapsed;if(st.shellCollapsed)closePop();saveCollapseState(shellCollapseKey,st.shellCollapsed);persist();applyChrome()});
+ $('.dg-tools-summary-toggle')?.addEventListener('click',()=>{st.toolsCollapsed=!st.toolsCollapsed;if(st.toolsCollapsed)closePop();saveCollapseState(toolsCollapseKey,st.toolsCollapsed);persist();applyChrome()});
+ bindCollapsePin($('.dg-shell-pin'),shellCollapseKey,()=>st.shellCollapsed);
+ bindCollapsePin($('.dg-tools-pin'),toolsCollapseKey,()=>st.toolsCollapsed);
+ bindCollapsePin($('.dg-filter-pin'),filterCollapseKey,()=>st.filterCollapsed);
+ root.addEventListener('collapse:bulk',event=>{
+  const detail=event.detail||{};const next=Boolean(detail.collapsed);const save=detail.persist!==false;
+  if(next&&(detail.target==='tools'||detail.target==='filters'||detail.target==='section'||detail.target==='all'))closePop();
+  if(detail.target==='tools'||detail.target==='all'){st.toolsCollapsed=next;if(save)saveCollapseState(toolsCollapseKey,next)}
+  if(detail.target==='filters'||detail.target==='all'){st.filterCollapsed=next;if(save)saveCollapseState(filterCollapseKey,next)}
+  if(detail.target==='section'||detail.target==='all'){st.shellCollapsed=next;if(save)saveCollapseState(shellCollapseKey,next)}
+  if(save)persist();applyChrome();
+ });
  $('.dg-font').addEventListener('change',e=>{st.fontSize=e.target.value;persist();renderBody()});
  $('.dg-fullscreen').addEventListener('click',async()=>{if(document.fullscreenElement===root){try{await document.exitFullscreen()}catch{}root.classList.remove('dg-fullscreen')}else if(root.requestFullscreen){try{await root.requestFullscreen()}catch{root.classList.toggle('dg-fullscreen')}}else root.classList.toggle('dg-fullscreen');renderBody()});
  root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});
@@ -308,7 +368,7 @@ export function mountGrid(root,opts){
   if(t==='q'){st.quick='';$('.dg-quick').value=''}else if(t==='c'){st.colSearch={};persist();renderHead()}else if(t==='f')st.filters.delete(k);else if(t==='a'){st.adv.rules=[];renderAdv()}else if(t==='s'){st.sort=st.sort.filter(x=>x.key!==k)}
   st.activeView='';persist();render();
  });
- $('.dg-tools-btn').addEventListener('click',e=>{const on=root.classList.toggle('dg-tools-open');e.currentTarget.setAttribute('aria-expanded',on)});
+
  const toggleGroup=tr=>{const k=tr.dataset.g;collapsed.has(k)?collapsed.delete(k):collapsed.add(k);renderBody()};
  $('tbody').addEventListener('click',e=>{const tr=e.target.closest('.dg-grouprow');if(tr){e.stopPropagation();toggleGroup(tr)}},true);
  $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest?.('.dg-grouprow');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();toggleGroup(tr)}});
@@ -343,10 +403,14 @@ export function mountGrid(root,opts){
  $('.dg-sel-print').addEventListener('click',()=>printGrid([...st.selected]));
  // إعادة ضبط الجدول بالكامل (إعدادات العرض فقط — لا تمس أي بيانات)
  $('.dg-reset-btn').addEventListener('click',()=>{
-  if(o.storageKey)prefs.remove(PK);
+  if(o.storageKey){prefs.remove(PK);try{localStorage.removeItem(`grid:${o.storageKey}`)}catch{}}
+  clearCollapseState(filterCollapseKey);clearCollapseState(toolsCollapseKey);clearCollapseState(shellCollapseKey);
+  st.filterCollapsed=resolveCollapseState(filterCollapseKey,{fallback:true});
+  st.toolsCollapsed=resolveCollapseState(toolsCollapseKey,{fallback:true});
+  st.shellCollapsed=resolveCollapseState(shellCollapseKey,{fallback:false,primary:true});
   st.filters.clear();st.adv={logic:'and',rules:[]};st.quick='';st.sort=[];st.groupBy='';st.hidden=new Set(cols.filter(c=>c.hidden).map(c=>c.key));
-  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize='medium';st.density='';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.filterCollapsed=false;st.searchCol='';st.span='';st.tableWidth=100;st.shellCollapsed=false;st.qaOn=true;
-  root.classList.add('dg-filter-open');root.classList.remove('dg-shell-closed');$('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
+  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize='medium';st.density='';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.searchCol='';st.span='';st.tableWidth=100;st.qaOn=true;
+  $('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
   renderAdv();render();toast('أُعيد ضبط الجدول إلى الإعدادات الافتراضية');
  });
  $('thead').addEventListener('click',e=>{
@@ -458,7 +522,7 @@ export function mountGrid(root,opts){
   st.adv=v.adv||{logic:'and',rules:[]};st.sort=(v.sort||[]).filter(x=>byKey.has(x.key));st.groupBy=byKey.has(v.groupBy)?v.groupBy:'';$('.dg-groupby').value=st.groupBy;
   if(v.hidden)st.hidden=new Set(v.hidden);
   if(v.order){const ord=v.order.filter(k=>byKey.has(k));cols.forEach(c=>{if(!ord.includes(c.key))ord.push(c.key)});order.splice(0,order.length,...ord)}
-  st.widths={...(v.widths||st.widths)};st.fontSize=['small','medium','large'].includes(v.fontSize)?v.fontSize:st.fontSize;st.density=v.density||st.density;st.cards=v.cards===undefined?st.cards:Boolean(v.cards);st.filterCollapsed=Boolean(v.filterCollapsed);root.classList.toggle('dg-filter-open',!st.filterCollapsed);
+  st.widths={...(v.widths||st.widths)};st.fontSize=['small','medium','large'].includes(v.fontSize)?v.fontSize:st.fontSize;st.density=v.density||st.density;st.cards=v.cards===undefined?st.cards:Boolean(v.cards);st.filterCollapsed=Boolean(v.filterCollapsed);saveCollapseState(filterCollapseKey,st.filterCollapsed);syncCollapsePin($('.dg-filter-pin'),filterCollapseKey);root.classList.toggle('dg-filter-open',!st.filterCollapsed);
   st.pinned=(Array.isArray(v.pinned)?v.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS);st.colSearch=v.colSearch&&typeof v.colSearch==='object'?{...v.colSearch}:{};st.colSearchOn=Boolean(v.colSearchOn);
   st.searchCol=byKey.has(v.searchCol)?v.searchCol:'';st.span=['wide','full'].includes(v.span)?v.span:'';st.tableWidth=Math.max(100,Math.min(220,Number(v.tableWidth)||100));st.qaOn=v.qaOn!==false;
   if($('.dg-scope'))$('.dg-scope').value=st.searchCol;if($('.dg-span'))$('.dg-span').value=st.span;if($('.dg-width'))$('.dg-width').value=st.tableWidth;
@@ -487,7 +551,7 @@ export function mountGrid(root,opts){
    <div class="dg-adv-actions"><button type="button" class="ghost dg-radd">+ شرط</button><button type="button" class="primary dg-rapply">تطبيق</button><button type="button" class="ghost dg-rclear">مسح الشروط</button></div>`;
  }
  const readAdv=()=>{const el=$('.dg-adv');st.adv.logic=el.querySelector('.dg-logic')?.value||'and';el.querySelectorAll('.dg-rule').forEach(div=>{const r=st.adv.rules[Number(div.dataset.i)];r.key=div.querySelector('.dg-rkey').value;r.op=div.querySelector('.dg-rop').value;r.v1=div.querySelector('.dg-v1')?.value??'';r.v2=div.querySelector('.dg-v2')?.value??''})};
- $('.dg-adv-btn').addEventListener('click',()=>{const el=$('.dg-adv');el.hidden=!el.hidden;if(!el.hidden){st.filterCollapsed=false;root.classList.add('dg-filter-open');if(!st.adv.rules.length)st.adv.rules.push({key:cols[0].key,op:OPS[cols[0].type||'text'][0][0],v1:'',v2:''});renderAdv()}persist()});
+ $('.dg-adv-btn').addEventListener('click',()=>{const el=$('.dg-adv');el.hidden=!el.hidden;if(!el.hidden){st.filterCollapsed=false;saveCollapseState(filterCollapseKey,false);root.classList.add('dg-filter-open');if(!st.adv.rules.length)st.adv.rules.push({key:cols[0].key,op:OPS[cols[0].type||'text'][0][0],v1:'',v2:''});renderAdv()}persist();applyChrome()});
  $('.dg-adv').addEventListener('click',e=>{
   if(e.target.closest('.dg-radd')){readAdv();const c=visibleCols()[0]||cols[0];st.adv.rules.push({key:c.key,op:OPS[c.type||'text'][0][0],v1:'',v2:''});renderAdv()}
   else if(e.target.closest('.dg-rdel')){readAdv();st.adv.rules.splice(Number(e.target.closest('.dg-rule').dataset.i),1);renderAdv()}

@@ -1,50 +1,204 @@
-import { prefs } from '../core/preferences.js';
+import {esc} from './dom.js';
+import {icon} from './icons.js';
+import {resolveCollapseState,saveCollapseState,toggleCollapsePin,isCollapsePinned} from './collapse-state.js';
 
-const STORE_KEY = 'ui:collapsed-panels';
-
-/** Add accessible, preference-backed collapse controls to cards that have a heading. */
-export function enhanceCollapsiblePanels(root, scope = 'page') {
-  if (!root?.querySelectorAll) return;
-  const state = prefs.get(STORE_KEY, {}) || {};
-  [...root.querySelectorAll('.panel')].forEach((panel, index) => {
-    if (panel.dataset.collapseReady) return;
-    let header = panel.querySelector(':scope > .panel-head');
-    if (!header) {
-      const title = panel.querySelector(':scope > h2,:scope > h3,:scope > h4');
-      if (!title) return;
-      header = document.createElement('div');
-      header.className = 'panel-collapse-head';
-      panel.insertBefore(header, title);
-      header.append(title);
-    } else {
-      header.classList.add('panel-collapse-head');
-    }
-    const looseBadge = [...panel.children].find(el => el.classList?.contains('badge') && !header.contains(el));
-    if (looseBadge) header.append(looseBadge);
-    const heading = header.querySelector('h2,h3,h4')?.textContent?.trim() || `بطاقة ${index + 1}`;
-    const key = panel.id || `${scope}:${index}:${heading}`;
-    panel.dataset.collapseReady = 'true';
-    panel.dataset.collapseKey = key;
-    const collapsed = Boolean(state[key]);
-    panel.classList.toggle('card-collapsed', collapsed);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'ghost small card-collapse-toggle';
-    button.setAttribute('aria-expanded', String(!collapsed));
-    button.setAttribute('aria-label', `${collapsed ? 'توسيع' : 'طي'} البطاقة: ${heading}`);
-    button.title = collapsed ? 'توسيع البطاقة' : 'طي البطاقة';
-    button.textContent = collapsed ? '▸' : '▾';
-    button.addEventListener('click', async () => {
-      const next = !panel.classList.contains('card-collapsed');
-      panel.classList.toggle('card-collapsed', next);
-      button.setAttribute('aria-expanded', String(!next));
-      button.setAttribute('aria-label', `${next ? 'توسيع' : 'طي'} البطاقة: ${heading}`);
-      button.title = next ? 'توسيع البطاقة' : 'طي البطاقة';
-      button.textContent = next ? '▸' : '▾';
-      const current = prefs.get(STORE_KEY, {}) || {};
-      if (next) current[key] = true; else delete current[key];
-      await prefs.set(STORE_KEY, current);
-    });
-    header.append(button);
+const titleOf=el=>el?.querySelector?.('h2,h3,h4')?.textContent?.trim()||el?.querySelector?.(':scope > summary')?.textContent?.trim()||'';
+const token=value=>String(value||'').trim().toLocaleLowerCase().replace(/\s+/g,'-').replace(/[^\p{L}\p{N}_.:-]/gu,'').slice(0,100)||'section';
+const semanticAttrs=['collapseId','sec','actionSection','group','tab','grid','route','store'];
+function semanticValue(el){
+ for(const key of semanticAttrs)if(el?.dataset?.[key])return `${key}:${el.dataset[key]}`;
+ return '';
+}
+function collapseKeyFor(el,scope,kind,title){
+ if(el.dataset.collapseKey)return el.dataset.collapseKey;
+ const semantic=semanticValue(el);
+ const titleToken=token(title);
+ const boundary=el.closest('#main-content, #file-tab');
+ const parent=el.parentElement;
+ const selector=kind==='panel'?'.panel':kind==='section'?'details':kind==='search-group'?'.search-group':'';
+ const candidates=selector?[...(boundary||el.ownerDocument).querySelectorAll(selector)] : [el];
+ const sameTitle=candidates
+  .filter(candidate=>candidate.parentElement===parent&&!candidate.id&&!semanticValue(candidate))
+  .filter(candidate=>{
+   const header=candidate.matches('.panel')?candidate.querySelector(':scope > .panel-head,:scope > .section-head'):candidate.querySelector(':scope > summary');
+   return token(titleOf(header))===titleToken;
   });
+ const duplicate=sameTitle.length>1?`:n${sameTitle.indexOf(el)+1}`:'';
+ const explicit=el.id||semantic||`${titleToken}${duplicate}`;
+ const parents=[];
+ for(let p=el.parentElement;p&&p!==el.getRootNode()?.host;p=p.parentElement){
+  const ownTitle=p.matches?.('.panel')?titleOf(p.querySelector(':scope > .panel-head,:scope > .section-head')):'';
+  const value=semanticValue(p)||p.dataset.collapseKey||p.dataset.cardKey||p.id||(ownTitle?`panel:${ownTitle}`:'');
+  if(value)parents.unshift(token(value));
+  if(p===boundary)break;
+ }
+ return `${kind}:${token(scope)}:${parents.length?parents.join('/')+':':''}${token(explicit)}`;
+}
+function updatePinButton(button,key){
+ if(!button)return;
+ const pinned=isCollapsePinned(key);
+ button.classList.toggle('is-pinned',pinned);
+ button.setAttribute('aria-pressed',String(pinned));
+ button.setAttribute('aria-label',pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية');
+ button.title=pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية';
+}
+export const syncCollapsePin=updatePinButton;
+export function collapsePinMarkup(key,pinned=false,className='collapse-pin'){
+ return `<button type="button" class="${className}${pinned?' is-pinned':''}" data-collapse-pin="${esc(key)}" aria-label="${pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية'}" aria-pressed="${Boolean(pinned)}" title="${pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية'}">${icon('pin')}</button>`;
+}
+export function bindCollapsePin(button,key,getCollapsed,onChange){
+ if(!button||button.dataset.pinBound)return;
+ button.dataset.pinBound='true';
+ button.addEventListener('click',event=>{
+  event.preventDefault();event.stopPropagation();
+  toggleCollapsePin(key,Boolean(getCollapsed?.()));
+  updatePinButton(button,key);
+  onChange?.(isCollapsePinned(key));
+ });
+}
+function updatePanel(panel,collapsed,button,heading,bodyId){
+ panel.classList.toggle('card-collapsed',collapsed);
+ button.setAttribute('aria-expanded',String(!collapsed));
+ button.setAttribute('aria-controls',bodyId);
+ button.setAttribute('aria-label',`${collapsed?'توسيع':'طي'} القسم: ${heading}`);
+ button.title=collapsed?'توسيع القسم':'طي القسم';
+ button.querySelector('.collapse-caret').textContent=collapsed?'›':'⌄';
+ const body=panel.querySelector(':scope > .panel-collapse-body');
+ if(body){body.hidden=collapsed;body.setAttribute('aria-hidden',String(collapsed))}
+}
+function addPanelCollapse(panel,scope,index,legacyState){
+ if(panel.dataset.collapseReady)return;
+ let header=panel.querySelector(':scope > .panel-head,:scope > .section-head');
+ if(!header){
+  const title=panel.querySelector(':scope > h2,:scope > h3,:scope > h4');
+  if(!title)return;
+  header=document.createElement('div');header.className='panel-collapse-head';
+  panel.insertBefore(header,title);header.append(title);
+ }else header.classList.add('panel-collapse-head');
+ const heading=titleOf(header)||`قسم ${index+1}`;
+ const key=collapseKeyFor(panel,scope,'panel',heading);
+ const oldKey=panel.id||`${scope}:${index}:${heading}`;
+ const configured=panel.dataset.collapseDefault==='open'||panel.dataset.collapseDefault==='collapsed';
+ const fallback=panel.dataset.collapseDefault==='open'?false:true;
+ const legacy=typeof legacyState?.[oldKey]==='boolean'?legacyState[oldKey]:undefined;
+ const collapsed=resolveCollapseState(key,{fallback,configured,legacy});
+ // Badges outside the heading are concise context too; move them into the
+ // persistent header instead of cloning a stale count into a second summary.
+ [...panel.children].filter(child=>child!==header&&child.matches?.('.badge,.count')).forEach(child=>header.append(child));
+ const body=document.createElement('div');body.className='panel-collapse-body';
+ body.id=`collapse-region-${token(key)}`;body.setAttribute('role','region');body.setAttribute('aria-label',heading);
+ [...panel.children].filter(child=>child!==header).forEach(child=>body.append(child));
+ panel.append(body);
+ const button=document.createElement('button');button.type='button';button.className='ghost small card-collapse-toggle collapse-toggle';
+ button.innerHTML=`<span class="collapse-caret" aria-hidden="true">${collapsed?'›':'⌄'}</span>`;
+ const pin=document.createElement('button');pin.type='button';pin.className='collapse-pin';pin.innerHTML=icon('pin');
+ header.append(pin,button);
+ panel.dataset.collapseReady='true';panel.dataset.collapseKey=key;panel.dataset.collapseType='panel';panel.dataset.collapseCollapsed=String(collapsed);
+ updatePanel(panel,collapsed,button,heading,body.id);
+ button.addEventListener('click',()=>{
+  const next=!panel.classList.contains('card-collapsed');
+  panel.dataset.collapseCollapsed=String(next);updatePanel(panel,next,button,heading,body.id);saveCollapseState(key,next);syncCollapsePin(pin,key);
+ });
+ panel.addEventListener('collapse:bulk',event=>{
+  const detail=event.detail||{};const next=Boolean(detail.collapsed);
+  panel.dataset.collapseCollapsed=String(next);updatePanel(panel,next,button,heading,body.id);
+  if(detail.persist!==false){saveCollapseState(key,next);syncCollapsePin(pin,key)}
+ });
+ header.addEventListener('click',event=>{
+  if(event.target.closest('button,a,input,select,textarea,[data-no-collapse]'))return;
+  button.click();
+ });
+ bindCollapsePin(pin,key,()=>panel.classList.contains('card-collapsed'));
+}
+function addDetailsCollapse(details,scope,index){
+ if(details.dataset.collapseReady)return;
+ const summary=details.querySelector(':scope > summary');if(!summary)return;
+ const heading=summary.querySelector('[data-collapse-title]')?.textContent?.trim()||summary.querySelector('span')?.textContent?.trim()||summary.textContent.trim()||`قسم ${index+1}`;
+ const key=collapseKeyFor(details,scope,'section',heading);
+ const configured=details.dataset.collapseDefault==='open'||details.dataset.collapseDefault==='collapsed';
+ const fallback=details.dataset.collapseDefault==='open'?false:true;
+ const collapsed=resolveCollapseState(key,{fallback,configured});
+ details.dataset.collapseReady='true';details.dataset.collapseKey=key;details.dataset.collapseType='details';details.dataset.collapseCollapsed=String(collapsed);
+ details.open=!collapsed;
+ const body=document.createElement('div');body.className='collapse-region details-collapse-body';body.id=`collapse-region-${token(key)}`;body.setAttribute('role','region');body.setAttribute('aria-label',heading);
+ [...details.children].filter(child=>child!==summary).forEach(child=>body.append(child));details.append(body);
+ const button=document.createElement('button');button.type='button';button.className='collapse-pin';button.innerHTML=icon('pin');
+ summary.append(button);
+ const sync=()=>{
+  const isClosed=!details.open;
+  details.dataset.collapseCollapsed=String(isClosed);
+  summary.setAttribute('aria-expanded',String(details.open));
+  summary.setAttribute('aria-controls',body.id);
+  body.setAttribute('aria-hidden',String(isClosed));
+ };
+ summary.setAttribute('aria-controls',body.id);sync();
+ let ignoreInitial=true,programmaticOpen=null;setTimeout(()=>{ignoreInitial=false},0);
+ details.addEventListener('toggle',()=>{
+  sync();
+  if(ignoreInitial)return;
+  if(programmaticOpen!==null&&details.open===programmaticOpen){programmaticOpen=null;return}
+  programmaticOpen=null;
+  saveCollapseState(key,!details.open);syncCollapsePin(button,key);
+ });
+ details.addEventListener('collapse:bulk',event=>{
+  const detail=event.detail||{};const next=Boolean(detail.collapsed);const open=!next;
+  if(details.open!==open){programmaticOpen=open;details.open=open}
+  sync();
+  if(detail.persist!==false){saveCollapseState(key,next);syncCollapsePin(button,key)}
+ });
+ bindCollapsePin(button,key,()=>!details.open);
+}
+function addSearchGroupCollapse(group,scope,index){
+ if(group.dataset.collapseReady)return;
+ const header=group.querySelector(':scope > .section-head');
+ const title=titleOf(header);
+ if(!header||!title)return;
+ const key=collapseKeyFor(group,scope,'search-group',title);
+ const collapsed=resolveCollapseState(key,{fallback:true});
+ const rows=[...group.children].filter(x=>x!==header);
+ const body=document.createElement('div');body.className='collapse-region search-group-content';body.id=`collapse-region-${token(key)}`;
+ rows.forEach(x=>body.append(x));group.append(body);
+ const button=document.createElement('button');button.type='button';button.className='ghost small collapse-toggle';button.innerHTML=`<span class="collapse-caret" aria-hidden="true">${collapsed?'›':'⌄'}</span>`;
+ const pin=document.createElement('button');pin.type='button';pin.className='collapse-pin';pin.innerHTML=icon('pin');
+ header.append(pin,button);
+ group.dataset.collapseReady='true';group.dataset.collapseKey=key;group.dataset.collapseType='group';group.dataset.collapseCollapsed=String(collapsed);
+ const apply=next=>{group.dataset.collapseCollapsed=String(next);body.hidden=next;body.setAttribute('aria-hidden',String(next));button.setAttribute('aria-expanded',String(!next));button.setAttribute('aria-controls',body.id);button.setAttribute('aria-label',`${next?'توسيع':'طي'} نتائج ${title}`);button.title=next?'توسيع النتائج':'طي النتائج';button.querySelector('.collapse-caret').textContent=next?'›':'⌄'};
+ apply(collapsed);
+ button.addEventListener('click',()=>{const next=group.dataset.collapseCollapsed!=='true';apply(next);saveCollapseState(key,next);syncCollapsePin(pin,key)});
+ group.addEventListener('collapse:bulk',event=>{const detail=event.detail||{};const next=Boolean(detail.collapsed);apply(next);if(detail.persist!==false){saveCollapseState(key,next);syncCollapsePin(pin,key)}});
+ header.addEventListener('click',event=>{if(event.target.closest('button,a,input,select,textarea,[data-no-collapse]'))return;button.click()});
+ bindCollapsePin(pin,key,()=>group.dataset.collapseCollapsed==='true');
+}
+
+function addPageCollapseTools(root){
+ let control=[...root.children].find(child=>child.classList?.contains('collapse-page-tools'))||null;
+ const items=[...root.querySelectorAll('[data-collapse-ready="true"]')];
+ if(items.length<2){control?.remove();return}
+ if(control){const count=control.querySelector('.collapse-page-count');if(count)count.textContent=`${items.length} عناصر`;return}
+ control=document.createElement('details');control.className='collapse-page-tools';
+ control.innerHTML=`<summary><span>الأقسام والجداول</span><small class="collapse-page-count">${items.length} عناصر</small></summary><div class="collapse-page-actions"><button type="button" class="ghost small" data-collapse-bulk="open">فتح الكل</button><button type="button" class="ghost small" data-collapse-bulk="closed">طي الكل</button><label><input type="checkbox" data-collapse-bulk-save> حفظ هذه الحالة</label><small class="muted">بدون تفعيل الحفظ، يقتصر التغيير على العرض الحالي. يمكن تثبيت العناصر منفردة من رمز الدبوس.</small></div>`;
+ const anchor=root.querySelector('.page-head,.record-head,.hero')||null;
+ if(anchor?.parentElement)anchor.after(control);else root.prepend(control);
+ control.addEventListener('click',event=>{
+  const button=event.target.closest('[data-collapse-bulk]');if(!button)return;
+  const collapsed=button.dataset.collapseBulk==='closed';
+  const persist=Boolean(control.querySelector('[data-collapse-bulk-save]')?.checked);
+  const detail={collapsed,persist,target:'all'};
+  for(const item of [...root.querySelectorAll('[data-collapse-ready="true"]')])item.dispatchEvent(new CustomEvent('collapse:bulk',{detail}));
+  control.open=false;
+ });
+}
+
+/** Add accessible, independently persisted collapse controls to data panels and sections. */
+export function enhanceCollapsiblePanels(root,scope='page',options={}){
+ if(!root?.querySelectorAll)return;
+ const legacy=prefsLegacyPanels();
+ [...root.querySelectorAll('.panel')].forEach((panel,index)=>addPanelCollapse(panel,scope,index,legacy));
+ [...root.querySelectorAll('details:not(.collapse-page-tools):not([data-collapse-ignore])')].forEach((details,index)=>addDetailsCollapse(details,scope,index));
+ [...root.querySelectorAll('.search-group')].forEach((group,index)=>addSearchGroupCollapse(group,scope,index));
+ if(options.bulk!==false)addPageCollapseTools(root);
+}
+function prefsLegacyPanels(){
+ // Read-only migration path for v5.2's original panel preference map.
+ try{return JSON.parse(localStorage.getItem('akl:prefs:ui:collapsed-panels')||'null')||{}}catch{return {}}
 }

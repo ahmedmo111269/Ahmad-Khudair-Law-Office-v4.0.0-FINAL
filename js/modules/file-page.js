@@ -103,7 +103,8 @@ function partyGroupsHtml(parties){
 async function renderTab(app){
  await renderTabContent(app);
  const el=document.querySelector('#file-tab');
- enhanceCollapsiblePanels(el,`file:${app.__file.id}:${app.__fileTab.tab}`);
+ const main=document.querySelector('#main-content');
+ enhanceCollapsiblePanels(main,`file:${app.__file.id}:${app.__fileTab.tab}`);
  bindCards(el);
 }
 async function renderTabContent(app){
@@ -132,7 +133,7 @@ async function renderTabContent(app){
     {k:'الحالة',html:statusBadge(fsig?.text||label(f.status||'نشط'),fsig?.tone||'ok')+(sig?statusBadge(sig.text==='اليوم'?'جلسة اليوم':sig.text==='غدًا'?'جلسة غدًا':'جلسة '+sig.text,sig.tone):'')+(openProc.length?statusBadge(`${openProc.length} عمل مطلوب`,'warn'):'')}
    ])+`<div class="snap-actions"><button type="button" class="ghost small" data-tab-jump="hearings">الجلسات</button><button type="button" class="ghost small" data-tab-jump="procedures">الأعمال</button><button type="button" class="ghost small" data-tab-jump="relations">العلاقات</button>${clientParty?.clientId?`<button type="button" class="ghost small" data-route="client:${esc(clientParty.clientId)}">فتح الموكل</button>`:''}</div>`+detailsBlock('عرض التفاصيل الإضافية',`<p class="muted small">الأطراف ${parties.length} · المراحل ${stages.length} · الأعمال المفتوحة ${openProc.length}${last?` · آخر جلسة ${fmtDate(last.hearingDate)}`:''}</p>`)
   });
-  el.innerHTML=`${snap}<div class="stats-grid"><div class="stat-card"><strong>${stages.length}${stages.length>=500?'+':''}</strong><span>أرقام / مراحل</span></div><div class="stat-card"><strong>${hearings.length}${hearingResult.more?'+':''}</strong><span>جلسات</span></div><div class="stat-card"><strong>${openProc.length}</strong><span>أعمال مفتوحة</span></div><div class="stat-card"><strong>${parties.length}</strong><span>أطراف</span></div></div>
+  el.innerHTML=`${snap}<section class="panel file-stats-panel" data-collapse-id="file-summary-stats"><div class="panel-head"><h3>ملخص الملف</h3><span class="badge">4 مؤشرات</span></div><div class="stats-grid"><div class="stat-card"><strong>${stages.length}${stages.length>=500?'+':''}</strong><span>أرقام / مراحل</span></div><div class="stat-card"><strong>${hearings.length}${hearingResult.more?'+':''}</strong><span>جلسات</span></div><div class="stat-card"><strong>${openProc.length}</strong><span>أعمال مفتوحة</span></div><div class="stat-card"><strong>${parties.length}</strong><span>أطراف</span></div></div></section>
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
    <div class="grid2 file-hearing-cards"><section class="panel"><div class="panel-head"><h3>الجلسات القادمة</h3><span class="badge">${upcoming.length} / 2</span></div>${upcoming.map((h,i)=>{const hs=dateSignal(h.hearingDate);return `<button class="hearing-preview" data-open="hearings:${esc(h.id)}"><span class="hearing-order">${i+1}</span><span><b>${fmtDate(h.hearingDate)}</b> ${esc(h.hearingTime||'')}${hs?` <span class="ux-badge ux-badge--${hs.tone}">${hs.text==='اليوم'?'جلسة اليوم':hs.text==='غدًا'?'جلسة غدًا':'جلسة '+esc(hs.text)}</span>`:''}<small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.reason?' — '+esc(h.reason):''}</small></span><span aria-hidden="true">↗</span></button>`}).join('')||'<p class="muted empty-inline">لا توجد جلسات قادمة مسجلة.</p>'}</section>
    <section class="panel"><div class="panel-head"><h3>الجلسة السابقة</h3></div>${last?`<button class="hearing-preview" data-open="hearings:${esc(last.id)}"><span class="hearing-order">‹</span><span><b>${fmtDate(last.hearingDate)}</b><small>${esc(last.result||'لم يُسجل القرار')}${last.adjournedTo?' — التأجيل إلى '+fmtDate(last.adjournedTo):''}</small></span><span aria-hidden="true">↗</span></button>`:'<p class="muted empty-inline">لا توجد جلسات سابقة مسجلة.</p>'}<button class="ghost small" data-show-hearing-cycle>عرض دورة الجلسات</button></section></div>
@@ -215,7 +216,7 @@ async function renderTabContent(app){
   const rows=rels.map(r=>({...r,otherLabel:refLabel('files',om.get(r.otherFileId)),dirLabel:r.direction==='out'?'هذا الملف ←':'← من ملف آخر'}));
   el.innerHTML=`<div class="sec-actions"><button class="primary" data-add>+ ربط بملف آخر</button><span class="muted small">مثال: ملف استئناف مرتبط بملف الدعوى الأصلية، أو ملف تنفيذ لحكم.</span></div><div data-grid></div>`;
   el.querySelector('[data-add]').onclick=()=>openEntityForm(app,'fileRelations',{preset:{sourceFileId:id},onSaved:()=>reload(app)});
-  mountGrid(el.querySelector('[data-grid]'),{title:'علاقات الملف',storageKey:'file:relations',rows,columns:[
+  mountGrid(el.querySelector('[data-grid]'),{title:'علاقات الملف',storageKey:'file:relations',collapseKey:`file:${id}:relations-grid`,rows,columns:[
    {key:'dirLabel',label:'الاتجاه'},{key:'relationType',label:'نوع العلاقة'},{key:'otherLabel',label:'الملف المرتبط'},{key:'notes',label:'ملاحظات'},{key:'createdAt',label:'تاريخ الربط',type:'date',text:r=>fmtDate(r.createdAt)}],
    onRowClick:r=>relationActions(app,r)});
   return;
@@ -259,7 +260,7 @@ async function renderTabContent(app){
   const rows=[...new Map([...a,...b].map(x=>[x.id,x])).values()].sort((x,y)=>String(y.timestamp).localeCompare(String(x.timestamp)));
   el.innerHTML='<div data-grid></div>';
   const refs=new Map();
-  mountGrid(el.querySelector('[data-grid]'),{columns:columnsFor('activityLog',refs).filter(c=>c.key!=='fileId'),rows,title:`سجل نشاط الملف ${formatFileNumber(f.fileNumber)}`,storageKey:'file:activity'});
+  mountGrid(el.querySelector('[data-grid]'),{columns:columnsFor('activityLog',refs).filter(c=>c.key!=='fileId'),rows,title:`سجل نشاط الملف ${formatFileNumber(f.fileNumber)}`,storageKey:'file:activity',collapseKey:`file:${id}:activity-grid`});
  }
 }
 

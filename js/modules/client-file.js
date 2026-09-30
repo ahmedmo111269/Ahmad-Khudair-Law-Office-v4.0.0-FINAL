@@ -40,12 +40,12 @@ export async function clientFilePage(app,clientId,query){
    <dl class="cf-meta">${phone?`<div><dt>الهاتف</dt><dd><a href="tel:${esc(phone)}" dir="ltr">${esc(phone)}</a></dd></div>`:''}<div><dt>المحامي المسؤول</dt><dd>${esc(cf.responsibleLawyer||'—')}</dd></div><div><dt>فتح الملف</dt><dd>${formatDate(cf.openedAt)}</dd></div><div><dt>آخر نشاط</dt><dd>${rel(s.files[0]?.lastActivityAt||cf.lastActivityAt)}</dd></div></dl></div></div>
   <div class="cf-actions"><button class="primary" data-new-lf>+ إضافة ملف قانوني</button><button class="ghost" data-cf-edit>تعديل ملف الموكل</button>${cf.isArchived?'<button class="ghost" data-cf-reopen>إعادة فتح</button>':'<button class="ghost" data-cf-archive>أرشفة</button>'}</div>
  </section>
- <div class="cf-stats">
+ <section class="panel cf-stats-panel" data-collapse-id="client-file-stats"><div class="panel-head"><h3>ملخص ملف الموكل</h3><span class="badge">${s.total} ملف</span></div><div class="cf-stats">
   <div class="stat"><b>${s.total}</b><span>إجمالي الملفات</span></div>
   <div class="stat stat-ok"><b>${s.active}</b><span>نشطة</span></div>
   <div class="stat stat-muted"><b>${s.closed}</b><span>منتهية</span></div>
   <div class="stat stat-warn"><b>${s.stopped}</b><span>متوقفة</span></div>
- </div>
+ </div></section>
  <div class="cf-search"><input type="search" id="cf-q" placeholder="ابحث داخل ملف الموكل: رقم الملف، الاسم، النوع، رقم القضية…" value="${esc(q)}" aria-label="بحث داخل ملف الموكل"></div>`;
  if(q)return head+`<section class="panel"><div class="panel-head"><h3>نتائج البحث داخل الملف</h3></div><div id="cf-files"></div></section></div>`;
  if(!cat){
@@ -93,7 +93,7 @@ export async function bindClientFilePage(app,clientId){
   if(q){const {normalizeArabic}=await import('../core/search-normalizer.js');const n=normalizeArabic(q);list=list.filter(f=>normalizeArabic([formatFileNumber(f.fileNumber),f.fileNumber,f.title,f.fileType,f.mainCategory,f.searchText].join(' ')).includes(n))}
   else{list=list.filter(f=>f.categoryId===catId&&(!typeId||f.fileTypeId===typeId))}
   grid.innerHTML=`<div class="lf-cards">${list.map(f=>fileCard(f,tax)).join('')||'<p class="muted">لا توجد ملفات.</p>'}</div><div class="lf-grid"></div>`;
-  mountGrid(grid.querySelector('.lf-grid'),{title:'ملفات الموكل',storageKey:'cfile:files',rows:list,onRowClick:f=>app.go('file:'+f.id),emptyText:'لا توجد ملفات.',columns:[
+  mountGrid(grid.querySelector('.lf-grid'),{title:'ملفات الموكل',storageKey:'cfile:files',collapseKey:`client-file:${clientId}:files-grid`,rows:list,onRowClick:f=>app.go('file:'+f.id),emptyText:'لا توجد ملفات.',columns:[
    {key:'fileNumber',label:'رقم الملف الفرعي',get:f=>formatFileNumber(f.fileNumber)},{key:'title',label:'الملف'},{key:'type',label:'النوع',get:f=>tax.byId.get(f.fileTypeId)?.name||f.fileType||''},
    {key:'cat',label:'القسم',get:f=>tax.byId.get(f.categoryId)?.name||'',hidden:Boolean(catId)},
    {key:'stage',label:'المرحلة الحالية',get:f=>f.__stage?.stageType||''},{key:'court',label:'المحكمة',get:f=>f.__stage?.courtId||''},
