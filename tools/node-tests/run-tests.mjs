@@ -20,6 +20,7 @@ const {runCardSidebarTests}=await import(`${R}/tests/card-sidebar-tests.js`);
 const {runTopNavTests}=await import(`${R}/tests/topnav-tests.js`);
 const {runDemoSeedTests}=await import(`${R}/tests/demo-seed-tests.js`);
 const {runCollapseStateTests}=await import(`${R}/tests/collapse-state-tests.js`);
+const {runGridProviderTests}=await import(`${R}/tests/grid-provider-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -48,6 +49,7 @@ try{await runSearchTableTests(test,expect)}catch(e){test('search-table suite imp
 try{await runGridUpgradeTests(test,expect)}catch(e){test('grid-upgrade suite import/setup',()=>{throw e})}
 await runDemoSeedTests(test,expect);
 await runCollapseStateTests(test,expect);
+await runGridProviderTests(test,expect);
 
 const r=await run();
 for(const [status,name,msg] of r.results){

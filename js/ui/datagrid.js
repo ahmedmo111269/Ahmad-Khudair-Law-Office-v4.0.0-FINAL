@@ -5,10 +5,11 @@
 // طرق عرض محفوظة، إعادة ضبط، طباعة وتصدير Excel/Word/CSV/TXT، وتمرير افتراضي فوق 600 صف.
 import {esc} from './dom.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
+import {applyGridQuery,createGridQuery,sortGridRows,GRID_FILTER_OPERATORS,isValueFreeGridFilter} from '../core/grid-query.js';
+import {defineGridColumns} from './grid-columns.js';
 import {APP_NAME} from '../core/constants.js';
 import {prefs} from '../core/preferences.js';
 import {formatDate} from '../core/format.js';
-import {localDate,addDays} from '../core/clock.js';
 import {toast} from './toast.js';
 import {resolveCollapseState,saveCollapseState,clearCollapseState,getCollapseRecord,isCollapsePinned,getCollapsePreferences} from './collapse-state.js';
 import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
@@ -38,49 +39,16 @@ function markHtml(text,re){
  const merged=[];for(const r of ranges){const last=merged.at(-1);if(!last||r[0]>last[1])merged.push([r[0],r[1]]);else last[1]=Math.max(last[1],r[1])}
  let out='',i=0;for(const [a,b] of merged){out+=esc(s.slice(i,a))+'<mark>'+esc(s.slice(a,b))+'</mark>';i=b}return out+esc(s.slice(i));
 }
-const searchTokens=q=>n(q).split(' ').filter(Boolean);
-
-const OPS={
- text:[['contains','يحتوي'],['notContains','لا يحتوي'],['eq','يساوي'],['neq','لا يساوي'],['starts','يبدأ بـ'],['ends','ينتهي بـ'],['allWords','كل الكلمات'],['anyWord','أي كلمة'],['empty','فارغ'],['notEmpty','غير فارغ']],
- number:[['eq','يساوي'],['neq','لا يساوي'],['gt','أكبر من'],['gte','أكبر من أو يساوي'],['lt','أصغر من'],['lte','أصغر من أو يساوي'],['between','بين'],['empty','فارغ'],['notEmpty','غير فارغ']],
- date:[['eq','في يوم'],['before','قبل'],['after','بعد'],['onOrBefore','في أو قبل'],['onOrAfter','في أو بعد'],['between','من تاريخ إلى تاريخ'],['today','اليوم'],['yesterday','أمس'],['thisWeek','هذا الأسبوع'],['thisMonth','هذا الشهر'],['thisYear','السنة الحالية'],['empty','فارغ'],['notEmpty','غير فارغ']],
- bool:[['isTrue','نعم'],['isFalse','لا'],['empty','فارغ']]
-};
+const OPS=GRID_FILTER_OPERATORS;
 const NOVAL=['empty','notEmpty','isTrue','isFalse','today','yesterday','thisWeek','thisMonth','thisYear'];
 const n=v=>normalizeArabic(String(v??''));
 const EMPTY='(فارغ)';
 
-function testOp(col,row,op,v1,v2){
- const type=col.type||'text';
- const raw=col.get(row);
- if(type==='number'){
-  const x=raw===''||raw===null||raw===undefined?NaN:Number(raw),a=Number(v1),b=Number(v2);
-  switch(op){case'eq':return x===a;case'neq':return x!==a;case'gt':return x>a;case'gte':return x>=a;case'lt':return x<a;case'lte':return x<=a;case'between':return x>=Math.min(a,b)&&x<=Math.max(a,b);case'empty':return Number.isNaN(x);case'notEmpty':return !Number.isNaN(x)}
-  return true;
- }
- if(type==='date'){
-  const d=String(raw||'').slice(0,10);
-  switch(op){case'eq':return d===v1;case'before':return Boolean(d)&&d<v1;case'after':return d>v1;case'onOrBefore':return Boolean(d)&&d<=v1;case'onOrAfter':return d>=v1;case'between':{const [a,b]=[v1||'0000',v2||'9999'].sort();return Boolean(d)&&d>=a&&d<=b}case'today':return d===localDate();case'yesterday':return d===addDays(localDate(),-1);case'thisWeek':{const t=localDate(),dow=new Date(t+'T00:00:00').getDay(),monday=addDays(t,dow===0?-6:1-dow);return Boolean(d)&&d>=monday&&d<=addDays(monday,6)}case'thisMonth':return Boolean(d)&&d.slice(0,7)===localDate().slice(0,7);case'thisYear':return Boolean(d)&&d.slice(0,4)===localDate().slice(0,4);case'empty':return !d;case'notEmpty':return Boolean(d)}
-  return true;
- }
- if(type==='bool'){const t=raw===true||raw==='true';const f=raw===false||raw==='false';if(op==='isTrue')return t;if(op==='isFalse')return f;if(op==='empty')return !t&&!f;return true}
- const s=n(col.text(row)),q=n(v1);
- const words=q.split(' ').filter(Boolean);
- switch(op){case'contains':return s.includes(q);case'notContains':return !s.includes(q);case'eq':return s===q;case'neq':return s!==q;case'starts':return s.startsWith(q);case'ends':return s.endsWith(q);case'allWords':return words.length?words.every(w=>s.includes(w)):true;case'anyWord':return words.length?words.some(w=>s.includes(w)):true;case'empty':return !s;case'notEmpty':return Boolean(s)}
- return true;
-}
-const cmp=(col,a,b)=>{
- const t=col.type||'text';let x=col.get(a),y=col.get(b);
- const ex=x===''||x===null||x===undefined,ey=y===''||y===null||y===undefined;
- if(ex||ey)return ex&&ey?0:ex?1:-1; // الفارغ دائمًا في الآخر
- if(t==='number')return Number(x)-Number(y);
- if(t==='date')return String(x).localeCompare(String(y));
- return String(col.text(a)).localeCompare(String(col.text(b)),'ar',{numeric:true});
-};
-
 export function mountGrid(root,opts){
  const o={title:'',emptyText:'لا توجد سجلات.',pageSize:300,storageKey:'',onRowClick:null,selectable:false,...opts};
- const cols=o.columns.map(c=>({type:'text',get:r=>r[c.key],text:r=>String(c.get?c.get(r)??'':r[c.key]??''),...c}));
+ const provider=o.dataProvider||o.provider||null;
+ if(provider&&typeof provider.getRows!=='function')throw new TypeError('DataGrid provider must implement getRows(query, context).');
+ const cols=defineGridColumns(o.columns||[]);
  const byKey=new Map(cols.map(c=>[c.key,c]));
  let rows=o.rows||[];
  const instance=++gridInstance;
@@ -101,8 +69,16 @@ export function mountGrid(root,opts){
   tableWidth:Math.max(100,Math.min(220,Number(saved.tableWidth)||100)),
   shellCollapsed:resolveCollapseState(shellCollapseKey,{fallback:false,legacy:typeof saved.shellCollapsed==='boolean'?saved.shellCollapsed:undefined,primary:true}),
   toolsCollapsed:resolveCollapseState(toolsCollapseKey,{fallback:true,legacy:typeof saved.toolsCollapsed==='boolean'?saved.toolsCollapsed:undefined}),
+  remotePageSize:[25,50,100].includes(Number(saved.remotePageSize))?Number(saved.remotePageSize):([25,50,100].includes(Number(o.pageSize))?Number(o.pageSize):25),
   qaOn:saved.qaOn!==false};
  if(!st.views.some(v=>v?.name===st.activeView))st.activeView='';
+ const remote=Boolean(provider);
+ const pageCursors=[null];let pageIndex=0,providerSequence=0,providerController=null,providerObserver=null;
+ let providerMeta={loading:false,error:'',total:null,totalExact:false,hasMore:false,nextCursor:null,sortStatus:null};
+ const selectedRowsByKey=new Map();
+ const rowKey=row=>String(o.getRowId?.(row)??row?.id??row);
+ const isRowSelected=row=>st.selected.has(rowKey(row));
+ const selectedRows=()=>[...st.selected].map(key=>selectedRowsByKey.get(key)).filter(Boolean);
  // One-time migration of pre-central grid collapse settings. After this point the
  // shared store is authoritative, so temporary bulk changes cannot leak through
  // the older grid-view preference object.
@@ -117,7 +93,7 @@ export function mountGrid(root,opts){
  root.dataset.collapseReady='true';root.dataset.collapseType='grid';root.dataset.collapseKey=shellCollapseKey;root.dataset.collapseCollapsed=String(st.shellCollapsed);
  root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}" aria-controls="${bodyId}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'›':'⌄'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button>${collapsePinMarkup(shellCollapseKey,isCollapsePinned(shellCollapseKey),'collapse-pin dg-shell-pin')}</div><div class="dg-body" id="${bodyId}"><div class="dg-tools-summary"><button type="button" class="dg-tools-summary-toggle" aria-expanded="${st.toolsCollapsed?'false':'true'}" aria-controls="${toolsId}"><span class="dg-tools-label">🔍 عوامل التصفية والتخصيص</span><span class="dg-tools-active"></span><span class="dg-tools-view"></span><span class="dg-tools-caret" aria-hidden="true">${st.toolsCollapsed?'›':'⌄'}</span></button>${collapsePinMarkup(toolsCollapseKey,isCollapsePinned(toolsCollapseKey),'collapse-pin dg-tools-pin')}</div><div class="dg-tools-panel" id="${toolsId}"${st.toolsCollapsed?' hidden':''}><div class="dg-toolbar"><button type="button" class="ghost dg-filter-toggle" aria-expanded="${!st.filterCollapsed}" aria-label="${st.filterCollapsed?'فتح':'طي'} عوامل التصفية" title="إظهار أو إخفاء عوامل التصفية">${st.filterCollapsed?'›':'⌄'} عوامل التصفية</button>${collapsePinMarkup(filterCollapseKey,isCollapsePinned(filterCollapseKey),'collapse-pin dg-filter-pin')}
   <input class="dg-quick" type="search" placeholder="بحث فوري في النتائج… ( / )" aria-label="بحث داخل النتائج">
-  <select class="dg-scope" aria-label="نطاق البحث" title="بحث في كل الأعمدة أو عمود محدد"><option value="">كل الأعمدة</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select>
+  <select class="dg-scope" aria-label="نطاق البحث" title="بحث في كل الأعمدة أو عمود محدد"><option value="">كل الأعمدة</option>${cols.filter(c=>c.searchable).map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select>
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
   <button type="button" class="ghost dg-csearch-btn" title="صف بحث تحت كل عمود" aria-pressed="${st.colSearchOn}">بحث الأعمدة</button>
   <label class="dg-group-lbl">تجميع حسب <select class="dg-groupby"><option value="">بدون</option>${cols.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select></label>
@@ -140,28 +116,77 @@ export function mountGrid(root,opts){
  <div class="dg-chips" hidden aria-label="التصفية النشطة"></div>
  <div class="dg-adv" hidden></div></div>
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
- <div class="dg-more"></div></div>`;
+ <div class="dg-state" role="status" aria-live="polite" hidden></div>
+ <div class="dg-footbar"><span class="dg-foot-count"></span><span class="dg-provider-note"></span>
+  <div class="dg-pagebar" hidden><button type="button" class="ghost small dg-page-prev">السابق</button><span class="dg-page-label"></span><label>صفوف الصفحة <select class="dg-page-size" aria-label="عدد الصفوف في الصفحة"><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><button type="button" class="ghost small dg-page-next">التالي</button></div>
+  <div class="dg-more"></div>
+ </div></div>`;
  const $=s=>root.querySelector(s);
  root.classList.toggle('dg-filter-open',!st.filterCollapsed);
  root.classList.toggle('dg-shell-closed',st.shellCollapsed);
  root.classList.toggle('dg-tools-collapsed',st.toolsCollapsed);
- $('.dg-quick').value=st.quick;$('.dg-groupby').value=st.groupBy;$('.dg-font').value=st.fontSize;
+ $('.dg-quick').value=st.quick;$('.dg-groupby').value=st.groupBy;$('.dg-font').value=st.fontSize;$('.dg-page-size').value=String(st.remotePageSize);
  if($('.dg-scope'))$('.dg-scope').value=st.searchCol||'';
  if($('.dg-span'))$('.dg-span').value=st.span||'';
  if($('.dg-width'))$('.dg-width').value=st.tableWidth;
  $('.dg-csearch-btn').classList.toggle('dg-chip-active',st.colSearchOn);
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn})};
+ const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,remotePageSize:st.remotePageSize})};
+ const makeQuery=()=>createGridQuery({
+  search:{text:st.quick,column:st.searchCol},
+  filters:{logic:'and',rules:[
+   ...[...st.filters].map(([key,f])=>({key,op:f.op||'',v1:f.v1||'',v2:f.v2||'',set:f.set?[...f.set]:null})),
+   ...Object.entries(st.colSearch).filter(([,value])=>value).map(([key,value])=>({key,op:'contains',v1:value}))
+  ]},
+  advanced:{logic:st.adv.logic,rules:st.adv.rules.filter(rule=>byKey.has(rule.key)&&(isValueFreeGridFilter(rule.op)||rule.v1!==''||rule.v2!==''))},
+  sort:st.sort,
+  groupBy:st.groupBy,
+  columnSearch:{},
+  pagination:{mode:'cursor',size:st.remotePageSize,cursor:pageCursors[pageIndex]??null,direction:'next',page:pageIndex+1}
+ });
+ function changeQuery({resetPage=true}={}){
+  if(resetPage&&remote){pageIndex=0;pageCursors.splice(1);pageCursors[0]=null}
+  persist();
+  if(remote)loadProviderRows();else render();
+ }
+ async function loadProviderRows(){
+  if(!remote||!root.isConnected)return;
+  const sequence=++providerSequence;
+  try{providerController?.abort()}catch{}
+  providerController=typeof AbortController==='function'?new AbortController():null;
+  const signal=providerController?.signal;
+  const query=makeQuery();
+  providerMeta={...providerMeta,loading:true,error:''};
+  o.onProviderState?.({phase:'loading',query,meta:providerMeta});
+  renderBody();
+  try{
+   const result=await provider.getRows(query,{columns:cols,signal});
+   if(sequence!==providerSequence||!root.isConnected)return;
+   const nextRows=Array.isArray(result)?result:(Array.isArray(result?.rows)?result.rows:[]);
+   await o.onRowsLoaded?.(nextRows,query,result||{});
+   if(sequence!==providerSequence||!root.isConnected)return;
+   rows=nextRows;
+   providerMeta={loading:false,error:'',total:result?.total!==null&&result?.total!==undefined&&Number.isFinite(Number(result.total))?Number(result.total):null,totalExact:Boolean(result?.totalExact),hasMore:Boolean(result?.hasMore),nextCursor:result?.nextCursor||null,sortStatus:result?.sortStatus||null,page:pageIndex+1,pageSize:st.remotePageSize};
+   rows.forEach(row=>{const key=rowKey(row);if(st.selected.has(key))selectedRowsByKey.set(key,row)});
+   render();
+   o.onProviderState?.({phase:'ready',query,rows,meta:providerMeta});
+  }catch(error){
+   if(sequence!==providerSequence||error?.name==='AbortError'||!root.isConnected)return;
+   providerMeta={...providerMeta,loading:false,error:String(error?.message||'تعذر تحميل البيانات.')};
+   renderBody();
+   o.onProviderState?.({phase:'error',query,error,meta:providerMeta});
+  }
+ }
  const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards;
  let rowH=0,vStart=-1;
- const allSelected=()=>view.length>0&&view.every(r=>st.selected.has(r));
+ const allSelected=()=>view.length>0&&view.every(isRowSelected);
 
  const showQa=()=>Boolean(o.rowMenu)&&st.qaOn;
  const extraCols=()=>(o.selectable?1:0)+(showQa()?1:0);
  const fmtN=v=>Number(v||0).toLocaleString('ar-EG');
  function activeFilterCount(){
   let n=st.filters.size+(st.quick?1:0)+(Object.values(st.colSearch).some(Boolean)?1:0);
-  n+=st.adv.rules.filter(x=>byKey.get(x.key)&&(NOVAL.includes(x.op)||x.v1!==''||x.v2!=='')).length;
+  n+=st.adv.rules.filter(x=>byKey.get(x.key)&&(isValueFreeGridFilter(x.op)||x.v1!==''||x.v2!=='')).length;
   return n;
  }
  function updateCollapseSummary(count=activeFilterCount()){
@@ -169,7 +194,8 @@ export function mountGrid(root,opts){
   const active=$('.dg-tools-active');if(active)active.textContent=n?`— ${fmtN(n)} فلاتر نشطة`:'— لا توجد فلاتر نشطة';
   const currentView=$('.dg-tools-view');if(currentView)currentView.textContent=`العرض: ${st.activeView||'الافتراضي'}`;
   const shellCount=$('.dg-shell-count');
-  if(shellCount)shellCount.textContent=`— ${fmtN(view.length)} نتيجة${n?` · ${fmtN(n)} فلاتر نشطة`:''}${st.activeView?` · ${st.activeView}`:''}`;
+  const shownSummary=remote?(providerMeta.totalExact&&providerMeta.total!==null?`${fmtN(providerMeta.total)} نتيجة`:`${fmtN(view.length)} في الصفحة ${fmtN(pageIndex+1)}`):`${fmtN(view.length)} نتيجة`;
+  if(shellCount)shellCount.textContent=`— ${shownSummary}${n?` · ${fmtN(n)} فلاتر نشطة`:''}${st.activeView?` · ${st.activeView}`:''}`;
  }
  function applyChrome(){
   root.style.setProperty('--dg-w',(st.tableWidth||100)+'%');
@@ -200,47 +226,28 @@ export function mountGrid(root,opts){
  }
  function menuItems(row){try{const items=(typeof o.rowMenu==='function'?o.rowMenu(row):o.rowMenu)||[];return Array.isArray(items)?items:[];}catch{return []}}
  function compute(){
-  const tokens=searchTokens(st.quick);hl=highlighters(st.quick);vStart=-1;
-  const scope=st.searchCol&&byKey.has(st.searchCol)?[byKey.get(st.searchCol)]:cols;
-  const vc=cols;
-  const csEntries=Object.entries(st.colSearch).filter(([k,v])=>v&&byKey.has(k));
-  let out=rows.filter(r=>{
-   if(tokens.length&&!tokens.every(tok=>scope.some(c=>n(c.text(r)).includes(tok))))return false;
-   for(const [k,f] of st.filters){const c=byKey.get(k);if(!c)continue;if(f.set&&!f.set.has(c.text(r)||EMPTY))return false;if(f.op&&(NOVAL.includes(f.op)||f.v1!==''||f.v2!=='')&&!testOp(c,r,f.op,f.v1,f.v2))return false}
-   for(const [k,cv] of csEntries){const c=byKey.get(k);if(!n(c.text(r)).includes(n(cv)))return false}
-   const rules=st.adv.rules.filter(x=>byKey.get(x.key)&&(NOVAL.includes(x.op)||x.v1!==''));
-   if(rules.length){const res=rules.map(x=>testOp(byKey.get(x.key),r,x.op,x.v1,x.v2));if(st.adv.logic==='or'?!res.some(Boolean):!res.every(Boolean))return false}
-   return true;
-  });
-  // فرز بمفاتيح مسبقة الحساب: كل عمود يُقيَّم مرة واحدة لكل صف بدل إعادة الحساب في كل مقارنة.
-  const g=st.groupBy&&byKey.get(st.groupBy);
-  const sorts=st.sort.map(s=>({c:byKey.get(s.key),dir:s.dir==='desc'?-1:1})).filter(s=>s.c);
-  const plan=g?[{c:g,dir:1},...sorts]:sorts;
-  if(plan.length){
-   const keyFor=(c,r)=>{const t=c.type||'text';const x=c.get(r);const empty=x===''||x===null||x===undefined;
-    if(t==='number')return {e:empty?1:0,v:empty?0:Number(x),num:true};
-    return {e:empty?1:0,v:empty?'':(t==='date'?String(x):String(c.text(r))),num:false}};
-   out=out.map(r=>({r,k:plan.map(s=>keyFor(s.c,r))}))
-    .sort((A,B)=>{for(let i=0;i<plan.length;i++){const a=A.k[i],b=B.k[i];if(a.e!==b.e)return a.e-b.e;if(a.v!==b.v){const x=a.num?(a.v-b.v)*plan[i].dir:a.v.localeCompare(b.v,'ar',{numeric:true})*plan[i].dir;if(x)return x}}return 0})
-    .map(x=>x.r);
-  }
-  view=out;
+  hl=highlighters(st.quick);vStart=-1;
+  const query=makeQuery();
+  // Array-backed feature grids use the same query engine locally; database-backed
+  // grids have already applied the query while streaming a single cursor page.
+  view=remote?(st.groupBy?sortGridRows(rows,query.sort,cols,[st.groupBy]):[...rows]):applyGridQuery(rows,query,cols);
  }
  function renderHead(){
   const sortMark=k=>{const i=st.sort.findIndex(s=>s.key===k);if(i<0)return '<span class="dg-sortidle" aria-hidden="true">↕</span>';return `<span class="dg-sortmark">${st.sort[i].dir==='asc'?'▲':'▼'}<b class="dg-rank">${i+1}</b></span>`};
   const vc=visibleCols();
   const selTh=o.selectable?`<th class="dg-sel-th"><input type="checkbox" class="dg-sel-all" aria-label="تحديد كل النتائج الحالية"${allSelected()?' checked':''}${view.length?'':' disabled'}></th>`:'';
   const qaTh=showQa()?'<th class="dg-qa-th" aria-label="إجراءات"></th>':'';
-  $('thead').innerHTML=`<tr class="dg-hrow">${selTh}${vc.map(c=>{const w=Math.max(90,Math.min(900,Number(st.widths[c.key])||0));const pin=st.pinned.includes(c.key);
-   return `<th data-key="${esc(c.key)}" ${w?`style="width:${w}px;min-width:${w}px;max-width:${w}px"`:''} class="${st.filters.has(c.key)?'dg-filtered':''}${pin?' dg-pin-th':''}"><div class="dg-th"><button type="button" class="dg-coltitle" title="تصفية عمود ${esc(c.label)}">${esc(c.label)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</button><button type="button" class="dg-sort" title="فرز: تصاعدي ثم تنازلي ثم إلغاء. Shift للفرز المتعدد" aria-label="فرز ${esc(c.label)}">${sortMark(c.key)}</button><button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية وفرز وتثبيت">▾</button></div><span class="dg-resizer" role="separator" tabindex="0" aria-label="تغيير عرض ${esc(c.label)}"></span></th>`}).join('')}${qaTh}</tr>
-   ${st.colSearchOn?`<tr class="dg-csrow">${o.selectable?'<th class="dg-sel-th"></th>':''}${vc.map(c=>`<th data-cs="${esc(c.key)}"><input type="search" class="dg-cs" data-key="${esc(c.key)}" value="${esc(st.colSearch[c.key]||'')}" placeholder="بحث…" aria-label="بحث في ${esc(c.label)}"></th>`).join('')}${showQa()?'<th></th>':''}</tr>`:''}`;
+  $('thead').innerHTML=`<tr class="dg-hrow">${selTh}${vc.map(c=>{const w=Math.max(c.minWidth,Math.min(c.maxWidth,Number(st.widths[c.key])||c.width||c.minWidth));const pin=c.pinnable&&st.pinned.includes(c.key);
+   const title=c.filterable?`<button type="button" class="dg-coltitle" title="تصفية عمود ${esc(c.label)}">${esc(c.label)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</button>`:`<span class="dg-coltitle">${esc(c.label)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</span>`;
+   return `<th data-key="${esc(c.key)}" style="width:${w}px;min-width:${w}px;max-width:${c.maxWidth}px" class="${st.filters.has(c.key)?'dg-filtered':''}${pin?' dg-pin-th':''}"><div class="dg-th">${title}${c.sortable?`<button type="button" class="dg-sort" title="فرز: تصاعدي ثم تنازلي ثم إلغاء. Shift للفرز المتعدد" aria-label="فرز ${esc(c.label)}">${sortMark(c.key)}</button>`:''}${c.filterable?`<button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية العمود">▾</button>`:''}</div>${c.resizable===false?'':`<span class="dg-resizer" role="separator" tabindex="0" aria-label="تغيير عرض ${esc(c.label)}"></span>`}</th>`}).join('')}${qaTh}</tr>
+   ${st.colSearchOn?`<tr class="dg-csrow">${o.selectable?'<th class="dg-sel-th"></th>':''}${vc.map(c=>`<th data-cs="${esc(c.key)}">${c.searchable?`<input type="search" class="dg-cs" data-key="${esc(c.key)}" value="${esc(st.colSearch[c.key]||'')}" placeholder="بحث…" aria-label="بحث في ${esc(c.label)}">`:''}</th>`).join('')}${showQa()?'<th></th>':''}</tr>`:''}`;
   const all=$('.dg-sel-all');
-  if(all){all.indeterminate=st.selected.size>0&&!allSelected()}
+  if(all){all.indeterminate=view.some(isRowSelected)&&!allSelected()}
   layoutPins();
  }
  function cellHtml(c,r){const t=c.text(r);return `<td data-k="${esc(c.key)}" data-label="${esc(c.label)}"${c.type==='number'?' class="num"':''} title="${esc(t)}">${hl?markHtml(t,hl):esc(t)}</td>`}
  const rowHtml=(r,i,vc)=>{
-  const sel=o.selectable&&st.selected.has(r);
+  const sel=o.selectable&&isRowSelected(r);
   const qa=showQa()?`<td class="dg-qa" data-label="إجراءات"><button type="button" class="ghost small dg-qa-btn" data-i="${i}" aria-label="إجراءات سريعة">⋯</button></td>`:'';
   return `<tr data-i="${i}" tabindex="0" class="${o.onRowClick?'dg-click':''}${st.sel===i?' dg-selected':''}${sel?' dg-checked':''}">${o.selectable?`<td class="dg-sel-td"><input type="checkbox" class="dg-rowchk" data-i="${i}" aria-label="تحديد الصف"${sel?' checked':''}></td>`:''}${vc.map(c=>cellHtml(c,r)).join('')}${qa}</tr>`;
  };
@@ -276,22 +283,29 @@ export function mountGrid(root,opts){
  function renderBody(){
   const vc=visibleCols();
   const colSpan=vc.length+extraCols();
-  const shown=view.slice(0,st.shown);
+  const shown=remote?view:view.slice(0,st.shown);
   const g=st.groupBy&&byKey.get(st.groupBy);
   let html='',last=null;
   const counts=g?view.reduce((m,r)=>{const k=g.text(r)||EMPTY;m.set(k,(m.get(k)||0)+1);return m},new Map()):null;
   shown.forEach((r,i)=>{
-   if(g){const k=g.text(r)||EMPTY;if(k!==last){html+=`<tr class="dg-grouprow${collapsed.has(k)?' dg-collapsed':''}" data-g="${esc(k)}" tabindex="0" title="اضغط للطي / الفتح"><th colspan="${colSpan}"><span class="dg-gcaret">${collapsed.has(k)?'◂':'▾'}</span> ${esc(g.label)}: ${esc(k)} <small>(${counts.get(k)})</small></th></tr>`;last=k}if(collapsed.has(k))return}
+   if(g){const k=g.text(r)||EMPTY;if(k!==last){html+=`<tr class="dg-grouprow${collapsed.has(k)?' dg-collapsed':''}" data-g="${esc(k)}" tabindex="0" title="اضغط للطي / الفتح"><th colspan="${colSpan}"><span class="dg-gcaret">${collapsed.has(k)?'◂':'▾'}</span> ${esc(g.label)}: ${esc(k)} <small>(${fmtN(counts.get(k))})</small></th></tr>`;last=k}if(collapsed.has(k))return}
    html+=rowHtml(r,i,vc);
   });
-  if(!view.length)html=`<tr><td colspan="${Math.max(1,colSpan)}" class="dg-empty">${esc(rows.length?'لا توجد صفوف مطابقة للتصفية.':o.emptyText)}</td></tr>`;
+  if(!view.length){
+   const hasQuery=Boolean(st.quick||st.filters.size||st.adv.rules.length||Object.values(st.colSearch).some(Boolean));
+   const message=hasQuery?'لا توجد نتائج تطابق البحث أو عوامل التصفية.':o.emptyText;
+   html=`<tr><td colspan="${Math.max(1,colSpan)}" class="dg-empty">${esc(message)}</td></tr>`;
+  }
   if(view.length&&virtualOn())renderWindow(true);else{$('tbody').innerHTML=html;layoutPins()}
-  $('.dg-count').textContent=view.length===rows.length&&!o.more?`${fmtN(rows.length)} نتيجة`:`${fmtN(view.length)} نتيجة من أصل ${fmtN(rows.length)}${o.more?'+':''}`;
+  const countText=remote
+   ?(providerMeta.totalExact&&providerMeta.total!==null?`${fmtN(providerMeta.total)} نتيجة`:`${fmtN(view.length)} في هذه الصفحة${providerMeta.hasMore?' · توجد صفحات أخرى':''}`)
+   :(view.length===rows.length&&!o.more?`${fmtN(rows.length)} نتيجة`:`${fmtN(view.length)} نتيجة من أصل ${fmtN(rows.length)}${o.more?'+':''}`);
+  $('.dg-count').textContent=countText;
   const nFilt=activeFilterCount();updateCollapseSummary(nFilt);
   $('.dg-filter-toggle').textContent=`${st.filterCollapsed?'›':'⌄'} عوامل التصفية${nFilt?` (${fmtN(nFilt)} نشطة)`:''}`;
   const rest=virtualOn()?0:view.length-shown.length;
-  $('.dg-more').innerHTML=rest>0?`<button type="button" class="ghost dg-showmore">عرض ${Math.min(rest,o.pageSize)} صف إضافي (متبقٍ ${rest})</button>`:'';
-  $('.dg-clear').hidden=!(st.filters.size||st.adv.rules.length||st.quick||st.sort.length);
+  $('.dg-more').innerHTML=!remote&&rest>0?`<button type="button" class="ghost dg-showmore">عرض ${Math.min(rest,o.pageSize)} صف إضافي (متبقٍ ${rest})</button>`:'';
+  $('.dg-clear').hidden=!(st.filters.size||st.adv.rules.length||st.quick||st.sort.length||Object.values(st.colSearch).some(Boolean));
   renderChips();renderFoot(vc);
   renderSelbar();
   root.classList.toggle('dg-cards',st.cards);
@@ -302,11 +316,38 @@ export function mountGrid(root,opts){
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
   $('.dg-filter-toggle').setAttribute('aria-expanded',String(!st.filterCollapsed));
   $('.dg-fullscreen').setAttribute('aria-pressed',String(root.classList.contains('dg-fullscreen')));$('.dg-fullscreen').textContent=root.classList.contains('dg-fullscreen')?'⛶ خروج من الشاشة':'⛶ ملء الشاشة';
+  const state=$('.dg-state');
+  if(remote&&providerMeta.loading){state.hidden=false;state.className='dg-state is-loading';state.textContent='جارٍ تحميل صفحة البيانات…';}
+  else if(remote&&providerMeta.error){
+   const offline=typeof navigator!=='undefined'&&navigator.onLine===false;
+   state.hidden=false;state.className=`dg-state ${offline?'is-offline':'is-error'}`;
+   state.innerHTML=`<span>${offline?'أنت غير متصل. تُقرأ البيانات محليًا لكن تعذّر إكمال هذا الاستعلام.':`تعذّر تحميل البيانات: ${esc(providerMeta.error)}`}</span><button type="button" class="ghost small dg-retry">إعادة المحاولة</button>`;
+  }else{state.hidden=true;state.className='dg-state';state.textContent=''}
+  const pagebar=$('.dg-pagebar');pagebar.hidden=!remote;
+  if(remote){
+   $('.dg-page-prev').disabled=pageIndex<=0||providerMeta.loading;
+   $('.dg-page-next').disabled=!providerMeta.hasMore||!providerMeta.nextCursor||providerMeta.loading;
+   $('.dg-page-label').textContent=providerMeta.totalExact&&providerMeta.total!==null?`صفحة ${fmtN(pageIndex+1)} · ${fmtN(providerMeta.total)} نتيجة`:`صفحة ${fmtN(pageIndex+1)}`;
+   $('.dg-page-size').value=String(st.remotePageSize);
+   const sortStatus=providerMeta.sortStatus;
+   const providerNotes=['الطباعة والتصدير للصفحة الحالية فقط.'];
+   if(sortStatus?.global===false)providerNotes.push('الفرز الكامل غير متاح لهذا العمود؛ يلزم فهرس مناسب.');
+   if(st.groupBy)providerNotes.push('التجميع وأعداده للصفحة الحالية فقط.');
+   if(o.aggregatePageOnly&&(cols.some(column=>column.aggregate)||o.aggregations?.length))providerNotes.push('الإجماليات المعلنة تخص الصفحة الحالية فقط.');
+   $('.dg-provider-note').textContent=providerNotes.join(' ');
+   $('.dg-export').title='تصدير صفوف الصفحة الحالية فقط';$('.dg-print').title='طباعة صفوف الصفحة الحالية فقط';
+   $('.dg-foot-count').textContent=providerMeta.totalExact&&providerMeta.total!==null
+    ?`إجمالي النتائج: ${fmtN(providerMeta.total)}`
+    :`يعرض ${fmtN(view.length)} سجلًا في الصفحة الحالية${providerMeta.hasMore?' — توجد صفحات أخرى':''}`;
+  }else{
+   $('.dg-provider-note').textContent='';
+   $('.dg-foot-count').textContent=view.length?`عدد الصفوف المعروضة: ${fmtN(view.length)}`:'';
+  }
  }
  function renderSelbar(){
   const sb=$('.dg-selbar');const cnt=st.selected.size;
   sb.hidden=!(o.selectable&&cnt);
-  if(cnt){sb.querySelector('.dg-sel-count').textContent=`تم تحديد ${fmtN(cnt)} — الإجراءات على النتائج الحالية فقط`}
+  if(cnt){sb.querySelector('.dg-sel-count').textContent=`تم تحديد ${fmtN(cnt)} صف — الإجراءات على الصفوف المحددة`}
   const slot=sb.querySelector('.dg-bulk-slot');
   if(slot)slot.innerHTML=(o.bulkActions||[]).map(a=>`<button type="button" class="ghost small dg-bulk${a.danger?' danger':''}" data-bulk="${esc(a.id)}">${esc(a.label)}</button>`).join('');
  }
@@ -322,24 +363,43 @@ export function mountGrid(root,opts){
   el.innerHTML=chips.map(([t,k,l])=>`<span class="dg-fchip dg-fchip-${t}"><span>${esc(l)}</span><button type="button" data-rm="${t}" data-k="${esc(k)}" aria-label="إزالة ${esc(l)}">✕</button></span>`).join('')+(chips.length>1?'<button type="button" class="link dg-chips-clear">مسح الكل</button>':'');
  }
  function renderFoot(vc){
-  const pre=o.selectable?'<td></td>':'';
-  const nums=vc.filter(c=>c.type==='number'&&c.sum!==false);
-  if(!nums.length||!view.length||st.cards){$('tfoot').innerHTML='';return}
-  const fmt=v=>Number.isInteger(v)?v.toLocaleString('ar-EG'):v.toLocaleString('ar-EG',{maximumFractionDigits:2});
-  $('tfoot').innerHTML=`<tr class="dg-total">${pre}${vc.map((c,i)=>{if(!nums.includes(c))return `<td>${i===0?`الإجمالي (${view.length})`:''}</td>`;const vals=view.map(r=>Number(c.get(r))).filter(Number.isFinite);const sum=vals.reduce((a,b)=>a+b,0);return `<td class="num" title="المتوسط: ${vals.length?fmt(sum/vals.length):'—'}">${fmt(sum)}</td>`}).join('')}</tr>`;
+  if(remote&&!o.aggregatePageOnly){$('tfoot').innerHTML='';return}
+  const aggregates=new Map();
+  for(const column of vc){
+   const config=column.aggregate;
+   if(config){const operation=typeof config==='string'?config:config?.operation||config?.type;if(operation)aggregates.set(column.key,operation)}
+  }
+  for(const aggregate of (Array.isArray(o.aggregations)?o.aggregations:[])){
+   if(aggregate?.key&&aggregate?.operation)aggregates.set(aggregate.key,aggregate.operation);
+  }
+  if(!aggregates.size||!view.length||st.cards){$('tfoot').innerHTML='';return}
+  const fmt=value=>Number.isInteger(value)?value.toLocaleString('ar-EG'):value.toLocaleString('ar-EG',{maximumFractionDigits:2});
+  $('tfoot').innerHTML=`<tr class="dg-total">${o.selectable?'<td></td>':''}${vc.map((column,index)=>{
+   const operation=aggregates.get(column.key);
+   if(!operation)return `<td>${index===0?`ملخص ${fmtN(view.length)} صف` :''}</td>`;
+   if(operation==='count')return `<td class="num">${fmt(view.filter(row=>!['',null,undefined].includes(column.get(row))).length)}</td>`;
+   if(!['sum','average','avg'].includes(operation)||column.type!=='number')return '<td>—</td>';
+   const values=view.map(row=>Number(column.get(row))).filter(Number.isFinite);
+   const value=operation==='sum'?values.reduce((sum,item)=>sum+item,0):(values.length?values.reduce((sum,item)=>sum+item,0)/values.length:0);
+   return `<td class="num" title="${operation==='sum'?'مجموع معلن صراحة':'متوسط معلن صراحة'}">${fmt(value)}</td>`;
+  }).join('')}</tr>`;
  }
  function render(){compute();renderHead();renderBody()}
 
  // ===== أحداث =====
  let qt=0;
- $('.dg-quick').addEventListener('input',()=>{const el=$('.dg-quick');clearTimeout(qt);qt=setTimeout(()=>{if(!root.isConnected||!el)return;st.quick=el.value;st.shown=o.pageSize;persist();compute();renderBody()},120)});
- $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;persist();render()});
+ $('.dg-quick').addEventListener('input',()=>{const el=$('.dg-quick');clearTimeout(qt);qt=setTimeout(()=>{if(!root.isConnected||!el)return;st.quick=el.value;st.shown=o.pageSize;changeQuery()},120)});
+ $('.dg-groupby').addEventListener('change',e=>{st.groupBy=e.target.value;collapsed.clear();changeQuery()});
+ $('.dg-page-prev').addEventListener('click',()=>{if(!remote||pageIndex<=0)return;pageIndex--;loadProviderRows()});
+ $('.dg-page-next').addEventListener('click',()=>{if(!remote||!providerMeta.hasMore||!providerMeta.nextCursor)return;pageCursors[pageIndex+1]=providerMeta.nextCursor;pageIndex++;loadProviderRows()});
+ $('.dg-page-size').addEventListener('change',e=>{const size=Number(e.target.value);if(![25,50,100].includes(size))return;st.remotePageSize=size;changeQuery()});
+ $('.dg-state').addEventListener('click',e=>{if(e.target.closest('.dg-retry'))loadProviderRows()});
  $('.dg-filter-toggle').addEventListener('click',()=>{st.filterCollapsed=!st.filterCollapsed;if(st.filterCollapsed)closePop();saveCollapseState(filterCollapseKey,st.filterCollapsed);persist();applyChrome()});
  $('.dg-filter-close')?.addEventListener('click',()=>{st.filterCollapsed=true;closePop();saveCollapseState(filterCollapseKey,true);persist();applyChrome()});
- $('.dg-filter-apply')?.addEventListener('click',()=>{st.shown=o.pageSize;persist();render();toast('تم تطبيق التصفية')});
+ $('.dg-filter-apply')?.addEventListener('click',()=>{st.shown=o.pageSize;changeQuery();toast('تم تطبيق التصفية')});
  $('.dg-save-filter')?.addEventListener('click',()=>$('.dg-views-btn')?.click());
- $('.dg-unsort')?.addEventListener('click',()=>{st.sort=[];st.activeView='';persist();render()});
- $('.dg-scope')?.addEventListener('change',e=>{st.searchCol=e.target.value;st.shown=o.pageSize;persist();render()});
+ $('.dg-unsort')?.addEventListener('click',()=>{st.sort=[];st.activeView='';changeQuery()});
+ $('.dg-scope')?.addEventListener('change',e=>{st.searchCol=e.target.value;st.shown=o.pageSize;changeQuery()});
  $('.dg-span')?.addEventListener('change',e=>{st.span=e.target.value;persist();applyChrome()});
  $('.dg-width')?.addEventListener('input',e=>{st.tableWidth=Number(e.target.value)||100;applyChrome()});
  $('.dg-width')?.addEventListener('change',()=>persist());
@@ -361,18 +421,17 @@ export function mountGrid(root,opts){
  root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});
  $('thead').addEventListener('pointerdown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle)return;e.preventDefault();const th=handle.closest('th'),key=th?.dataset.key;if(!key)return;const startX=e.clientX,startW=th.getBoundingClientRect().width,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl';let w=startW;const move=ev=>{w=Math.max(90,Math.min(900,startW+(rtl?startX-ev.clientX:ev.clientX-startX)));th.style.width=w+'px';th.style.minWidth=w+'px';th.style.maxWidth=w+'px'};const end=()=>{document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',end,true);document.removeEventListener('pointercancel',end,true);st.widths[key]=Math.round(w);persist();renderBody()};document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',end,true);document.addEventListener('pointercancel',end,true)});
  $('thead').addEventListener('keydown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle||!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const th=handle.closest('th'),key=th.dataset.key,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl',delta=(e.key==='ArrowRight'?1:-1)*(rtl?-1:1)*12,w=Math.max(90,Math.min(900,(Number(st.widths[key])||th.getBoundingClientRect().width)+delta));st.widths[key]=w;persist();renderHead();[...$('thead').querySelectorAll('th')].find(x=>x.dataset.key===key)?.querySelector('.dg-resizer')?.focus()});
- $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.colSearch={};st.activeView='';persist();$('.dg-quick').value='';renderAdv();render()});
+ $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.colSearch={};st.activeView='';$('.dg-quick').value='';renderAdv();changeQuery()});
  $('.dg-chips').addEventListener('click',e=>{
   if(e.target.closest('.dg-chips-clear')){$('.dg-clear').click();return}
   const b=e.target.closest('[data-rm]');if(!b)return;const t=b.dataset.rm,k=b.dataset.k;
-  if(t==='q'){st.quick='';$('.dg-quick').value=''}else if(t==='c'){st.colSearch={};persist();renderHead()}else if(t==='f')st.filters.delete(k);else if(t==='a'){st.adv.rules=[];renderAdv()}else if(t==='s'){st.sort=st.sort.filter(x=>x.key!==k)}
-  st.activeView='';persist();render();
+  if(t==='q'){st.quick='';$('.dg-quick').value=''}else if(t==='c'){st.colSearch={};renderHead()}else if(t==='f')st.filters.delete(k);else if(t==='a'){st.adv.rules=[];renderAdv()}else if(t==='s'){st.sort=st.sort.filter(x=>x.key!==k)}
+  st.activeView='';changeQuery();
  });
 
  const toggleGroup=tr=>{const k=tr.dataset.g;collapsed.has(k)?collapsed.delete(k):collapsed.add(k);renderBody()};
  $('tbody').addEventListener('click',e=>{const tr=e.target.closest('.dg-grouprow');if(tr){e.stopPropagation();toggleGroup(tr)}},true);
  $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest?.('.dg-grouprow');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();toggleGroup(tr)}});
- $('.dg-groupby').addEventListener('change',()=>collapsed.clear());
  root.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();$('.dg-quick').focus()}});
  $('.dg-cards-btn').addEventListener('click',()=>{st.cards=!st.cards;persist();renderBody()});
  $('.dg-density').addEventListener('change',e=>{st.density=e.target.value;rowH=0;persist();renderBody()});
@@ -382,25 +441,26 @@ export function mountGrid(root,opts){
  $('.dg-more').addEventListener('click',e=>{if(e.target.closest('.dg-showmore')){st.shown+=o.pageSize;renderBody()}});
  // بحث الأعمدة: تبديل الصف + إدخال مباشر بلا فقدان تركيز
  $('.dg-csearch-btn').addEventListener('click',()=>{st.colSearchOn=!st.colSearchOn;$('.dg-csearch-btn').classList.toggle('dg-chip-active',st.colSearchOn);$('.dg-csearch-btn').setAttribute('aria-pressed',String(st.colSearchOn));persist();render();if(st.colSearchOn)root.querySelector('.dg-cs')?.focus()});
- $('thead').addEventListener('input',e=>{const inp=e.target.closest('.dg-cs');if(!inp)return;const key=inp.dataset.key;clearTimeout(inp._t);inp._t=setTimeout(()=>{const v=inp.value.trim();if(v)st.colSearch[key]=v;else delete st.colSearch[key];st.shown=o.pageSize;persist();compute();renderBody()},250)});
+ $('thead').addEventListener('input',e=>{const inp=e.target.closest('.dg-cs');if(!inp)return;const key=inp.dataset.key;clearTimeout(inp._t);inp._t=setTimeout(()=>{const v=inp.value.trim();if(v)st.colSearch[key]=v;else delete st.colSearch[key];st.shown=o.pageSize;changeQuery()},240)});
  // التحديد والإجراءات الجماعية (تصدير/طباعة المحدد فقط — لا إتلاف بيانات)
  $('thead').addEventListener('change',e=>{
   const all=e.target.closest('.dg-sel-all');if(!all)return;
-  if(all.checked)view.forEach(r=>st.selected.add(r));else view.forEach(r=>st.selected.delete(r));
+  if(all.checked)view.forEach(r=>{const key=rowKey(r);st.selected.add(key);selectedRowsByKey.set(key,r)});else view.forEach(r=>{const key=rowKey(r);st.selected.delete(key);selectedRowsByKey.delete(key)});
   renderHead();renderBody();
  });
  $('tbody').addEventListener('change',e=>{
   const chk=e.target.closest('.dg-rowchk');if(!chk)return;
   const r=view[Number(chk.dataset.i)];if(!r)return;
-  chk.checked?st.selected.add(r):st.selected.delete(r);
+  const key=rowKey(r);
+  if(chk.checked){st.selected.add(key);selectedRowsByKey.set(key,r)}else{st.selected.delete(key);selectedRowsByKey.delete(key)}
   chk.closest('tr')?.classList.toggle('dg-checked',chk.checked);
-  const all=$('.dg-sel-all');if(all){all.checked=allSelected();all.indeterminate=st.selected.size>0&&!allSelected()}
+  const all=$('.dg-sel-all');if(all){all.checked=allSelected();all.indeterminate=view.some(isRowSelected)&&!allSelected()}
   renderSelbar();
  });
- $('.dg-sel-clear').addEventListener('click',()=>{st.selected.clear();renderHead();renderBody()});
- $('.dg-sel-export').addEventListener('click',()=>exportGrid('xls',[...st.selected]));
- $('.dg-sel-csv').addEventListener('click',()=>exportGrid('csv',[...st.selected]));
- $('.dg-sel-print').addEventListener('click',()=>printGrid([...st.selected]));
+ $('.dg-sel-clear').addEventListener('click',()=>{st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody()});
+ $('.dg-sel-export').addEventListener('click',()=>exportGrid('xls',selectedRows()));
+ $('.dg-sel-csv').addEventListener('click',()=>exportGrid('csv',selectedRows()));
+ $('.dg-sel-print').addEventListener('click',()=>printGrid(selectedRows()));
  // إعادة ضبط الجدول بالكامل (إعدادات العرض فقط — لا تمس أي بيانات)
  $('.dg-reset-btn').addEventListener('click',()=>{
   if(o.storageKey){prefs.remove(PK);try{localStorage.removeItem(`grid:${o.storageKey}`)}catch{}}
@@ -408,19 +468,19 @@ export function mountGrid(root,opts){
   st.filterCollapsed=resolveCollapseState(filterCollapseKey,{fallback:true});
   st.toolsCollapsed=resolveCollapseState(toolsCollapseKey,{fallback:true});
   st.shellCollapsed=resolveCollapseState(shellCollapseKey,{fallback:false,primary:true});
-  st.filters.clear();st.adv={logic:'and',rules:[]};st.quick='';st.sort=[];st.groupBy='';st.hidden=new Set(cols.filter(c=>c.hidden).map(c=>c.key));
+  st.filters.clear();st.adv={logic:'and',rules:[]};st.quick='';st.sort=[];st.groupBy='';st.hidden=new Set(cols.filter(c=>c.hidden).map(c=>c.key));st.remotePageSize=25;
   order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize='medium';st.density='';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.searchCol='';st.span='';st.tableWidth=100;st.qaOn=true;
-  $('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
-  renderAdv();render();toast('أُعيد ضبط الجدول إلى الإعدادات الافتراضية');
+  $('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-page-size').value='25';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
+  renderAdv();changeQuery();toast('أُعيد ضبط الجدول إلى الإعدادات الافتراضية');
  });
  $('thead').addEventListener('click',e=>{
   const th=e.target.closest('th');if(!th)return;const key=th.dataset.key;if(!key)return;
-  if(e.target.closest('.dg-fbtn')||e.target.closest('.dg-coltitle')){openFilter(th,key);return}
-  if(e.target.closest('.dg-sort')){
+  if(byKey.get(key)?.filterable&&(e.target.closest('.dg-fbtn')||e.target.closest('.dg-coltitle'))){openFilter(th,key);return}
+  if(byKey.get(key)?.sortable&&e.target.closest('.dg-sort')){
    const i=st.sort.findIndex(s=>s.key===key);
    if(e.shiftKey){if(i<0)st.sort.push({key,dir:'asc'});else if(st.sort[i].dir==='asc')st.sort[i].dir='desc';else st.sort.splice(i,1)}
    else{const cur=i>=0?st.sort[i].dir:null;st.sort=cur==='asc'?[{key,dir:'desc'}]:cur==='desc'?[]:[{key,dir:'asc'}]}
-   persist();render();
+   changeQuery();
   }
  });
  const selectRow=tr=>{st.sel=Number(tr.dataset.i);root.querySelectorAll('tr.dg-selected').forEach(x=>x.classList.remove('dg-selected'));tr.classList.add('dg-selected')};
@@ -462,27 +522,28 @@ export function mountGrid(root,opts){
    <div class="dg-pop-sort"><button type="button" class="ghost" data-dir="asc">فرز تصاعدي ▲</button><button type="button" class="ghost" data-dir="desc">فرز تنازلي ▼</button><button type="button" class="ghost" data-dir="none">بدون فرز</button><button type="button" class="ghost dg-pintoggle" title="يبقى العمود ظاهرًا أثناء التمرير الأفقي">${pinned?'📌 إلغاء التثبيت':'📌 تثبيت العمود'}</button></div>
    ${presets}
    <label class="dg-pop-cond">شرط<select class="dg-op">${OPS[type].map(([v,l])=>`<option value="${v}"${v===f.op?' selected':''}>${l}</option>`).join('')}</select></label><div class="dg-vals">${valueInputs(type,f.op,f.v1,f.v2)}</div>
+   ${remote?'<small class="dg-facet-note">القيم الظاهرة من الصفحة الحالية فقط؛ شرط التصفية يطبّق على نتائج الاستعلام كلها.</small>':''}
    <div class="dg-pop-list"><input type="search" class="dg-lsearch" placeholder="بحث في القيم…"><div class="dg-list-tools"><button type="button" class="link dg-checkall">تحديد الكل</button><button type="button" class="link dg-checknone">إلغاء الكل</button></div><label class="dg-all"><input type="checkbox" class="dg-allbox" ${!f.set?'checked':''}> تحديد الكل</label><div class="dg-checks">${values.map(([v,cnt])=>`<label><input type="checkbox" value="${esc(v)}" ${!f.set||f.set.has(v)?'checked':''}> <span>${esc(v)}</span> <small>${cnt}</small></label>`).join('')}</div>${distinct.size>1000?'<small class="muted">تُعرض أول 1000 قيمة.</small>':''}</div>
    <div class="dg-pop-actions"><button type="button" class="primary dg-apply">تطبيق</button><button type="button" class="ghost dg-reset">مسح تصفية العمود</button></div>`;
   place(pop,th);
   const q=s=>pop.querySelector(s);
   q('.dg-x').onclick=closePop;
-  pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{if(b.dataset.dir==='none')st.sort=st.sort.filter(s=>s.key!==key);else st.sort=[{key,dir:b.dataset.dir}];closePop();persist();render()});
-  pop.querySelectorAll('[data-preset-op]').forEach(b=>b.onclick=()=>{st.filters.set(key,{op:b.dataset.presetOp,v1:'',v2:'',set:null});closePop();st.shown=o.pageSize;persist();render()});
+  pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{if(b.dataset.dir==='none')st.sort=st.sort.filter(s=>s.key!==key);else st.sort=[{key,dir:b.dataset.dir}];closePop();changeQuery()});
+  pop.querySelectorAll('[data-preset-op]').forEach(b=>b.onclick=()=>{st.filters.set(key,{op:b.dataset.presetOp,v1:'',v2:'',set:null});closePop();st.shown=o.pageSize;changeQuery()});
   q('.dg-checkall').onclick=()=>{pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=true);q('.dg-allbox').checked=true};
   q('.dg-checknone').onclick=()=>{pop.querySelectorAll('.dg-checks input').forEach(i=>i.checked=false);q('.dg-allbox').checked=false};
   q('.dg-pintoggle').onclick=()=>{togglePin(key);closePop()};
   q('.dg-op').onchange=e=>{q('.dg-vals').innerHTML=valueInputs(type,e.target.value,q('.dg-v1')?.value||'',q('.dg-v2')?.value||'')};
   q('.dg-lsearch').oninput=e=>{const s=n(e.target.value);pop.querySelectorAll('.dg-checks label').forEach(l=>l.hidden=Boolean(s)&&!n(l.textContent).includes(s))};
   q('.dg-allbox').onchange=e=>pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=e.target.checked);
-  q('.dg-reset').onclick=()=>{st.filters.delete(key);closePop();st.shown=o.pageSize;persist();render()};
+  q('.dg-reset').onclick=()=>{st.filters.delete(key);closePop();st.shown=o.pageSize;changeQuery()};
   q('.dg-apply').onclick=()=>{
    const op=q('.dg-op').value,v1=q('.dg-v1')?.value??'',v2=q('.dg-v2')?.value??'';
    const boxes=[...pop.querySelectorAll('.dg-checks input')];const checked=boxes.filter(b=>b.checked).map(b=>b.value);
    const set=checked.length===boxes.length?null:new Set(checked);
    const hasCond=NOVAL.includes(op)||v1!==''||v2!=='';
    if(!set&&!hasCond)st.filters.delete(key);else st.filters.set(key,{op:hasCond?op:'',v1,v2,set});
-   closePop();st.shown=o.pageSize;persist();render();
+   closePop();st.shown=o.pageSize;changeQuery();
   };
   pop.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();if(e.key==='Enter'&&e.target.matches('input:not([type=checkbox])'))q('.dg-apply').click()});
   q('.dg-op').focus();
@@ -526,7 +587,7 @@ export function mountGrid(root,opts){
   st.pinned=(Array.isArray(v.pinned)?v.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS);st.colSearch=v.colSearch&&typeof v.colSearch==='object'?{...v.colSearch}:{};st.colSearchOn=Boolean(v.colSearchOn);
   st.searchCol=byKey.has(v.searchCol)?v.searchCol:'';st.span=['wide','full'].includes(v.span)?v.span:'';st.tableWidth=Math.max(100,Math.min(220,Number(v.tableWidth)||100));st.qaOn=v.qaOn!==false;
   if($('.dg-scope'))$('.dg-scope').value=st.searchCol;if($('.dg-span'))$('.dg-span').value=st.span;if($('.dg-width'))$('.dg-width').value=st.tableWidth;
-  st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;persist();render();
+  st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;changeQuery();
  }
  $('.dg-views-btn').addEventListener('click',e=>{
   closePop();pop=document.createElement('div');pop.className='dg-pop';
@@ -555,8 +616,8 @@ export function mountGrid(root,opts){
  $('.dg-adv').addEventListener('click',e=>{
   if(e.target.closest('.dg-radd')){readAdv();const c=visibleCols()[0]||cols[0];st.adv.rules.push({key:c.key,op:OPS[c.type||'text'][0][0],v1:'',v2:''});renderAdv()}
   else if(e.target.closest('.dg-rdel')){readAdv();st.adv.rules.splice(Number(e.target.closest('.dg-rule').dataset.i),1);renderAdv()}
-  else if(e.target.closest('.dg-rapply')){readAdv();st.shown=o.pageSize;persist();render()}
-  else if(e.target.closest('.dg-rclear')){st.adv.rules=[];renderAdv();persist();render()}
+  else if(e.target.closest('.dg-rapply')){readAdv();st.shown=o.pageSize;changeQuery()}
+  else if(e.target.closest('.dg-rclear')){st.adv.rules=[];renderAdv();changeQuery()}
  });
  $('.dg-adv').addEventListener('change',e=>{
   if(e.target.matches('.dg-rkey')){readAdv();const r=st.adv.rules[Number(e.target.closest('.dg-rule').dataset.i)];r.op=OPS[byKey.get(r.key)?.type||'text'][0][0];r.v1='';r.v2='';renderAdv()}
@@ -601,30 +662,38 @@ export function mountGrid(root,opts){
  const onDocKey=e=>{if(!root.isConnected){document.removeEventListener('mousedown',onDocDown,true);document.removeEventListener('keydown',onDocKey);return}if(e.key==='Escape')closeMenu()};
  document.addEventListener('mousedown',onDocDown,true);
  document.addEventListener('keydown',onDocKey);
+ if(remote&&typeof MutationObserver==='function'&&document.documentElement){
+  providerObserver=new MutationObserver(()=>{if(root.isConnected)return;providerSequence++;try{providerController?.abort()}catch{}providerObserver?.disconnect()});
+  providerObserver.observe(document.documentElement,{childList:true,subtree:true});
+ }
  $('.dg-selbar').addEventListener('click',async e=>{
   const b=e.target.closest('[data-bulk]');if(!b)return;
   const act=(o.bulkActions||[]).find(a=>a.id===b.dataset.bulk);if(!act)return;
-  const picked=[...st.selected];if(!picked.length)return;
+  const picked=selectedRows();if(!picked.length)return;
   if(act.confirm){const {confirmBox}=await import('./modal.js');const ok=await confirmBox(act.confirm,{okText:act.okText||act.label||'تأكيد'});if(!ok)return}
   try{await o.onBulk?.(act.id,picked)}catch(err){toast(err?.message||'تعذر تنفيذ الإجراء','error')}
  });
  $('.dg-open-sel')?.addEventListener('click',async()=>{
-  const picked=[...st.selected].slice(0,20);if(!picked.length)return;
+  const picked=selectedRows().slice(0,20);if(!picked.length)return;
   if(o.onBulk){try{await o.onBulk('open',picked)}catch(err){toast(err?.message||'تعذر الفتح','error')}return}
   if(picked[0]&&o.onRowClick)o.onRowClick(picked[0]);
  });
  renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;
  render();
+ if(remote)loadProviderRows();
  return {
-  setRows(r,meta){rows=r||[];if(meta&&typeof meta==='object'&&'more' in meta)o.more=Boolean(meta.more);st.shown=o.pageSize;render()},
+  setRows(r,meta){if(remote){provider.setRows?.(r||[]);pageIndex=0;pageCursors.splice(1);pageCursors[0]=null;return loadProviderRows()}rows=r||[];if(meta&&typeof meta==='object'&&'more' in meta)o.more=Boolean(meta.more);st.shown=o.pageSize;render()},
   getView:()=>view,
   get rows(){return rows},
-  applyFilter(key,op,v1,v2=''){st.filters.set(key,{op,v1,v2,set:null});render()},
-  sortBy(key,dir='asc'){st.sort=[{key,dir}];render()},
+  getQuery:()=>makeQuery(),
+  reload({resetPage=true}={}){if(remote){if(resetPage){pageIndex=0;pageCursors.splice(1);pageCursors[0]=null}return loadProviderRows()}render();return Promise.resolve()},
+  applyFilter(key,op,v1,v2=''){st.filters.set(key,{op,v1,v2,set:null});changeQuery()},
+  sortBy(key,dir='asc'){st.sort=[{key,dir}];changeQuery()},
   togglePin(key){togglePin(key)},
-  getSelection(){return [...st.selected]},
-  clearSelection(){st.selected.clear();renderHead();renderBody()},
-  setColSearch(key,val){if(val)st.colSearch[key]=val;else delete st.colSearch[key];compute();renderBody()},
+  getSelection(){return selectedRows()},
+  destroy(){providerSequence++;try{providerController?.abort()}catch{}providerObserver?.disconnect();document.removeEventListener('mousedown',onDocDown,true);document.removeEventListener('keydown',onDocKey);closePop();closeMenu()},
+  clearSelection(){st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody()},
+  setColSearch(key,val){if(val)st.colSearch[key]=val;else delete st.colSearch[key];changeQuery()},
   isColSearchOn(){return st.colSearchOn},
   exportData:kind=>exportGrid(kind),
   docHtml:()=>docHtml(false)

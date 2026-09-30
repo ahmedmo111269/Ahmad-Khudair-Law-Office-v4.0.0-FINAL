@@ -38,8 +38,9 @@ export class Repository{
   * cursor: opaque token returned as nextCursor by the previous call; iteration resumes strictly after it.
   * Backward navigation is handled by the caller keeping a stack of cursors (see ui/pagination.js).
   */
- async page({index=null,key=undefined,cursor=null,limit=25,direction='next',filter=null}={}){
+ async page({index=null,key=undefined,lower=undefined,upper=undefined,lowerOpen=false,upperOpen=false,cursor=null,limit=25,direction='next',filter=null,signal=null}={}){
    if(limit<1||limit>MAX_PAGE_SIZE)throw new AppError(ERR.VALIDATION,'حجم الصفحة غير مسموح.');
+   if(signal?.aborted)throw abortError();
    this.ctx.assert();
    const tx=this.ctx.db.transaction(this.store,'readonly'),s=tx.objectStore(this.store);
    if(index&&!s.indexNames.contains(index))index=null; // unknown index: fall back to primary-key (ULID = creation) order
@@ -49,22 +50,36 @@ export class Repository{
      try{decoded=typeof cursor==='string'?decodeCursor(cursor):cursor}catch{throw new AppError(ERR.VALIDATION,'مؤشر التصفح غير صالح.')}
      if(decoded?.sessionToken!==this.ctx.token)throw new AppError(ERR.STALE,'انتهت صلاحية مؤشر التصفح بعد تغيير قاعدة البيانات.');
    }
-   const range=key===undefined?undefined:IDBKeyRange.only(key);
    const dir=direction==='prev'?'prev':'next';
+   if(decoded&&(decoded.index??null)!==(index??null))throw new AppError(ERR.STALE,'تغيّر ترتيب الاستعلام؛ أعد بدء التصفح من الصفحة الأولى.');
+   if(decoded&&decoded.direction&&decoded.direction!==dir)throw new AppError(ERR.STALE,'تغيّر اتجاه التصفح؛ أعد بدء التصفح من الصفحة الأولى.');
+   let range;
+   if(key!==undefined)range=IDBKeyRange.only(key);
+   else if(lower!==undefined&&upper!==undefined)range=IDBKeyRange.bound(lower,upper,Boolean(lowerOpen),Boolean(upperOpen));
+   else if(lower!==undefined)range=IDBKeyRange.lowerBound(lower,Boolean(lowerOpen));
+   else if(upper!==undefined)range=IDBKeyRange.upperBound(upper,Boolean(upperOpen));
    const sign=dir==='next'?1:-1;
    // >0 when the cursor row is after the saved position in the iteration direction.
    const position=cur=>{let c=indexedDB.cmp(cur.key,decoded.key);if(c===0&&index)c=indexedDB.cmp(cur.primaryKey,decoded.primaryKey);return c*sign};
    const items=[];
    return new Promise((resolve,reject)=>{
-     let positioned=!decoded,jumped=false;
+     let positioned=!decoded,jumped=false,settled=false;
+     const cleanup=()=>signal?.removeEventListener?.('abort',onAbort);
+     const fail=error=>{if(settled)return;settled=true;cleanup();reject(error)};
+     const onAbort=()=>{try{tx.abort()}catch{}fail(abortError())};
      const c=src.openCursor(range,dir);
-     c.onerror=()=>reject(c.error);
+     c.onerror=()=>fail(signal?.aborted?abortError():c.error);
+     tx.onabort=()=>fail(signal?.aborted?abortError():(tx.error||new Error('IndexedDB page query aborted.')));
+     signal?.addEventListener?.('abort',onAbort,{once:true});
+     if(signal?.aborted){onAbort();return}
      const finish=hasMore=>{
+       if(settled)return;
        const visible=items.slice(0,limit);
        const last=visible[visible.length-1];
-       resolve({items:visible.map(x=>x.value),nextCursor:hasMore&&last?encodeCursor({sessionToken:this.ctx.token,index,key:last.meta.key,primaryKey:last.meta.primaryKey}):null,prevCursor:null,hasMore,hasPrev:Boolean(decoded)});
+       settled=true;cleanup();
+       resolve({items:visible.map(x=>x.value),nextCursor:hasMore&&last?encodeCursor({sessionToken:this.ctx.token,index,key:last.meta.key,primaryKey:last.meta.primaryKey,direction:dir}):null,prevCursor:null,hasMore,hasPrev:Boolean(decoded)});
      };
-     c.onsuccess=()=>{
+     c.onsuccess=()=>{if(settled)return;
        const cur=c.result;
        if(!cur){finish(false);return}
        if(!positioned){
@@ -90,4 +105,5 @@ export class Repository{
 // UTF-8 safe base64 (index keys often contain Arabic text, which plain btoa() rejects).
 function encodeCursor(v){const bytes=new TextEncoder().encode(JSON.stringify(v));let bin='';for(const b of bytes)bin+=String.fromCharCode(b);return btoa(bin)}
 function decodeCursor(s){const bin=atob(s);const bytes=Uint8Array.from(bin,ch=>ch.charCodeAt(0));return JSON.parse(new TextDecoder().decode(bytes))}
+function abortError(){return new DOMException('تم إلغاء قراءة الصفحة بسبب استعلام أحدث.','AbortError')}
 function req(r){return new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}

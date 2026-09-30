@@ -33,6 +33,21 @@ tr:hover .dg-qa-btn,tr:focus-within .dg-qa-btn{background:var(--primary-soft);co
 .dg.dg-d-mobile td{display:block;border:0;white-space:normal;max-width:none;background:transparent!important}
 .dg.dg-d-mobile td::before{content:attr(data-label);display:block;font-size:11px;color:var(--text-muted)}
 .dg-scroll{overflow:auto}
+.dg-footbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;padding:7px 10px;border-top:1px solid var(--border);background:var(--surface2);color:var(--text-muted);font-size:12px}
+.dg-foot-count{font-weight:650;color:var(--text-muted)}
+.dg-provider-note{color:var(--warn);font-size:11px;line-height:1.4}
+.dg-facet-note{display:block;padding:5px 7px;border-radius:7px;background:var(--surface2);color:var(--text-muted);line-height:1.5}
+.dg-pagebar{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:1 1 auto;min-width:0}
+.dg-pagebar[hidden]{display:none!important}
+.dg-pagebar label{display:inline-flex!important;align-items:center;gap:5px;min-width:0!important;white-space:nowrap;font-size:12px;color:var(--text-muted)}
+.dg-pagebar select{width:auto;min-width:64px;padding:5px 25px 5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font:inherit}
+.dg-page-label{white-space:nowrap;font-weight:700;color:var(--text)}
+.dg-state{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);background:var(--surface)}
+.dg-state[hidden]{display:none!important}
+.dg-state.is-error{color:var(--danger)}
+.dg-state.is-offline{color:var(--warn)}
+.dg-state.is-loading::before{content:"";width:13px;height:13px;flex:none;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:dg-spin .7s linear infinite}
+@keyframes dg-spin{to{transform:rotate(360deg)}}
 .dg-table thead th{z-index:3}
 .dg-pin-cell,.dg-pin-th{z-index:4}
 
@@ -122,6 +137,10 @@ tr:hover .dg-qa-btn,tr:focus-within .dg-qa-btn{background:var(--primary-soft);co
 .collapse-settings .collapse-setting-select select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
 .collapse-setting-actions{display:flex;flex-wrap:wrap;gap:8px}
 @media(max-width:760px){
+ .dg-footbar{align-items:flex-start}
+ .dg-pagebar{flex-basis:100%;justify-content:space-between;gap:4px}
+ .dg-pagebar label{font-size:11px}
+ .dg-provider-note{flex-basis:100%}
  .dg-shell-head{padding:6px 8px}
  .dg-shell-toggle{flex-wrap:wrap;gap:5px;padding:4px}
  .dg-shell-count{flex-basis:100%;margin-inline-start:25px;text-align:start;font-size:11.5px}
@@ -141,7 +160,7 @@ tr:hover .dg-qa-btn,tr:focus-within .dg-qa-btn{background:var(--primary-soft);co
  .collapse-pin,.collapse-toggle,.card-collapse-toggle{min-width:40px;min-height:40px}
 }
 @media(prefers-reduced-motion:reduce){
- .collapse-caret,.dg-tools-panel,.ux-card-toggle svg,.form-group>summary::before{animation:none!important;transition:none!important}
+ .collapse-caret,.dg-tools-panel,.dg-state.is-loading::before,.ux-card-toggle svg,.form-group>summary::before{animation:none!important;transition:none!important}
 }
 .collapse-page-tools{margin:0 0 10px auto;position:relative;z-index:4;width:max-content;max-width:100%;color:var(--text-muted);font-size:12px}
 .collapse-page-tools>summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:5px 10px;min-height:34px}

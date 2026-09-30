@@ -4,6 +4,7 @@ import {ENTITIES,phonesOf,fmtDate} from '../domain/entities.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {localDate,addDays,isActiveProcedure} from '../core/clock.js';
 import {formatFileNumber} from '../core/file-number.js';
+import {createIndexedDbDataProvider} from '../db/grid-data-provider.js';
 
 export const DEFAULT_LIMIT=1000;
 export const MAX_LIMIT=5000;
@@ -28,7 +29,8 @@ export function rowText(row){
 export const normQ=q=>normalizeArabic(normalizeDigits(String(q||''))).trim();
 
 // مسح محدود بمؤشر: index اختياري، range اختياري، يرجع {rows, more}
-export function scan(office,store,{index=null,lower,upper,direction='prev',limit=DEFAULT_LIMIT,filter=null}={}){
+export function scan(office,store,{index=null,lower,upper,direction='prev',limit=DEFAULT_LIMIT,filter=null,signal=null}={}){
+ if(signal?.aborted)return Promise.reject(abortError());
  office.ctx.assert();
  limit=Math.min(Math.max(1,limit),MAX_LIMIT);
  const tx=office.ctx.db.transaction(store,'readonly'),s=tx.objectStore(store);
@@ -36,16 +38,29 @@ export function scan(office,store,{index=null,lower,upper,direction='prev',limit
  const useIndex=index&&s.indexNames.contains(index);
  if(useIndex){src=s.index(index);if(lower!==undefined&&upper!==undefined)range=IDBKeyRange.bound(lower,upper);else if(lower!==undefined)range=IDBKeyRange.lowerBound(lower);else if(upper!==undefined)range=IDBKeyRange.upperBound(upper)}
  const inRange=v=>{if(!index||useIndex)return true;const x=v[index];if(x===undefined||x===null||x==='')return false;if(lower!==undefined&&String(x)<String(lower))return false;if(upper!==undefined&&String(x)>String(upper))return false;return true};
- return new Promise((resolve,reject)=>{const rows=[];const c=src.openCursor(range,direction==='prev'?'prev':'next');c.onerror=()=>reject(c.error);c.onsuccess=()=>{const cur=c.result;if(!cur){resolve({rows,more:false});return}const v=cur.value;if(!v.isDeleted&&inRange(v)&&(!filter||filter(v))){if(rows.length>=limit){resolve({rows,more:true});return}rows.push(v)}cur.continue()}});
-}
+ return new Promise((resolve,reject)=>{
+  const rows=[];let settled=false;
+  const cleanup=()=>signal?.removeEventListener?.('abort',onAbort);
+  const fail=error=>{if(settled)return;settled=true;cleanup();reject(error)};
+  const complete=result=>{if(settled)return;settled=true;cleanup();resolve(result)};
+  const onAbort=()=>{try{tx.abort()}catch{}fail(abortError())};
+  const c=src.openCursor(range,direction==='prev'?'prev':'next');
+  c.onerror=()=>fail(signal?.aborted?abortError():c.error);
+  tx.onabort=()=>fail(signal?.aborted?abortError():(tx.error||new Error('IndexedDB scan aborted.')));
+  signal?.addEventListener?.('abort',onAbort,{once:true});
+  if(signal?.aborted){onAbort();return}
+  c.onsuccess=()=>{if(settled)return;const cur=c.result;if(!cur){complete({rows,more:false});return}const v=cur.value;if(!v.isDeleted&&inRange(v)&&(!filter||filter(v))){if(rows.length>=limit){complete({rows,more:true});return}rows.push(v)}cur.continue()};
+ });
+ }
+function abortError(){return new DOMException('تم إلغاء بحث قائمة قديم.','AbortError')}
 
 // معرّفات الملفات/القضايا/الموكلين التي تطابق نص البحث، ليظهر في جدول الجلسات مثلًا كل جلسات قضية تم البحث برقمها.
-async function relatedIds(office,q,stores){
+async function relatedIds(office,q,stores,signal=null){
  const out={files:new Set(),cases:new Set(),clients:new Set()};
  const jobs=[];
- if(stores.includes('files'))jobs.push(scan(office,'files',{limit:300,filter:f=>(f.searchText||rowText(f)).includes(q)}).then(r=>r.rows.forEach(x=>out.files.add(x.id))));
- if(stores.includes('cases'))jobs.push(scan(office,'cases',{limit:300,filter:c=>rowText(c).includes(q)}).then(r=>r.rows.forEach(x=>out.cases.add(x.id))));
- if(stores.includes('clients'))jobs.push(scan(office,'clients',{limit:300,filter:c=>rowText(c).includes(q)}).then(r=>r.rows.forEach(x=>out.clients.add(x.id))));
+ if(stores.includes('files'))jobs.push(scan(office,'files',{limit:300,signal,filter:f=>(f.searchText||rowText(f)).includes(q)}).then(r=>r.rows.forEach(x=>out.files.add(x.id))));
+ if(stores.includes('cases'))jobs.push(scan(office,'cases',{limit:300,signal,filter:c=>rowText(c).includes(q)}).then(r=>r.rows.forEach(x=>out.cases.add(x.id))));
+ if(stores.includes('clients'))jobs.push(scan(office,'clients',{limit:300,signal,filter:c=>rowText(c).includes(q)}).then(r=>r.rows.forEach(x=>out.clients.add(x.id))));
  await Promise.all(jobs);return out;
 }
 
@@ -71,6 +86,52 @@ export async function loadRows(office,store,{q='',from='',to='',dateField=null,l
   return scan(office,store,{index,lower,upper,direction:'prev',limit,filter:match});
  }
  return scan(office,store,{direction:'prev',limit,filter:match});
+}
+
+// Adapt the current feature-level query (search/date/quick predicate) to the shared
+// provider boundary. Domain-specific meaning stays here; the DataGrid only sends a
+// portable Grid Query and never knows what a legal file, hearing, or service record is.
+async function entityGridScope(office,store,options={}){
+ const ent=ENTITIES[store]||{};
+ const field=options.dateField||ent.dateField||null;
+ const from=String(options.from||'').slice(0,10),to=String(options.to||'').slice(0,10);
+ const nq=normQ(options.q||'');
+ let rel=null;
+ if(nq){
+  const refs=(ent.fields||[]).filter(f=>f.ref).map(f=>f.ref);
+  const need=['files','cases','clients'].filter(s=>refs.includes(s)&&s!==store);
+  if(need.length)rel=await relatedIds(office,nq,need,signal);
+ }
+ const filter=row=>{
+  if(options.filter&&!options.filter(row))return false;
+  if((from||to)&&field){
+   const date=String(row[field]||'').slice(0,10);
+   if(!date||(from&&date<from)||(to&&date>to))return false;
+  }
+  if(!nq)return true;
+  if((store==='files'?(row.searchText||'')+' '+rowText(row):rowText(row)).includes(nq))return true;
+  return Boolean(rel&&((row.fileId&&rel.files.has(row.fileId))||(row.caseId&&rel.cases.has(row.caseId))||(row.clientId&&rel.clients.has(row.clientId))));
+ };
+ const ranged=Boolean((from||to)&&field);
+ return {
+  index:ranged?field:null,
+  lower:ranged?(from||'0000'):undefined,
+  upper:ranged?(to||'9999')+String.fromCharCode(0xffff):undefined,
+  direction:'prev',
+  filter
+ };
+}
+
+/**
+ * Create a cursor-backed IndexedDB provider for an entity list. It streams only one
+ * bounded page and composes the page's domain scope with the grid's neutral query.
+ */
+export function createEntityGridProvider(office,store,{getBaseQuery=()=>({})}={}){
+ const repo=office?.r?.[store];
+ if(!repo)throw new TypeError(`Unknown repository: ${store}`);
+ return createIndexedDbDataProvider(repo,{
+  resolveScope:query=>entityGridScope(office,store,typeof getBaseQuery==='function'?getBaseQuery(query)||{}:getBaseQuery||{})
+ });
 }
 
 // عرض مختصر للسجل المرجعي

@@ -1,3 +1,15 @@
+# v5.4.0 — خريطة Universal DataGrid ومسار البيانات
+
+- `js/core/grid-query.js` — Query Model محايد بالإصدار 1: `createGridQuery`, `matchesGridQuery`, `applyGridQuery`, `sortGridRows`، تطبيع عربي/أرقام، أنواع فلاتر، أشجار AND/OR متداخلة، ترتيب متعدد وحالة cursor. التجميع لا ينشئ أي إجماليات تلقائية.
+- `js/ui/grid-columns.js` — `defineGridColumns` و`defaultColumnOrder`: يحافظ على `label/get/text` القديمة ويطبّع تعريفات `title`, `type`, `index`, `searchable/sortable/filterable`, حدود العرض وسائر خصائص العمود.
+- `js/db/grid-data-provider.js` — `createIndexedDbDataProvider(repository,{resolveScope,indexForSort,countProvider})`: يمرر cursor/حدود الفهرس/الإشارة إلى `Repository.page()` ويحتفظ بصفحة واحدة؛ يعيد `rows`, `nextCursor`, `hasMore`, `totalExact` وحالة قابلية الفرز. لا ينفذ count شاملًا افتراضيًا. `js/ui/grid-data-provider.js` يوفّر `createArrayDataProvider` للبيانات المحدودة فقط.
+- `js/ui/datagrid.js` — `mountGrid(root,{provider|dataProvider,columns,...})` يبني Query Model موحدًا، يلغي الطلب السابق ويتجاهل نتائجه المتأخرة، ويعرض تحميل/خطأ/إعادة محاولة وpagination 25/50/100. تغيّر query يعيد مؤشر cursor. التحديد في `Set` مفاتيح مستقرة مع `Map` للصفوف المحددة عبر الصفحات. المجاميع تتطلب `column.aggregate` أو `options.aggregations` صراحة؛ تذييل provider لا يعرض إجماليًا غير معلوم.
+- `js/db/repository.js` — `page()` يقبل `key/lower/upper` وحدودًا مفتوحة، يتحقق من توافق cursor مع index والاتجاه، ويدعم إلغاء cursor الجاري عبر `AbortSignal`. Schema لم يتغير.
+- `js/services/entity-query.js` — `entityGridScope` يبقي نطاق التاريخ والبحث العابر للعلاقات في طبقة الخدمة؛ `createEntityGridProvider` يكيّف مستودع الكيان للعقد المحايد. مسوح `scan` المرتبطة بالبحث تقبل AbortSignal. `js/modules/list-page.js` يقرأ الصفحة المطلوبة فقط، ثم ينفذ `resolveRefs` على صفحتها؛ أحداث إضافة/تعديل/تغيير نطاق تعيد القائمة إلى الصفحة الأولى.
+- `css/workbench.css` — حالات التحميل والخطأ، تذييل pagination وملاحظات الصفحة الحالية، RTL وتخطيط هاتف، تخفيف حركة spinner.
+- `sw.js` — كاش `ahmad-khudair-law-office-v5.4.0-offline1` ويضم `grid-query.js` و`grid-data-provider.js` و`grid-columns.js` ومحوّل المصفوفات.
+- `js/tests/grid-provider-tests.js` — Query Model، Array/IndexedDB providers، نطاقات index/missing-index، cursor متكرر/ثابت، الإلغاء، تنقل DataGrid والتحديد وتغيير الحجم والفلاتر ومنع مجموع سنة القضية. أُضيف إلى `tests.html` و`tools/node-tests/run-tests.mjs`; التحقق المسجل لهذه النسخة: 150/150؛ فحص الصياغة وفحص `tools/release-audit.mjs` PASS (168 ملفًا/118 JavaScript، دون تحذيرات)؛ التفاصيل في `docs/RELEASE-AUDIT.json`. Schema 13 والبيانات التجريبية والعلاقات كما هي.
+
 # v5.3.0 — خريطة سلوك الطي وحالة الواجهة
 
 - `js/ui/collapse-state.js` — مخزن مركزي محلي بمفتاح `ui:collapse-state`: الأوضاع الافتراضية الأربعة، والحالة الحالية والمثبتة المستقلة لكل مفتاح مستقر، دوال الحل/الحفظ/التثبيت/المسح وإعادة الضبط. يسبق `pinnedCollapsed` ثم `currentCollapsed` الافتراضي عند استعادة عنصر.
