@@ -10,6 +10,7 @@ import {createEntityGridProvider,resolveRefs,presetRange,PRESETS,scan} from '../
 import {fmtDate} from '../domain/entities.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {prefs} from '../core/preferences.js';
+import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
 
 export function columnsFor(store,refs,{extra=[]}={}){
  const ent=ENTITIES[store];
@@ -40,6 +41,10 @@ function saveListView(store,st){prefs.set(LIST_VIEW_KEY(store),{q:st.q||'',prese
 
 export function listPage(app,store,query){
  const ent=ENTITIES[store];
+ // اشتراك القائمة في نظام ترتيب الأقسام المركزي (تعريف واحد يعمل لكل القوائم)
+ registerPageLayout({pageId:store,title:ent.plural,sections:[
+  {id:'filters',title:'عوامل التصفية والفترات'},
+  {id:'grid',title:'جدول السجلات',canHide:false}]});
  const saved=prefs.get(LIST_VIEW_KEY(store),{})||{};
  const st=state(app)[store]=state(app)[store]||{q:saved.q||'',preset:saved.preset||'all',from:saved.from||'',to:saved.to||'',showCal:saved.showCal??Boolean(ent.calendar)};
  if(query?.get('preset')){st.preset=query.get('preset');st.from=query.get('from')||'';st.to=query.get('to')||''}
@@ -48,8 +53,8 @@ export function listPage(app,store,query){
  const hasDate=Boolean(ent.dateField);
  const presetLabel=store==='procedures'?[...PRESETS.slice(0,1),['overdue','المتأخرة'],...PRESETS.slice(1)]:PRESETS;
  return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
-  <div class="head-actions"><button class="ghost" data-qa-custom title="إظهار أو إخفاء إجراءات الصف">إجراءات الصف</button><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
- <section class="panel list-filter-panel" data-collapse-id="list-filters-${esc(store)}"><div class="panel-head"><h3>🔍 عوامل التصفية والفترات</h3><span class="badge" data-list-filter-count>${listFilterCount(st)?`${listFilterCount(st)} فلاتر نشطة`:'لا توجد فلاتر نشطة'}</span></div>
+  <div class="head-actions"><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-qa-custom title="إظهار أو إخفاء إجراءات الصف">إجراءات الصف</button><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
+ <section class="panel list-filter-panel" data-section-id="filters" data-collapse-id="list-filters-${esc(store)}"><div class="panel-head"><h3>🔍 عوامل التصفية والفترات</h3><span class="badge" data-list-filter-count>${listFilterCount(st)?`${listFilterCount(st)} فلاتر نشطة`:'لا توجد فلاتر نشطة'}</span></div>
  <div class="list-controls">
   <input id="list-q" type="search" class="list-search" value="${esc(st.q)}" placeholder="بحث فوري شامل…" autocomplete="off" aria-label="بحث">
   ${hasDate?`<div class="preset-bar" role="group" aria-label="الفترة">${presetLabel.map(([k,l])=>`<button type="button" class="chip${st.preset===k?' active':''}" data-preset="${k}">${l}</button>`).join('')}</div>
@@ -58,7 +63,7 @@ export function listPage(app,store,query){
  </div></section>
  ${ent.calendar?`<div class="list-cal"${st.showCal?'':' hidden'}><div id="list-calendar"></div></div>`:''}
  <div class="list-status muted small" aria-live="polite"></div>
- <div id="list-grid"></div>`;
+ <div id="list-grid" data-section-id="grid"></div>`;
 }
 
 export function bindListPage(app,store){
@@ -103,6 +108,7 @@ export function bindListPage(app,store){
  }
  root.querySelector('[data-list-add]').onclick=async()=>store==='files'?(await import('./client-file.js')).startNewLegalFile(app):openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
  root.querySelector('[data-qa-custom]')?.addEventListener('click',()=>customizeRowActions().then(()=>load()).catch(err=>app.fail(err)));
+ root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:store,root}));
  let t=0;
  root.querySelector('#list-q').addEventListener('input',e=>{clearTimeout(t);st.q=e.target.value;saveListView(store,st);syncFilterSummary();t=setTimeout(()=>load().catch(err=>app.fail(err)),250)});
  // «/» يقفز لبحث القائمة من أي موضع في الصفحة، وEsc يمسحه
@@ -172,7 +178,9 @@ async function handleRowAction(app,store,id,row,reload){
  }
 }
 function bulkFor(store){
- const items=[{id:'open',label:'فتح المحدد'}];
+ // «فتح المحدد» ليس إجراءً جماعيًا هنا: الجدول الموحّد يوفره مرة واحدة كزر مدمج
+ // في شريط التحديد (dg-open-sel) ويستدعي onBulk('open',…) نفسه — لا تكرار للزر.
+ const items=[];
  if(store==='files')items.push({id:'archive',label:'أرشفة',danger:true,confirm:'أرشفة الملفات المحددة؟ تبقى كل البيانات محفوظة ويمكن إعادة فتح الملف لاحقًا.',okText:'أرشفة'});
  if(store==='procedures')items.push({id:'done',label:'تعليم كمنجَز',confirm:'تعليم الأعمال المحددة كمنجَزة؟ يمكن تعديل الحالة لاحقًا من سجل كل عمل.',okText:'تعليم كمنجَز'});
  return items;
