@@ -6,6 +6,7 @@
 // =====================================================================
 import {esc} from './dom.js';
 import {formatDate} from '../core/format.js';
+import {icon as svgIcon} from './icons.js';
 import {priorityInfo, statusInfo, classifyDue, daysLate} from '../domain/work-items.js';
 
 const daysWord = n => n === 1 ? 'يوم' : n === 2 ? 'يومان' : n <= 10 ? `${n} أيام` : `${n} يومًا`;
@@ -34,8 +35,10 @@ export function dueChip(item, today) {
   return {key: bucket, text: `${formatDate(item.dueDate)}${time}`, tone: ''};
 }
 
+/** اسم أيقونة SVG من مجموعة التطبيق (لا تعتمد على خط إيموجي) أو رمز نصي بسيط. */
+const glyph = name => svgIcon(name) || esc(name);
 export const chip = (text, {tone = '', icon = '', title = '', cls = ''} = {}) =>
-  `<span class="wc-chip${tone ? ` wc-chip--${tone}` : ''}${cls ? ` ${cls}` : ''}"${title ? ` title="${esc(title)}"` : ''}>${icon ? `<span class="wc-ic" aria-hidden="true">${esc(icon)}</span>` : ''}${esc(text)}</span>`;
+  `<span class="wc-chip${tone ? ` wc-chip--${tone}` : ''}${cls ? ` ${cls}` : ''}"${title ? ` title="${esc(title)}"` : ''}>${icon ? `<span class="wc-ic" aria-hidden="true">${glyph(icon)}</span>` : ''}${esc(text)}</span>`;
 
 export function priorityChip(item, config) {
   const p = priorityInfo(item.priority, config);
@@ -50,12 +53,12 @@ export function chipsHtml(item, {config, today}) {
   out.push(chip(item.typeLabel || item.sourceLabel, {icon: item.sourceIcon || '•', cls: 'wc-type', title: 'نوع العنصر'}));
   out.push(priorityChip(item, config), statusChip(item, config));
   out.push(chip(due.text, {tone: due.tone, title: item.dueDate ? `الموعد: ${formatDate(item.dueDate)}` : 'لا موعد'}));
-  if (item.postponeCount) out.push(chip(`أُجّل ${item.postponeCount}×`, {tone: 'warn', icon: '⏭', title: item.originalDueDate ? `الموعد الأصلي: ${formatDate(item.originalDueDate)}` : 'تأجيلات'}));
-  if (item.isPinned) out.push(chip('مثبّت', {icon: '📌'}));
-  if (item.archivedAt) out.push(chip('مؤرشف', {tone: 'muted', icon: '🗄'}));
-  if (!item.sourceAvailable) out.push(chip('المصدر غير متاح حاليًا', {tone: 'danger', icon: '⛓'}));
-  if (item.isVirtual) out.push(chip('متكرر', {icon: '🔁'}));
-  if (item.overlay?.commentCount || item.raw?.commentCount) out.push(chip(String(item.overlay?.commentCount || item.raw?.commentCount), {icon: '💬', title: 'تعليقات'}));
+  if (item.postponeCount) out.push(chip(`أُجّل ${item.postponeCount}×`, {tone: 'warn', icon: '↷', title: item.originalDueDate ? `الموعد الأصلي: ${formatDate(item.originalDueDate)}` : 'تأجيلات'}));
+  if (item.isPinned) out.push(chip('مثبّت', {icon: 'pin'}));
+  if (item.archivedAt) out.push(chip('مؤرشف', {tone: 'muted', icon: 'inbox'}));
+  if (!item.sourceAvailable) out.push(chip('المصدر غير متاح حاليًا', {tone: 'danger', icon: '⚠'}));
+  if (item.isVirtual) out.push(chip('متكرر', {icon: '↻'}));
+  if (item.overlay?.commentCount || item.raw?.commentCount) out.push(chip(String(item.overlay?.commentCount || item.raw?.commentCount), {icon: 'note', title: 'تعليقات'}));
   for (const tag of (item.tags || []).slice(0, 3)) out.push(chip(`#${tag}`, {cls: 'wc-tag'}));
   return out.join('');
 }
@@ -81,7 +84,8 @@ export const ariaOf = (item, today) => `${item.typeLabel || item.sourceLabel}: $
 
 export function workCardHtml(item, {relations = null, config, today, drag = false, move = false, compact = false, quadrantMove = false, selected = false} = {}) {
   const canToggle = item.isDone ? Boolean(item.caps?.reopen) : Boolean(item.caps?.complete);
-  return `<article class="wc-card${item.isDone ? ' is-done' : ''}${item.isCancelled ? ' is-cancelled' : ''}${item.archivedAt ? ' is-archived' : ''}${compact ? ' is-compact' : ''}${!item.sourceAvailable ? ' is-orphan' : ''}${selected ? ' is-selected' : ''}" data-wc-id="${esc(item.id)}" data-priority="${esc(item.priority)}" data-status="${esc(item.status)}" data-source="${esc(item.sourceType)}"${drag ? ' draggable="true"' : ''} tabindex="0" aria-label="${esc(ariaOf(item, today))}">
+  const edge = priorityInfo(item.priority, config).color;
+  return `<article style="--wc-c:${esc(edge)}" class="wc-card${item.isDone ? ' is-done' : ''}${item.isCancelled ? ' is-cancelled' : ''}${item.archivedAt ? ' is-archived' : ''}${compact ? ' is-compact' : ''}${!item.sourceAvailable ? ' is-orphan' : ''}${selected ? ' is-selected' : ''}" data-wc-id="${esc(item.id)}" data-priority="${esc(item.priority)}" data-status="${esc(item.status)}" data-source="${esc(item.sourceType)}"${drag ? ' draggable="true"' : ''} tabindex="0" aria-label="${esc(ariaOf(item, today))}">
   <div class="wc-card-row">
    <input type="checkbox" class="wc-check" data-wc-act="toggle" ${item.isDone ? 'checked' : ''} ${canToggle ? '' : 'disabled'} aria-label="${item.isDone ? 'إعادة فتح' : 'إنجاز'}: ${esc(item.title)}">
    <div class="wc-card-body">

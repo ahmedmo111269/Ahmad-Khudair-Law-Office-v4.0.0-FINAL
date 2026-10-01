@@ -46,7 +46,7 @@ export function normalizeSpec(spec = {}, {today = Clock.today(), config = getWor
   const range = resolveRange(spec.range || 'all', {from: spec.from, to: spec.to});
   const kinds = asList(spec.kinds).filter(k => ['open', 'done', 'cancelled'].includes(k));
   return {
-    range: range.key, from: range.from || '', to: range.to || '', undated: Boolean(spec.undated),
+    range: range.key, from: range.from || '', to: range.to || '', undated: Boolean(spec.undated), onlyUndated: Boolean(spec.onlyUndated),
     kinds: kinds.length ? kinds : ['open'],
     statuses: asList(spec.statuses), priorities: asList(spec.priorities), sources: asList(spec.sources), types: asList(spec.types), tags: asList(spec.tags),
     pinned: Boolean(spec.pinned), archived: spec.archived === 'any' || spec.archived === 'only' ? spec.archived : 'none',
@@ -55,7 +55,7 @@ export function normalizeSpec(spec = {}, {today = Clock.today(), config = getWor
     includeVirtual: spec.includeVirtual !== false, today, config
   };
 }
-const isScoped = spec => Boolean(spec.fileId || spec.caseId || spec.clientId || spec.opponentId);
+const isScoped = spec => Boolean(spec.fileId || spec.caseId || spec.clientId || spec.opponentId || spec.relatedId);
 function lowerFor(source, spec) {
   let lower = spec.from || MIN_DATE;
   if (!spec.from && spec.kinds.length === 1 && spec.kinds[0] === 'open') {
@@ -238,6 +238,11 @@ export async function scopeFileIds(office, spec) {
   return [...ids].slice(0, SCOPE_FILES_LIMIT);
 }
 function scopedStreams(office, spec, ctx, sources) {
+  // المهام المرتبطة بسجل معيّن: فهرس relatedId مباشرة (لا مسح لنطاق «الكل»).
+  if (spec.relatedId && !spec.fileId && !spec.caseId && !spec.clientId && !spec.opponentId) {
+    return [new ArrayStream(async () => (await office.r.workItems.byIndexAll('relatedId', spec.relatedId)).filter(r => r.kind === WORK_KIND.native).map(r => buildNativeItem(r, {config: spec.config})),
+      ctx.fromKey, item => ctx.accept(item) && inScopeWindow(item, spec))];
+  }
   const streams = [];
   const load = async () => {
     const fileIds = await scopeFileIds(office, spec);
@@ -290,7 +295,9 @@ function refsOf(relations, item) {
   const stage = relations.model(item)?.stage;
   return {
     fileLabel: names('legalFile').join(' '), fileTitle: relations.items(item, 'legalFile').map(x => x.detail).join(' '),
-    caseNumber: relations.officialNumber(item) || stage?.caseNumber || '', court: [item.raw?.court, stage?.courtId].filter(Boolean).join(' '),
+    fileNumber: (relations.model(item)?.primary || []).map(b => b.file?.fileNumber).filter(Boolean).join(' '),
+    caseNumber: [relations.officialNumber(item), stage?.caseNumber, stage?.caseNumber && stage?.caseYear ? `${stage.caseNumber}/${stage.caseYear}` : ''].filter(Boolean).join(' '),
+    court: [item.raw?.court, stage?.courtId].filter(Boolean).join(' '),
     clients: names('client'), opponents: names('opponent')
   };
 }
@@ -324,8 +331,8 @@ export async function queryWorkItems(office, specInput = {}, {cursor = null, lim
   const wantNative = !spec.sources.length || spec.sources.includes('task');
   const accept = item => itemPassesFilters(item, spec);
   const ctx = {fromKey, lowerDate, accept, signal};
-  const wantsUndated = spec.undated || (!spec.from && !spec.to);
-  const untilNoDate = fromKey && keyDate(fromKey) === NO_DATE_KEY;
+  const wantsUndated = spec.undated || spec.onlyUndated || (!spec.from && !spec.to);
+  const untilNoDate = (fromKey && keyDate(fromKey) === NO_DATE_KEY) || spec.onlyUndated;
   let streams = [];
   if (isScoped(spec)) streams = scopedStreams(office, spec, ctx, sources);
   else {
@@ -413,7 +420,7 @@ async function driveQuery(office, spec, {cursor, limit, signal, predicate, relat
       filterSpec.statuses = []; filterSpec.kinds = spec.kinds; dateWindow = true;
       break;
     }
-    case 'pinned': base = {index: 'pinnedAt', direction: 'prev'}; break;
+    case 'pinned': base = {index: 'pinnedAt', direction: 'prev'}; filterSpec.kinds = spec.kinds; break;
     case 'archived': base = {index: 'archivedAt', direction: 'prev'}; filterSpec.archived = 'only'; break;
     case 'completed':
       base = {index: 'completedAt', direction: 'prev', ...(spec.from ? {lower: localDayStartIso(spec.from)} : {}), ...(spec.to ? {upper: localDayEndIso(spec.to)} : {})};

@@ -40,7 +40,7 @@ const serviceKind = status => {
  *  writer: 'operational' (saveOperational) | 'file' (تحديث حقل واحد داخل المعاملة) | null (طبقة تشغيلية فقط).
  */
 const hearings = {
-  type: 'hearings', store: 'hearings', label: SOURCE_LABELS.hearings, icon: '⚖️', defaultEnabled: true, writer: 'operational',
+  type: 'hearings', store: 'hearings', label: SOURCE_LABELS.hearings, icon: 'gavel', defaultEnabled: true, writer: 'operational',
   index: 'hearingDate', lookbackDays: 90, scopeIndexes: {fileId: 'fileId', caseId: 'caseId'},
   dateOf: r => r.hearingDate || '', timeOf: r => r.hearingTime || '',
   include: r => Boolean(r.hearingDate),
@@ -59,7 +59,7 @@ const hearings = {
 };
 
 const procedures = {
-  type: 'procedures', store: 'procedures', label: SOURCE_LABELS.procedures, icon: '🗂️', defaultEnabled: true, writer: 'operational',
+  type: 'procedures', store: 'procedures', label: SOURCE_LABELS.procedures, icon: 'clipboard', defaultEnabled: true, writer: 'operational',
   index: 'internalDueDate', undatedKey: '', lookbackDays: Infinity, scopeIndexes: {fileId: 'fileId', caseId: 'caseId'},
   dateOf: r => r.internalDueDate || '', timeOf: () => '',
   include: () => true,
@@ -79,7 +79,7 @@ const procedures = {
 };
 
 const appointments = {
-  type: 'appointments', store: 'appointments', label: SOURCE_LABELS.appointments, icon: '📅', defaultEnabled: true, writer: 'operational',
+  type: 'appointments', store: 'appointments', label: SOURCE_LABELS.appointments, icon: 'clock', defaultEnabled: true, writer: 'operational',
   index: 'date', lookbackDays: 60, scopeIndexes: {fileId: 'fileId', clientId: 'clientId'},
   dateOf: r => r.date || '', timeOf: r => r.time || '',
   include: r => Boolean(r.date),
@@ -95,7 +95,7 @@ const appointments = {
 };
 
 const communications = {
-  type: 'communications', store: 'communications', label: SOURCE_LABELS.communications, icon: '📞', defaultEnabled: true, writer: 'operational',
+  type: 'communications', store: 'communications', label: SOURCE_LABELS.communications, icon: 'phone', defaultEnabled: true, writer: 'operational',
   index: 'followUpDate', lookbackDays: 180, scopeIndexes: {fileId: 'fileId', clientId: 'clientId'},
   dateOf: r => r.followUpDate || '', timeOf: () => '',
   // وجود «تاريخ المتابعة» يعني متابعة مطلوبة ما لم تُغلق صراحةً (followUpRequired=false).
@@ -112,7 +112,7 @@ const communications = {
 };
 
 const files = {
-  type: 'files', store: 'files', label: SOURCE_LABELS.files, icon: '📁', defaultEnabled: true, writer: 'file', overlayTerminal: true,
+  type: 'files', store: 'files', label: SOURCE_LABELS.files, icon: 'folder', defaultEnabled: true, writer: 'file', overlayTerminal: true,
   index: 'nextStepDate', lookbackDays: 180, scopeIndexes: {fileId: 'id'},
   dateOf: r => r.nextStepDate || '', timeOf: () => '',
   include: r => Boolean(r.nextStepDate) && !isClosedFile(r),
@@ -128,7 +128,7 @@ const files = {
 };
 
 const serviceRecords = {
-  type: 'serviceRecords', store: 'serviceRecords', label: SOURCE_LABELS.serviceRecords, icon: '📨', defaultEnabled: false, writer: null,
+  type: 'serviceRecords', store: 'serviceRecords', label: SOURCE_LABELS.serviceRecords, icon: 'send', defaultEnabled: false, writer: null,
   index: 'serviceDate', lookbackDays: 90, scopeIndexes: {fileId: 'fileId', caseId: 'caseId'},
   dateOf: r => r.serviceDate || '', timeOf: () => '',
   include: r => Boolean(r.serviceDate) && r.recordState !== 'deleted',
@@ -215,7 +215,7 @@ export function buildNativeItem(row, {config = {}} = {}) {
   const status = row.status || 'notStarted';
   return common({
     id: row.id, kind: WORK_KIND.native, projected: false,
-    sourceType: TASK_SOURCE, sourceId: row.id, sourceAvailable: true, sourceLabel: SOURCE_LABELS.task, sourceIcon: '✅',
+    sourceType: TASK_SOURCE, sourceId: row.id, sourceAvailable: true, sourceLabel: SOURCE_LABELS.task, sourceIcon: 'check',
     title: row.title || 'مهمة بلا عنوان', subtitle: '', typeLabel: row.type || SOURCE_LABELS.task,
     description: row.description || '', notes: row.description || '',
     dueDate, dueTime: normalizeTime(row.dueTime), status,
@@ -239,7 +239,7 @@ export function buildOrphanItem(overlay, {config = {}} = {}) {
   const status = done ? 'done' : (overlay.status && isOpenStatus(overlay.status, config) ? overlay.status : 'notStarted');
   return common({
     id: overlay.id, kind: WORK_KIND.overlay, projected: true,
-    sourceType: overlay.sourceType, sourceId: overlay.sourceId, sourceAvailable: false, sourceLabel: typeLabel, sourceIcon: '⛓️‍💥',
+    sourceType: overlay.sourceType, sourceId: overlay.sourceId, sourceAvailable: false, sourceLabel: typeLabel, sourceIcon: '⚠',
     title: `${typeLabel} — المصدر غير متاح حاليًا`, subtitle: '', typeLabel, description: '', notes: '',
     dueDate: isIsoDate(overlay.dueDate) ? overlay.dueDate : '', dueTime: '', status,
     priority: validPriority(overlay.priority, DEFAULT_PRIORITY),

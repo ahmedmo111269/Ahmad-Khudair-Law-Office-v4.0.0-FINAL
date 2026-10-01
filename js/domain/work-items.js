@@ -26,8 +26,8 @@ export const NO_TIME_KEY = '99:99';
 export const DEFAULT_WORK_STATUSES = Object.freeze([
   Object.freeze({key: 'notStarted', label: 'لم يبدأ', kind: 'open', icon: '○', color: '#64748b'}),
   Object.freeze({key: 'inProgress', label: 'قيد التنفيذ', kind: 'open', icon: '◐', color: '#2563eb'}),
-  Object.freeze({key: 'waiting', label: 'بانتظار', kind: 'open', icon: '⏳', color: '#7c3aed'}),
-  Object.freeze({key: 'postponed', label: 'مؤجل', kind: 'open', icon: '⏭', color: '#b45309'}),
+  Object.freeze({key: 'waiting', label: 'بانتظار', kind: 'open', icon: '◔', color: '#7c3aed'}),
+  Object.freeze({key: 'postponed', label: 'مؤجل', kind: 'open', icon: '↷', color: '#b45309'}),
   Object.freeze({key: 'done', label: 'مكتمل', kind: 'done', icon: '✓', color: '#15803d'}),
   Object.freeze({key: 'cancelled', label: 'ملغى', kind: 'cancelled', icon: '✕', color: '#b91c1c'})
 ]);
@@ -38,10 +38,10 @@ export const STATUS_KINDS = Object.freeze({open: 'مفتوح', done: 'مكتمل
 // ---------- الأولويات ----------
 // اللون وحده لا يكفي: لكل مستوى أيضًا رمز نصي (mark) وأيقونة وتسمية.
 export const DEFAULT_WORK_PRIORITIES = Object.freeze([
-  Object.freeze({key: 'urgent', label: 'عاجل جدًا', icon: '🔴', mark: '!!!', rank: 4, color: '#dc2626'}),
-  Object.freeze({key: 'high', label: 'مرتفعة', icon: '🟠', mark: '!!', rank: 3, color: '#ea580c'}),
-  Object.freeze({key: 'medium', label: 'متوسطة', icon: '🟡', mark: '!', rank: 2, color: '#a16207'}),
-  Object.freeze({key: 'low', label: 'منخفضة', icon: '🟢', mark: '–', rank: 1, color: '#15803d'})
+  Object.freeze({key: 'urgent', label: 'عاجل جدًا', icon: '▲', mark: '!!!', rank: 4, color: '#dc2626'}),
+  Object.freeze({key: 'high', label: 'مرتفعة', icon: '◆', mark: '!!', rank: 3, color: '#ea580c'}),
+  Object.freeze({key: 'medium', label: 'متوسطة', icon: '●', mark: '!', rank: 2, color: '#a16207'}),
+  Object.freeze({key: 'low', label: 'منخفضة', icon: '▼', mark: '–', rank: 1, color: '#15803d'})
 ]);
 export const PRIORITY_KEYS = Object.freeze(DEFAULT_WORK_PRIORITIES.map(p => p.key));
 export const DEFAULT_PRIORITY = 'medium';
@@ -60,7 +60,7 @@ export const WORK_RANGES = Object.freeze([
   ['custom', 'مخصص'], ['all', 'الكل']
 ]);
 export const WORK_VIEWS = Object.freeze([
-  ['cards', 'بطاقات'], ['list', 'قائمة'], ['kanban', 'كانبان'], ['matrix', 'مصفوفة الأولويات'],
+  ['cards', 'بطاقات'], ['list', 'قائمة'], ['kanban', 'كانبان'], ['matrix', 'مصفوفة أيزنهاور'], ['priorities', 'الأولويات'],
   ['calendar', 'تقويم'], ['overdue', 'المتأخر'], ['upcoming', 'القادم'], ['completed', 'المنجز'],
   ['attention', 'يحتاج انتباهي'], ['productivity', 'الإنتاجية']
 ]);
@@ -88,6 +88,15 @@ export const AGING_BUCKETS = Object.freeze([
 export const DAY_PARTS = Object.freeze([
   ['morning', 'صباحًا'], ['hearings', 'الجلسات'], ['admin', 'الأعمال الإدارية'], ['followups', 'المتابعات'], ['undated', 'بلا موعد']
 ]);
+/** قسم العنصر في «مساحة عمل اليوم»: بلا موعد · جلسات · صباحًا (قبل 12:00) · متابعات (اتصال/خطوة ملف/مواعيد) · أعمال إدارية وغيرها. */
+export function dayPartOf(item) {
+  if (!item?.dueDate) return 'undated';
+  if (item.sourceType === 'hearings') return 'hearings';
+  if (item.dueTime && item.dueTime < '12:00') return 'morning';
+  if (['communications', 'files', 'appointments'].includes(item.sourceType)) return 'followups';
+  return 'admin';
+}
+export const DAY_LAYOUTS = Object.freeze([['parts', 'أقسام اليوم'], ['priority', 'حسب الأولوية'], ['timeline', 'خط زمني']]);
 
 // ---------- التواريخ والأوقات ----------
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -334,7 +343,7 @@ export function workSearchFields(item = {}, refs = {}) {
   return [
     item.title, item.description, item.notes, item.typeLabel, item.sourceLabel, item.statusLabel,
     (item.tags || []).join(' '), item.dueDate,
-    refs.fileLabel, refs.fileTitle, refs.caseNumber, refs.court,
+    refs.fileLabel, refs.fileTitle, refs.fileNumber, refs.caseNumber, refs.court,
     ...(refs.clients || []), ...(refs.opponents || []), ...(refs.comments || [])
   ].filter(Boolean).join(' ');
 }

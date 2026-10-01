@@ -201,9 +201,12 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
     row=await saveEntity(office,store,{...data,allowDuplicate:true},old?.id||null,old?.version??null);
    }
    closeModal();
-   if(store==='hearings'&&row.__followUpCreated)toast(`تم حفظ الجلسة وإنشاء جلسة تالية بتاريخ ${data.adjournedTo}`);
-   else if(store==='hearings'&&row.__followUpUpdated)toast(`تم حفظ الجلسة وتحديث تاريخ جلستها التالية إلى ${data.adjournedTo}`);
-   else toast(isNew?'تمت الإضافة':'تم الحفظ');
+   // بعد تسجيل نتيجة/تأجيل الجلسة نعرض «إنشاء مهمة متابعة» كخيار يختاره المستخدم فقط (لا إنشاء تلقائي لأي مهمة).
+   const offerFollowUp=store==='hearings'&&Boolean(row.result||row.adjournedTo||/تمت|حضر|مؤجل/.test(String(row.status||'')));
+   const say=msg=>offerFollowUp?toast(msg,'ok',{duration:9000,actionLabel:'إنشاء مهمة متابعة',action:()=>import('./work-actions.js').then(m=>m.openLinkedTaskForm(app,'hearings',row.id,{title:'متابعة الجلسة',onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh?.()}}))}):toast(msg);
+   if(store==='hearings'&&row.__followUpCreated)say(`تم حفظ الجلسة وإنشاء جلسة تالية بتاريخ ${data.adjournedTo}`);
+   else if(store==='hearings'&&row.__followUpUpdated)say(`تم حفظ الجلسة وتحديث تاريخ جلستها التالية إلى ${data.adjournedTo}`);
+   else say(isNew?'تمت الإضافة':'تم الحفظ');
    if(onSaved)await onSaved(row,isNew);
    else if(isNew&&store==='files')await app.go('file:'+row.id);
    else await app.refresh();

@@ -8,7 +8,7 @@
 import {prefs} from '../core/preferences.js';
 import {uid} from '../core/id.js';
 import {Clock} from '../core/clock.js';
-import {validColor, PRIORITY_KEYS, WORK_RANGES, WORK_VIEWS, CORE_STATUS_KEYS, STATUS_KINDS} from '../domain/work-items.js';
+import {validColor, PRIORITY_KEYS, WORK_RANGES, WORK_VIEWS, CORE_STATUS_KEYS, STATUS_KINDS, DAY_LAYOUTS} from '../domain/work-items.js';
 import {allWorkSources} from '../domain/work-sources.js';
 
 export const WORK_CONFIG_KEY = 'ui:workcenter-config';
@@ -19,7 +19,7 @@ export const MAX_SAVED_VIEWS = 30;
 export const DEFAULT_WORK_CONFIG = Object.freeze({
   version: 1, statuses: {}, customStatuses: [], priorities: {}, sources: {}, lookback: {},
   staleFileDays: 30, summaryWindowDays: 45, upcomingDays: 14, urgentWithinDays: 2,
-  attention: {rules: {}}, notifications: {enabled: true, maxVisible: 3}
+  attention: {rules: {}}, notifications: {enabled: true, maxVisible: 2}
 });
 
 const num = (value, min, max, fallback) => {
@@ -61,7 +61,7 @@ export function sanitizeWorkConfig(raw) {
   if (isObject(src.attention?.rules)) for (const [key, value] of Object.entries(src.attention.rules)) if (/^[a-zA-Z]{2,30}$/.test(key)) out.attention.rules[key] = Boolean(value);
   if (isObject(src.notifications)) {
     out.notifications.enabled = src.notifications.enabled !== false;
-    out.notifications.maxVisible = num(src.notifications.maxVisible, 1, 6, 3);
+    out.notifications.maxVisible = num(src.notifications.maxVisible, 1, 6, 2);
   }
   return out;
 }
@@ -80,7 +80,7 @@ export async function saveWorkConfig(patch = {}) {
 export const resetWorkConfig = () => prefs.set(WORK_CONFIG_KEY, null);
 
 // ---------- حالة الصفحة (تُحفظ وتُستعاد) ----------
-export const DEFAULT_WORK_STATE = Object.freeze({range: 'today', from: '', to: '', view: 'cards', q: '', filters: {}, pageSize: 25});
+export const DEFAULT_WORK_STATE = Object.freeze({range: 'today', from: '', to: '', view: 'cards', q: '', filters: {}, pageSize: 25, dayLayout: 'parts'});
 const RANGE_KEYS = WORK_RANGES.map(([key]) => key);
 const VIEW_KEYS = WORK_VIEWS.map(([key]) => key);
 const strArr = (value, max = 30) => Array.isArray(value) ? [...new Set(value.map(v => String(v).slice(0, 80)).filter(Boolean))].slice(0, max) : [];
@@ -94,6 +94,7 @@ export function sanitizeWorkFilters(raw) {
   if (out.priorities) out.priorities = out.priorities.filter(p => PRIORITY_KEYS.includes(p));
   if (out.priorities && !out.priorities.length) delete out.priorities;
   if (f.pinned) out.pinned = true;
+  if (f.undatedOnly) out.undatedOnly = true;
   if (['any', 'only'].includes(f.archived)) out.archived = f.archived;
   for (const key of ['fileId', 'caseId', 'clientId', 'relatedId', 'quadrant']) if (f[key]) out[key] = String(f[key]).slice(0, 60);
   return out;
@@ -105,7 +106,8 @@ export function sanitizeWorkState(raw) {
     from: /^\d{4}-\d{2}-\d{2}$/.test(s.from || '') ? s.from : '', to: /^\d{4}-\d{2}-\d{2}$/.test(s.to || '') ? s.to : '',
     view: VIEW_KEYS.includes(s.view) ? s.view : DEFAULT_WORK_STATE.view,
     q: String(s.q ?? '').slice(0, 120), filters: sanitizeWorkFilters(s.filters),
-    pageSize: [25, 50, 100].includes(Number(s.pageSize)) ? Number(s.pageSize) : DEFAULT_WORK_STATE.pageSize
+    pageSize: [25, 50, 100].includes(Number(s.pageSize)) ? Number(s.pageSize) : DEFAULT_WORK_STATE.pageSize,
+    dayLayout: DAY_LAYOUTS.some(([key]) => key === s.dayLayout) ? s.dayLayout : DEFAULT_WORK_STATE.dayLayout
   };
 }
 export const getWorkState = () => sanitizeWorkState(prefs.get(WORK_STATE_KEY, null));

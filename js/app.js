@@ -20,7 +20,7 @@ import {openQuickAdd} from './modules/quick-add.js';
 import {renderDatabases,bindDatabases,renderBackup,bindBackup,renderRecovery,bindRecovery} from './modules/databases.js';
 import {reportsPage,bindReports} from './modules/reports.js';
 import {renderSearch,bindSearch} from './modules/search.js';
-import {actionCenterPage,bindActionCenter} from './modules/action-center.js';
+import {workCenterPage,bindWorkCenter,scheduleWorkBadge} from './modules/work-center.js';
 import {analyticsPage,bindAnalytics} from './modules/analytics.js';
 import {integrityPage,bindIntegrity} from './modules/integrity.js';
 import {repairPage,bindRepair} from './modules/repair.js';
@@ -46,7 +46,7 @@ const PAGES={
  dashboard:{title:'الرئيسية',render:app=>homePage(app),bind:app=>bindHome(app)},
  search:{title:'البحث',render:app=>renderSearch(app),bind:app=>bindSearch(app)},
  reports:{title:'التقارير',render:(app,q)=>reportsPage(app,q),bind:app=>bindReports(app)},
- actionCenter:{title:'مركز العمل',render:app=>actionCenterPage(app),bind:app=>bindActionCenter(app)},
+ actionCenter:{title:'مركز العمل',render:(app,q)=>workCenterPage(app,q),bind:(app,q)=>bindWorkCenter(app,q)},
  analytics:{title:'الإحصاءات',render:(app,q)=>analyticsPage(app,q),bind:app=>bindAnalytics(app)},
  integrity:{title:'سلامة البيانات والتدقيق',render:app=>integrityPage(app),bind:app=>bindIntegrity(app)},
  repair:{title:'مركز الإصلاح والاسترداد',render:app=>repairPage(app),bind:app=>bindRepair(app)},
@@ -63,6 +63,8 @@ function recordRoute(route){
  m=/^cfile:(.+)$/.exec(route);
  if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients',layoutId:'client-file'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
+ // المهمة المستقلة لا صفحة سجل عامة لها: تُفتح في مجلّد مركز العمل (رابط ثابت rec:workItems:ID).
+ if(m&&m[1]==='workItems')return {title:'مركز العمل',render:app=>workCenterPage(app,new URLSearchParams({item:m[2]})),bind:app=>bindWorkCenter(app,new URLSearchParams({item:m[2]})),store:'actionCenter',layoutId:'actionCenter'};
  if(m&&m[1]!=='witnesses'&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1],layoutId:'rec:'+m[1]};
  return null;
 }
@@ -114,7 +116,7 @@ class App{
   });
  }
  showShortcutsHelp(){
-  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
   modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
  async go(route,opts={}){
@@ -154,6 +156,7 @@ class App{
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
    closeMobile(); // على الهاتف: تُغلق لوحة التنقل تلقائيًا بعد اختيار الصفحة
    if(baseRoute!=='dashboard')prefs.set('ui:last-route',{route,title:page.title,at:Date.now()});
+   if(baseRoute!=='actionCenter'&&!/^rec:workItems:/.test(baseRoute))scheduleWorkBadge(this);
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}
  }
@@ -170,7 +173,7 @@ class App{
   // صيانة غير مدمرة بعد فتح القاعدة (زرع القوائم، ترحيل روابط الموكلين، فهرس البحث)
   const office=this.office;this.maintenance=runMaintenance(office).catch(e=>console.error('maintenance',e));
  }
- resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__report','__agendaDay'])delete this[k]}
+ resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__report','__agendaDay','__wc'])delete this[k]}
  back(){const r=this.history.pop()||'dashboard';return this.go(r,{replace:true})}
  refresh(){return this.go(this.route,{replace:true})}
  fail(e){const err=normalizeError(e);console.error(err.code,err,e);const retry=this.route||'dashboard';$('#main-content').innerHTML=`<div class="error-box" role="alert"><h2>تعذر تنفيذ العملية</h2><p>${esc(userError(err))}</p><div class="error-actions"><button class="primary" data-retry>إعادة المحاولة</button><button class="ghost" data-error-home>الرئيسية</button><button class="ghost" data-error-diagnostics>سلامة البيانات</button></div><small class="muted">رمز التشخيص: ${esc(err.code)}</small></div>`;document.querySelector('[data-retry]')?.addEventListener('click',()=>this.go(retry,{replace:true}));document.querySelector('[data-error-home]')?.addEventListener('click',()=>this.go('dashboard'));document.querySelector('[data-error-diagnostics]')?.addEventListener('click',()=>this.go('integrity'))}

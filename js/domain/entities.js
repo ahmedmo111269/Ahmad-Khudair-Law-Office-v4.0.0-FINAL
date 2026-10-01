@@ -353,7 +353,7 @@ export const ENTITIES={
   {k:'targetFileId',l:'الملف المرتبط',t:'ref',ref:'files',req:true,grid:true,g:'العلاقة'},
   {k:'notes',l:'ملاحظات',t:'textarea',grid:true,g:'العلاقة'}]},
  // v14 — مركز العمل: المهام المستقلة فقط (الجلسات/الأعمال/المواعيد تبقى كيانات أصلية). التسميات الظاهرة تُبدَّل بإعدادات المستخدم عبر workItemFieldOverrides.
- workItems:{label:'مهمة',plural:'المهام وعناصر العمل',title:r=>r.title||'مهمة',route:'actionCenter',dateField:'dueDate',dateIndex:'dueDate',fields:[
+ workItems:{label:'مهمة',plural:'المهام وعناصر العمل',title:r=>r.title||'مهمة',route:'rec:workItems',dateField:'dueDate',dateIndex:'dueDate',fields:[
   {k:'title',l:'عنوان المهمة',t:'text',req:true,grid:true,g:'المهمة'},
   {k:'description',l:'الوصف / الملاحظات',t:'textarea',grid:true,g:'المهمة'},
   {k:'dueDate',l:'الموعد',t:'date',grid:true,g:'الموعد'},
