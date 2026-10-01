@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {SCHEMA_VERSION} from '../../js/core/constants.js';
 
 const repository=fileURLToPath(new URL('../../',import.meta.url));
 const base=(process.env.GRID_BASE_URL||'http://127.0.0.1:8000').replace(/\/$/,'');
@@ -179,8 +180,8 @@ async function verifyCursorButtons(){
   await verify('Application buttons: indexed date-range ASC/DESC cursor pagination visits all 230 rows exactly once per direction',()=>{
    assert.deepEqual(report.cursorButtons.directions,{asc:{pages:10,rows:230},desc:{pages:10,rows:230}});
   });
-  await verify('Cursor-button scenarios preserve all raw fixture records, tombstones, IDs and Schema 13',async()=>{
-   assert.deepEqual(await snapshotOffice(page),before);assert.equal(await page.evaluate(()=>window.__gridFixture.db.version),13);
+  await verify(`Cursor-button scenarios preserve all raw fixture records, tombstones, IDs and Schema ${SCHEMA_VERSION}`,async()=>{
+   assert.deepEqual(await snapshotOffice(page),before);assert.equal(await page.evaluate(()=>window.__gridFixture.db.version),SCHEMA_VERSION);
   });
   await page.evaluate(()=>window.__gridFixture.dispose());
  }finally{await context.close()}
@@ -228,8 +229,8 @@ async function verifyOffline(){
    for(const module of modules)assert.equal(cacheState.contents[module],await fs.readFile(path.join(repository,module),'utf8'),`Stale cached module: ${module}`);
   },'VERIFIED — Service Worker/cache output');
   const profile=await page.evaluate(async()=>{
-   const {createGridFixture}=await import('./js/tests/grid-context-tests.js'),fixture=await createGridFixture(),app=window.__LAW_OFFICE_APP__;
-   const profile=app.registry.adoptExisting({databaseName:fixture.name,version:13,displayName:'اختبار الجداول دون اتصال'});
+   const {createGridFixture}=await import('./js/tests/grid-context-tests.js'),{SCHEMA_VERSION}=await import('./js/core/constants.js'),fixture=await createGridFixture(),app=window.__LAW_OFFICE_APP__;
+   const profile=app.registry.adoptExisting({databaseName:fixture.name,version:SCHEMA_VERSION,displayName:'اختبار الجداول دون اتصال'});
    for(const other of app.registry.data.profiles)if(other.id!==profile.id)app.registry.archive(other.id);
    await app.switchDb(profile.id);const maintenance=await app.maintenance;await app.maybeSeedDemo();fixture.ctx.close();
    return {id:profile.id,databaseName:profile.databaseName,maintenance};
@@ -245,10 +246,10 @@ async function verifyOffline(){
   assert.ok(oldMaintenance&&newMaintenance);
   if(oldMaintenance.lastRunAt!==newMaintenance.lastRunAt)bootChanges.push({store:'meta',id:'maintenance',field:'lastRunAt',before:oldMaintenance.lastRunAt,after:newMaintenance.lastRunAt});
   delete oldMaintenance.lastRunAt;delete newMaintenance.lastRunAt;
-  await verify('Offline reload: app boots from the controlled cache with the same office/Schema 13 and only the existing maintenance timestamp update',async()=>{
+  await verify(`Offline reload: app boots from the controlled cache with the same office/Schema ${SCHEMA_VERSION} and only the existing maintenance timestamp update`,async()=>{
    assert.equal(navigation.fromServiceWorker(),true);assert.equal(await page.evaluate(()=>navigator.onLine),false);
    assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.profile.id),profile.id);
-   assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.db.name),profile.databaseName);assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.db.version),13);
+   assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.db.name),profile.databaseName);assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.db.version),SCHEMA_VERSION);
    assert.deepEqual(normalized,prior);assert.ok((await page.locator('#network-badge').textContent()).includes('عدم الاتصال'));
    for(const module of modules)assert.ok(responses.some(response=>response.path.endsWith('/'+module)&&response.serviceWorker&&response.status===200),`Module not served offline by SW: ${module}`);
   },'VERIFIED — Offline browser/cache output');
@@ -262,7 +263,7 @@ async function verifyOffline(){
   await verify('Offline table navigation and popup printing preserve every raw office store after boot',async()=>{
    assert.deepEqual(await snapshotOffice(page),after);assert.deepEqual(report.errors,[]);
   },'VERIFIED — Offline data integrity output');
-  report.offline={cache:cacheName,precachedAssets:assets.length,runtimeModules:runtimeFiles.length,verifiedModules:modules,oldCachesRemoved:oldCaches,bootChanges,responses,profileId:profile.id,schema:13};
+  report.offline={cache:cacheName,precachedAssets:assets.length,runtimeModules:runtimeFiles.length,verifiedModules:modules,oldCachesRemoved:oldCaches,bootChanges,responses,profileId:profile.id,schema:SCHEMA_VERSION};
  }catch(error){
   report.offlineFailure={message:error.message,responses,consoleErrors,failedRequests,state:await page.evaluate(()=>({
    ready:document.readyState,app:Boolean(window.__LAW_OFFICE_APP__),booting:window.__LAW_OFFICE_APP__?.booting,
@@ -422,9 +423,9 @@ async function verifyFullSuite(){
   for(let index=0;index<720;index++)assert.ok(pages.some(text=>new RegExp(`ROW-${index}(?!\\d)`).test(text)),`Missing ROW-${index}`);
  });
  await pdfTask.destroy();await printed.close();
- await verify('All browser navigation/display/query/print actions leave every office store and Schema 13 unchanged',async()=>{
+ await verify(`All browser navigation/display/query/print actions leave every office store and Schema ${SCHEMA_VERSION} unchanged`,async()=>{
   assert.equal(await page.evaluate(()=>window.__gridFixture.snapshot()),await page.evaluate(()=>window.__gridBefore));
-  assert.equal(await page.evaluate(()=>window.__gridFixture.db.version),13);assert.deepEqual(report.errors,[]);
+  assert.equal(await page.evaluate(()=>window.__gridFixture.db.version),SCHEMA_VERSION);assert.deepEqual(report.errors,[]);
  });
  await page.evaluate(()=>window.__gridFixture.dispose());await context.close();
  await verifyCursorButtons();await verifyOffline();
