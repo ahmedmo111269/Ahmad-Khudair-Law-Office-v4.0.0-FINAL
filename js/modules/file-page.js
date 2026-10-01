@@ -6,12 +6,14 @@ import {toast} from '../ui/toast.js';
 import {modal,closeModal,confirmBox} from '../ui/modal.js';
 import {openEntityForm} from '../ui/form.js';
 import {mountGrid} from '../ui/datagrid.js';
+import {legalFileColumns} from '../ui/grid-columns.js';
+import {createGridRelations} from '../services/grid-relations.js';
 import {ENTITIES,FILE_TYPE_GROUPS,fileTypeGroup,label,fmtDate,isClosedFile,displayValue} from '../domain/entities.js';
 import {resolveRefs,fileStages,fileChildren,refLabel} from '../services/entity-query.js';
 import {fileParties,fileRelations,archiveFile,reopenFile,closeFile,removeParty,moveParty} from '../services/legal-files.js';
 import {deleteEntity} from '../services/entity-save.js';
 import {kvHtml,bindRefLinks,notFound} from './record-page.js';
-import {sectionGrid,columnsFor,openRow} from './list-page.js';
+import {sectionGrid,openRow} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {localDate} from '../core/clock.js';
 import {dateSignal,fileSignal} from '../ui/signals.js';
@@ -216,12 +218,13 @@ async function renderTabContent(app){
  }
  if(tab==='relations'){
   const rels=await fileRelations(office,id);
-  const others=await office.r.files.getMany(rels.map(r=>r.otherFileId));const om=new Map(others.map(x=>[x.id,x]));
-  const rows=rels.map(r=>({...r,otherLabel:refLabel('files',om.get(r.otherFileId)),dirLabel:r.direction==='out'?'هذا الملف ←':'← من ملف آخر'}));
+  const rows=rels.map(r=>({...r,dirLabel:r.direction==='out'?'هذا الملف ←':'← من ملف آخر'}));
+  const relations=createGridRelations(office,'fileRelations');await relations.hydrate(rows);
   el.innerHTML=`<div class="sec-actions"><button class="primary" data-add>+ ربط بملف آخر</button><span class="muted small">مثال: ملف استئناف مرتبط بملف الدعوى الأصلية، أو ملف تنفيذ لحكم.</span></div><div data-grid></div>`;
   el.querySelector('[data-add]').onclick=()=>openEntityForm(app,'fileRelations',{preset:{sourceFileId:id},onSaved:()=>reload(app)});
-  mountGrid(el.querySelector('[data-grid]'),{title:'علاقات الملف',storageKey:'file:relations',collapseKey:`file:${id}:relations-grid`,rows,columns:[
-   {key:'dirLabel',label:'الاتجاه'},{key:'relationType',label:'نوع العلاقة'},{key:'otherLabel',label:'الملف المرتبط'},{key:'notes',label:'ملاحظات'},{key:'createdAt',label:'تاريخ الربط',type:'date',text:r=>fmtDate(r.createdAt)}],
+  mountGrid(el.querySelector('[data-grid]'),{title:'علاقات الملف',storageKey:'file:relations',collapseKey:`file:${id}:relations-grid`,rows,...relations.gridOptions({fileId:id}),columns:[
+   ...legalFileColumns(relations,{side:'other',fileKey:'otherLabel',fileTitle:'رقم الملف المرتبط / نوعه'}),
+   {key:'dirLabel',label:'الاتجاه'},{key:'relationType',label:'نوع العلاقة'},{key:'notes',label:'ملاحظات'},{key:'createdAt',label:'تاريخ الربط',type:'date',text:r=>fmtDate(r.createdAt)}],
    onRowClick:r=>relationActions(app,r)});
   return;
  }
@@ -263,8 +266,7 @@ async function renderTabContent(app){
   const [a,b]=await Promise.all([office.r.activityLog.byIndex('fileId',id,2000),office.r.activityLog.byIndex('entityId',id,500)]);
   const rows=[...new Map([...a,...b].map(x=>[x.id,x])).values()].sort((x,y)=>String(y.timestamp).localeCompare(String(x.timestamp)));
   el.innerHTML='<div data-grid></div>';
-  const refs=new Map();
-  mountGrid(el.querySelector('[data-grid]'),{columns:columnsFor('activityLog',refs).filter(c=>c.key!=='fileId'),rows,title:`سجل نشاط الملف ${formatFileNumber(f.fileNumber)}`,storageKey:'file:activity',collapseKey:`file:${id}:activity-grid`});
+  await sectionGrid(app,el.querySelector('[data-grid]'),'activityLog',rows,{title:`سجل نشاط الملف ${formatFileNumber(f.fileNumber)}`,storageKey:'file:activity',collapseKey:`file:${id}:activity-grid`});
  }
 }
 

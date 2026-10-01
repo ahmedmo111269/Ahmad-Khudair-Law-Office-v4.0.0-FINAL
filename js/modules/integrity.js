@@ -2,6 +2,9 @@ import {formatDate,formatDateTime} from '../core/format.js';
 import {deepHealth,auditPage} from '../services/integrity.js';
 import {esc} from '../ui/dom.js';
 import {toast} from '../ui/toast.js';
+import {mountGrid} from '../ui/datagrid.js';
+import {columnsFor} from './list-page.js';
+import {createGridRelations} from '../services/grid-relations.js';
 
 const label={clients:'الموكلون',files:'الملفات',cases:'القضايا',hearings:'الجلسات',procedures:'الإجراءات',appointments:'المواعيد',communications:'الاتصالات',judgments:'الأحكام',execution:'التنفيذ',fees:'الأتعاب'};
 function issueRows(items){return items.length?items.slice(0,100).map(x=>`<tr><td>${esc(x.type||'')}</td><td>${esc(x.store||'')}</td><td><code>${esc(x.id||'')}</code></td><td>${esc(x.field||x.message||x.fields?.join('، ')||'')}</td></tr>`).join(''):`<tr><td colspan="4">لا توجد مشكلات.</td></tr>`}
@@ -15,5 +18,19 @@ export async function integrityPage(app){
 }
 export function bindIntegrity(app){
  document.querySelector('#run-doctor')?.addEventListener('click',()=>app.refresh());
- document.querySelector('#load-audit')?.addEventListener('click',async()=>{try{const rows=await auditPage(app.ctx,{entityType:document.querySelector('#audit-type').value});document.querySelector('#audit-results').innerHTML=rows.length?`<table><thead><tr><th>الوقت</th><th>النوع</th><th>المعرف</th><th>العملية</th><th>الملخص</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.timestamp)}</td><td>${esc(r.entityType)}</td><td><code>${esc(r.entityId)}</code></td><td>${esc(r.action)}</td><td>${esc(r.summary||'')}</td></tr>`).join('')}</tbody></table>`:'<p class="muted">لا توجد سجلات مطابقة.</p>'}catch(e){toast(e.message,'error')}});
+ const target=document.querySelector('#audit-results'),type=document.querySelector('#audit-type');
+ let grid=null,seq=0;
+ document.querySelector('#load-audit')?.addEventListener('click',async()=>{
+  const generation=++seq,office=app.office,entityType=type.value;
+  try{
+   const rows=await auditPage(office.ctx,{entityType}),relations=createGridRelations(office,'activityLog');
+   await relations.hydrate(rows);
+   if(generation!==seq||!target.isConnected||office!==app.office)return;
+   grid?.destroy();
+   grid=mountGrid(target,{title:'سجل التدقيق',storageKey:'integrity:audit',rows,
+    columns:columnsFor('activityLog',new Map(),{relations,extra:[{key:'entityId',label:'المعرف',width:220}]}),
+    ...relations.gridOptions({filters:['أحدث 200 عملية مطابقة',entityType&&`نوع السجل: ${label[entityType]||entityType}`].filter(Boolean)}),
+    emptyText:'لا توجد سجلات مطابقة.'});
+  }catch(e){if(generation===seq&&target.isConnected)toast(e.message,'error')}
+ });
 }

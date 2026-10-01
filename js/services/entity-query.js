@@ -3,7 +3,7 @@
 import {ENTITIES,phonesOf,fmtDate} from '../domain/entities.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {localDate,addDays,isActiveProcedure} from '../core/clock.js';
-import {formatFileNumber} from '../core/file-number.js';
+import {formatFileNumber,formatOfficialNumber} from '../core/file-number.js';
 import {createIndexedDbDataProvider} from '../db/grid-data-provider.js';
 
 export const DEFAULT_LIMIT=1000;
@@ -68,7 +68,21 @@ async function relatedIds(office,q,stores,signal=null){
  * تحميل صفوف كيان لصفحة أو تقرير.
  * from/to: نطاق تاريخ على حقل التاريخ الأساسي للكيان (مفهرس). q: بحث فوري شامل.
  */
-export async function loadRows(office,store,{q='',from='',to='',dateField=null,limit=DEFAULT_LIMIT,filter=null}={}){
+export async function loadRows(office,store,{q='',from='',to='',dateField=null,limit=DEFAULT_LIMIT,filter=null,columns=[],prepareRows=null,prepareQuery=null}={}){
+ // Bounded reports use the very same prepared cursor path as entity lists, so
+ // relational columns participate in search before the report limit is applied.
+ if(typeof prepareRows==='function'){
+  const max=Math.min(Math.max(1,Number(limit)||DEFAULT_LIMIT),MAX_LIMIT),rows=[];
+  const provider=createEntityGridProvider(office,store,{getBaseQuery:()=>({q,from,to,dateField,filter}),prepareRows,prepareQuery});
+  let cursor=null,more=false;
+  do{
+   const result=await provider.getRows({pagination:{size:100,cursor}},{columns});
+   const room=max-rows.length;rows.push(...result.rows.slice(0,room));
+   more=result.hasMore||result.rows.length>room;cursor=result.nextCursor;
+   if(rows.length>=max||!cursor)break;
+  }while(cursor);
+  return {rows,more};
+ }
  const ent=ENTITIES[store]||{};const field=dateField||ent.dateField;
  const nq=normQ(q);
  let rel=null;
@@ -91,13 +105,13 @@ export async function loadRows(office,store,{q='',from='',to='',dateField=null,l
 // Adapt the current feature-level query (search/date/quick predicate) to the shared
 // provider boundary. Domain-specific meaning stays here; the DataGrid only sends a
 // portable Grid Query and never knows what a legal file, hearing, or service record is.
-async function entityGridScope(office,store,options={}){
+async function entityGridScope(office,store,options={}, {columns=[],signal,prepared=false}={}){
  const ent=ENTITIES[store]||{};
  const field=options.dateField||ent.dateField||null;
  const from=String(options.from||'').slice(0,10),to=String(options.to||'').slice(0,10);
  const nq=normQ(options.q||'');
  let rel=null;
- if(nq){
+ if(nq&&!prepared){
   const refs=(ent.fields||[]).filter(f=>f.ref).map(f=>f.ref);
   const need=['files','cases','clients'].filter(s=>refs.includes(s)&&s!==store);
   if(need.length)rel=await relatedIds(office,nq,need,signal);
@@ -108,7 +122,7 @@ async function entityGridScope(office,store,options={}){
    const date=String(row[field]||'').slice(0,10);
    if(!date||(from&&date<from)||(to&&date>to))return false;
   }
-  if(!nq)return true;
+  if(!nq||prepared)return true;
   if((store==='files'?(row.searchText||'')+' '+rowText(row):rowText(row)).includes(nq))return true;
   return Boolean(rel&&((row.fileId&&rel.files.has(row.fileId))||(row.caseId&&rel.cases.has(row.caseId))||(row.clientId&&rel.clients.has(row.clientId))));
  };
@@ -118,7 +132,8 @@ async function entityGridScope(office,store,options={}){
   lower:ranged?(from||'0000'):undefined,
   upper:ranged?(to||'9999')+String.fromCharCode(0xffff):undefined,
   direction:'prev',
-  filter
+  filter,
+  preparedFilter:prepared&&nq?row=>normalizeArabic([rowText(row),...columns.filter(column=>column.searchable!==false).map(column=>column.text?.(row)||'')].join(' ')).includes(nq):null
  };
 }
 
@@ -126,11 +141,12 @@ async function entityGridScope(office,store,options={}){
  * Create a cursor-backed IndexedDB provider for an entity list. It streams only one
  * bounded page and composes the page's domain scope with the grid's neutral query.
  */
-export function createEntityGridProvider(office,store,{getBaseQuery=()=>({})}={}){
+export function createEntityGridProvider(office,store,{getBaseQuery=()=>({}),prepareRows=null,prepareQuery=null}={}){
  const repo=office?.r?.[store];
  if(!repo)throw new TypeError(`Unknown repository: ${store}`);
  return createIndexedDbDataProvider(repo,{
-  resolveScope:query=>entityGridScope(office,store,typeof getBaseQuery==='function'?getBaseQuery(query)||{}:getBaseQuery||{})
+  prepareRows,prepareQuery,
+  resolveScope:(query,context)=>entityGridScope(office,store,typeof getBaseQuery==='function'?getBaseQuery(query)||{}:getBaseQuery||{},{...context,prepared:typeof prepareRows==='function'})
  });
 }
 
@@ -138,7 +154,7 @@ export function createEntityGridProvider(office,store,{getBaseQuery=()=>({})}={}
 export function refLabel(store,r){
  if(!r)return '';
  if(store==='files')return `${formatFileNumber(r.fileNumber)} — ${r.title||''}`.trim().replace(/^— /,'');
- if(store==='cases')return [r.stageType||r.numberType||'',`${r.caseNumber||'بدون رقم'}${r.caseYear?'/'+r.caseYear:''}`,r.courtId||''].filter(Boolean).join(' — ');
+ if(store==='cases')return [r.stageType||r.numberType||'',formatOfficialNumber(r)||'بدون رقم',r.courtId||''].filter(Boolean).join(' — ');
  if(store==='clients')return r.fullName||'';
  if(store==='opponents')return r.name||'';
  if(store==='fees')return `أتعاب ${r.agreedAmount??''} ${r.currency||''}`.trim();

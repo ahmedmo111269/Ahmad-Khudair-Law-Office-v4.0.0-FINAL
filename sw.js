@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.6.0-offline1';
+const CACHE='ahmad-khudair-law-office-v5.6.0-grid-context3';
 const ASSETS=[
   "./",
   "./index.html",
@@ -32,6 +32,7 @@ const ASSETS=[
   "./js/core/display-prefs.js",
   "./js/core/component-style.js",
   "./js/core/grid-query.js",
+  "./js/core/grid-print-context.js",
   "./js/core/id.js",
   "./js/core/preferences.js",
   "./js/core/search-normalizer.js",
@@ -77,6 +78,7 @@ const ASSETS=[
   "./js/services/demo-seed.js",
   "./js/services/favorites.js",
   "./js/services/entity-query.js",
+  "./js/services/grid-relations.js",
   "./js/services/entity-save.js",
   "./js/services/finance.js",
   "./js/services/generic.js",
@@ -93,6 +95,7 @@ const ASSETS=[
   "./js/services/search.js",
   "./js/services/search-engine.js",
   "./js/services/service-records.js",
+  "./js/services/timeline.js",
   "./js/ui/sidebar.js",
   "./js/ui/nav-model.js",
   "./js/ui/nav-customize.js",

@@ -38,7 +38,7 @@ export class Repository{
   * cursor: opaque token returned as nextCursor by the previous call; iteration resumes strictly after it.
   * Backward navigation is handled by the caller keeping a stack of cursors (see ui/pagination.js).
   */
- async page({index=null,key=undefined,lower=undefined,upper=undefined,lowerOpen=false,upperOpen=false,cursor=null,limit=25,direction='next',filter=null,signal=null}={}){
+ async page({index=null,key=undefined,lower=undefined,upper=undefined,lowerOpen=false,upperOpen=false,cursor=null,limit=25,direction='next',filter=null,signal=null,includeItemCursors=false}={}){
    if(limit<1||limit>MAX_PAGE_SIZE)throw new AppError(ERR.VALIDATION,'حجم الصفحة غير مسموح.');
    if(signal?.aborted)throw abortError();
    this.ctx.assert();
@@ -77,7 +77,8 @@ export class Repository{
        const visible=items.slice(0,limit);
        const last=visible[visible.length-1];
        settled=true;cleanup();
-       resolve({items:visible.map(x=>x.value),nextCursor:hasMore&&last?encodeCursor({sessionToken:this.ctx.token,index,key:last.meta.key,primaryKey:last.meta.primaryKey,direction:dir}):null,prevCursor:null,hasMore,hasPrev:Boolean(decoded)});
+       const cursorFor=item=>encodeCursor({sessionToken:this.ctx.token,index,key:item.meta.key,primaryKey:item.meta.primaryKey,direction:dir});
+       resolve({items:visible.map(x=>x.value),nextCursor:hasMore&&last?cursorFor(last):null,prevCursor:null,hasMore,hasPrev:Boolean(decoded),...(includeItemCursors?{itemCursors:visible.map(cursorFor)}:{})});
      };
      c.onsuccess=()=>{if(settled)return;
        const cur=c.result;

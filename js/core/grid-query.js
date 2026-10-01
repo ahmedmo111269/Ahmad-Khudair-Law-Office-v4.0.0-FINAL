@@ -108,14 +108,30 @@ function normalizeFilterNode(node) {
     v1: node.v1 ?? node.value ?? '',
     v2: node.v2 ?? node.valueTo ?? '',
     set: values,
-    ...(node.valueType ? { valueType: node.valueType } : {})
+    ...(node.valueType ? { valueType: node.valueType } : {}),
+    ...(node.setValueType ? { setValueType: node.setValueType } : {})
   };
 }
 
 function testCondition(column, row, rule) {
   const type = rule.valueType || typeOf(column);
   const raw = valueOf(column, row);
-  if (rule.set) {
+  // Identity-backed facets for multi-valued/reference columns. Text conditions
+  // still use the full formatted value; selecting a person uses their real ID.
+  const referenceSet = rule.setValueType === 'reference' || rule.valueType === 'reference';
+  if ((referenceSet || rule.valueType === 'reference') && typeof column.references === 'function') {
+    const ids = column.references(row).map(item => String(item.id));
+    const choices = ids.length ? ids : ['(فارغ)'];
+    if (rule.set && !rule.set.some(id => choices.includes(String(id)))) return false;
+    if (rule.valueType === 'reference') {
+      if (rule.op === 'eq') return ids.includes(String(rule.v1));
+      if (rule.op === 'neq') return !ids.includes(String(rule.v1));
+      if (rule.op === 'empty') return !ids.length;
+      if (rule.op === 'notEmpty') return Boolean(ids.length);
+      if (!rule.op) return true;
+    }
+  }
+  if (rule.set && !referenceSet) {
     const rendered = displayOf(column, row) || '(فارغ)';
     if (!rule.set.includes(rendered)) return false;
   }

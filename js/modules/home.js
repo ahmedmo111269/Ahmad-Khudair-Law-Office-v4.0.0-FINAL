@@ -3,6 +3,8 @@
 import {esc} from '../ui/dom.js';
 import {mountCalendar} from '../ui/calendar.js';
 import {mountGrid} from '../ui/datagrid.js';
+import {legalFileColumns} from '../ui/grid-columns.js';
+import {createGridRelations} from '../services/grid-relations.js';
 import {agenda,agendaMarks,resolveRefs} from '../services/entity-query.js';
 import {fmtDate,label} from '../domain/entities.js';
 import {localDate,addDays} from '../core/clock.js';
@@ -90,12 +92,14 @@ export function bindHome(app){
  document.querySelectorAll('[data-open-rec]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.openRec));
  document.querySelectorAll('[data-recent]').forEach(b=>b.onclick=()=>app.go(b.dataset.recent));
  const refs=new Map();
+ const relations=createGridRelations(app.office,'agenda');
  const cols=[
+  ...legalFileColumns(relations),
   {key:'kind',label:'النوع'},{key:'date',label:'التاريخ',type:'date',text:r=>fmtDate(r.date)},{key:'time',label:'الوقت'},
   {key:'title',label:'البيان'},{key:'details',label:'التفاصيل'},{key:'status',label:'الحالة',text:r=>label(r.status)||''},
-  {key:'fileId',label:'الملف',get:r=>refs.get(r.fileId)||'',text:r=>refs.get(r.fileId)||''},
   {key:'caseId',label:'القضية / المرحلة',get:r=>refs.get(r.caseId)||'',text:r=>refs.get(r.caseId)||''}];
  const grid=mountGrid(document.querySelector('#agenda-grid'),{columns:cols,rows:[],title:'الأجندة',storageKey:'home:agenda',collapseKey:'home:agenda:grid',emptyText:'لا توجد عناصر في هذه الفترة.',
+  ...relations.gridOptions(()=>{const [from,to]=rangeOf(app.__agendaMode,app.__agendaDay);return {filters:[`الفترة: ${fmtDate(from)} — ${fmtDate(to)}`]}}),
   onRowClick:r=>app.go(r.store==='files'?'file:'+r.id:`rec:${r.store}:${r.id}`)});
  app.__agendaDay=app.__agendaDay||localDate();
  app.__agendaMode=app.__agendaMode||prefs.get('ui:agenda-mode','day')||'day';
@@ -113,7 +117,7 @@ export function bindHome(app){
   const title=app.__agendaMode==='day'?`عناصر يوم ${fmtDate(d)}`:app.__agendaMode==='week'?`أسبوع ${fmtDate(from)} — ${fmtDate(to)}`:app.__agendaMode==='month'?`شهر ${fmtDate(from).slice(3)}`:`القادمة حتى ${fmtDate(to)}`;
   document.querySelector('#agenda-title').textContent=title;
   const rows=await agenda(app.office,from,to);
-  await resolveRefs(app.office,rows,[{k:'fileId',ref:'files'},{k:'caseId',ref:'cases'}],refs);
+  await Promise.all([resolveRefs(app.office,rows,[{k:'caseId',ref:'cases'}],refs),relations.hydrate(rows)]);
   grid.setRows(rows);
  };
  document.querySelectorAll('[data-agenda-mode]').forEach(b=>b.onclick=()=>{app.__agendaMode=b.dataset.agendaMode;prefs.set('ui:agenda-mode',app.__agendaMode);showDay(app.__agendaDay).catch(e=>app.fail(e))});
