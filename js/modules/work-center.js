@@ -112,12 +112,29 @@ export async function bindWorkCenter(app, q) {
   rt.spec = (extra = {}) => { const f = rt.filters(); return {range: rt.st.range, from: rt.st.from, to: rt.st.to, q: rt.st.q, ...f, ...(f.undatedOnly ? {onlyUndated: true, undated: true} : {}), ...extra}; };
   rt.html = (item, opts = {}) => workCardHtml(item, {relations: rt.relations, config: rt.config(), today: rt.today(), ...opts});
   rt.stale = () => !root.isConnected;
+  // «ذاكرة الصفحات»: نتائج استعلامات دورة البيانات الحالية. تبديل العرض أو تخطيط اليوم أو طي/فتح الأقسام يعيد الرسم منها
+  // دون أي قراءة من IndexedDB. أي تحديث/تغيّر بيانات/تغيّر نطاق أو مرشح أو بحث يمسحها (rt.invalidate) فلا تُعرض بيانات قديمة.
+  const CACHE_MAX = 60;
+  rt.cache = new Map(); rt.epoch = 0;
+  rt.invalidate = () => { rt.epoch++; rt.cache.clear(); rt.relations.reset?.(); };
+  const remember = (key, value) => { rt.cache.set(key, value); while (rt.cache.size > CACHE_MAX) rt.cache.delete(rt.cache.keys().next().value); };
+  /** يحفظ نتيجة استعلام مخصص (غير rt.fetch) داخل دورة البيانات نفسها؛ لا تُحفظ نتيجة استعلام أُلغي أو سبقه استعلام أحدث. */
+  rt.memo = async (key, producer) => {
+    const full = `${rt.today()}|${key}`;
+    if (rt.cache.has(full)) return rt.cache.get(full);
+    const epoch = rt.epoch, mySeq = rt.seq, value = await producer();
+    if (epoch === rt.epoch && mySeq === rt.seq && !rt.signal?.aborted) remember(full, value);
+    return value;
+  };
   rt.fetch = async (spec, {limit = 50, cursor = null} = {}) => {
-    const mySeq = rt.seq;
+    const key = JSON.stringify([rt.today(), spec, limit, cursor || null]), hit = rt.cache.get(key);
+    if (hit) { for (const item of hit.items) rt.register(item); return hit; }
+    const mySeq = rt.seq, epoch = rt.epoch;
     const page = await queryWorkItems(office, spec, {limit, cursor, signal: rt.signal, relations: rt.relations});
     if (mySeq !== rt.seq || rt.stale()) throw new DOMException('استعلام أحدث', 'AbortError');
     await rt.relations.hydrate(page.items, {signal: rt.signal});
     for (const item of page.items) rt.register(item);
+    if (epoch === rt.epoch) remember(key, page);
     return page;
   };
   rt.wc = {app, office, relations: rt.relations, onChanged: change => rt.onChanged(change)};
@@ -128,13 +145,13 @@ export async function bindWorkCenter(app, q) {
     enhanceCollapsiblePanels(rt.host, PAGE_ID, {bulk: false});
     bindCustomizableComponents(rt.host);
   };
-  rt.reload = async () => {
+  rt.reload = async opts => {
+    if (!(opts && opts.reuse === true)) rt.invalidate();          // الافتراضي آمن: إعادة التحميل تقرأ بيانات طازجة
     rt.controller?.abort();
     rt.controller = typeof AbortController === 'function' ? new AbortController() : null;
     rt.signal = rt.controller?.signal || null;
     const my = ++rt.seq;
     rt.collect = new Map();          // خريطة التحميل الجديدة؛ القديمة تبقى مقروءة حتى ينجح الرسم
-    rt.relations.reset?.();
     rt.host.setAttribute('aria-busy', 'true');
     try {
       await (RENDERERS[rt.st.view] || RENDERERS.cards)(rt);
@@ -153,7 +170,9 @@ export async function bindWorkCenter(app, q) {
     if (patch.range && patch.range !== 'custom' && patch.from === undefined) { rt.st.from = ''; rt.st.to = ''; }
     await saveWorkState({range: rt.st.range, from: rt.st.from, to: rt.st.to, view: rt.st.view, filters: rt.st.filters, pageSize: rt.st.pageSize, dayLayout: rt.st.dayLayout});
     syncChrome();
-    if (reload) await rt.reload();
+    // تغيّر العرض أو تخطيط اليوم وحدهما = تغيير عرض فقط: يُعاد الرسم من ذاكرة الصفحات بلا قراءة جديدة.
+    const keys = Object.keys(patch), presentationOnly = keys.length > 0 && keys.every(k => k === 'view' || k === 'dayLayout');
+    if (reload) await rt.reload({reuse: presentationOnly});
   };
   rt.openItem = async id => { if (id) await openWorkDrawer(rt.wc, id); };
   rt.openLayout = () => openPageCustomizer(app, {pageId: PAGE_ID, root, onChanged: () => {}});

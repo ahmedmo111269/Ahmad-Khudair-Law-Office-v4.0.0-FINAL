@@ -1,6 +1,7 @@
 // اختبارات مركز العمل في متصفح Chromium حقيقي (DOM + IndexedDB حقيقيان).
 //   WC_BROWSER_SCENARIO = functional | mobile | perf | offline | all (الافتراضي)
 //   WC_BASE_URL (الافتراضي http://127.0.0.1:8000) · WC_BROWSER_EXECUTABLE لاستخدام متصفح مثبّت.
+//   WC_PERF_SCALE (الافتراضي 1 ≈ 305 ألف سجل) يضرب أحجام بذرة الأداء؛ WC_REPORT_FILE اسم ملف التقرير (الافتراضي report.json).
 // لا يختبر: الطباعة الفعلية، أجهزة اللمس الحقيقية (يُحاكى اللمس فقط)، ولا اتصال الإنترنت (الخطوط الخارجية تفشل في العزلة وتُهمَل).
 // كل سطر VERIFIED يعني أن التحقق نُفِّذ فعلًا وانتهى بنجاح؛ أي فشل يُوقف الاختبار ويُسجَّل.
 import {chromium} from 'playwright';
@@ -13,6 +14,8 @@ import assert from 'node:assert/strict';
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const base = (process.env.WC_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const scenario = process.env.WC_BROWSER_SCENARIO || 'all';
+const perfScale = Math.max(0.1, Number(process.env.WC_PERF_SCALE || 1));
+const reportFile = process.env.WC_REPORT_FILE || 'report.json';
 const outDir = path.join(repository, '.cache', 'work-center-browser');
 await fs.mkdir(outDir, {recursive: true});
 
@@ -337,6 +340,45 @@ async function functional() {
     await page.click('[data-wc-layout="timeline"]'); await ready(page);
     assert.ok(await page.locator('.wc-timeline').count() > 0);
     await page.click('[data-wc-layout="parts"]'); await ready(page);
+  });
+
+  await verify('لا إعادة جلب عند تغيير العرض فقط: تبديل تخطيط اليوم والعرض ذهابًا وإيابًا وطي/فتح قسم بلا أي قراءة من IndexedDB، وتغيّر البيانات يمسح الذاكرة فيظهر أثره', async () => {
+    await page.click('[data-wc-range="today"]'); await ready(page);          // دورة بيانات جديدة (تملأ ذاكرة الصفحات)
+    await page.evaluate(() => {
+      if (window.__reads === undefined) {   // عدّاد قراءات مخازن البيانات (القراءات من settings/lookups لا تُحسب)
+        const DATA = new Set(['workItems', 'hearings', 'procedures', 'appointments', 'communications', 'files', 'cases', 'clients', 'opponents', 'fileParties', 'fileClients', 'clientFiles', 'caseClients', 'caseOpponents']);
+        const wrap = (proto, name, storeName) => { const original = proto[name]; proto[name] = function (...args) { try { if (DATA.has(storeName(this))) window.__reads++; } catch { /* لا شيء */ } return original.apply(this, args); }; };
+        window.__reads = 0;
+        for (const name of ['openCursor', 'openKeyCursor', 'getAll', 'getAllKeys', 'get', 'count']) { wrap(IDBObjectStore.prototype, name, store => store.name); wrap(IDBIndex.prototype, name, index => index.objectStore.name); }
+      }
+      window.__reads = 0;
+    });
+    const reads = () => page.evaluate(() => window.__reads);
+    for (const layout of ['priority', 'timeline', 'parts']) { await page.click(`[data-wc-layout="${layout}"]`); await ready(page); }
+    assert.equal(await reads(), 0, 'تبديل تخطيط اليوم قرأ IndexedDB');
+    await selectView(page, 'matrix'); await selectView(page, 'cards');      // الزيارة الأولى لعرض بشكل بيانات مختلف تقرأ فهارسه
+    assert.ok(await reads() > 0, 'الزيارة الأولى للمصفوفة لم تُصدر استعلامها');
+    await page.evaluate(() => { window.__reads = 0; });
+    for (const view of ['matrix', 'cards', 'matrix', 'cards']) await selectView(page, view);
+    assert.equal(await reads(), 0, 'العودة إلى عرض سبق عرضه قرأت IndexedDB');
+    const toggle = page.locator('#wc-view .ux-card-toggle').first();
+    assert.ok(await toggle.count() > 0, 'لا قسم قابل للطي في مساحة اليوم');
+    await toggle.click(); await page.waitForTimeout(200); await toggle.click(); await page.waitForTimeout(200);
+    assert.equal(await reads(), 0, 'طي/فتح القسم قرأ IndexedDB');
+    // تغيّر بيانات من خارج الصفحة (الخدمة مباشرة) يجب أن يمسح الذاكرة فيظهر الأثر بدل عرض نسخة قديمة.
+    const title = 'WCTEST كاش خارجي';
+    const id = await page.evaluate(async ([name, day]) => {
+      const service = await import('/js/services/work-items.js');
+      return (await service.saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: name, dueDate: day, priority: 'medium', status: 'notStarted'})).id;
+    }, [title, today()]);
+    await pollUntil(page, name => document.querySelector('#wc-view')?.textContent.includes(name), 12000, title); await ready(page);
+    assert.ok(await reads() > 0, 'تغيّر البيانات لم يُعد القراءة');
+    await page.evaluate(() => { window.__reads = 0; });
+    for (const layout of ['priority', 'parts']) { await page.click(`[data-wc-layout="${layout}"]`); await ready(page); }
+    assert.equal(await reads(), 0, 'التبديل بعد التحديث قرأ IndexedDB');
+    assert.ok((await page.locator('#wc-view').textContent()).includes(title), 'العنصر الجديد اختفى بعد التبديل');
+    await page.evaluate(async taskId => { const service = await import('/js/services/work-items.js'); await service.deleteItem(window.__LAW_OFFICE_APP__.office, taskId); }, id);
+    await pollUntil(page, name => !document.querySelector('#wc-view')?.textContent.includes(name), 12000, title); await ready(page);
   });
 
   await verify('العروض المحفوظة: حفظ وتطبيق وإعادة تسمية وحذف', async () => {
@@ -762,7 +804,7 @@ async function perf() {
   const stats = () => { window.__idb = {cursorSteps: 0, getAllRows: 0, cursors: 0}; const proto = IDBCursor.prototype, origC = proto.continue, origA = proto.advance; proto.continue = function (...a) { window.__idb.cursorSteps++; return origC.apply(this, a); }; proto.advance = function (...a) { window.__idb.cursorSteps += a[0] || 1; return origA.apply(this, a); }; for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) { const oc = P.openCursor; P.openCursor = function (...a) { window.__idb.cursors++; return oc.apply(this, a); }; const ga = P.getAll; P.getAll = function (...a) { const r = ga.apply(this, a); r.addEventListener('success', () => { window.__idb.getAllRows += r.result?.length || 0; }); return r; }; } };
   const page = await newPage(context, {init: stats}); currentPage = page;
   await boot(page);
-  const target = {clients: 5000, files: 20000, hearings: 100000, procedures: 50000, appointments: 20000, communications: 20000, natives: 30000};
+  const target = Object.fromEntries(Object.entries({clients: 5000, files: 20000, hearings: 100000, procedures: 50000, appointments: 20000, communications: 20000, natives: 30000}).map(([k, v]) => [k, Math.round(v * perfScale)]));
   const t0 = Date.now();
   const seeded = await page.evaluate(async cfg => {
     const app = window.__LAW_OFFICE_APP__, db = app.office.ctx.db;
@@ -773,6 +815,8 @@ async function perf() {
     const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
     const now = new Date().toISOString();
     const put = async (store, rows) => { for (let i = 0; i < rows.length; i += 4000) await new Promise((res, rej) => { const tx = db.transaction(store, 'readwrite'); const os = tx.objectStore(store); for (const r of rows.slice(i, i + 4000)) os.put(r); tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); }); };
+    // توليد مجزّأ (20 ألف صف في كل دفعة) حتى لا تبقى مئات الآلاف من الكائنات في الذاكرة دفعة واحدة عند المقاييس الكبيرة.
+    const gen = async (store, n, make) => { for (let off = 0; off < n; off += 20000) await put(store, Array.from({length: Math.min(20000, n - off)}, (_, j) => make(null, off + j))); };
     const common = {createdAt: now, updatedAt: now, version: 1, isArchived: false, isDeleted: false, deletedAt: null};
     const clients = Array.from({length: cfg.clients}, (_, i) => ({id: uid(), fullName: `موكل أداء ${i}`, fullNameNormalized: `موكل اداء ${i}`, status: 'active', ...common}));
     await put('clients', clients);
@@ -785,13 +829,11 @@ async function perf() {
       parties.push({id: uid(), fileId: id, partyKind: 'client', clientId: c.id, name: c.fullName, partyName: c.fullName, role: 'موكل', roleGroup: 'موكلو المكتب', sequence: 1, isPrimary: true, isActive: true, activeStatus: 'active', ...common});
     }
     await put('files', files); await put('cases', cases); await put('fileClients', links); await put('fileParties', parties);
-    const hearings = Array.from({length: cfg.hearings}, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), caseId: cases[k].id, stageId: cases[k].id, fileId: files[k].id, hearingDate: dayAt(rnd(-730, 730)), hearingTime: ['09:00', '10:30', '12:00', '13:30', ''][i % 5], type: 'نظر', reason: `جلسة أداء ${i}`, status: i % 7 === 0 ? 'تمت' : 'مجدولة', court: 'محكمة الأداء', ...common}; });
-    await put('hearings', hearings);
-    const procedures = Array.from({length: cfg.procedures}, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, description: `عمل أداء ${i}`, type: 'متابعة', internalDueDate: i % 11 === 0 ? '' : dayAt(rnd(-400, 200)), status: ['open', 'open', 'pending', 'done', 'done', 'cancelled'][i % 6], priority: ['normal', 'urgent', 'critical'][i % 3], ...common}; });
-    await put('procedures', procedures);
-    await put('appointments', Array.from({length: cfg.appointments}, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, clientId: clients[k % clients.length].id, title: `موعد أداء ${i}`, date: dayAt(rnd(-200, 200)), time: '11:00', status: i % 4 === 0 ? 'تم' : 'مجدول', ...common}; }));
-    await put('communications', Array.from({length: cfg.communications}, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, clientId: clients[k % clients.length].id, subject: `اتصال أداء ${i}`, date: dayAt(rnd(-100, 0)), followUpDate: i % 3 === 0 ? dayAt(rnd(-60, 60)) : '', followUpRequired: i % 6 === 0 ? false : (i % 3 === 0 ? true : undefined), ...common}; }));
-    await put('workItems', Array.from({length: cfg.natives}, (_, i) => { const k = rnd(0, files.length - 1), id = uid(); return {id, kind: 'native', sourceType: 'task', sourceId: id, title: `مهمة أداء ${i}`, description: '', type: 'مهمة', dueDate: i % 10 === 0 ? '' : dayAt(rnd(-200, 200)), dueTime: '', status: ['notStarted', 'inProgress', 'waiting', 'done'][i % 4], priority: ['urgent', 'high', 'medium', 'low'][i % 4], tags: [], fileId: files[k].id, caseId: '', clientId: '', opponentId: '', relatedType: '', relatedId: '', originalDueDate: '', postponeCount: 0, commentCount: 0, pinnedAt: null, quadrant: null, completedAt: i % 4 === 3 ? new Date().toISOString() : null, completedBy: null, archivedAt: null, ...common}; }));
+    await gen('hearings', cfg.hearings, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), caseId: cases[k].id, stageId: cases[k].id, fileId: files[k].id, hearingDate: dayAt(rnd(-730, 730)), hearingTime: ['09:00', '10:30', '12:00', '13:30', ''][i % 5], type: 'نظر', reason: `جلسة أداء ${i}`, status: i % 7 === 0 ? 'تمت' : 'مجدولة', court: 'محكمة الأداء', ...common}; });
+    await gen('procedures', cfg.procedures, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, description: `عمل أداء ${i}`, type: 'متابعة', internalDueDate: i % 11 === 0 ? '' : dayAt(rnd(-400, 200)), status: ['open', 'open', 'pending', 'done', 'done', 'cancelled'][i % 6], priority: ['normal', 'urgent', 'critical'][i % 3], ...common}; });
+    await gen('appointments', cfg.appointments, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, clientId: clients[k % clients.length].id, title: `موعد أداء ${i}`, date: dayAt(rnd(-200, 200)), time: '11:00', status: i % 4 === 0 ? 'تم' : 'مجدول', ...common}; });
+    await gen('communications', cfg.communications, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, clientId: clients[k % clients.length].id, subject: `اتصال أداء ${i}`, date: dayAt(rnd(-100, 0)), followUpDate: i % 3 === 0 ? dayAt(rnd(-60, 60)) : '', followUpRequired: i % 6 === 0 ? false : (i % 3 === 0 ? true : undefined), ...common}; });
+    await gen('workItems', cfg.natives, (_, i) => { const k = rnd(0, files.length - 1), id = uid(); return {id, kind: 'native', sourceType: 'task', sourceId: id, title: `مهمة أداء ${i}`, description: '', type: 'مهمة', dueDate: i % 10 === 0 ? '' : dayAt(rnd(-200, 200)), dueTime: '', status: ['notStarted', 'inProgress', 'waiting', 'done'][i % 4], priority: ['urgent', 'high', 'medium', 'low'][i % 4], tags: [], fileId: files[k].id, caseId: '', clientId: '', opponentId: '', relatedType: '', relatedId: '', originalDueDate: '', postponeCount: 0, commentCount: 0, pinnedAt: null, quadrant: null, completedAt: i % 4 === 3 ? new Date().toISOString() : null, completedBy: null, archivedAt: null, ...common}; });
     return {total: cfg.clients + cfg.files * 4 + cfg.hearings + cfg.procedures + cfg.appointments + cfg.communications + cfg.natives, sampleClient: clients[7].fullName, sampleFile: files[7].fileNumber};
   }, target);
   report.metrics.seed = {...target, totalRecords: seeded.total, seconds: Math.round((Date.now() - t0) / 100) / 10};
@@ -807,7 +849,7 @@ async function perf() {
     return {ms, io};
   };
   const total = seeded.total;
-  await verify('الأداء والدقة: ملخص الرأس على 305 ألف سجل بقراءة محدودة، وأرقام اليوم صحيحة ولا يحجبها تراكم المتأخر القديم', async () => {
+  await verify(`الأداء والدقة: ملخص الرأس على ${Math.round(total / 1000)} ألف سجل بقراءة محدودة، وأرقام اليوم صحيحة ولا يحجبها تراكم المتأخر القديم`, async () => {
     const r = await measure('summary', () => page.evaluate(async () => {
       const m = await import('/js/services/work-query.js'); const office = window.__LAW_OFFICE_APP__.office;
       const s = await m.workSummary(office);
@@ -919,8 +961,8 @@ for (const name of chosen) {
   try { await plan[name](); } catch (error) { failed = true; report.errors.push({scenario: name, message: String(error?.message || error).slice(0, 800)}); }
 }
 report.notVerified = ['الطباعة الفعلية ومعاينتها', 'أجهزة لمس وهواتف حقيقية (يُحاكى اللمس فقط)', 'الأداء على أجهزة المستخدم الفعلية (القياس في بيئة اختبار محدودة)', 'اتصال الإنترنت/الخطوط الخارجية (محجوبة في بيئة الاختبار)'];
-await fs.writeFile(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2));
+await fs.writeFile(path.join(outDir, reportFile), JSON.stringify(report, null, 2));
 await browser.close();
 const verified = report.checks.filter(c => c.status === 'VERIFIED').length;
-console.log(`\n${verified}/${report.checks.length} فحصًا متصفحيًا ناجحًا${failed ? ' — يوجد إخفاق' : ''} (التقرير: .cache/work-center-browser/report.json)`);
+console.log(`\n${verified}/${report.checks.length} فحصًا متصفحيًا ناجحًا${failed ? ' — يوجد إخفاق' : ''} (التقرير: .cache/work-center-browser/${reportFile})`);
 process.exit(failed ? 1 : 0);

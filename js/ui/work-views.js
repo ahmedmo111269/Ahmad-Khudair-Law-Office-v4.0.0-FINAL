@@ -1,7 +1,8 @@
 // =====================================================================
 // مركز العمل — عروض البيانات: بطاقات/مساحة اليوم، كانبان، مصفوفة أيزنهاور، الأولويات، المتأخر، القادم، المنجز، التقويم.
-// كل عرض يستعلم عبر rt.fetch (فهارس + مؤشر + إلغاء) ويعرض الصفحة الأولى فقط مع «عرض المزيد»؛ تبديل العرض بالـCSS/الحالة
-// لا يعيد الاستعلام إلا إن تغيّر النطاق أو المرشحات أو البيانات. قائمة الجدول (DataGrid) في work-grid.js.
+// كل عرض يستعلم عبر rt.fetch (فهارس + مؤشر + إلغاء) ويعرض الصفحة الأولى فقط مع «عرض المزيد». نتائج rt.fetch/rt.memo تُحفظ في
+// ذاكرة الصفحات طوال دورة البيانات نفسها: تبديل العرض أو تخطيط اليوم أو الطي/الفتح يعيد الرسم منها دون قراءة IndexedDB، ويُمسح
+// كل ذلك عند تغيّر النطاق أو المرشحات أو البحث أو البيانات أو التحديث اليدوي. قائمة الجدول (DataGrid) في work-grid.js.
 // =====================================================================
 import {esc} from './dom.js';
 import {card, cardEmpty, statusBadge} from './card.js';
@@ -73,7 +74,7 @@ async function renderToday(rt) {
     rt.fetch(rt.spec({range: 'today'}), {limit: 200}),
     rt.fetch(rt.spec({range: 'all', onlyUndated: true, kinds: ['open']}), {limit: 25}),
     pinnedStrip(rt),
-    queryWorkItems(rt.office, {drive: 'completed', from: rt.today(), to: rt.today()}, {limit: 100, signal: rt.signal}).catch(() => ({items: []}))
+    rt.memo('done-today', () => queryWorkItems(rt.office, {drive: 'completed', from: rt.today(), to: rt.today()}, {limit: 100, signal: rt.signal}).catch(() => ({items: []})))
   ]);
   const items = page.items.filter(i => !pinned.ids.has(i.id)), config = rt.config();
   const byPriority = mergePriorities(config).map(p => ({p, n: items.filter(i => i.priority === p.key).length}));
@@ -92,7 +93,8 @@ async function renderToday(rt) {
     body = DAY_PARTS.filter(([k]) => k !== 'undated').map(([key, label]) => { const list = items.filter(i => dayPartOf(i) === key); return list.length ? section(rt, `part:${key}`, label, list, {tone: key === 'hearings' ? 'info' : ''}) : ''; }).join('');
   }
   if (undated.items.length) body += section(rt, 'part:undated', 'بلا موعد', undated.items, {more: undated.hasMore});
-  host.innerHTML = `${summary}${switcher}${nowBox}${pinned.html}${body}`;
+  // الأقسام داخل .wc-sections: عمود واحد على الجوال، وعمودان على سطح المكتب (الجلسات بجانب الأعمال الإدارية…).
+  host.innerHTML = `${summary}${switcher}${nowBox}${pinned.html}<div class="wc-sections">${body}</div>`;
   host.querySelectorAll('[data-wc-layout]').forEach(b => b.onclick = () => rt.setState({dayLayout: b.dataset.wcLayout}));
 }
 

@@ -67,6 +67,12 @@
 /* ---------- البطاقة الموحّدة ---------- */
 .wc-cards{display:grid;gap:8px;min-width:0}
 .wc-groups{display:grid;gap:10px;min-width:0}
+/* مساحة اليوم: أقسام الجلسات/الأعمال/المتابعات — عمود واحد على الجوال، وعمودان على سطح المكتب بلا تمرير أفقي للصفحة. */
+.wc-sections{display:grid;gap:10px;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0}
+.wc-sections>*{min-width:0}
+/* بطاقات الأقسام تحمل .ux-card--full (تمتد على كل الأعمدة) فنلغيها هنا فقط ليتوزع القسمان جنبًا إلى جنب؛ القسم الوحيد (مثل الخط الزمني) يبقى بعرض كامل. */
+.wc-sections>.ux-card--full{grid-column:auto}
+@media (min-width:1100px){.wc-sections{grid-template-columns:repeat(2,minmax(0,1fr))}.wc-sections>:only-child{grid-column:1/-1}}
 .wc-group-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 2px 4px;font-size:.95rem;color:var(--text-strong)}
 .wc-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;padding:0 8px;border-radius:var(--radius-pill);background:var(--surface2);border:1px solid var(--border-subtle);font-size:.8rem;font-weight:700}
 .wc-card{position:relative;border:1px solid var(--border);border-inline-start:5px solid var(--wc-c,var(--border));border-radius:var(--radius);background:var(--surface);padding:10px 12px;min-width:0;transition:box-shadow var(--transition),border-color var(--transition)}
