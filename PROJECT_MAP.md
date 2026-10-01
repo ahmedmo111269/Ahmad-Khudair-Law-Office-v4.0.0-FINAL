@@ -12,13 +12,14 @@
 |---|---|
 | `js/domain/work-items.js` | نقي: الحالات والأولويات والنطاقات والعروض، `sortKey`، ربع أيزنهاور، مُوسِّع التكرار، مدققات الإدخال، `canActOn` (مقعد الصلاحيات)، `overlayId`/`parseOverlayId`، `dayPartOf` |
 | `js/domain/work-sources.js` | محوّلات المصادر (hearings, procedures, appointments, communications, files, serviceRecords)، `registerWorkSource`، بناة النماذج `buildProjectedItem/buildNativeItem/buildOrphanItem`، `itemPassesFilters` |
-| `js/services/work-config.js` | إعدادات/حالة/عروض محفوظة عبر `prefs` الموجودة (`ui:workcenter-config|state|views`) |
+| `js/services/work-config.js` | إعدادات/حالة/عروض محفوظة عبر `prefs` الموجودة (`ui:workcenter-config|state|views`)؛ `getWorkConfig()` يدمج الحالات المخصصة من لقطة Lookups |
+| `js/services/work-statuses.js` | الحالات المخصصة عبر **Lookups** (`workItemStatus`): لقطة بالذاكرة `ensureWorkStatuses`، `createCustomStatus/renameCustomStatus/removeCustomStatus`، تُبطَل عند `entity:changed`/`db:switched`/`db:restored` |
 | `js/services/work-items.js` | كل الأوامر (حفظ، إنجاز، تأجيل، إعادة جدولة، حالة، أولوية، تثبيت، وسوم، أرشفة/استعادة، حذف منطقي/تراجع، تعليقات، تكرار، `bulkApply`) بمعاملة واحدة وكتابة عبر `saveOperational` |
 | `js/services/work-query.js` | محرك الاستعلام: مجاري بفهارس + دمج k-way + مؤشر `wc1:`، `queryWorkItems/getWorkItem/countWorkItems/workSummary/searchScope/nowAndNext` |
 | `js/services/work-insights.js` | `ATTENTION_RULES`، الاقتراحات، المراجعة اليومية/الأسبوعية، الإنتاجية، الملفات الراكدة |
 | `js/ui/work-card.js` `work-actions.js` `work-drawer.js` `work-views.js` `work-grid.js` `work-panels.js` `work-links.js` | البطاقة، ورقة الإجراءات والنماذج، المجلّد، العروض الأحد عشر، قائمة DataGrid، المراجعات/الإعدادات/الإنتاجية، لوحة «المهام المرتبطة» في صفحات السجلات |
 | `css/work-center.css` | أنماط `.wc-*` (جوال أولًا ثم أعمدة على الشاشات الواسعة) |
-| `js/tests/work-center-tests.js` | 63 اختبارًا (Node + `tests.html`) |
+| `js/tests/work-center-tests.js` | 70 اختبارًا (Node + `tests.html`) |
 | `tools/node-tests/work-center-browser-tests.mjs` | Chromium حقيقي: `WC_BROWSER_SCENARIO=functional|mobile|perf|offline|all`، و`WC_PERF_SCALE` لتكبير بذرة الأداء |
 
 حُذف وحل محله: `js/modules/action-center.js`, `js/services/action-center.js` (وكانا يخصان صفحة القوائم الخمس القديمة؛ ما ورد عنهما أدناه في v2.7.0 تاريخي).
@@ -34,12 +35,13 @@
 
 - `js/app.js`: `PAGES.actionCenter` ← `workCenterPage/bindWorkCenter`؛ المسار الثابت `rec:workItems:ID` يفتح مجلّد العنصر؛ شارة الشريط (`scheduleWorkBadge`)؛ مرجع الاختصارات؛ `resetViewState` يمسح `__wc`.
 - `js/domain/entities.js`: `ENTITIES.workItems` (للنموذج الموحّد `openEntityForm`)؛ `js/ui/form.js`: حقول `newOnly` وتبديل خيارات الأولوية/الحالة من إعدادات المستخدم وإشعار «إنشاء مهمة متابعة» بعد نتيجة/تأجيل جلسة.
-- `js/services/entity-save.js`: `case 'workItems'`؛ `js/services/operations.js`: خياران `extraStores`/`withinTransaction`؛ `js/db/repository.js`: `getManyRaw` (قراءة تشمل المحذوف منطقيًا للطبقات).
+- `js/services/entity-save.js`: `case 'workItems'`؛ `js/services/operations.js`: خياران `extraStores`/`withinTransaction`؛ `js/db/repository.js`: `getManyRaw` و`byIndexRaw` (قراءتان تشملان المحذوف منطقيًا: للطبقات ولقيم القوائم المتقاعدة).
+- `js/domain/lookup-defaults.js`: أربع فئات `workItemType/workItemTag/workItemPostponeReason/workItemStatus` وخطاف تحقق اختياري `check` لكل فئة؛ `js/services/lookups.js`: `saveLookupValue` يستدعي الخطاف ويمسح ذاكرته عند `db:restored`؛ `js/modules/databases.js`: يعلن `db:restored` بعد الاستعادة فوق القاعدة الحالية.
 - `js/services/search-engine.js`: مصدر `workItems` (المهام المستقلة فقط، `routeOf` → `actionCenter?item=ID`) — **لا محرك بحث ثانٍ**.
 - `js/services/integrity.js`: قواعد علاقات ومدقّق `work-item-invalid`؛ `js/services/grid-relations.js`: `workItems` ضمن `hasLegalFileColumns` (أعمدة الملف/الموكل/الخصم المركزية في قائمة DataGrid).
 - `js/ui/palette.js`: أوامر مركز العمل و«+ مهمة مرتبطة بالصفحة الحالية» و«ترحيل أعمال اليوم» (بتأكيد).
 - `js/modules/record-page.js`, `file-page.js`, `home.js`: أزرار «+ مهمة» ولوحات «المهام المرتبطة» والشارة.
-- `sw.js`: الأصول الجديدة في precache وذاكرة `ahmad-khudair-law-office-v5.7.0-work-center1`؛ `index.html`: `css/work-center.css`.
+- `sw.js`: الأصول الجديدة في precache وذاكرة `ahmad-khudair-law-office-v5.7.0-work-center2`؛ `index.html`: `css/work-center.css`.
 
 ## قواعد للتطوير اللاحق
 

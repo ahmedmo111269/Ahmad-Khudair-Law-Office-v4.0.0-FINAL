@@ -7,7 +7,8 @@ import {saveOperational} from '../services/operations.js';
 import {saveEntity} from '../services/entity-save.js';
 import {seedDemoData} from '../services/demo-seed.js';
 import {seedTaxonomy} from '../services/client-files.js';
-import {seedLookups, getLookup} from '../services/lookups.js';
+import {seedLookups, getLookup, saveLookupValue, removeLookupValue} from '../services/lookups.js';
+import {LOOKUP_CATEGORIES} from '../domain/lookup-defaults.js';
 import {exportDatabase, importDatabase, inspectBackup} from '../services/backup.js';
 import {deepHealth} from '../services/integrity.js';
 import {Clock, addDays, localDate} from '../core/clock.js';
@@ -19,6 +20,9 @@ import * as C from '../services/work-items.js';
 import * as Q from '../services/work-query.js';
 import * as I from '../services/work-insights.js';
 import * as K from '../services/work-config.js';
+import * as ST from '../services/work-statuses.js';
+import {prefs} from '../core/preferences.js';
+import {events} from '../core/events.js';
 import {createGridRelations} from '../services/grid-relations.js';
 import {searchAll} from '../services/search-engine.js';
 
@@ -66,6 +70,14 @@ export async function runWorkCenterTests(test, expect) {
     return {db, office, client, file, stage, hearing, procedure, overdueProc, appointment, comm, snapshot, before: await snapshot()};
   })();
   const ref = (type, id) => D.overlayId(type, id);
+  // مكتب معزول (قاعدته ورمزه) لاختبارات الحالات المخصصة: لا يغيّر أعداد العناصر في المكتب المشترك للاختبارات الأخرى.
+  const isolated = async tag => {
+    const name = `AhmadKhudairLawOfficeDB__test__wcstatus__${tag}__${Date.now()}`;
+    const db = await openDb(name, SCHEMA_VERSION);
+    const office = new Office({db, assert() {}, token: `wcst-${tag}`, profile: {id: `wcst-${tag}`}});
+    await seedLookups(office);
+    return {db, office, done: () => { db.close(); indexedDB.deleteDatabase(name); ST.resetWorkStatuses(); }};
+  };
 
   // ===== 1) المجال النقي =====
   test('مركز العمل/مجال: الحالات الافتراضية الست + مؤرشف علم منفصل', () => {
@@ -78,12 +90,176 @@ export async function runWorkCenterTests(test, expect) {
     for (const p of D.DEFAULT_WORK_PRIORITIES) { expect(Boolean(p.icon && p.mark && p.label)).toBe(true); }
     expect(D.priorityRank('urgent') > D.priorityRank('high') && D.priorityRank('high') > D.priorityRank('medium') && D.priorityRank('medium') > D.priorityRank('low')).toBe(true);
   });
-  test('مركز العمل/مجال: تسميات وألوان الأولوية والحالة قابلة للتخصيص وحالات مخصصة', () => {
-    const cfg = K.sanitizeWorkConfig({priorities: {urgent: {label: 'حرج للغاية', color: '#112233'}}, statuses: {waiting: {label: 'في انتظار الموكل'}}, customStatuses: [{key: 'c_review', label: 'تحت المراجعة', kind: 'open', color: '#445566'}, {key: 'bad key', label: 'x', kind: 'open'}]});
+  test('مركز العمل/مجال: تسميات وألوان الأولوية والحالة قابلة للتخصيص، وتفضيلات الجهاز لا تحمل قائمة حالات مخصصة', () => {
+    const cfg = K.sanitizeWorkConfig({priorities: {urgent: {label: 'حرج للغاية', color: '#112233'}}, statuses: {waiting: {label: 'في انتظار الموكل'}, c_review: {label: 'تسمية لا تُحفظ', color: '#445566'}, 'bad key': {color: '#ffffff'}},
+      customStatuses: [{key: 'c_old', label: 'قديمة في التفضيلات', kind: 'open'}]});
     expect(D.priorityInfo('urgent', cfg).label).toBe('حرج للغاية'); expect(D.priorityInfo('urgent', cfg).color).toBe('#112233');
     expect(D.statusInfo('waiting', cfg).label).toBe('في انتظار الموكل');
-    expect(D.statusInfo('c_review', cfg).kind).toBe('open'); expect(cfg.customStatuses.length).toBe(1);
+    // الحالات المخصصة لا تُحفظ في تفضيلات الجهاز (قائمتها في Lookups داخل قاعدة المكتب): يُقبل لون فقط، والتسمية ومفتاح غريب يُرفضان.
+    expect(cfg.customStatuses.length).toBe(0);
+    expect(JSON.stringify(cfg.statuses.c_review)).toBe(JSON.stringify({color: '#445566'})); expect(cfg.statuses['bad key']).toBe(undefined);
     expect(K.sanitizeWorkConfig({priorities: {urgent: {color: 'javascript:alert(1)'}}}).priorities.urgent).toBe(undefined);
+  });
+  test('مركز العمل/مجال: الحالات المخصصة من صفوف Lookups — مفتاح ثابت من المعرّف، مفتوحة دائمًا، مرتبة، والمحذوفة تتقاعد', () => {
+    const rows = [
+      {id: '01HZZZZZ00AAAAAAAAAA', value: 'تحت المراجعة', order: 2, isDeleted: false},
+      {id: '01HZZZZZ00BBBBBBBBBB', value: 'بانتظار الموكل', order: 1, isDeleted: false},
+      {id: '01HZZZZZ00CCCCCCCCCC', value: 'حالة قديمة', order: 3, isDeleted: true},
+      {id: '', value: 'بلا معرّف'}, {id: 'x1', value: '   '}
+    ];
+    const {custom, retired} = D.customStatusesFromRows(rows);
+    expect(custom.map(x => x.label).join('|')).toBe('بانتظار الموكل|تحت المراجعة');                 // بترتيب order لا ترتيب الإدخال
+    expect(custom.every(x => x.kind === 'open' && /^c_[a-z0-9_]{1,24}$/.test(x.key))).toBe(true);
+    expect(custom[0].key).toBe(D.customStatusKey('01HZZZZZ00BBBBBBBBBB'));                          // مشتق من المعرّف لا من الاسم
+    expect(retired.map(x => x.label).join()).toBe('حالة قديمة');
+    const cfg = {customStatuses: custom, retiredStatuses: retired, statuses: {[custom[0].key]: {color: '#123456'}}};
+    expect(D.mergeStatuses(cfg).filter(x => x.custom).length).toBe(2);
+    expect(D.statusInfo(custom[0].key, cfg).color).toBe('#123456');                                  // لون الجهاز يغلب الافتراضي
+    expect(D.statusInfo(retired[0].key, cfg).retired).toBe(true);
+    expect(D.statusInfo(retired[0].key, cfg).label).toBe('حالة قديمة (محذوفة)');
+    expect(D.mergeStatuses(cfg).some(x => x.key === retired[0].key)).toBe(false);                    // المتقاعدة لا تظهر في الاختيار
+    expect(D.statusInfo('c_zzzzzz', cfg).unknown).toBe(true);                                        // مفتاح يتيم لا يُعرض خامًا
+    expect(D.statusInfo('c_zzzzzz', cfg).label).toBe('حالة محذوفة');
+    expect(D.statusKindOf(custom[0].key, cfg)).toBe('open');
+    const many = Array.from({length: 45}, (_, i) => ({id: `ID${String(i).padStart(18, '0')}`, value: `حالة ${i}`, order: i}));
+    expect(D.customStatusesFromRows(many).custom.length).toBe(D.MAX_CUSTOM_STATUSES);                // سقف الأمان
+  });
+  test('مركز العمل/قوائم: إنشاء حالة مخصصة — صف في lookups لا في التفضيلات، والمفتاح يثبت عند إعادة التسمية، والتحقق من الاسم', async () => {
+    const t = await isolated('create');
+    try {
+      const {office} = t;
+      const made = await ST.createCustomStatus(office, 'بانتظار الموكل');
+      const rows = await office.r.lookups.byIndex('category', D.STATUS_LOOKUP, 50);
+      expect(rows.length).toBe(1); expect(rows[0].value).toBe('بانتظار الموكل'); expect(rows[0].id).toBe(made.id);
+      expect(made.key).toBe(D.customStatusKey(made.id));
+      expect(K.getWorkConfig().customStatuses.map(x => x.label).join()).toBe('بانتظار الموكل');
+      await K.saveWorkConfig({});                                                                        // ما يُحفظ على الجهاز لا يحمل قائمة الحالات
+      expect(((prefs.get(K.WORK_CONFIG_KEY) || {}).customStatuses || []).length).toBe(0);
+      const task = await C.saveWorkItem(office, {title: 'WCST مهمة بحالة مخصصة', status: made.key, dueDate: today});
+      expect(task.status).toBe(made.key);
+      const renamed = await ST.renameCustomStatus(office, made.id, 'بانتظار رد الموكل');
+      expect(renamed.key).toBe(made.key);                                                                // إعادة التسمية لا تفكّ الارتباط
+      expect(K.getWorkConfig().customStatuses[0].label).toBe('بانتظار رد الموكل');
+      const item = await Q.getWorkItem(office, task.id);
+      expect(item.status).toBe(made.key); expect(item.statusLabel).toBe('بانتظار رد الموكل');
+      expect(D.isOpenStatus(item.status, K.getWorkConfig())).toBe(true);
+      for (const [name, part] of [['مكتمل', 'أساسية'], ['مكتّمل', 'أساسية'], ['مؤرشف', 'أساسية'], ['  بانتظار   رد الموكل ', 'موجود'], ['', 'مطلوب'], ['ا'.repeat(31), 'أطول']]) {
+        const error = await rejects(() => ST.createCustomStatus(office, name));
+        expect(String(error.message).includes(part)).toBe(true);
+      }
+      expect((await office.r.lookups.byIndex('category', D.STATUS_LOOKUP, 50)).length).toBe(1);           // الرفض لا يترك صفوفًا
+    } finally { t.done(); }
+  });
+  test('مركز العمل/قوائم: حذف الحالة المخصصة منطقي — تتقاعد وتبقى مقروءة للمهام القديمة ولا يُحجب تعديلها', async () => {
+    const t = await isolated('retire');
+    try {
+      const {office} = t;
+      const made = await ST.createCustomStatus(office, 'حالة ستُحذف');
+      const task = await C.saveWorkItem(office, {title: 'WCST مهمة بحالة ستتقاعد', status: made.key, dueDate: today});
+      await ST.removeCustomStatus(office, made.id);
+      const cfg = K.getWorkConfig();
+      expect(cfg.customStatuses.some(x => x.key === made.key)).toBe(false);
+      expect(cfg.retiredStatuses.some(x => x.key === made.key)).toBe(true);
+      const row = (await office.r.lookups.byIndexRaw('category', D.STATUS_LOOKUP, 50)).find(r => r.id === made.id);
+      expect(row.isDeleted).toBe(true);                                                                   // حذف منطقي: الصف باقٍ
+      const item = await Q.getWorkItem(office, task.id);
+      expect(item.status).toBe(made.key); expect(item.statusLabel).toBe('حالة ستُحذف (محذوفة)');
+      expect(D.statusKindOf(item.status, cfg)).toBe('open');
+      const edited = await C.saveWorkItem(office, {title: 'WCST مهمة معدّلة بعد التقاعد'}, task.id);        // التعديل لا يُرفض ولا يغيّر الحالة
+      expect(edited.status).toBe(made.key); expect(edited.title).toBe('WCST مهمة معدّلة بعد التقاعد');
+      const other = await C.saveWorkItem(office, {title: 'WCST أخرى', dueDate: today});
+      expect((await rejects(() => C.setItemStatus(office, other.id, made.key))).message.includes('محذوفة')).toBe(true);   // اختيارها لمهمة أخرى مرفوض
+      expect(Boolean(await rejects(() => C.saveWorkItem(office, {title: 'WCST ثالثة', status: made.key})))).toBe(true);
+      const probe = [{k: 'status', opts: []}];
+      expect(D.workItemFieldOverrides(probe, cfg, item)[0].opts.some(([k]) => k === made.key)).toBe(true);  // تبقى خيارًا ظاهرًا لمهمتها فقط
+      expect(D.workItemFieldOverrides(probe, cfg, null)[0].opts.some(([k]) => k === made.key)).toBe(false);
+      expect(D.mergeStatuses(cfg).some(x => x.key === made.key)).toBe(false);
+    } finally { t.done(); }
+  });
+  test('مركز العمل/قوائم: مسار «القوائم» العام يضيف ويعيد التسمية ويحذف حالات المهام نفسها', async () => {
+    const t = await isolated('lists');
+    try {
+      const {office} = t;
+      expect(Boolean(LOOKUP_CATEGORIES[D.STATUS_LOOKUP])).toBe(true);                                    // الفئة ظاهرة في الإعدادات ← القوائم
+      await ST.ensureWorkStatuses(office);
+      expect(ST.customStatusSnapshot().fresh).toBe(true);
+      const row = await saveLookupValue(office, D.STATUS_LOOKUP, 'عبر القوائم');                         // كما تفعل شاشة القوائم
+      expect(ST.customStatusSnapshot().fresh).toBe(false);                                                // أُبطلت اللقطة بحدث التغيير
+      await ST.ensureWorkStatuses(office);
+      const key = D.customStatusKey(row.id);
+      expect(K.getWorkConfig().customStatuses.map(x => x.key).join()).toBe(key);
+      expect(D.statusInfo(key, K.getWorkConfig()).kind).toBe('open');
+      // الإضافة من القوائم مباشرةً تخضع لقاعدة الاسم نفسها (خطاف الفئة): لا اسم حالة أساسية ولا تكرار بعد التطبيع ولا 31 حرفًا.
+      for (const [bad, part] of [['مكتمل', 'أساسية'], ['ملغي', 'أساسية'], ['  مؤرشف ', 'أساسية'], ['عبر   القوائم', 'موجود'], ['ا'.repeat(31), 'أطول']]) {
+        const error = await rejects(() => saveLookupValue(office, D.STATUS_LOOKUP, bad));
+        expect(Boolean(error) && String(error.message).includes(part)).toBe(true);
+      }
+      expect((await office.r.lookups.byIndex('category', D.STATUS_LOOKUP, 50)).length).toBe(1);
+      await saveLookupValue(office, 'workItemType', 'مكتمل');                                              // فئة أخرى لا تتأثر بقاعدة الحالات
+      await saveLookupValue(office, D.STATUS_LOOKUP, 'عبر القوائم (معدّلة)', row.id);
+      await ST.ensureWorkStatuses(office);
+      expect(K.getWorkConfig().customStatuses[0].key).toBe(key); expect(K.getWorkConfig().customStatuses[0].label).toBe('عبر القوائم (معدّلة)');
+      await removeLookupValue(office, row.id);
+      await ST.ensureWorkStatuses(office);
+      expect(K.getWorkConfig().customStatuses.length).toBe(0); expect(K.getWorkConfig().retiredStatuses[0].key).toBe(key);
+    } finally { t.done(); }
+  });
+  test('مركز العمل/قوائم: سقف الحالات المخصصة يُفرض على كل مسارات الإضافة ولا تُحتسب فيه المحذوفة', async () => {
+    const t = await isolated('cap');
+    try {
+      const {office} = t;
+      for (let i = 1; i <= D.MAX_CUSTOM_STATUSES; i++) await saveLookupValue(office, D.STATUS_LOOKUP, `حالة رقم ${i}`);
+      expect(String((await rejects(() => saveLookupValue(office, D.STATUS_LOOKUP, 'حالة زائدة'))).message).includes('الحد الأقصى')).toBe(true);
+      expect(String((await rejects(() => ST.createCustomStatus(office, 'حالة زائدة أخرى'))).message).includes('الحد الأقصى')).toBe(true);
+      const rows = await office.r.lookups.byIndex('category', D.STATUS_LOOKUP, 100);
+      expect(rows.length).toBe(D.MAX_CUSTOM_STATUSES);
+      await ST.removeCustomStatus(office, rows[0].id);
+      await saveLookupValue(office, D.STATUS_LOOKUP, 'حالة بعد الحذف');                                    // مقبولة: المتقاعدة خارج السقف
+      await ST.refreshWorkStatuses(office);
+      expect(K.getWorkConfig().customStatuses.length).toBe(D.MAX_CUSTOM_STATUSES);
+      expect(K.getWorkConfig().retiredStatuses.length).toBe(1);
+      await ST.renameCustomStatus(office, rows[1].id, 'حالة رقم 2 معدّلة');                                 // إعادة التسمية لا تتأثر بالسقف
+    } finally { t.done(); }
+  });
+  test('مركز العمل/قوائم: النسخة الاحتياطية تحمل تعريف الحالات المخصصة (والمتقاعدة) وتُستعاد بالمفاتيح نفسها وتبقى المهام مرتبطة', async () => {
+    const a = await isolated('bk-a'), b = await isolated('bk-b');
+    try {
+      const live = await ST.createCustomStatus(a.office, 'حالة للنسخ الاحتياطي');
+      const gone = await ST.createCustomStatus(a.office, 'حالة محذوفة قبل النسخ');
+      const retiredTask = await C.saveWorkItem(a.office, {title: 'WCST مهمة بحالة متقاعدة', status: gone.key, dueDate: today});
+      await ST.removeCustomStatus(a.office, gone.id);
+      const task = await C.saveWorkItem(a.office, {title: 'WCST مهمة للنسخ', status: live.key, dueDate: today});
+      const payload = await exportDatabase(a.office.ctx);
+      await importDatabase(b.office.ctx, payload);
+      await ST.refreshWorkStatuses(b.office);
+      const cfg = K.getWorkConfig();
+      expect(cfg.customStatuses.map(x => x.key).join()).toBe(live.key);
+      expect(cfg.retiredStatuses.map(x => x.key).join()).toBe(gone.key);
+      const restored = await Q.getWorkItem(b.office, task.id);
+      expect(restored.status).toBe(live.key); expect(restored.statusLabel).toBe('حالة للنسخ الاحتياطي');
+      expect((await Q.getWorkItem(b.office, retiredTask.id)).statusLabel).toBe('حالة محذوفة قبل النسخ (محذوفة)');
+    } finally { a.done(); b.done(); }
+  });
+  test('مركز العمل/قوائم: لا تتسرب الحالات بين قاعدتين، واستعادة نسخة فوق الاتصال الحالي تُبطل اللقطة', async () => {
+    const a = await isolated('iso-a'), b = await isolated('iso-b');
+    try {
+      await ST.createCustomStatus(a.office, 'حالة المكتب أ');
+      await ST.ensureWorkStatuses(a.office);
+      expect(K.getWorkConfig().customStatuses.map(x => x.label).join()).toBe('حالة المكتب أ');
+      await ST.ensureWorkStatuses(b.office);                                                              // قاعدة أخرى برمز مختلف
+      expect(K.getWorkConfig().customStatuses.length).toBe(0);
+      await ST.ensureWorkStatuses(a.office);
+      expect(K.getWorkConfig().customStatuses.length).toBe(1);
+      // استعادة فوق الاتصال الحالي (databases.js) تعيد كتابة lookups بلا entity:changed، فيُطلق المستدعي db:restored.
+      const payload = await exportDatabase(a.office.ctx);
+      await ST.createCustomStatus(a.office, 'حالة أضيفت بعد النسخة');
+      expect(K.getWorkConfig().customStatuses.length).toBe(2);
+      await importDatabase(a.office.ctx, payload);
+      expect(K.getWorkConfig().customStatuses.length).toBe(2);                                            // اللقطة قديمة قبل الإعلان
+      events.emit('db:restored', {token: a.office.ctx.token}, false);
+      await ST.ensureWorkStatuses(a.office);
+      expect(K.getWorkConfig().customStatuses.map(x => x.label).join()).toBe('حالة المكتب أ');
+    } finally { a.done(); b.done(); }
   });
   test('مركز العمل/مجال: تصنيف المواعيد وفئات التأخر', () => {
     expect(D.classifyDue(addDays(today, -1), today)).toBe('overdue'); expect(D.classifyDue(today, today)).toBe('today'); expect(D.classifyDue(tomorrow, today)).toBe('tomorrow');

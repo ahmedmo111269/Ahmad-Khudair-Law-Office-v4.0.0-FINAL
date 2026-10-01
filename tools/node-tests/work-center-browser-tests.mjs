@@ -656,15 +656,22 @@ async function functional() {
     await setSearch(page, '');
   });
 
-  await verify('الحالات القابلة للتوسعة: إضافة حالة مخصصة من الإعدادات تظهر في كانبان والمرشحات ويمكن نقل عنصر إليها', async () => {
+  const custom = {};   // مفتاح الحالة المخصصة ومعرّف مهمتها بين الخطوات الثلاث التالية
+  await verify('الحالات القابلة للتوسعة: إضافة حالة مخصصة من الإعدادات تُكتب في Lookups (لا التفضيلات) وتظهر في كانبان والمرشحات ويمكن نقل عنصر إليها', async () => {
     await page.click('[data-wc-more-menu]'); await page.click('.wc-sheet [data-i="9"]'); await page.waitForSelector('.wc-settings');
     await page.locator('.wc-settings details').nth(1).locator('summary').click();
-    await page.fill('[data-new-st-label]', 'تحت المراجعة'); await page.selectOption('[data-new-st-kind]', 'open'); await page.click('[data-add-custom]');
+    assert.equal(await page.locator('[data-new-st-kind]').count(), 0, 'كل الحالات المخصصة مفتوحة: لا اختيار نوع');
+    await page.fill('[data-new-st-label]', 'تحت المراجعة'); await page.click('[data-add-custom]');
     await page.click('.wc-settings [type=submit]'); await ready(page);
     const cfg = await page.evaluate(async () => (await import('/js/services/work-config.js')).getWorkConfig().customStatuses);
     assert.equal(cfg.length, 1); assert.equal(cfg[0].label, 'تحت المراجعة'); assert.equal(cfg[0].kind, 'open');
-    const key = cfg[0].key;
-    const id = await page.evaluate(async d => { const m = await import('/js/services/work-items.js'); return (await m.saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: 'WCTEST للحالة المخصصة', dueDate: d})).id; }, today());
+    const key = custom.key = cfg[0].key;
+    const rows = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.lookups.byIndex('category', 'workItemStatus', 50));
+    assert.equal(rows.length, 1); assert.equal(rows[0].value, 'تحت المراجعة');          // الصف في قاعدة المكتب (يدخل النسخ الاحتياطي)
+    assert.equal(key, `c_${rows[0].id.toLowerCase()}`);                                 // المفتاح مشتق من معرّف الصف لا من الاسم
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('akl:prefs:ui:workcenter-config') || '{}'));
+    assert.ok(!(saved.customStatuses || []).length, 'تفضيلات الجهاز لا تحمل قائمة الحالات المخصصة');
+    const id = custom.id = await page.evaluate(async d => { const m = await import('/js/services/work-items.js'); return (await m.saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: 'WCTEST للحالة المخصصة', dueDate: d})).id; }, today());
     await page.click('[data-wc-toggle-filters]');
     assert.ok((await page.locator('#wc-filters').textContent()).includes('تحت المراجعة'), 'الحالة المخصصة في المرشحات');
     await page.click('[data-wc-toggle-filters]');
@@ -674,6 +681,49 @@ async function functional() {
     assert.equal((await dbGet(page, 'workItems', id)).status, key);
     assert.equal(await page.locator(`.wc-col[data-col="${key}"] .wc-card[data-wc-id="${id}"]`).count(), 1);
     await selectView(page, 'cards'); await setSearch(page, '');
+  });
+
+  await verify('الحالات المخصصة: حذفها من الإعدادات منطقي — تتقاعد وتبقى مهمتها مقروءة في عمود «(محذوفة)» ولا تُعرض خيارًا ولا تُقبل هدفًا', async () => {
+    const {key, id} = custom;
+    await page.click('[data-wc-more-menu]'); await page.click('.wc-sheet [data-i="9"]'); await page.waitForSelector('.wc-settings');
+    await page.locator('.wc-settings details').nth(1).locator('summary').click();
+    await page.click('.wc-settings [data-cs-del="0"]');
+    await page.click('.wc-settings [type=submit]'); await ready(page);
+    const cfg = await page.evaluate(async () => { const c = (await import('/js/services/work-config.js')).getWorkConfig(); return {live: c.customStatuses.length, retired: c.retiredStatuses.map(r => r.key)}; });
+    assert.equal(cfg.live, 0); assert.deepEqual(cfg.retired, [key]);
+    const row = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.lookups.byIndexRaw('category', 'workItemStatus', 50));
+    assert.equal(row.length, 1); assert.equal(row[0].isDeleted, true);                  // حذف منطقي: الصف باقٍ
+    assert.equal((await dbGet(page, 'workItems', id)).status, key);                      // المهمة لم تُمسّ
+    await useTask(page, 'WCTEST للحالة المخصصة'); await selectView(page, 'kanban');
+    const col = page.locator(`.wc-col[data-col="${key}"]`);
+    assert.equal(await col.count(), 1, 'عمود للحالة المتقاعدة ما دامت عليها عناصر');
+    assert.ok((await col.locator('.wc-col-h').textContent()).includes('(محذوفة)'));
+    assert.equal(await col.locator(`.wc-card[data-wc-id="${id}"]`).count(), 1);
+    assert.equal(await col.locator('[data-drop]').count(), 0, 'لا إسقاط داخل عمود متقاعد');
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${id}"] select[data-wc-move] option[value="${key}"]`).count(), 0, 'المتقاعدة ليست هدف نقل');
+    await page.locator(`.wc-card[data-wc-id="${id}"] select[data-wc-move]`).selectOption('inProgress'); await ready(page);
+    assert.equal((await dbGet(page, 'workItems', id)).status, 'inProgress');
+    assert.equal(await page.locator(`.wc-col[data-col="${key}"]`).count(), 0, 'يختفي العمود حين لا تبقى عناصر');
+    await selectView(page, 'cards'); await setSearch(page, '');
+  });
+
+  await verify('القوائم: حالة تُضاف من الإعدادات ← القوائم الموجودة تظهر في مركز العمل (مرشحات وكانبان) دون إعادة تحميل الصفحة', async () => {
+    await page.evaluate(async () => { const app = window.__LAW_OFFICE_APP__; app.__settingsTab = 'general'; app.__lookupCat = 'workItemStatus'; await app.go('settings'); });
+    await page.waitForSelector('#lk-cat', {state: 'attached'});
+    const toggle = page.locator('.collapse-toggle[aria-label^="توسيع القسم: القوائم القابلة للتعديل"]');   // القسم مطويّ افتراضيًا (نظام الطيّ الموحّد)
+    if (await toggle.count()) await toggle.click();
+    await page.waitForSelector('#lk-cat', {state: 'visible'});
+    assert.equal(await page.locator('#lk-cat option[value="workItemStatus"]').count(), 1, 'الفئة ظاهرة في شاشة القوائم');
+    assert.equal(await page.locator('#lk-cat').inputValue(), 'workItemStatus');
+    await page.fill('#lk-add input[name="value"]', 'بانتظار الجهة'); await page.click('#lk-add button');
+    await page.waitForSelector('.lookup-list li .lk-val:has-text("بانتظار الجهة")');
+    await goWC(page);
+    await page.click('[data-wc-toggle-filters]');
+    assert.ok((await page.locator('#wc-filters').textContent()).includes('بانتظار الجهة'), 'في المرشحات');
+    await page.click('[data-wc-toggle-filters]');
+    await selectView(page, 'kanban');
+    assert.equal(await page.locator('.wc-col:has(h4:has-text("بانتظار الجهة"))').count(), 1, 'عمود كانبان للحالة المضافة من القوائم');
+    await selectView(page, 'cards');
   });
 
   await verify('القائمة (DataGrid): تحديد عدة صفوف وتنفيذ إجراء جماعي بنتيجة صادقة لكل عنصر', async () => {

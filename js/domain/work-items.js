@@ -7,6 +7,7 @@
 // • كل ما هنا قابل للاختبار دون قاعدة بيانات. القيم الظاهرة (تسميات/ألوان) تُدمج مع إعدادات المستخدم.
 // =====================================================================
 import {addDays} from '../core/clock.js';
+import {normalizeArabic} from '../core/search-normalizer.js';
 
 export const WORK_KIND = Object.freeze({native: 'native', overlay: 'overlay'});
 export const OVERLAY_SEP = '::';
@@ -41,6 +42,51 @@ export const DEFAULT_WORK_STATUSES = Object.freeze([
 export const CORE_STATUS_KEYS = Object.freeze(DEFAULT_WORK_STATUSES.map(s => s.key));
 export const ARCHIVED_LABEL = 'مؤرشف';
 export const STATUS_KINDS = Object.freeze({open: 'مفتوح', done: 'مكتمل', cancelled: 'ملغى'});
+
+// ---------- الحالات المخصصة (فئة workItemStatus في Lookups) ----------
+// التعريف يعيش في مخزن lookups داخل قاعدة المكتب (يدخل النسخ الاحتياطي ويتبع القاعدة لا الجهاز)، والمفتاح المخزَّن في السجلات
+// مشتق من معرّف صف القائمة فلا تنفكّ الروابط عند إعادة التسمية. كل الحالات المخصصة «مفتوحة»: الإنجاز والإلغاء حالتان أساسيتان
+// لهما حقولهما (completedAt/cancelledAt) ولا تُخزَّن قيمتهما كحالة مخصصة أبدًا. الحذف منطقي: تتقاعد الحالة وتبقى مقروءة للسجلات القديمة.
+export const STATUS_LOOKUP = 'workItemStatus';
+export const MAX_CUSTOM_STATUSES = 30;           // سقف أمان لعدد الأعمدة/الخيارات، لا قاعدة عمل
+export const MAX_STATUS_LABEL = 30;
+export const CUSTOM_STATUS_COLOR = '#475569';
+export const RETIRED_STATUS_COLOR = '#94a3b8';
+const CUSTOM_STATUS_KEY = /^c_[a-z0-9_]{1,24}$/;
+export const isCustomStatusKey = key => CUSTOM_STATUS_KEY.test(String(key || ''));
+export const customStatusKey = id => `c_${String(id ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(-22)}`;
+
+/**
+ * سبب رفض اسم حالة مخصصة، أو '' إن صلح (نقية بلا قراءة قاعدة). مصدر واحد للقاعدة: يستدعيها خطاف `check` لفئة workItemStatus في
+ * القوائم فتسري على الإضافة من «الإعدادات ← القوائم» وعلى خدمة الحالات معًا. `existing` صفوف الفئة النشطة ({id, value}).
+ */
+export function statusLabelProblem(label, {existing = [], exceptId = null} = {}) {
+  const name = String(label ?? '').replace(/\s+/g, ' ').trim();
+  if (!name) return 'اسم الحالة مطلوب.';
+  if (name.length > MAX_STATUS_LABEL) return `اسم الحالة أطول من ${MAX_STATUS_LABEL} حرفًا.`;
+  const norm = normalizeArabic(name);
+  if ([...DEFAULT_WORK_STATUSES.map(status => status.label), ARCHIVED_LABEL].some(core => normalizeArabic(core) === norm)) return 'الاسم مستخدم لحالة أساسية.';
+  const others = (Array.isArray(existing) ? existing : []).filter(row => row && row.id !== exceptId);
+  if (others.some(row => normalizeArabic(row.value ?? row.label) === norm)) return 'الاسم موجود بالفعل بين الحالات المخصصة.';
+  if (!exceptId && others.length >= MAX_CUSTOM_STATUSES) return `الحد الأقصى للحالات المخصصة ${MAX_CUSTOM_STATUSES}.`;
+  return '';
+}
+
+/** صفوف lookups (فئة workItemStatus، النشطة والمحذوفة منطقيًا) ← {custom: النشطة مرتبة، retired: المتقاعدة}. نقية بلا قراءة قاعدة. */
+export function customStatusesFromRows(rows = []) {
+  const list = (Array.isArray(rows) ? rows : []).filter(row => row && row.id && String(row.value ?? '').trim());
+  list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.value).localeCompare(String(b.value), 'ar'));
+  const custom = [], retired = [], seen = new Set(CORE_STATUS_KEYS);
+  for (const row of list) {
+    const key = customStatusKey(row.id);
+    if (!isCustomStatusKey(key) || seen.has(key)) continue;
+    seen.add(key);
+    const label = String(row.value).trim().slice(0, MAX_STATUS_LABEL);
+    if (row.isDeleted) { if (retired.length < 200) retired.push({key, label, id: row.id}); }
+    else if (custom.length < MAX_CUSTOM_STATUSES) custom.push({key, label, kind: 'open', id: row.id});
+  }
+  return {custom, retired};
+}
 
 // ---------- الأولويات ----------
 // اللون وحده لا يكفي: لكل مستوى أيضًا رمز نصي (mark) وأيقونة وتسمية.
@@ -146,9 +192,14 @@ export const keyDate = key => String(key || '').slice(0, 10);
 export function mergeStatuses(config = {}) {
   const overrides = config.statuses || {};
   const base = DEFAULT_WORK_STATUSES.map(status => ({...status, ...cleanLook(overrides[status.key])}));
-  const custom = (Array.isArray(config.customStatuses) ? config.customStatuses : [])
-    .filter(s => s && /^c_[a-z0-9_]{1,24}$/.test(String(s.key || '')) && String(s.label || '').trim() && STATUS_KINDS[s.kind])
-    .map(s => ({key: s.key, label: String(s.label).trim().slice(0, 30), kind: s.kind, icon: s.kind === 'done' ? '✓' : s.kind === 'cancelled' ? '✕' : '●', color: validColor(s.color) || '#475569', custom: true}));
+  const seen = new Set(CORE_STATUS_KEYS), custom = [];
+  for (const s of Array.isArray(config.customStatuses) ? config.customStatuses : []) {
+    if (!s || !isCustomStatusKey(s.key) || seen.has(s.key) || !String(s.label || '').trim()) continue;
+    seen.add(s.key);
+    // التسمية من Lookups (مشتركة في المكتب)؛ اللون فقط تخصيص عرض على الجهاز (مثل ألوان الحالات الأساسية).
+    custom.push({key: s.key, label: String(s.label).trim().slice(0, MAX_STATUS_LABEL), kind: 'open', icon: '●',
+      color: validColor(overrides[s.key]?.color) || validColor(s.color) || CUSTOM_STATUS_COLOR, custom: true, id: s.id});
+  }
   return [...base, ...custom];
 }
 export function mergePriorities(config = {}) {
@@ -168,7 +219,12 @@ function cleanLook(value) {
 export const validColor = value => /^#[0-9a-fA-F]{6}$/.test(String(value || '')) ? String(value).toLowerCase() : '';
 
 export function statusInfo(key, config = {}) {
-  return mergeStatuses(config).find(s => s.key === key) || {key, label: String(key || 'غير معروف'), kind: 'open', icon: '●', color: '#475569', unknown: true};
+  const found = mergeStatuses(config).find(s => s.key === key);
+  if (found) return found;
+  // حالة مخصصة حُذفت منطقيًا: تبقى مقروءة للسجلات القديمة (بتسميتها) ولا تُعرض في الاختيار.
+  const retired = (Array.isArray(config.retiredStatuses) ? config.retiredStatuses : []).find(s => s && s.key === key);
+  if (retired) return {key, label: `${retired.label} (محذوفة)`, kind: 'open', icon: '●', color: RETIRED_STATUS_COLOR, custom: true, retired: true};
+  return {key, label: isCustomStatusKey(key) ? 'حالة محذوفة' : String(key || 'غير معروف'), kind: 'open', icon: '●', color: CUSTOM_STATUS_COLOR, unknown: true};
 }
 export function statusKindOf(key, config = {}) {
   return statusInfo(key, config).kind;
@@ -356,8 +412,11 @@ export function workSearchFields(item = {}, refs = {}) {
 }
 
 /** يُبدّل خيارات الأولوية/الحالة في تعريف نموذج المهمة بالتسميات المخصصة (لا يغيّر ENTITIES الثابت). */
-export function workItemFieldOverrides(fields, config = {}) {
+export function workItemFieldOverrides(fields, config = {}, current = null) {
   const priorities = mergePriorities(config).map(p => [p.key, `${p.icon} ${p.label}`]);
   const statuses = mergeStatuses(config).map(s => [s.key, `${s.icon} ${s.label}`]);
+  // مهمة حالتها الحالية متقاعدة/محذوفة: تبقى خيارًا ظاهرًا كي لا يغيّرها الحفظ بصمت إلى أول خيار في القائمة.
+  const held = current?.status ? statusInfo(current.status, config) : null;
+  if (held && (held.retired || held.unknown) && !statuses.some(([key]) => key === held.key)) statuses.push([held.key, `${held.icon} ${held.label}`]);
   return fields.map(field => field.k === 'priority' ? {...field, opts: priorities} : field.k === 'status' ? {...field, opts: statuses} : field);
 }

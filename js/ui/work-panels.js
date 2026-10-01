@@ -8,11 +8,12 @@ import {toast} from './toast.js';
 import {card, cardEmpty, statusBadge} from './card.js';
 import {formatDate} from '../core/format.js';
 import {normalizeError, userError} from '../core/errors.js';
-import {mergePriorities, mergeStatuses, STATUS_KINDS} from '../domain/work-items.js';
+import {mergePriorities, mergeStatuses} from '../domain/work-items.js';
 import {allWorkSources} from '../domain/work-sources.js';
 import {ATTENTION_RULES, attentionItems, productivity, dailyReview, weeklyReview, buildSuggestions} from '../services/work-insights.js';
 import {getWorkConfig, saveWorkConfig, resetWorkConfig, listWorkViews, saveWorkView, removeWorkView, sanitizeWorkState} from '../services/work-config.js';
 import * as C from '../services/work-items.js';
+import {createCustomStatus, renameCustomStatus, removeCustomStatus} from '../services/work-statuses.js';
 import {chip} from './work-card.js';
 import {openLinkedTaskForm} from './work-actions.js';
 
@@ -134,10 +135,12 @@ export function openWorkSettings(rt) {
   const box = modal(`<h2 class="modal-title">إعدادات مركز العمل</h2>
    <form class="wc-settings" novalidate>
     <details open data-collapse-ignore><summary>مستويات الأولوية (التسمية واللون — الرمز والأيقونة ثابتان)</summary>${pr.map(p => row('pri', p)).join('')}</details>
-    <details data-collapse-ignore><summary>الحالات (التسمية واللون)</summary>${st.map(s => row('st', s)).join('')}
-      <div class="wc-custom-st"><h4>حالات مخصصة</h4><div id="wc-custom-list">${st.filter(s => s.custom).map(s => `<div class="wc-set-row" data-custom="${esc(s.key)}"><span>${esc(s.label)} — ${esc(STATUS_KINDS[s.kind])}</span><button type="button" class="link" data-del-custom="${esc(s.key)}">حذف</button></div>`).join('') || '<p class="muted small">لا حالات مخصصة.</p>'}</div>
-       <div class="wc-set-row"><input data-new-st-label placeholder="اسم حالة جديدة" maxlength="30"><select data-new-st-kind aria-label="نوع الحالة">${Object.entries(STATUS_KINDS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select><input type="color" data-new-st-color value="#475569" aria-label="لون الحالة"><button type="button" class="ghost small" data-add-custom>إضافة</button></div></div></details>
-    <details data-collapse-ignore><summary>المصادر المعروضة في مركز العمل</summary>${allWorkSources().map(s => `<label class="wc-check-row"><input type="checkbox" data-source="${esc(s.type)}" ${(config.sources[s.type] ?? s.defaultEnabled) ? 'checked' : ''}> ${esc(s.icon)} ${esc(s.label)}${Number.isFinite(s.lookbackDays) ? ` <small class="muted">— المتأخر حتى <input type="number" min="7" max="3650" data-lookback="${esc(s.type)}" value="${config.lookback[s.type] ?? s.lookbackDays}" aria-label="عمق المتأخر بالأيام"> يومًا</small>` : ''}</label>`).join('')}<p class="muted small">المهام المستقلة تظهر دائمًا. الأنواع والوسوم وأسباب التأجيل تُدار من الإعدادات ← القوائم.</p></details>
+    <details data-collapse-ignore><summary>الحالات (التسمية واللون)</summary>${st.filter(s => !s.custom).map(s => row('st', s)).join('')}
+      <div class="wc-custom-st"><h4>حالات مخصصة</h4>
+       <p class="muted small">حالات عمل «مفتوحة» تُضاف إلى الأساسية (الإنجاز والإلغاء حالتان أساسيتان). تُحفظ في قاعدة المكتب وتُدار أيضًا من الإعدادات ← القوائم ← «حالات المهام المخصصة»؛ واللون تخصيص عرض لهذا الجهاز.</p>
+       <div id="wc-custom-list"></div>
+       <div class="wc-set-row"><input data-new-st-label placeholder="اسم حالة جديدة" maxlength="30" aria-label="اسم حالة جديدة"><input type="color" data-new-st-color value="#475569" aria-label="لون الحالة"><button type="button" class="ghost small" data-add-custom>إضافة</button></div></div></details>
+    <details data-collapse-ignore><summary>المصادر المعروضة في مركز العمل</summary>${allWorkSources().map(s => `<label class="wc-check-row"><input type="checkbox" data-source="${esc(s.type)}" ${(config.sources[s.type] ?? s.defaultEnabled) ? 'checked' : ''}> ${esc(s.icon)} ${esc(s.label)}${Number.isFinite(s.lookbackDays) ? ` <small class="muted">— المتأخر حتى <input type="number" min="7" max="3650" data-lookback="${esc(s.type)}" value="${config.lookback[s.type] ?? s.lookbackDays}" aria-label="عمق المتأخر بالأيام"> يومًا</small>` : ''}</label>`).join('')}<p class="muted small">المهام المستقلة تظهر دائمًا. الأنواع والوسوم وأسباب التأجيل والحالات المخصصة تُدار من الإعدادات ← القوائم.</p></details>
     <details data-collapse-ignore><summary>القواعد الذكية والإشعارات</summary>${ATTENTION_RULES.map(r => `<label class="wc-check-row"><input type="checkbox" data-rule="${esc(r.key)}" ${config.attention.rules[r.key] === false ? '' : 'checked'}> ${esc(r.label)}</label>`).join('')}
       <label>ملف «بلا نشاط» بعد (يومًا)<input type="number" min="7" max="730" data-stale value="${config.staleFileDays}"></label>
       <label>خلال كم يومًا يُعدّ العنصر عاجلًا<input type="number" min="0" max="14" data-urgent value="${config.urgentWithinDays}"></label>
@@ -146,20 +149,41 @@ export function openWorkSettings(rt) {
       <label>أقصى عدد تنبيهات ظاهرة<input type="number" min="1" max="6" data-notify-max value="${config.notifications.maxVisible}"></label></details>
     <div class="form-actions"><button class="primary" type="submit">حفظ الإعدادات</button><button class="ghost" type="button" data-reset>استعادة الافتراضي</button><button class="ghost" type="button" data-layout>⚙ ترتيب الأقسام وعرض الصفحة</button></div>
    </form>`);
-  const customs = [...(config.customStatuses || [])];
-  const redrawCustom = () => { box.querySelector('#wc-custom-list').innerHTML = customs.map(s => `<div class="wc-set-row" data-custom="${esc(s.key)}"><span>${esc(s.label)} — ${esc(STATUS_KINDS[s.kind])}</span><button type="button" class="link" data-del-custom="${esc(s.key)}">حذف</button></div>`).join('') || '<p class="muted small">لا حالات مخصصة.</p>'; };
+  // ---------- الحالات المخصصة: نموذج في الذاكرة يُطبَّق على Lookups عند «حفظ الإعدادات» ----------
+  const colorOf = key => st.find(s => s.key === key)?.color || '#475569';
+  const customs = (config.customStatuses || []).map(s => ({id: s.id, key: s.key, label: s.label, orig: s.label, color: colorOf(s.key), isNew: false, removed: false}));
+  const customRow = (m, i) => m.removed ? '' : `<div class="wc-set-row" data-cs="${i}"><span class="wc-set-ic" aria-hidden="true">●</span><label><span class="sr-only">تسمية الحالة المخصصة</span><input data-cs-label="${i}" value="${esc(m.label)}" maxlength="30"></label><label><span class="sr-only">لون ${esc(m.label)}</span><input type="color" data-cs-color="${i}" value="${esc(m.color)}"></label>${m.isNew ? '<small class="muted">(جديدة)</small>' : ''}<button type="button" class="link" data-cs-del="${i}">حذف</button></div>`;
+  const redrawCustom = () => { box.querySelector('#wc-custom-list').innerHTML = customs.map(customRow).join('') || '<p class="muted small">لا حالات مخصصة.</p>'; };
+  redrawCustom();
+  box.addEventListener('input', e => {
+    const label = e.target.closest?.('[data-cs-label]'), color = e.target.closest?.('[data-cs-color]');
+    if (label) customs[Number(label.dataset.csLabel)].label = label.value;
+    if (color) customs[Number(color.dataset.csColor)].color = color.value;
+  });
+  box.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches?.('[data-new-st-label]')) { e.preventDefault(); box.querySelector('[data-add-custom]').click(); } });   // Enter يضيف الحالة ولا يحفظ النموذج كله
   box.addEventListener('click', e => {
-    const del = e.target.closest('[data-del-custom]');
-    if (del) { customs.splice(customs.findIndex(s => s.key === del.dataset.delCustom), 1); redrawCustom(); }
+    const del = e.target.closest('[data-cs-del]');
+    if (del) {
+      const i = Number(del.dataset.csDel);
+      if (customs[i].isNew) customs.splice(i, 1); else customs[i].removed = true;
+      redrawCustom();
+      return;
+    }
     if (e.target.closest('[data-add-custom]')) {
-      const label = box.querySelector('[data-new-st-label]').value.trim();
+      const input = box.querySelector('[data-new-st-label]'), label = input.value.trim();
       if (!label) return toast('اكتب اسم الحالة.', 'error');
-      const key = `c_${Date.now().toString(36)}`;
-      customs.push({key, label, kind: box.querySelector('[data-new-st-kind]').value, color: box.querySelector('[data-new-st-color]').value});
-      box.querySelector('[data-new-st-label]').value = ''; redrawCustom();
+      customs.push({id: null, key: null, label, orig: label, color: box.querySelector('[data-new-st-color]').value, isNew: true, removed: false});
+      input.value = ''; redrawCustom();
     }
   });
-  box.querySelector('[data-reset]').onclick = async () => { if (await confirmBox('استعادة كل إعدادات مركز العمل الافتراضية؟ لا يتأثر أي سجل.', {okText: 'استعادة'})) { await resetWorkConfig(); await rt.onSettingsChanged(); toast('تمت الاستعادة'); } };
+  /** تطبيق تغييرات الحالات المخصصة على Lookups بالترتيب (حذف ← إعادة تسمية ← إنشاء)؛ كل خطوة ناجحة تُثبَّت في النموذج فتُستأنف بلا تكرار إن فشلت إحداها. */
+  const applyCustomStatuses = async () => {
+    for (const m of [...customs]) if (m.removed && !m.isNew) { await removeCustomStatus(rt.office, m.id); customs.splice(customs.indexOf(m), 1); }
+    for (const m of customs) if (!m.isNew && m.label.trim() !== m.orig) { await renameCustomStatus(rt.office, m.id, m.label); m.orig = m.label.trim(); }
+    for (const m of customs) if (m.isNew) { const made = await createCustomStatus(rt.office, m.label); Object.assign(m, {id: made.id, key: made.key, orig: made.label, label: made.label, isNew: false}); }
+    return Object.fromEntries(customs.map(m => [m.key, {color: m.color}]));
+  };
+  box.querySelector('[data-reset]').onclick = async () => { if (await confirmBox('استعادة كل إعدادات مركز العمل الافتراضية (التسميات والألوان والمصادر والقواعد)؟ لا يتأثر أي سجل، وتبقى الحالات المخصصة في قاعدة المكتب.', {okText: 'استعادة'})) { await resetWorkConfig(); await rt.onSettingsChanged(); toast('تمت الاستعادة'); } };
   box.querySelector('[data-layout]').onclick = () => { closeModal(); rt.openLayout(); };
   box.querySelector('form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -170,7 +194,10 @@ export function openWorkSettings(rt) {
     q('[data-source]').forEach(i => { sources[i.dataset.source] = i.checked; });
     q('[data-lookback]').forEach(i => { lookback[i.dataset.lookback] = Number(i.value); });
     q('[data-rule]').forEach(i => { rules[i.dataset.rule] = i.checked; });
-    await saveWorkConfig({priorities, statuses: Object.fromEntries(Object.entries(statuses).filter(([k]) => !k.startsWith('c_'))), customStatuses: customs.map(c => ({...c, ...(statuses[c.key] || {})})), sources, lookback, attention: {rules},
+    let customColors = {};
+    try { customColors = await applyCustomStatuses(); }
+    catch (error) { redrawCustom(); return toast(userError(normalizeError(error)) || 'تعذر حفظ الحالات المخصصة', 'error'); }
+    await saveWorkConfig({priorities, statuses: {...statuses, ...customColors}, sources, lookback, attention: {rules},
       staleFileDays: Number(box.querySelector('[data-stale]').value), urgentWithinDays: Number(box.querySelector('[data-urgent]').value), upcomingDays: Number(box.querySelector('[data-upcoming]').value),
       notifications: {enabled: box.querySelector('[data-notify]').checked, maxVisible: Number(box.querySelector('[data-notify-max]').value)}});
     closeModal(); toast('تم حفظ إعدادات مركز العمل'); await rt.onSettingsChanged();

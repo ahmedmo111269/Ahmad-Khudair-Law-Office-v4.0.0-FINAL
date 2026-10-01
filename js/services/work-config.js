@@ -1,6 +1,7 @@
 // =====================================================================
 // مركز العمل — الإعدادات والحالة المحفوظة (تفضيلات المستخدم عبر prefs الموجودة؛ بلا مخزن/نظام إعدادات جديد).
-//   ui:workcenter-config : تسميات/ألوان الحالات والأولويات، المصادر المفعّلة، عتبات القواعد الذكية.
+//   ui:workcenter-config : تسميات/ألوان الحالات الأساسية والأولويات، ألوان الحالات المخصصة، المصادر المفعّلة، عتبات القواعد الذكية.
+//   الحالات المخصصة نفسها (الاسم والترتيب) في Lookups داخل قاعدة المكتب (work-statuses.js) وتُدمج في getWorkConfig() من لقطة الذاكرة.
 //   ui:workcenter-state  : آخر نطاق/عرض/فلاتر (يُستعاد بعد التحديث).
 //   ui:workcenter-views  : العروض المحفوظة (Saved Views).
 // طي/فتح الأقسام يُحفظ في نظام collapse-state الموجود، وإعدادات الجدول في تفضيلات DataGrid الموجودة.
@@ -8,7 +9,8 @@
 import {prefs} from '../core/preferences.js';
 import {uid} from '../core/id.js';
 import {Clock} from '../core/clock.js';
-import {validColor, PRIORITY_KEYS, WORK_RANGES, WORK_VIEWS, CORE_STATUS_KEYS, STATUS_KINDS, DAY_LAYOUTS} from '../domain/work-items.js';
+import {validColor, PRIORITY_KEYS, WORK_RANGES, WORK_VIEWS, CORE_STATUS_KEYS, DAY_LAYOUTS, isCustomStatusKey} from '../domain/work-items.js';
+import {customStatusSnapshot} from './work-statuses.js';
 import {allWorkSources} from '../domain/work-sources.js';
 
 export const WORK_CONFIG_KEY = 'ui:workcenter-config';
@@ -17,7 +19,7 @@ export const WORK_VIEWS_KEY = 'ui:workcenter-views';
 export const MAX_SAVED_VIEWS = 30;
 
 export const DEFAULT_WORK_CONFIG = Object.freeze({
-  version: 1, statuses: {}, customStatuses: [], priorities: {}, sources: {}, lookback: {},
+  version: 1, statuses: {}, customStatuses: [], retiredStatuses: [], priorities: {}, sources: {}, lookback: {},
   staleFileDays: 30, summaryWindowDays: 45, upcomingDays: 14, urgentWithinDays: 2,
   attention: {rules: {}}, notifications: {enabled: true, maxVisible: 2}
 });
@@ -40,17 +42,15 @@ const lookOf = value => {
 /** تنظيف أي إعداد قادم من التخزين أو النموذج؛ لا يقبل مفاتيح غريبة ولا ألوانًا غير صالحة. */
 export function sanitizeWorkConfig(raw) {
   const src = isObject(raw) ? raw : {};
-  const out = {...DEFAULT_WORK_CONFIG, statuses: {}, customStatuses: [], priorities: {}, sources: {}, lookback: {}, attention: {rules: {}}, notifications: {...DEFAULT_WORK_CONFIG.notifications}};
+  const out = {...DEFAULT_WORK_CONFIG, statuses: {}, customStatuses: [], retiredStatuses: [], priorities: {}, sources: {}, lookback: {}, attention: {rules: {}}, notifications: {...DEFAULT_WORK_CONFIG.notifications}};
   for (const key of CORE_STATUS_KEYS) { const look = lookOf(src.statuses?.[key]); if (look) out.statuses[key] = look; }
   for (const key of PRIORITY_KEYS) { const look = lookOf(src.priorities?.[key]); if (look) out.priorities[key] = look; }
-  const seen = new Set(CORE_STATUS_KEYS);
-  for (const status of Array.isArray(src.customStatuses) ? src.customStatuses : []) {
-    if (!isObject(status) || !/^c_[a-z0-9_]{1,24}$/.test(String(status.key || '')) || seen.has(status.key)) continue;
-    const label = String(status.label ?? '').trim().slice(0, 30);
-    if (!label || !STATUS_KINDS[status.kind]) continue;
-    seen.add(status.key);
-    out.customStatuses.push({key: status.key, label, kind: status.kind, color: validColor(status.color) || '#475569'});
-    if (out.customStatuses.length >= 12) break;
+  // الحالات المخصصة: لونها فقط يُحفظ هنا (تخصيص عرض على الجهاز)؛ وجودها وتسميتها في Lookups، فلا تُحفظ قائمتها في التفضيلات.
+  let customLooks = 0;
+  if (isObject(src.statuses)) for (const [key, value] of Object.entries(src.statuses)) {
+    if (!isCustomStatusKey(key) || customLooks >= 60) continue;
+    const color = isObject(value) ? validColor(value.color) : '';
+    if (color) { out.statuses[key] = {color}; customLooks++; }
   }
   for (const source of allWorkSources()) if (isObject(src.sources) && source.type in src.sources) out.sources[source.type] = Boolean(src.sources[source.type]);
   for (const source of allWorkSources()) if (isObject(src.lookback) && Number.isFinite(Number(src.lookback[source.type]))) out.lookback[source.type] = num(src.lookback[source.type], 7, 3650, 90);
@@ -66,7 +66,14 @@ export function sanitizeWorkConfig(raw) {
   return out;
 }
 
-export const getWorkConfig = () => sanitizeWorkConfig(prefs.get(WORK_CONFIG_KEY, null));
+/** الإعدادات المدموجة: تفضيلات الجهاز + الحالات المخصصة من لقطة Lookups (تُحمَّل عبر ensureWorkStatuses عند أول استعلام/نموذج/فتح الصفحة). */
+export function getWorkConfig() {
+  const config = sanitizeWorkConfig(prefs.get(WORK_CONFIG_KEY, null));
+  const {custom, retired} = customStatusSnapshot();
+  config.customStatuses = [...custom];
+  config.retiredStatuses = [...retired];
+  return config;
+}
 export async function saveWorkConfig(patch = {}) {
   const current = getWorkConfig();
   const next = sanitizeWorkConfig({...current, ...patch,

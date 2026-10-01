@@ -10,6 +10,7 @@ import {isClosedFile} from '../domain/entities.js';
 import {dayDiff, priorityRank} from '../domain/work-items.js';
 import {queryWorkItems, workSummary} from './work-query.js';
 import {getWorkConfig} from './work-config.js';
+import {ensureWorkStatuses} from './work-statuses.js';
 
 /** سجل القواعد: أضف قاعدة جديدة بإدراج عنصر هنا فقط. test(item, ctx) → سبب نصي أو null. */
 export const ATTENTION_RULES = [
@@ -49,6 +50,7 @@ export async function staleFiles(office, {today = Clock.today(), days = getWorkC
 
 /** عناصر «يحتاج انتباهي»: نافذة محدودة [اليوم − العمق، اليوم + 7] + بلا موعد؛ ثم تُرتَّب بالأشد. */
 export async function attentionItems(office, {today = Clock.today(), limit = 40, signal = null} = {}) {
+  await ensureWorkStatuses(office);
   const config = getWorkConfig();
   const page = await queryWorkItems(office, {range: 'custom', from: '', to: addDays(today, 7), kinds: ['open'], undated: true}, {limit: 1500, signal});
   const ctx = {today, config};

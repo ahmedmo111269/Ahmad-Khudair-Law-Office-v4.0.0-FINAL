@@ -18,6 +18,7 @@ import {longDateAr} from '../core/format.js';
 import {WORK_RANGES, WORK_VIEWS, mergePriorities, mergeStatuses} from '../domain/work-items.js';
 import {allWorkSources} from '../domain/work-sources.js';
 import {getWorkConfig, getWorkState, saveWorkState, sanitizeWorkState, DEFAULT_WORK_STATE} from '../services/work-config.js';
+import {ensureWorkStatuses} from '../services/work-statuses.js';
 import {workSummary, queryWorkItems} from '../services/work-query.js';
 import {createGridRelations} from '../services/grid-relations.js';
 import {getLookup} from '../services/lookups.js';
@@ -98,6 +99,7 @@ export async function bindWorkCenter(app, q) {
   if (!root || !app.__wc) return;
   const office = app.office;
   const shared = app.__wc;
+  await ensureWorkStatuses(office).catch(error => console.error('work statuses', error));   // الحالات المخصصة (Lookups) قبل أول رسم
   const rt = {
     app, office, root, host: root.querySelector('#wc-view'), st: shared.st, scope: shared.scope, items: new Map(), collect: null, seq: 0, controller: null, signal: null, calDay: null,
     relations: createGridRelations(office, 'workItems'), lastLocalChange: 0, busy: false

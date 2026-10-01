@@ -14,6 +14,7 @@ import {presetRange} from './entity-query.js';
 import {tokenizeQuery, matchTokens, searchAll} from './search-engine.js';
 import {createGridRelations} from './grid-relations.js';
 import {getWorkConfig} from './work-config.js';
+import {ensureWorkStatuses} from './work-statuses.js';
 import {
   overlayId, WORK_KIND, NO_DATE_KEY, keyDate, isIsoDate, classifyDue, workSearchFields, expandRecurrence,
   RECURRENCE_LOOKBACK_DAYS, RECURRENCE_MAX_OCCURRENCES, priorityRank, sortKeyOf, dayDiff
@@ -355,6 +356,7 @@ export async function searchScope(office, q, signal = null) {
  */
 export async function queryWorkItems(office, specInput = {}, {cursor = null, limit = 50, signal = null, predicate = null, relations = null} = {}) {
   office.ctx.assert();
+  await ensureWorkStatuses(office);   // الحالات المخصصة (Lookups) قبل أي قراءة تحتاج الإعداد
   const spec = normalizeSpec(specInput);
   if (spec.drive) return driveQuery(office, spec, {cursor, limit, signal, predicate, relations});
   const fromKey = cursorKey(cursor);
@@ -510,8 +512,10 @@ async function driveQuery(office, spec, {cursor, limit, signal, predicate, relat
 
 
 /** عنصر واحد بمعرّفه (مهمة/إسقاط/تكرار افتراضي/يتيم) — للمجلّد وللروابط المباشرة. null إن لم يوجد. */
-export async function getWorkItem(office, id, {config = getWorkConfig()} = {}) {
+export async function getWorkItem(office, id, {config: given = null} = {}) {
   office.ctx.assert();
+  await ensureWorkStatuses(office);
+  const config = given || getWorkConfig();
   const text = String(id || '');
   if (!text) return null;
   if (text.startsWith('rec::')) {
@@ -557,6 +561,7 @@ export async function countWorkItems(office, specInput = {}, {cap = 500, signal 
  */
 export const SUMMARY_CAPS = Object.freeze({overdue: 1000, forward: 3000, undated: 500});
 export async function workSummary(office, {today = Clock.today(), signal = null, caps = SUMMARY_CAPS} = {}) {
+  await ensureWorkStatuses(office);
   const config = getWorkConfig();
   const windowEnd = addDays(today, config.summaryWindowDays);
   const result = {today, overdue: 0, todayCount: 0, tomorrow: 0, week: 0, later: 0, undated: 0, urgentToday: 0, hearingsToday: 0, hearingsTomorrow: 0, hearingsNext7: 0,

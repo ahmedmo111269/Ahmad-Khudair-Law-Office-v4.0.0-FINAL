@@ -21,6 +21,7 @@ import {
 } from '../domain/work-items.js';
 import {workSource} from '../domain/work-sources.js';
 import {getWorkConfig} from './work-config.js';
+import {ensureWorkStatuses} from './work-statuses.js';
 
 const WI = STORE.workItems, WC = STORE.workItemComments, WR = STORE.workItemRecurrences;
 const nowIso = () => Clock.now();
@@ -162,12 +163,14 @@ export async function resolveLinks(office, data) {
 /** إنشاء/تعديل مهمة مستقلة. `recurFreq` تُنشئ تعريف تكرار بدل صف واحد (التوليد كسول). */
 export async function saveWorkItem(office, input, id = null, expectedVersion = null) {
   if (!id && input?.recurFreq) return createRecurringTask(office, input);
+  await ensureWorkStatuses(office);
   const config = getWorkConfig();
   const statusKeys = mergeStatuses(config).map(s => s.key);
   const old = id ? await office.r.workItems.get(id) : null;
   if (id && (!old || old.kind !== WORK_KIND.native)) throw new AppError(ERR.NOT_FOUND, 'المهمة غير موجودة.');
   if (old) assertExpectedVersion(old, expectedVersion, 'المهمة');
-  const {errors, data} = validateNativeInput({...(old || {}), ...input}, {statuses: statusKeys});
+  // حالة المهمة الحالية تُقبل كما هي ولو تقاعدت (حُذفت من القائمة)؛ أما اختيار حالة متقاعدة جديدة فمرفوض.
+  const {errors, data} = validateNativeInput({...(old || {}), ...input}, {statuses: old?.status ? [...statusKeys, old.status] : statusKeys});
   if (Object.keys(errors).length) throw new AppError(ERR.VALIDATION, 'راجع بيانات المهمة.', errors);
   const linked = await resolveLinks(office, data);
   const at = nowIso(), rowId = id || uid();
@@ -221,6 +224,7 @@ export async function completeItem(office, refInput, {by = 'user'} = {}) {
 }
 
 export async function reopenItem(office, refInput) {
+  await ensureWorkStatuses(office);
   const ref = await resolveVirtual(office, parseItemRef(refInput));
   if (ref.kind === 'native') {
     const row = await loadNative(office, ref);
@@ -322,9 +326,11 @@ export async function rescheduleItem(office, refInput, {date, time = null} = {})
 
 // ---------- الحالة والأولوية والتثبيت والوسوم ----------
 export async function setItemStatus(office, refInput, key) {
+  await ensureWorkStatuses(office);
   const config = getWorkConfig();
   const info = statusInfo(key, config);
   if (info.unknown) throw new AppError(ERR.VALIDATION, 'حالة غير معروفة.');
+  if (info.retired) throw new AppError(ERR.VALIDATION, 'هذه الحالة محذوفة من القائمة؛ اختر حالة أخرى.');
   if (info.kind === 'done') return completeItem(office, refInput);
   if (info.kind === 'cancelled') return cancelItem(office, refInput);
   const ref = await resolveVirtual(office, parseItemRef(refInput));

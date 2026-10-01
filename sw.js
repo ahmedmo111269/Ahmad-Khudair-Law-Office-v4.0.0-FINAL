@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.7.0-work-center1';
+const CACHE='ahmad-khudair-law-office-v5.7.0-work-center2';
 const ASSETS=[
   "./",
   "./index.html",
@@ -76,6 +76,7 @@ const ASSETS=[
   "./js/services/work-insights.js",
   "./js/services/work-items.js",
   "./js/services/work-query.js",
+  "./js/services/work-statuses.js",
   "./js/services/analytics.js",
   "./js/services/backup.js",
   "./js/services/client-files.js",

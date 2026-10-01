@@ -10,7 +10,7 @@ import {mountCalendar} from './calendar.js';
 import {formatDate} from '../core/format.js';
 import {addDays, localDate} from '../core/clock.js';
 import {
-  dayPartOf, DAY_PARTS, DAY_LAYOUTS, mergeStatuses, mergePriorities, classifyDue, agingBucket, AGING_BUCKETS, QUADRANTS, classifyQuadrant, dayDiff
+  dayPartOf, DAY_PARTS, DAY_LAYOUTS, mergeStatuses, mergePriorities, classifyDue, agingBucket, AGING_BUCKETS, QUADRANTS, classifyQuadrant, dayDiff, RETIRED_STATUS_COLOR
 } from '../domain/work-items.js';
 import {workCardHtml, groupHeaderHtml, chip} from './work-card.js';
 import {nowAndNext, queryWorkItems} from '../services/work-query.js';
@@ -118,7 +118,9 @@ async function renderKanban(rt) {
   const {host, st} = rt, config = rt.config();
   const statuses = mergeStatuses(config);
   const order = [...statuses.filter(s => s.kind === 'open'), ...statuses.filter(s => s.kind === 'done'), ...statuses.filter(s => s.kind === 'cancelled')];
-  const operational = new Set(['inProgress', 'postponed', ...statuses.filter(s => s.custom && s.kind === 'open').map(s => s.key)]);   // حالات تُحفظ في الطبقة فقط → فهرس الحالة مباشرة
+  // حالات مخصصة حُذفت من القائمة: يظهر لكل منها عمود (للقراءة والسحب منه فقط) إن بقيت عليها عناصر، فلا يختفي عنصر من الكانبان.
+  const retired = (config.retiredStatuses || []).slice(0, 10).map(r => ({key: r.key, label: `${r.label} (محذوفة)`, kind: 'open', icon: '●', color: RETIRED_STATUS_COLOR, custom: true, retired: true}));
+  const operational = new Set(['inProgress', 'postponed', ...statuses.filter(s => s.custom && s.kind === 'open').map(s => s.key), ...retired.map(r => r.key)]);   // حالات تُحفظ في الطبقة فقط → فهرس الحالة مباشرة
   const loadColumn = (s, cursor = null) => {
     const base = rt.spec({kinds: [s.kind]});
     if (s.kind === 'done') return rt.fetch({...base, drive: 'completed', from: st.range === 'all' ? '' : base.from, to: st.range === 'all' ? '' : base.to, kinds: ['done']}, {limit: 15, cursor});
@@ -126,10 +128,14 @@ async function renderKanban(rt) {
     return rt.fetch({...base, statuses: [s.key], kinds: [s.kind]}, {limit: 15, cursor});
   };
   const pages = await Promise.all(order.map(s => loadColumn(s)));
+  if (retired.length) {
+    const extra = await Promise.all(retired.map(s => loadColumn(s)));
+    retired.forEach((s, i) => { if (extra[i].items.length) { order.push(s); pages.push(extra[i]); } });
+  }
   host.innerHTML = `<p class="muted small wc-hint">اسحب البطاقة بين الأعمدة (أو استخدم قائمة «نقل إلى» في كل بطاقة). الإنجاز والإلغاء والتأجيل تمر عبر السجل الأصلي.</p><div class="wc-board" data-uxc-id="wc:kanban" data-uxc-type="component" data-uxc-title="لوحة كانبان">${order.map((s, i) => `
    <section class="wc-col" data-col="${esc(s.key)}" aria-label="${esc(s.label)}"><header class="wc-col-h" style="--wc-c:${esc(s.color)}"><span aria-hidden="true">${esc(s.icon)}</span><h4>${esc(s.label)}</h4><span class="wc-count">${pages[i].items.length}${pages[i].hasMore ? '+' : ''}</span></header>
-    <div class="wc-col-body" data-drop="${esc(s.key)}">${pages[i].items.length ? cardsHtml(rt, pages[i].items, {drag: true, move: true, compact: true}) : '<p class="muted wc-empty">لا عناصر</p>'}${pages[i].hasMore ? moreRow(`col:${s.key}`) : ''}</div></section>`).join('')}</div>`;
-  const options = order.map(s => `<option value="${esc(s.key)}">${esc(s.label)}</option>`).join('');
+    <div class="wc-col-body"${s.retired ? '' : ` data-drop="${esc(s.key)}"`}>${pages[i].items.length ? cardsHtml(rt, pages[i].items, {drag: true, move: true, compact: true}) : '<p class="muted wc-empty">لا عناصر</p>'}${pages[i].hasMore ? moreRow(`col:${s.key}`) : ''}</div></section>`).join('')}</div>`;
+  const options = order.filter(s => !s.retired).map(s => `<option value="${esc(s.key)}">${esc(s.label)}</option>`).join('');
   host.querySelectorAll('select[data-wc-move]').forEach(sel => { const key = sel.closest('[data-wc-id]').dataset.status; sel.innerHTML = `<option value="">نقل إلى…</option>${options}`; sel.querySelector(`[value="${key}"]`)?.remove(); });
   order.forEach((s, i) => {
     let cursor = pages[i].nextCursor;
