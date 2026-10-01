@@ -1,5 +1,6 @@
 import {DatabaseContext} from '../db/database-context.js';
 import {ensureSchema,STORES} from '../db/schema.js';
+import {transaction,request} from '../db/unit-of-work.js';
 import {Office} from '../services/office.js';
 import {createGridRelations,constrainedReferenceId,gridPageContext,hasLegalFileColumns} from '../services/grid-relations.js';
 import {resolveRefs,createEntityGridProvider,loadRows} from '../services/entity-query.js';
@@ -91,6 +92,20 @@ export async function createGridFixture(){
   async snapshot(){const data={};for(const store of STORES)data[store]=await office.r[store].all(5000);return JSON.stringify(data)},
   async dispose(){this.grids.forEach(({grid,root})=>{grid.destroy();root.remove()});ctx.close();await new Promise(resolve=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=resolve;request.onerror=resolve;request.onblocked=resolve})}
  };
+}
+
+// Additional bounded records for cursor/date tests only. Seed once, atomically,
+// before taking integrity snapshots; never touch a registered office database.
+export async function seedGridDateRows(fixture){
+ const ordered=Array.from({length:230},(_,index)=>({
+  id:`dated-${String(index).padStart(3,'0')}`,fileId:'f1',caseId:'ca1',
+  type:`DATED-${String(index).padStart(3,'0')}`,
+  hearingDate:new Date(Date.UTC(2026,0,index+1)).toISOString().slice(0,10),isDeleted:false
+ }));
+ await transaction(fixture.ctx,['hearings'],async tx=>{
+  for(const row of ordered)await request(tx.objectStore('hearings').put(row));
+ });
+ return ordered;
 }
 
 export async function fixtureGrid(fixture,store,rows=fixture.rows[store]||[],options={}){
@@ -324,8 +339,7 @@ export function runGridContextTests(test,expect){
   const sorted=await provider.getRows({sort:[{key:'clientId',dir:'asc'}]},{columns});expect(sorted.sortStatus.global).toBe(false);
  }));
  test('Grid provider — date-scoped ascending/descending cursors remain globally ordered across prepared batches',withFixture(async f=>{
-  const ordered=Array.from({length:230},(_,index)=>({id:`dated-${String(index).padStart(3,'0')}`,fileId:'f1',hearingDate:new Date(Date.UTC(2026,0,index+1)).toISOString().slice(0,10),isDeleted:false}));
-  for(const row of ordered)await f.office.r.hearings.put(row);
+  const ordered=await seedGridDateRows(f);
   const before=await f.snapshot(),relations=createGridRelations(f.office,'hearings'),refs=new Map(),columns=defineGridColumns(columnsFor('hearings',refs,{relations}));
   const provider=createEntityGridProvider(f.office,'hearings',{getBaseQuery:()=>({from:ordered[0].hearingDate,to:ordered.at(-1).hearingDate,dateField:'hearingDate'}),prepareRows:async rows=>{await Promise.all([relations.hydrate(rows),resolveRefs(f.office,rows,ENTITIES.hearings.fields,refs)])}});
   const plain=createIndexedDbDataProvider(f.office.r.hearings,{resolveScope:()=>({index:'hearingDate',lower:ordered[0].hearingDate,upper:ordered.at(-1).hearingDate+'\uffff',direction:'prev'})});
@@ -382,7 +396,8 @@ export function runGridContextTests(test,expect){
   const relations=createGridRelations(f.office,'hearings');await relations.hydrate(rows);
   const {grid,root}=await fixtureGrid(f,'hearings',[],{columns:columnsFor('hearings',new Map(),{relations}),dataProvider:createArrayDataProvider(rows),...relations.gridOptions()});
   const ready=async id=>{for(let i=0;i<100;i++){if(grid.getView()[0]?.id===id&&!root.querySelector('.dg-state.is-loading'))return;await pause(5)}throw Error('Cursor selection grid did not settle')};
-  await ready('selected-000');root.querySelector('.dg-rowchk[data-i="0"]').click();root.querySelector('.dg-page-next').click();
+  await ready('selected-000');expect(root.querySelector('.dg-provider-note').textContent).toContain('أوامر المحدد');
+  root.querySelector('.dg-rowchk[data-i="0"]').click();root.querySelector('.dg-page-next').click();
   await ready('selected-025');root.querySelector('.dg-rowchk[data-i="0"]').click();
   const firstDoc=parse(await grid.getPrintDocument({srcRows:grid.getSelection()}));
   expect(firstDoc.querySelectorAll('tbody tr').length).toBe(2);expect(firstDoc.querySelector('.dg-print-meta').textContent).toContain('عبر الصفحات');

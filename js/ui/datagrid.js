@@ -374,7 +374,8 @@ export function mountGrid(root,opts){
    $('.dg-page-label').textContent=providerMeta.totalExact&&providerMeta.total!==null?`صفحة ${fmtN(pageIndex+1)} · ${fmtN(providerMeta.total)} نتيجة`:`صفحة ${fmtN(pageIndex+1)}`;
    $('.dg-page-size').value=String(st.remotePageSize);
    const sortStatus=providerMeta.sortStatus;
-   const providerNotes=['الطباعة والتصدير للصفحة الحالية فقط.'];
+   const providerNotes=['الطباعة والتصدير العاديان للصفحة الحالية فقط.'];
+   if(o.selectable)providerNotes.push('أوامر المحدد تشمل الصفوف المحددة عبر الصفحات.');
    if(sortStatus?.global===false)providerNotes.push('الفرز الكامل غير متاح لهذا العمود؛ يلزم فهرس مناسب.');
    if(st.groupBy)providerNotes.push('التجميع وأعداده للصفحة الحالية فقط.');
    if(o.aggregatePageOnly&&(cols.some(column=>column.aggregate)||o.aggregations?.length))providerNotes.push('الإجماليات المعلنة تخص الصفحة الحالية فقط.');

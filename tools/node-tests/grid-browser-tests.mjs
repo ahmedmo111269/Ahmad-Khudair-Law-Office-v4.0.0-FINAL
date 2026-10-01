@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 
 const repository=fileURLToPath(new URL('../../',import.meta.url));
 const base=(process.env.GRID_BASE_URL||'http://127.0.0.1:8000').replace(/\/$/,'');
+const scenario=process.env.GRID_BROWSER_SCENARIO||'full';
+assert.ok(['full','offline'].includes(scenario),'GRID_BROWSER_SCENARIO must be full or offline');
 const artifactDir=path.join(repository,'.cache','grid-browser');
 await fs.mkdir(artifactDir,{recursive:true});
 let browser;
@@ -25,8 +27,8 @@ if(process.env.GRID_BROWSER_EXECUTABLE){
  process.env.LD_LIBRARY_PATH=[libPath,process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
  browser=await chromium.launch({executablePath:await slim.executablePath(),headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
 }
-const report={browser:browser.version(),date:new Date().toISOString(),checks:[],errors:[],printVerification:'NOT VERIFIED — Print Preview/Physical Print Not Tested'};
-const verify=async(name,fn)=>{await fn();report.checks.push({name,status:'VERIFIED — Browser DOM/Popup or PDF output'});console.log(`VERIFIED — ${name}`)};
+const report={scenario,browser:browser.version(),date:new Date().toISOString(),checks:[],errors:[],printVerification:'NOT VERIFIED — Print Preview/Physical Print Not Tested'};
+const verify=async(name,fn,status='VERIFIED — Browser DOM/Popup or PDF output')=>{await fn();report.checks.push({name,status});console.log(`VERIFIED — ${name}`)};
 
 async function unitSuite(baseline=''){
  const context=await browser.newContext({viewport:{width:1280,height:900},serviceWorkers:'block'});
@@ -49,7 +51,229 @@ async function unitSuite(baseline=''){
  const result={summary,failures,errors};await context.close();return result;
 }
 
-try{
+async function reveal(locator){
+ await locator.evaluate(element=>{for(let node=element;node;node=node.parentElement){if(node.dataset.collapseReady==='true')node.dispatchEvent(new CustomEvent('collapse:bulk',{detail:{collapsed:false,persist:false}}));if(node.tagName==='DETAILS')node.open=true}});
+}
+async function openTools(locator){
+ await locator.waitFor({state:'attached'});await reveal(locator);
+ if(await locator.locator('.dg-shell-toggle').getAttribute('aria-expanded')==='false')await locator.locator('.dg-shell-toggle').click();
+ if(await locator.locator('.dg-tools-summary-toggle').getAttribute('aria-expanded')==='false')await locator.locator('.dg-tools-summary-toggle').click();
+}
+async function printPopup(locator,{screenshot='',button='.dg-print'}={}){
+ await openTools(locator);
+ const opened=locator.page().context().waitForEvent('page');await locator.locator(button).click();const popup=await opened;
+ popup.on('pageerror',error=>report.errors.push(error.message));
+ await popup.waitForFunction(()=>document.querySelector('.dg-print-header')&&window.__printRequested>0,null,{timeout:20000});
+ const data=await popup.evaluate(()=>({
+  fields:Object.fromEntries([...document.querySelectorAll('.dg-print-context div')].map(node=>[node.querySelector('dt').textContent,node.querySelector('dd').textContent])),
+  title:document.querySelector('h1').textContent,
+  columns:[...document.querySelectorAll('thead th')].map(node=>node.dataset.column),
+  rows:[...document.querySelectorAll('tbody tr')].map(row=>row.textContent),
+  cells:[...document.querySelectorAll('tbody tr')].map(row=>[...row.cells].map(cell=>cell.textContent)),
+  meta:document.querySelector('.dg-print-meta')?.textContent||'',
+  filters:document.querySelector('.dg-print-filters')?.textContent||'',
+  scriptClosed:document.scripts.length===1,theadDisplay:getComputedStyle(document.querySelector('thead')).display,
+  contextHeaders:document.querySelectorAll('.dg-print-header').length
+ }));
+ if(screenshot)await popup.screenshot({path:path.join(artifactDir,screenshot),fullPage:true});
+ await popup.close();return data;
+}
+async function appContext(serviceWorkers='block'){
+ const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true,serviceWorkers});
+ await context.addInitScript(()=>{window.print=()=>{window.__printRequested=(window.__printRequested||0)+1}});
+ await context.route('https://fonts.googleapis.com/**',route=>route.fulfill({body:'',contentType:'text/css'}));
+ return context;
+}
+async function waitForApp(page){
+ await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting&&!document.querySelector('.error-box'),null,{timeout:60000});
+ await page.evaluate(()=>window.__LAW_OFFICE_APP__.maintenance);
+}
+async function snapshotOffice(page){
+ // Raw, read-only snapshots of the bounded synthetic fixture include tombstones.
+ // This is test evidence, never a runtime DataGrid getAll/query implementation.
+ return page.evaluate(async()=>{
+  const ctx=window.__LAW_OFFICE_APP__.office.ctx;ctx.assert();
+  const stores=[...ctx.db.objectStoreNames],tx=ctx.db.transaction(stores,'readonly');
+  const rows=await Promise.all(stores.map(store=>new Promise((resolve,reject)=>{
+   const request=tx.objectStore(store).getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+  })));
+  ctx.assert();return Object.fromEntries(stores.map((store,index)=>[store,rows[index]]));
+ });
+}
+async function waitGrid(page,marker){
+ await page.waitForFunction(marker=>{
+  const root=document.querySelector('#list-grid');
+  return root&&!root.querySelector('.dg-state.is-loading,.dg-state.is-error')&&root.querySelector('tbody tr[data-i] td[data-k="type"]')?.textContent===marker;
+ },marker,{timeout:20000});
+}
+async function referenceFilter(page,key,id){
+ await openTools(page.locator('#list-grid'));
+ await page.locator(`#list-grid th[data-key="${key}"] .dg-fbtn`).click();
+ await page.locator('.dg-ref-choice').selectOption(id);await page.locator('.dg-pop .dg-apply').click();
+}
+async function clearReferenceFilter(page,key){
+ await page.locator(`#list-grid th[data-key="${key}"] .dg-fbtn`).click();await page.locator('.dg-pop .dg-reset').click();
+}
+const printedMarkers=output=>output.cells.map(cells=>cells[output.columns.indexOf('type')]);
+
+async function verifyCursorButtons(){
+ const context=await appContext(),page=await context.newPage();page.on('pageerror',error=>report.errors.push(error.message));
+ try{
+  await page.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});await waitForApp(page);
+  const dates=await page.evaluate(async()=>{
+   const {createGridFixture,seedGridDateRows}=await import('./js/tests/grid-context-tests.js');
+   const fixture=window.__gridFixture=await createGridFixture(),ordered=await seedGridDateRows(fixture),app=window.__LAW_OFFICE_APP__;
+   app.ctx=fixture.ctx;app.office=fixture.office;
+   return {from:ordered[0].hearingDate,to:ordered.at(-1).hearingDate,markers:ordered.map(row=>row.type)};
+  });
+  const before=await snapshotOffice(page),go=route=>page.evaluate(route=>window.__LAW_OFFICE_APP__.go(route),route);
+  const grid=page.locator('#list-grid');
+  await go('hearings');await waitGrid(page,'ملف مشترك');await openTools(grid);
+  await grid.locator('tbody tr[data-i]').filter({has:page.locator('td[data-k="type"]',{hasText:'طلب'})}).locator('.dg-rowchk').check();
+  await grid.locator('.dg-page-next').click();await waitGrid(page,'DATED-207');await grid.locator('.dg-rowchk[data-i="0"]').check();
+  const selectedCount=await grid.locator('.dg-sel-count').textContent();
+  let output=await printPopup(grid,{button:'.dg-sel-print'});
+  await verify('Application buttons: cross-page selection prints both original rows and honest metadata',async()=>{
+   assert.deepEqual(printedMarkers(output),['طلب','DATED-207']);assert.ok(output.meta.includes('عبر الصفحات'));assert.ok(!output.meta.includes('الصفحة الحالية'));
+   assert.ok(!('الموكل' in output.fields));assert.equal(await grid.locator('.dg-sel-count').textContent(),selectedCount);
+   assert.ok((await grid.locator('.dg-provider-note').textContent()).includes('أوامر المحدد'));
+  });
+  await referenceFilter(page,'clientId','c1');await waitGrid(page,'ملف مشترك');
+  const queryPrefs=await page.evaluate(async()=>{const {prefs}=await import('./js/core/preferences.js');return JSON.stringify(prefs.get('grid:list:hearings'))});
+  output=await printPopup(grid,{button:'.dg-sel-print'});
+  await verify('Application buttons: off-client-filter selection is complete and cannot acquire a false client header',async()=>{
+   assert.deepEqual(printedMarkers(output),['طلب','DATED-207']);assert.ok(!('الموكل' in output.fields));assert.ok(output.columns.includes('clientId'));
+   assert.ok(output.rows.some(row=>row.includes('موكل آخر')));assert.ok(output.filters.includes('لا تُطبق مجددًا'));assert.ok(output.filters.includes('فاطمة'));
+   assert.equal(await grid.locator('.dg-sel-count').textContent(),selectedCount);
+   assert.equal(await page.evaluate(async()=>{const {prefs}=await import('./js/core/preferences.js');return JSON.stringify(prefs.get('grid:list:hearings'))}),queryPrefs);
+  });
+  await clearReferenceFilter(page,'clientId');await waitGrid(page,'ملف مشترك');
+  await referenceFilter(page,'fileId','f1');await waitGrid(page,'مرافعة');output=await printPopup(grid,{button:'.dg-sel-print'});
+  await verify('Application buttons: off-file-filter selection cannot acquire a false file or official-case header',()=>{
+   assert.deepEqual(printedMarkers(output),['طلب','DATED-207']);assert.ok(!('رقم الملف / نوع الملف' in output.fields));assert.ok(!('رقم الدعوى / القضية' in output.fields));assert.ok(!('الموكل' in output.fields));
+  });
+  await grid.locator('.dg-sel-clear').click();await grid.locator('.dg-reset-btn').click();await waitGrid(page,'ملف مشترك');
+  await reveal(page.locator('.list-filter-panel'));await page.locator('[data-preset="custom"]').click();
+  const displayDate=value=>value.split('-').reverse().join('/');
+  await page.locator('#list-from__dmy').fill(displayDate(dates.from));await page.locator('#list-to__dmy').fill(displayDate(dates.to));
+  await page.locator('[data-range-apply]').click();await waitGrid(page,'DATED-229');await openTools(grid);
+  await grid.locator('th[data-key="hearingDate"] .dg-sort').click();await waitGrid(page,'DATED-000');output=await printPopup(grid);
+  await verify('Application buttons: date-range current-page print has 25 ASC rows and no invented client context',()=>{
+   assert.deepEqual(printedMarkers(output),dates.markers.slice(0,25));assert.ok(output.meta.includes('الصفحة الحالية'));assert.ok(!('الموكل' in output.fields));assert.ok(output.filters.includes(displayDate(dates.from)));assert.ok(output.filters.includes(displayDate(dates.to)));
+  });
+  report.cursorButtons={selectionRows:2,dateRows:230,directions:{}};
+  for(const direction of ['asc','desc']){
+   const expected=direction==='asc'?dates.markers:[...dates.markers].reverse();
+   if(direction==='desc'){await grid.locator('th[data-key="hearingDate"] .dg-sort').click();await waitGrid(page,expected[0])}
+   const actual=[];let pages=0;
+   do{
+    await waitGrid(page,expected[actual.length]);
+    actual.push(...await grid.locator('tbody tr[data-i] td[data-k="type"]').allTextContents());pages++;
+    if(!await grid.locator('.dg-page-next').isEnabled())break;
+    assert.ok(pages<=10,'Date cursor did not terminate');await grid.locator('.dg-page-next').click();
+   }while(true);
+   assert.deepEqual(actual,expected);assert.equal(new Set(actual).size,230);assert.equal(pages,10);
+   assert.ok(!(await grid.locator('.dg-provider-note').textContent()).includes('الفرز الكامل غير متاح'));
+   report.cursorButtons.directions[direction]={pages,rows:actual.length};
+  }
+  await verify('Application buttons: indexed date-range ASC/DESC cursor pagination visits all 230 rows exactly once per direction',()=>{
+   assert.deepEqual(report.cursorButtons.directions,{asc:{pages:10,rows:230},desc:{pages:10,rows:230}});
+  });
+  await verify('Cursor-button scenarios preserve all raw fixture records, tombstones, IDs and Schema 13',async()=>{
+   assert.deepEqual(await snapshotOffice(page),before);assert.equal(await page.evaluate(()=>window.__gridFixture.db.version),13);
+  });
+  await page.evaluate(()=>window.__gridFixture.dispose());
+ }finally{await context.close()}
+}
+
+async function verifyOffline(){
+ const source=await fs.readFile(path.join(repository,'sw.js'),'utf8'),cacheName=source.match(/const CACHE='([^']+)'/)[1];
+ const assets=[...source.matchAll(/^\s+"(\.\/[^"\n]*)",?\s*$/gm)].map(match=>match[1]);assert.ok(assets.length>100);
+ // Follow actual static, side-effect, re-export and literal dynamic imports.
+ // Unused helper files are not runtime dependencies and need no cache changes.
+ const runtimeGraph=new Set(),pending=['js/app.js'];
+ const importPatterns=[/\b(?:import|export)\s+[^'";]*?\bfrom\s*['"](\.\.?\/[^'"]+)['"]/g,/\bimport\s*['"](\.\.?\/[^'"]+)['"]/g,/\bimport\(\s*['"](\.\.?\/[^'"]+)['"]\s*\)/g];
+ while(pending.length){
+  const file=pending.pop();if(runtimeGraph.has(file))continue;runtimeGraph.add(file);
+  const text=await fs.readFile(path.join(repository,file),'utf8');
+  for(const pattern of importPatterns)for(const match of text.matchAll(pattern)){
+   const dependency=path.posix.normalize(path.posix.join(path.posix.dirname(file),match[1]));
+   if(dependency.endsWith('.js'))pending.push(dependency);
+  }
+ }
+ const runtimeFiles=[...runtimeGraph].sort(),missingRuntime=runtimeFiles.filter(file=>!assets.includes('./'+file));
+ assert.deepEqual(missingRuntime,[],'Service-worker precache is missing runtime modules');
+ const modules=['js/core/grid-print-context.js','js/services/grid-relations.js','js/db/grid-data-provider.js','js/ui/datagrid.js','js/services/timeline.js'];
+ const context=await appContext('allow'),page=await context.newPage();page.on('pageerror',error=>report.errors.push(error.message));
+ let offline=false;const responses=[],consoleErrors=[],failedRequests=[];
+ page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text())});
+ page.on('requestfailed',request=>failedRequests.push({url:request.url(),error:request.failure()?.errorText}));
+ page.on('response',response=>{if(offline&&response.url().startsWith(`${base}/`))responses.push({path:new URL(response.url()).pathname,status:response.status(),serviceWorker:response.fromServiceWorker()})});
+ try{
+  // Seed obsolete release caches BEFORE any service-worker registration. All
+  // browser storage belongs to this fresh, isolated test context.
+  await page.goto(`${base}/manifest.webmanifest`);
+  const oldCaches=['ahmad-khudair-law-office-v5.6.0-offline1','ahmad-khudair-law-office-v5.6.0-grid-context1','ahmad-khudair-law-office-v5.6.0-grid-context2'];
+  await page.evaluate(async names=>{for(const name of names){const cache=await caches.open(name);await cache.put('./__grid-stale-cache__.js',new Response('obsolete test cache'))}},oldCaches);
+  await page.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});await waitForApp(page);
+  await page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller),null,{timeout:60000});
+  const cacheState=await page.evaluate(async({cacheName,assets,modules,base})=>{
+   const registration=await navigator.serviceWorker.ready,cache=await caches.open(cacheName),missing=[],contents={};
+   for(const asset of assets){const response=await cache.match(new URL(asset,`${base}/`));if(!response?.ok)missing.push(asset)}
+   for(const module of modules){const response=await cache.match(new URL(module,`${base}/`));contents[module]=response?await response.text():null}
+   return {keys:await caches.keys(),missing,contents,controller:navigator.serviceWorker.controller.scriptURL,scope:registration.scope,stale:Boolean(await caches.match(new URL('./__grid-stale-cache__.js',`${base}/`)))};
+  },{cacheName,assets,modules,base});
+  await verify('Service Worker: installation controls the page, removes prior caches, and precaches the current complete runtime graph',async()=>{
+   assert.deepEqual(cacheState.keys,[cacheName]);assert.deepEqual(cacheState.missing,[]);assert.equal(cacheState.stale,false);
+   for(const module of modules)assert.equal(cacheState.contents[module],await fs.readFile(path.join(repository,module),'utf8'),`Stale cached module: ${module}`);
+  },'VERIFIED — Service Worker/cache output');
+  const profile=await page.evaluate(async()=>{
+   const {createGridFixture}=await import('./js/tests/grid-context-tests.js'),fixture=await createGridFixture(),app=window.__LAW_OFFICE_APP__;
+   const profile=app.registry.adoptExisting({databaseName:fixture.name,version:13,displayName:'اختبار الجداول دون اتصال'});
+   for(const other of app.registry.data.profiles)if(other.id!==profile.id)app.registry.archive(other.id);
+   await app.switchDb(profile.id);const maintenance=await app.maintenance;await app.maybeSeedDemo();fixture.ctx.close();
+   return {id:profile.id,databaseName:profile.databaseName,maintenance};
+  });
+  assert.ok(!profile.maintenance?.clientFilesError,'Fixture maintenance must finish before offline integrity assertions');
+  const before=await snapshotOffice(page);offline=true;await context.setOffline(true);
+  const navigation=await page.reload({waitUntil:'domcontentloaded'});await waitForApp(page);
+  const after=await snapshotOffice(page),bootChanges=[];
+  const normalized=structuredClone(after),prior=structuredClone(before);
+  // runMaintenance() predates this feature and updates this timestamp on every
+  // boot. Account for ONLY that field; never ignore an entire store or record.
+  const oldMaintenance=prior.meta.find(row=>row.id==='maintenance'),newMaintenance=normalized.meta.find(row=>row.id==='maintenance');
+  assert.ok(oldMaintenance&&newMaintenance);
+  if(oldMaintenance.lastRunAt!==newMaintenance.lastRunAt)bootChanges.push({store:'meta',id:'maintenance',field:'lastRunAt',before:oldMaintenance.lastRunAt,after:newMaintenance.lastRunAt});
+  delete oldMaintenance.lastRunAt;delete newMaintenance.lastRunAt;
+  await verify('Offline reload: app boots from the controlled cache with the same office/Schema 13 and only the existing maintenance timestamp update',async()=>{
+   assert.equal(navigation.fromServiceWorker(),true);assert.equal(await page.evaluate(()=>navigator.onLine),false);
+   assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.profile.id),profile.id);
+   assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.db.name),profile.databaseName);assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.db.version),13);
+   assert.deepEqual(normalized,prior);assert.ok((await page.locator('#network-badge').textContent()).includes('عدم الاتصال'));
+   for(const module of modules)assert.ok(responses.some(response=>response.path.endsWith('/'+module)&&response.serviceWorker&&response.status===200),`Module not served offline by SW: ${module}`);
+  },'VERIFIED — Offline browser/cache output');
+  const go=route=>page.evaluate(route=>window.__LAW_OFFICE_APP__.go(route),route);
+  await go('cfile:c1?cat=civil');let output=await printPopup(page.locator('.lf-grid'));
+  assert.equal(output.fields['الموكل'],'فاطمة محمد إبراهيم محمد');assert.ok(!output.columns.includes('clientId'));
+  await go('file:f1');await page.locator('[data-tab="hearings"]').click();output=await printPopup(page.locator('#file-tab .dg'));
+  await verify('Offline application buttons: client-file and file-hearing popup documents resolve original context without an online route warm-up',()=>{
+   assert.equal(output.fields['الموكل'],'فاطمة محمد إبراهيم محمد');assert.equal(output.fields['رقم الملف / نوع الملف'],'2/2026 — دعوى');assert.equal(output.fields['رقم الدعوى / القضية'],'4661/2026');assert.equal(output.rows.length,1);
+  },'VERIFIED — Offline DOM/popup output');
+  await verify('Offline table navigation and popup printing preserve every raw office store after boot',async()=>{
+   assert.deepEqual(await snapshotOffice(page),after);assert.deepEqual(report.errors,[]);
+  },'VERIFIED — Offline data integrity output');
+  report.offline={cache:cacheName,precachedAssets:assets.length,runtimeModules:runtimeFiles.length,verifiedModules:modules,oldCachesRemoved:oldCaches,bootChanges,responses,profileId:profile.id,schema:13};
+ }catch(error){
+  report.offlineFailure={message:error.message,responses,consoleErrors,failedRequests,state:await page.evaluate(()=>({
+   ready:document.readyState,app:Boolean(window.__LAW_OFFICE_APP__),booting:window.__LAW_OFFICE_APP__?.booting,
+   office:Boolean(window.__LAW_OFFICE_APP__?.office),error:document.querySelector('.error-box')?.textContent||'',
+   controller:navigator.serviceWorker.controller?.scriptURL,body:document.body.textContent.slice(0,1500)
+  })).catch(()=>null)};
+  throw error;
+ }finally{await context.close()}
+}
+
+async function verifyFullSuite(){
  report.unitSuite=await unitSuite();
  if(process.env.GRID_BASELINE){
   report.baseline=await unitSuite(process.env.GRID_BASELINE);
@@ -58,12 +282,10 @@ try{
  }else if(report.unitSuite.failures.length){
   throw new Error(`Browser unit-suite failures (set GRID_BASELINE to compare pre-existing failures):\n${report.unitSuite.failures.join('\n')}`);
  }
- const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true,serviceWorkers:'block'});
- await context.addInitScript(()=>{window.print=()=>{window.__printRequested=(window.__printRequested||0)+1}});
- await context.route('https://fonts.googleapis.com/**',route=>route.fulfill({body:'',contentType:'text/css'}));
+ const context=await appContext();
  const page=await context.newPage();page.on('pageerror',error=>report.errors.push(error.message));
  await page.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
- await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,{timeout:60000});
+ await waitForApp(page);
  await page.evaluate(async()=>{
   const {createGridFixture}=await import('./js/tests/grid-context-tests.js');
   const fixture=window.__gridFixture=await createGridFixture(),app=window.__LAW_OFFICE_APP__;
@@ -71,29 +293,6 @@ try{
   window.__gridBefore=await fixture.snapshot();
  });
  const go=async route=>{await page.evaluate(route=>window.__LAW_OFFICE_APP__.go(route),route)};
- async function openTools(locator){
-  await locator.waitFor({state:'attached'});
-  await locator.evaluate(element=>{for(let parent=element.parentElement;parent;parent=parent.parentElement){if(parent.dataset.collapseReady==='true')parent.dispatchEvent(new CustomEvent('collapse:bulk',{detail:{collapsed:false,persist:false}}));if(parent.tagName==='DETAILS')parent.open=true}});
-  if(await locator.locator('.dg-shell-toggle').getAttribute('aria-expanded')==='false')await locator.locator('.dg-shell-toggle').click();
-  if(await locator.locator('.dg-tools-summary-toggle').getAttribute('aria-expanded')==='false')await locator.locator('.dg-tools-summary-toggle').click();
- }
- async function printPopup(locator,{screenshot='',button='.dg-print'}={}){
-  await openTools(locator);
-  const opened=context.waitForEvent('page');await locator.locator(button).click();const popup=await opened;
-  popup.on('pageerror',error=>report.errors.push(error.message));
-  await popup.waitForFunction(()=>document.querySelector('.dg-print-header')&&window.__printRequested>0,{timeout:20000});
-  const data=await popup.evaluate(()=>({
-   fields:Object.fromEntries([...document.querySelectorAll('.dg-print-context div')].map(node=>[node.querySelector('dt').textContent,node.querySelector('dd').textContent])),
-   title:document.querySelector('h1').textContent,
-   columns:[...document.querySelectorAll('thead th')].map(node=>node.dataset.column),
-   rows:[...document.querySelectorAll('tbody tr')].map(row=>row.textContent),
-   filters:document.querySelector('.dg-print-filters')?.textContent||'',
-   scriptClosed:document.scripts.length===1,theadDisplay:getComputedStyle(document.querySelector('thead')).display,
-   contextHeaders:document.querySelectorAll('.dg-print-header').length
-  }));
-  if(screenshot)await popup.screenshot({path:path.join(artifactDir,screenshot),fullPage:true});
-  await popup.close();return data;
- }
  const client='فاطمة محمد إبراهيم محمد';
  await go('cfile:c1?cat=civil');
  let output=await printPopup(page.locator('.lf-grid'),{screenshot:'client-files-print.png'});
@@ -228,5 +427,10 @@ try{
   assert.equal(await page.evaluate(()=>window.__gridFixture.db.version),13);assert.deepEqual(report.errors,[]);
  });
  await page.evaluate(()=>window.__gridFixture.dispose());await context.close();
+ await verifyCursorButtons();await verifyOffline();
+}
+
+try{
+ if(scenario==='offline')await verifyOffline();else await verifyFullSuite();
 }catch(error){report.failure=error.stack||error.message;console.error(report.failure);process.exitCode=1}
 finally{await browser.close();await fs.writeFile(path.join(artifactDir,'report.json'),JSON.stringify(report,null,2));console.log(report.printVerification);console.log(`Evidence (not committed): ${artifactDir}`)}
