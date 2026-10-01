@@ -38,7 +38,21 @@ export const STORE = Object.freeze({
   // v14 — مركز العمل (Work Center). مخازن تشغيلية فقط؛ لا تنسخ أي بيانات قانونية من الملفات/الجلسات/الموكلين.
   workItems: 'workItems',
   workItemComments: 'workItemComments',
-  workItemRecurrences: 'workItemRecurrences'
+  workItemRecurrences: 'workItemRecurrences',
+  // v15 — قسم التنفيذ. مخازن تشغيلية بسجل تاريخي فقط (لا تُعدَّل حركة مالية قديمة):
+  // أطراف التنفيذ، شرائح القيمة، الحركات المالية (Ledger)، التخصيصات، محاضر التحصيل،
+  // الإجراءات اللاحقة، توكيلات التنفيذ، الفروق، التسويات، التصحيحات، وقوالب الطباعة.
+  executionParties: 'executionParties',
+  executionValuePeriods: 'executionValuePeriods',
+  executionLedger: 'executionLedger',
+  executionAllocations: 'executionAllocations',
+  executionReceipts: 'executionReceipts',
+  executionActions: 'executionActions',
+  executionPOAs: 'executionPOAs',
+  differenceRecords: 'differenceRecords',
+  executionSettlements: 'executionSettlements',
+  executionAdjustments: 'executionAdjustments',
+  executionTemplates: 'executionTemplates'
 });
 
 // Index declarations use short aliases for compound keys. Schema upgrades are additive:
@@ -61,8 +75,15 @@ const IDX = {
   caseNotes: { fileId: 'fileId', caseId: 'caseId', createdAt: 'createdAt' },
   witnesses: { caseId: 'caseId' },
   expertReports: { caseId: 'caseId', reportDate: 'reportDate', a: ['caseId', 'reportDate'] },
-  judgments: { caseId: 'caseId', fileId: 'fileId', judgmentDate: 'judgmentDate', a: ['caseId', 'judgmentDate'] },
-  execution: { caseId: 'caseId', fileId: 'fileId', status: 'status', openedDate: 'openedDate' },
+  // v15: سلسلة الأحكام في التنفيذ تُشتق من الحكم نفسه (executionId + previousJudgmentId) بلا مخزن مكرر.
+  judgments: { caseId: 'caseId', fileId: 'fileId', judgmentDate: 'judgmentDate', executionId: 'executionId', previousJudgmentId: 'previousJudgmentId', a: ['caseId', 'judgmentDate'], b: ['executionId', 'sequence'] },
+  // v15: فهارس التنفيذ مضافة بحسب الاستعلامات الفعلية (تعريف النوع/الحالة، الموكّل، الرقم الرسمي، موعد المراجعة).
+  execution: {
+    caseId: 'caseId', fileId: 'fileId', status: 'status', openedDate: 'openedDate',
+    clientId: 'clientId', executionType: 'executionType', officialNumber: 'officialNumber', nextReviewDate: 'nextReviewDate',
+    searchTextNormalized: 'searchTextNormalized',
+    a: ['executionType', 'status'], b: ['clientId', 'status'], c: ['fileId', 'openedDate']
+  },
   fees: { fileId: 'fileId', createdAt: 'createdAt', a: ['fileId', 'createdAt'] },
   feePayments: { feeId: 'feeId', date: 'date', a: ['feeId', 'date'] },
   documentReferences: { fileId: 'fileId', date: 'date', a: ['fileId', 'date'] },
@@ -96,7 +117,31 @@ const IDX = {
     a: ['kind', 'dueDate'], b: ['recurrenceId', 'occurrenceDate'], c: ['status', 'dueDate']
   },
   workItemComments: { workItemId: 'workItemId', createdAt: 'createdAt', a: ['workItemId', 'createdAt'] },
-  workItemRecurrences: { status: 'status', startDate: 'startDate', fileId: 'fileId', createdAt: 'createdAt' }
+  workItemRecurrences: { status: 'status', startDate: 'startDate', fileId: 'fileId', createdAt: 'createdAt' },
+  // v15 — التنفيذ: كل فهرس هنا مبني على استعلام فعلي، وأي فهرس زائد يُحذف.
+  executionParties: { executionId: 'executionId', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'sequence'] },
+  executionValuePeriods: {
+    executionId: 'executionId', entitlementType: 'entitlementType', linkedJudgmentId: 'linkedJudgmentId', startDate: 'startDate',
+    fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'startDate'], b: ['executionId', 'endDate']
+  },
+  executionLedger: {
+    executionId: 'executionId', type: 'type', date: 'date', receiptId: 'receiptId', differenceRecordId: 'differenceRecordId', poaId: 'poaId',
+    fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'], b: ['executionId', 'type'], c: ['sourceType', 'sourceId']
+  },
+  executionAllocations: {
+    ledgerId: 'ledgerId', executionId: 'executionId', periodKey: 'periodKey', receiptId: 'receiptId', differenceRecordId: 'differenceRecordId',
+    a: ['executionId', 'periodKey'], b: ['ledgerId', 'periodKey']
+  },
+  executionReceipts: { executionId: 'executionId', ledgerId: 'ledgerId', receiptNumber: 'receiptNumber', date: 'date', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'] },
+  executionActions: { executionId: 'executionId', kind: 'kind', date: 'date', fileId: 'fileId', clientId: 'clientId', resultFileId: 'resultFileId', a: ['executionId', 'date'] },
+  executionPOAs: { executionId: 'executionId', poaNumber: 'poaNumber', date: 'date', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'] },
+  differenceRecords: {
+    executionId: 'executionId', status: 'status', judgmentId: 'judgmentId', periodKey: 'periodKey', settlementId: 'settlementId',
+    fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'status'], b: ['executionId', 'periodKey']
+  },
+  executionSettlements: { executionId: 'executionId', status: 'status', newJudgmentId: 'newJudgmentId', fileId: 'fileId', a: ['executionId', 'status'] },
+  executionAdjustments: { executionId: 'executionId', ledgerId: 'ledgerId', kind: 'kind', status: 'status', fileId: 'fileId', a: ['executionId', 'status'] },
+  executionTemplates: { kind: 'kind', createdAt: 'createdAt' }
 };
 
 export const SCHEMA = {};
@@ -115,6 +160,18 @@ export const STORES = Object.values(STORE);
 // Official, additive migration registry. Each entry is the complete description of what an upgrade to `version`
 // does to an existing database. Upgrades never rewrite, move or delete rows (see ADR in PROJECT_MAP).
 export const SCHEMA_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    version: 15,
+    title: 'قسم التنفيذ: الشرائح والحركات المالية والتخصيصات والمحاضر والتوكيلات والفروق والتسويات والإجراءات',
+    addsStores: Object.freeze([
+      'executionParties', 'executionValuePeriods', 'executionLedger', 'executionAllocations', 'executionReceipts',
+      'executionActions', 'executionPOAs', 'differenceRecords', 'executionSettlements', 'executionAdjustments', 'executionTemplates'
+    ]),
+    // الترقية إنشاء مخازن/فهارس فقط: لا إعادة كتابة ولا حذف لأي صف قائم. تعبئة بيانات التنفيذ القديمة تجري في
+    // صيانة غير مدمرة (services/execution-migration.js) وتقتصر على إضافة الحقول الناقصة مع علامة «يحتاج مراجعة».
+    destructive: false,
+    backfill: false
+  }),
   Object.freeze({
     version: 14,
     title: 'مركز العمل: عناصر العمل والتعليقات وتعريفات التكرار',

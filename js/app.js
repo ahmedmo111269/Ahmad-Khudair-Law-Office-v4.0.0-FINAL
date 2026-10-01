@@ -21,6 +21,7 @@ import {renderDatabases,bindDatabases,renderBackup,bindBackup,renderRecovery,bin
 import {reportsPage,bindReports} from './modules/reports.js';
 import {renderSearch,bindSearch} from './modules/search.js';
 import {workCenterPage,bindWorkCenter,scheduleWorkBadge} from './modules/work-center.js';
+import {executionCenterPage,bindExecutionCenter,executionDetailPage,bindExecutionDetail} from './modules/execution-center.js';
 import {analyticsPage,bindAnalytics} from './modules/analytics.js';
 import {integrityPage,bindIntegrity} from './modules/integrity.js';
 import {repairPage,bindRepair} from './modules/repair.js';
@@ -47,6 +48,7 @@ const PAGES={
  search:{title:'البحث',render:app=>renderSearch(app),bind:app=>bindSearch(app)},
  reports:{title:'التقارير',render:(app,q)=>reportsPage(app,q),bind:app=>bindReports(app)},
  actionCenter:{title:'مركز العمل',render:(app,q)=>workCenterPage(app,q),bind:(app,q)=>bindWorkCenter(app,q)},
+ executionCenter:{title:'مركز التنفيذ',render:app=>executionCenterPage(app),bind:app=>bindExecutionCenter(app),layoutId:'executionCenter'},
  analytics:{title:'الإحصاءات',render:(app,q)=>analyticsPage(app,q),bind:app=>bindAnalytics(app)},
  integrity:{title:'سلامة البيانات والتدقيق',render:app=>integrityPage(app),bind:app=>bindIntegrity(app)},
  repair:{title:'مركز الإصلاح والاسترداد',render:app=>repairPage(app),bind:app=>bindRepair(app)},
@@ -60,6 +62,9 @@ for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>li
 function recordRoute(route){
  let m=/^(client|opponent|file|case):(.+)$/.exec(route);
  if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];const layouts={client:'client-details',opponent:'opponent-details',file:'file-details',case:'rec:cases'};return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0],layoutId:layouts[m[1]]}}
+ // بطاقة التنفيذ: مسار ثابت يُستخدم من الجدول والبحث والخط الزمني
+ m=/^exc:(.+)$/.exec(route);
+ if(m)return {title:'بطاقة التنفيذ',render:app=>executionDetailPage(app,m[1]),bind:app=>bindExecutionDetail(app,m[1]),store:'executionCenter',layoutId:'execution:card'};
  m=/^cfile:(.+)$/.exec(route);
  if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients',layoutId:'client-file'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);

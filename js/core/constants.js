@@ -1,8 +1,8 @@
 export const APP_NAME='⚖️ مكتب الأستاذ / أحمد محمد خضير المحامي';
 export const APP_SUBTITLE='نظام إدارة ومتابعة دورة الملفات القانونية';
-export const APP_VERSION='5.7.0';
+export const APP_VERSION='5.8.0';
 export const REGISTRY_VERSION=1;
-export const SCHEMA_VERSION=14;
+export const SCHEMA_VERSION=15;
 export const REGISTRY_KEY='AhmadKhudairLawOffice::Registry::v1';
 export const DB_PREFIX='AhmadKhudairLawOfficeDB__';
 export const CHANNEL='ahmad-khudair-office';

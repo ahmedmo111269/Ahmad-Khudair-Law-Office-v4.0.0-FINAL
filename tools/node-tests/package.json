@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node run-tests.mjs",
-    "test:grid-browser": "node grid-browser-tests.mjs"
+    "test:grid-browser": "node grid-browser-tests.mjs",
+    "test:execution-browser": "node execution-browser-tests.mjs"
   },
   "keywords": [],
   "author": "",

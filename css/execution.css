@@ -1,0 +1,87 @@
+/* =====================================================================
+   قسم التنفيذ — أنماط مركز التنفيذ وبطاقة التنفيذ
+   تستخدم متغيرات الثيم القائمة (--surface/--text/--primary…) فلا ثيم جديد.
+   ===================================================================== */
+.exec-head { align-items: flex-start; }
+
+/* ===== مؤشرات ===== */
+.exec-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.exec-kpi { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 12px; background: var(--surface-2, rgba(255,255,255,.03)); color: inherit; text-align: right; cursor: pointer; transition: border-color .15s, transform .15s; }
+.exec-kpi:hover { border-color: var(--primary, #c9a227); transform: translateY(-1px); }
+.exec-kpi.is-active { border-color: var(--primary, #c9a227); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); }
+.exec-kpi b { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.exec-kpi span { font-weight: 600; font-size: .9rem; }
+.exec-kpi small { font-size: .72rem; line-height: 1.3; }
+
+/* ===== تنبيهات ===== */
+.exec-alerts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.exec-alert { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border, rgba(255,255,255,.12)); background: var(--surface-2, rgba(255,255,255,.03)); }
+.exec-alert-warn { border-inline-start: 3px solid #d98b2b; }
+.exec-alert-info { border-inline-start: 3px solid #4c8bf5; }
+.exec-alert-body { line-height: 1.5; }
+
+/* ===== فلاتر ===== */
+.exec-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.exec-controls input[type='search'] { flex: 1 1 320px; min-width: 220px; }
+.exec-controls select { min-width: 150px; }
+
+/* ===== جداول التفصيل ===== */
+.exec-table-wrap { overflow: auto; max-width: 100%; }
+.exec-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+.exec-table th, .exec-table td { padding: 6px 8px; border-bottom: 1px solid var(--border, rgba(255,255,255,.1)); text-align: right; vertical-align: top; }
+.exec-table th { font-weight: 700; background: var(--surface-2, rgba(255,255,255,.04)); position: sticky; top: 0; z-index: 1; }
+.exec-table tbody tr:hover { background: var(--surface-3, rgba(255,255,255,.05)); }
+.exec-row-warn td { background: rgba(217,139,43,.08); }
+.exec-row-muted td { opacity: .55; }
+.exec-cell-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ===== أزواج مفتاح/قيمة ===== */
+.exec-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
+.exec-kv > span { color: var(--muted, #9aa); font-size: .8rem; }
+.exec-kv > b { font-variant-numeric: tabular-nums; }
+.exec-amount-due { color: #d98b2b; }
+.exec-equations { margin: 6px 0 10px; padding-inline-start: 18px; font-size: .82rem; color: var(--muted, #9aa); display: grid; gap: 2px; }
+.exec-sub { margin: 14px 0 6px; font-size: .95rem; }
+.exec-actions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.exec-quick-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ===== شرائح وتطور القيمة ===== */
+.exec-chip { display: inline-block; margin: 2px 2px; padding: 2px 6px; border-radius: 8px; background: var(--surface-3, rgba(255,255,255,.06)); font-size: .78rem; }
+.exec-evolution-block, .exec-evolution { margin: 6px 0; }
+.exec-evolution-list { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: .84rem; }
+
+/* ===== شجرة التتبع ===== */
+.exec-trace-root .exec-trace-level { margin: 4px 0; padding-inline-start: 16px; border-inline-start: 1px dashed var(--border, rgba(255,255,255,.15)); }
+.exec-trace-level { list-style: none; margin: 4px 0; padding-inline-start: 16px; }
+.exec-trace-node { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; padding: 3px 0; font-size: .85rem; }
+.exec-trace-label { font-weight: 600; }
+
+/* ===== الخط الزمني ===== */
+.exec-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.exec-timeline li { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 8px; background: var(--surface-2, rgba(255,255,255,.03)); font-size: .85rem; }
+.exec-timeline b { font-size: .78rem; color: var(--muted, #9aa); }
+
+/* ===== نوافذ الإجراءات ===== */
+.exec-form { display: grid; gap: 10px; }
+.exec-form-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.exec-field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; }
+.exec-field > span { font-weight: 600; }
+.exec-field small { font-size: .72rem; }
+.exec-field input, .exec-field select, .exec-field textarea { width: 100%; }
+.exec-alloc { margin-top: 12px; border-top: 1px solid var(--border, rgba(255,255,255,.12)); padding-top: 10px; }
+.exec-alloc-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.exec-alloc-rows { display: grid; gap: 4px; max-height: 300px; overflow: auto; }
+.exec-alloc-row { display: grid; grid-template-columns: 1fr auto 110px; gap: 8px; align-items: center; font-size: .82rem; }
+.exec-alloc-row input[type='number'] { width: 110px; }
+.exec-include { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 12px; }
+.exec-include label { display: flex; gap: 6px; align-items: center; font-size: .85rem; }
+.exec-total { margin-inline-start: auto; font-weight: 700; }
+.exec-snapshot, .exec-simulation { margin-top: 10px; }
+
+@media (max-width: 640px) {
+  .exec-timeline li { grid-template-columns: 1fr; }
+  .exec-alloc-row { grid-template-columns: 1fr; }
+}
+@media print {
+  .exec-kpis, .exec-quick-actions, .exec-actions-row, .exec-cell-actions, .dg-tools-panel { display: none !important; }
+}

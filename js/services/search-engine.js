@@ -63,7 +63,14 @@ export const SEARCH_SOURCES=[
  {store:'execution',icon:'hammer',weight:40,title:r=>`تنفيذ ${r.executionNumber||''}`.trim()||'تنفيذ',sub:r=>[r.status,fdate(r.openedDate)].filter(Boolean).join(' · ')},
  {store:'powersOfAttorney',icon:'stamp',weight:38,title:r=>`توكيل ${r.poaNumber||''}`.trim()||'توكيل',sub:r=>[r.status,fdate(r.issuedDate)].filter(Boolean).join(' · ')},
  {store:'documentReferences',icon:'file',weight:36,title:r=>r.title||'مستند',sub:r=>[fdate(r.date),r.physicalLocation].filter(Boolean).join(' · ')},
- {store:'bailiffs',icon:'scale',weight:34,title:r=>r.name||'محضر',sub:r=>[r.court,r.phone].filter(Boolean).join(' · ')}
+ {store:'bailiffs',icon:'scale',weight:34,title:r=>r.name||'محضر',sub:r=>[r.court,r.phone].filter(Boolean).join(' · ')},
+ // ===== قسم التنفيذ: نتائج فرعية تفتح صفحة التنفيذ ذاتها =====
+ {store:'executionReceipts',icon:'wallet',weight:33,title:r=>`محضر تحصيل ${r.receiptNumber||''}`.trim()||'محضر تحصيل',sub:r=>[r.amount,r.date&&fdate(r.date),r.collectorName].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'محاضر التحصيل'},
+ {store:'executionPOAs',icon:'stamp',weight:32,title:r=>`توكيل تنفيذ ${r.poaNumber||''}`.trim()||'توكيل تنفيذ',sub:r=>[r.total,r.date&&fdate(r.date)].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'توكيلات التنفيذ'},
+ {store:'executionActions',icon:'hammer',weight:31,title:r=>`${r.kindLabel||r.kind||'إجراء تنفيذ'} ${r.referenceNumber||''}`.trim(),sub:r=>[fdate(r.date),r.authority,r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'إجراءات التنفيذ'},
+ {store:'executionParties',icon:'users',weight:30,title:r=>r.name||'طرف تنفيذ',sub:r=>[r.side==='debtor'?'منفذ ضده':'مستحق',r.role].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'أطراف التنفيذ'},
+ {store:'executionValuePeriods',icon:'chart',weight:29,title:r=>`شريحة قيمة: ${r.amount||''} ${r.entitlementType||''}`.trim(),sub:r=>[r.valueType==='fixed'?'ثابت':'دوري',r.periodicity,r.startDate&&fdate(r.startDate)].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'شرائح القيمة'},
+ {store:'differenceRecords',icon:'scale',weight:28,title:r=>`فرق استحقاق ${r.periodKey||''}`.trim(),sub:r=>[r.oldValue&&('قديم '+r.oldValue),r.newValue&&('جديد '+r.newValue),r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'فروق الاستحقاق'}
 ];
 export const PRIMARY_STORES=['clients','files','cases','opponents','hearings','procedures'];
 export const allSearchStores=()=>SEARCH_SOURCES.map(s=>s.store);
@@ -76,9 +83,12 @@ const FAST_INDEXES={
  cases:[['caseNumber','digits'],['subjectNormalized','text']],
  opponents:[['nameNormalized','text']],
  serviceRecords:[['internalNumber','digits']],
- powersOfAttorney:[['poaNumber','digits']]
+ powersOfAttorney:[['poaNumber','digits']],
+ execution:[['searchTextNormalized','text']],
+ executionReceipts:[['receiptNumber','digits']],
+ executionPOAs:[['poaNumber','digits']]
 };
-const numberishFields={clients:['nationalId','phone','clientCode'],files:['fileNumber'],cases:['caseNumber','caseYear'],opponents:['nationalId'],serviceRecords:['internalNumber','noticeNumber'],powersOfAttorney:['poaNumber'],judgments:['judgmentNumber'],execution:['executionNumber'],feePayments:['receiptNumber'],documentReferences:['referenceNumber']};
+const numberishFields={clients:['nationalId','phone','clientCode'],files:['fileNumber'],cases:['caseNumber','caseYear'],opponents:['nationalId'],serviceRecords:['internalNumber','noticeNumber'],powersOfAttorney:['poaNumber'],judgments:['judgmentNumber','lawsuitNumber','appealNumber'],execution:['executionNumber','officialNumber','internalNumber'],feePayments:['receiptNumber'],documentReferences:['referenceNumber'],executionReceipts:['receiptNumber'],executionPOAs:['poaNumber'],executionActions:['referenceNumber','judicialNumber','petitionNumber'],differenceRecords:['periodKey']};
 
 function rowMatches(src,r,tokens,code,numDigits){
  if(src.extra&&!src.extra(r))return false;

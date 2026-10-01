@@ -9,6 +9,9 @@ import {createLegalFile,saveParty,removeParty,saveRelation,refreshFileSearchText
 import {opponentData} from '../domain/normalizers.js';
 import {saveServiceRecord,saveBailiff} from './service-records.js';
 import {saveWorkItem} from './work-items.js';
+import {saveExecution as saveExecutionRow,saveExecutionParty,saveValueSlice,saveExecutionAction,createResultFile} from './execution.js';
+import {recordCollection,updateReceiptDetails,recordExpense} from './execution-ledger.js';
+import {saveExecutionPoa} from './execution-poa.js';
 
 const OPERATIONAL=['hearings','procedures','appointments','communications','caseNotes'];
 const JUDICIAL=['witnesses','expertReports','judgments','execution'];
@@ -31,6 +34,17 @@ export async function saveEntity(office,store,data,id=null,expectedVersion=null)
   case 'feePayments':row=id?await saveGeneric(office,'feePayments',{...data,amount:Number(data.amount||0)},id):await addFeePayment(office,data);break;
   case 'documentReferences':if(!data.fileId)throw new AppError(ERR.VALIDATION,'يجب اختيار الملف.',{fileId:'الملف مطلوب'});row=await saveGeneric(office,store,data,id);break;
   case 'fileParties':row=await saveParty(office,data,id);break;
+  // ===== قسم التنفيذ: التوجيه إلى خدمات التنفيذ (لا كتابة مباشرة) =====
+  case 'execution':row=data.executionType?await saveExecutionRow(office,data,id,expectedVersion):await saveJudicial(office,'execution',{...data,caseId:data.caseId},id);break;
+  case 'executionParties':row=await saveExecutionParty(office,data,id);break;
+  case 'executionValuePeriods':row=await saveValueSlice(office,data);break;
+  case 'executionReceipts':row=id?await updateReceiptDetails(office,id,data):await recordCollection(office,data);break;
+  case 'executionPOAs':row=await saveExecutionPoa(office,data,id);break;
+  case 'executionActions':row=await saveExecutionAction(office,data,id);break;
+  case 'executionLedger':row=await recordExpense(office,data);break;
+  case 'differenceRecords':case 'executionSettlements':case 'executionAdjustments':case 'executionAllocations':case 'executionTemplates':
+   throw new AppError(ERR.VALIDATION,'هذا السجل المالي يُدار من شاشات التنفيذ (التسويات/الحركات/التخصيصات/الطباعة) ولا يُحرَّر مباشرةً: كل تعديل يحتاج مسارًا موثقًا.');
+  case 'executionResultFiles':{row=await createResultFile(office,data);await refreshFileSearchText(office,row.fileId);break}
   case 'fileRelations':row=await saveRelation(office,data,id);break;
   default:
    if(OPERATIONAL.includes(store))row=await saveOperational(office,store,data,id);

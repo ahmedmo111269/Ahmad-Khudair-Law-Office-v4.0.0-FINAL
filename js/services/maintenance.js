@@ -1,6 +1,6 @@
 // صيانة خفيفة بعد فتح أي قاعدة بيانات (بما فيها القواعد المستعادة من نسخة أقدم):
 // 1) زرع القوائم الافتراضية للفئات التي لم تُزرع. 2) ترحيل روابط الموكلين القديمة (fileClients) إلى أطراف الملف (fileParties).
-// 3) بناء نص البحث للملفات التي لا تملكه. كل الخطوات لا تحذف أي بيانات ويمكن تكرارها بأمان.
+// 3) بناء نص البحث للملفات والتنفيذات التي لا تملكه. 4) ترحيل التنفيذ (حقول إضافية + علامة مراجعة) بلا تغيير أي تاريخ أو رقم.\n// كل الخطوات لا تحذف أي بيانات ويمكن تكرارها بأمان.
 import {STORE} from '../db/schema.js';
 import {Clock} from '../core/clock.js';
 import {transaction,request} from '../db/unit-of-work.js';
@@ -9,6 +9,7 @@ import {seedTaxonomy,migrateToClientFiles} from './client-files.js';
 import {refreshFileSearchText} from './legal-files.js';
 import {phonesOf} from '../domain/entities.js';
 import {PARTY_ROLE_GROUP_MAP} from '../domain/taxonomy-defaults.js';
+import {migrateExecutionData} from './execution-migration.js';
 
 const META_ID='maintenance';
 const SCHEMA13_META='schema13-data-backfill-v2';

@@ -8,12 +8,24 @@ const REQUIRED={
   caseOpponents:['id','caseId','opponentId'],caseRelations:['id','sourceCaseId','targetCaseId'],
   hearings:['id','caseId','hearingDate'],procedures:['id','fileId','status'],
   appointments:['id','date'],communications:['id','fileId'],caseNotes:['id','fileId','content'],
-  witnesses:['id','caseId','name'],expertReports:['id','caseId','reportDate'],judgments:['id','caseId','judgmentDate'],
-  execution:['id','caseId','status'],fees:['id','fileId','agreedAmount'],feePayments:['id','feeId','amount','date'],
+  witnesses:['id','caseId','name'],expertReports:['id','caseId','reportDate'],
+  // الأحكام والتنفيذ يُقبلان أيضًا مرتبطين بملف/تنفيذ بلا قضية (سلسلة أحكام التنفيذ)،
+  // لذلك الحقول الدنيا هي المعرّف والتاريخ/الحالة، والعلاقات تُفحص في relationRules عند وجودها.
+  judgments:['id','judgmentDate'],
+  execution:['id','status'],fees:['id','fileId','agreedAmount'],feePayments:['id','feeId','amount','date'],
   documentReferences:['id','fileId','title'],powersOfAttorney:['id','clientId'],activityLog:['id','entityType','entityId','action','timestamp'],
   fileParties:['id','fileId','partyKind','role'],fileRelations:['id','sourceFileId','targetFileId'],
   serviceRecords:['id','fileId','actionType','status'],bailiffs:['id','name'],
-  workItemComments:['id','workItemId','body'],workItemRecurrences:['id','title','rule','startDate']
+  workItemComments:['id','workItemId','body'],workItemRecurrences:['id','title','rule','startDate'],
+  // قسم التنفيذ: الحقول الدنيا التي تجعل كل رقم قابلًا للتتبع والمصدر
+  executionParties:['id','executionId','side'],
+  executionValuePeriods:['id','executionId','judgmentId','entitlementType','amount','startDate','createdAt'],
+  executionLedger:['id','executionId','type','amount','date','createdAt'],
+  executionReceipts:['id','executionId','amount','date'],
+  executionActions:['id','executionId','kind','date'],
+  executionPOAs:['id','executionId','total','date'],
+  differenceRecords:['id','executionId','periodKey','differenceAmount','status'],
+  executionSettlements:['id','executionId','status']
 };
 const OPEN=(db,name,mode='readonly')=>db.transaction(name,mode).objectStore(name);
 const scan=(db,name,visit,{maxRows=Infinity}={})=>new Promise((resolve,reject)=>{const s=OPEN(db,name);const c=s.openCursor();let n=0;c.onerror=()=>reject(c.error);c.onsuccess=()=>{const cur=c.result;if(!cur||n>=maxRows){resolve(n);return}n++;try{visit(cur.value);cur.continue()}catch(e){reject(e)}}});
@@ -30,7 +42,7 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
   }
   if(scanRows){
     const sets={};
-    for(const n of ['clients','files','cases','opponents','fees','staff','fileParties','fileRelations','hearings','serviceRecords','bailiffs','workItems']){sets[n]=new Set();if(!out.schemaIssues.some(x=>x.store===n&&x.type==='missing-store'))await scan(ctx.db,n,row=>{if(row?.id)sets[n].add(row.id)})}
+    for(const n of ['clients','files','cases','opponents','fees','staff','fileParties','fileRelations','hearings','serviceRecords','bailiffs','workItems','execution','judgments','executionLedger','executionReceipts','executionSettlements']){sets[n]=new Set();if(!ctx.db.objectStoreNames.contains(n)){delete sets[n];continue}if(!out.schemaIssues.some(x=>x.store===n&&x.type==='missing-store'))await scan(ctx.db,n,row=>{if(row?.id)sets[n].add(row.id)})}
     const relationRules=[
       ['fileClients','fileId','files','clientId','clients'],['caseClients','caseId','cases','clientId','clients'],['caseOpponents','caseId','cases','opponentId','opponents'],
       ['caseRelations','sourceCaseId','cases','targetCaseId','cases'],['powersOfAttorney','clientId','clients','fileId','files'],
@@ -43,7 +55,15 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
       ['serviceRecords','previousServiceId','serviceRecords','bailiffId','bailiffs'],
       ['fees','fileId','files'],['feePayments','feeId','fees'],['documentReferences','fileId','files'],
       // مركز العمل: روابط المهام المستقلة معرّفات فقط. الطبقة (overlay) لا تُفحص مقابل مصدرها عمدًا: فقدان المصدر حالة مسموحة («المصدر غير متاح حاليًا»).
-      ['workItems','fileId','files','clientId','clients'],['workItems','caseId','cases'],['workItemComments','workItemId','workItems'],['workItemRecurrences','fileId','files','clientId','clients']
+      ['workItems','fileId','files','clientId','clients'],['workItems','caseId','cases'],['workItemComments','workItemId','workItems'],['workItemRecurrences','fileId','files','clientId','clients'],
+      // قسم التنفيذ: كل سجل مالي أو إجرائي يجب أن يتبع تنفيذًا موجودًا، وكل رقم إلى مصدره
+      ['executionParties','executionId','execution','clientId','clients'],['executionValuePeriods','executionId','execution','judgmentId','judgments'],
+      ['executionLedger','executionId','execution','receiptId','executionReceipts'],['executionLedger','poaId','executionPOAs'],['executionLedger','settlementId','executionSettlements'],
+      ['executionReceipts','executionId','execution','poaId','executionPOAs'],
+      ['executionActions','executionId','execution','fileId','files'],
+      ['executionPOAs','executionId','execution','previousPoaId','executionPOAs'],
+      ['differenceRecords','executionId','execution','settlementId','executionSettlements'],
+      ['executionSettlements','executionId','execution']
     ];
     for(const rule of relationRules){
       if(out.relationIssues.length>=maxIssues)break;
