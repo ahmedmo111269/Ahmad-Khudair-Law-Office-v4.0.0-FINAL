@@ -1,4 +1,5 @@
 import {EXTRA_LOOKUPS} from './taxonomy-defaults.js';
+import {statusLabelProblem} from './work-items.js';
 // القوائم الافتراضية للبرنامج. تُنسخ مرة واحدة إلى مخزن lookups عند أول تشغيل،
 // ثم يستطيع المكتب تعديلها من الإعدادات ← القوائم. هذه القيم إدارية فقط وليست قواعد قانونية.
 export const LOOKUP_CATEGORIES={
@@ -38,6 +39,10 @@ export const LOOKUP_CATEGORIES={
  poaStatus:{label:'حالات التوكيل',values:['ساري','منتهٍ','ملغي']},
  fileRelationType:{label:'أنواع العلاقة بين الملفات',values:['استئناف لملف','طعن على ملف','تنفيذ لملف','مرتبط بـ','ملف فرعي من','دعوى متقابلة','نشأ عن','تظلم من','إحالة من','ناتج عن','متصل بـ','أخرى']},
  appointmentStatus:{label:'حالات المواعيد',values:['مجدول','تم','مؤجل','ملغي']},
+ workItemType:{label:'أنواع المهام وعناصر العمل',values:['مهمة','متابعة','اتصال','تذكير','مراجعة مستندات','تحضير مذكرة','تحضير جلسة','زيارة / انتقال','أخرى']},
+ workItemTag:{label:'وسوم المهام',values:[]},
+ workItemStatus:{label:'حالات المهام المخصصة',values:[],check:(value,rows,id)=>statusLabelProblem(value,{existing:rows,exceptId:id})}, // حالات عمل «مفتوحة» تُضاف إلى الحالات الأساسية (الإنجاز والإلغاء أساسيان ثابتان)؛ check: خطاف تحقق اختياري تستدعيه saveLookupValue
+ workItemPostponeReason:{label:'أسباب تأجيل المهام',values:['طلب الموكل','انتظار مستندات','انتظار رد جهة','ظرف طارئ','إعادة ترتيب الأولويات','أخرى']},
  commChannel:{label:'وسائل الاتصال',values:['هاتف','واتساب','زيارة','بريد إلكتروني','خطاب']},
  noteCategory:{label:'تصنيف الملاحظات',values:['عامة','قانونية','إدارية','مالية']},
  documentType:{label:'أنواع المستندات',values:['عقد','توكيل','صحيفة دعوى','مذكرة','حكم','شهادة','محضر','إعلان','أخرى']},

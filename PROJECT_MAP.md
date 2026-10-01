@@ -1,3 +1,59 @@
+# v5.7.0 — خريطة مركز العمل (Work Center / Command Center) · Schema 14
+
+**2026-10-01 — طبقة تشغيل فوق بيانات المكتب الموجودة (`actionCenter`).** العقد التفصيلي وقرارات التصميم والقياسات وما لم يُتحقق منه: [`docs/WORK-CENTER.md`](docs/WORK-CENTER.md). `APP_VERSION=5.7.0`, `SCHEMA_VERSION=14`.
+
+**المبدأ:** عنصر العمل (Work Item) إما صف مستقل (مهمة) أو **إسقاط** لسجل أصلي (جلسة/عمل إداري/موعد/متابعة اتصال/خطوة الملف التالية). لا تُنسخ أي بيانات قانونية؛ العرض يربط وقت القراءة. حذف أو أرشفة المصدر لا يحذف عنصر العمل («المصدر غير متاح حاليًا»).
+
+## الطبقات والملفات
+
+`js/modules/work-center.js` (الصفحة) ← `js/ui/work-*.js` (عرض) ← `js/services/work-*.js` (أوامر/استعلام/استنتاج) ← `js/domain/work-*.js` (نقي) ← Repository ← IndexedDB.
+
+| الملف | الدور |
+|---|---|
+| `js/domain/work-items.js` | نقي: الحالات والأولويات والنطاقات والعروض، `sortKey`، ربع أيزنهاور، مُوسِّع التكرار، مدققات الإدخال، `canActOn` (مقعد الصلاحيات)، `overlayId`/`parseOverlayId`، `dayPartOf` |
+| `js/domain/work-sources.js` | محوّلات المصادر (hearings, procedures, appointments, communications, files, serviceRecords)، `registerWorkSource`، بناة النماذج `buildProjectedItem/buildNativeItem/buildOrphanItem`، `itemPassesFilters` |
+| `js/services/work-config.js` | إعدادات/حالة/عروض محفوظة عبر `prefs` الموجودة (`ui:workcenter-config|state|views`)؛ `getWorkConfig()` يدمج الحالات المخصصة من لقطة Lookups |
+| `js/services/work-statuses.js` | الحالات المخصصة عبر **Lookups** (`workItemStatus`): لقطة بالذاكرة `ensureWorkStatuses`، `createCustomStatus/renameCustomStatus/removeCustomStatus`، تُبطَل عند `entity:changed`/`db:switched`/`db:restored` |
+| `js/services/work-items.js` | كل الأوامر (حفظ، إنجاز، تأجيل، إعادة جدولة، حالة، أولوية، تثبيت، وسوم، أرشفة/استعادة، حذف منطقي/تراجع، تعليقات، تكرار، `bulkApply`) بمعاملة واحدة وكتابة عبر `saveOperational` |
+| `js/services/work-query.js` | محرك الاستعلام: مجاري بفهارس + دمج k-way + مؤشر `wc1:`، `queryWorkItems/getWorkItem/countWorkItems/workSummary/searchScope/nowAndNext` |
+| `js/services/work-insights.js` | `ATTENTION_RULES`، الاقتراحات، المراجعة اليومية/الأسبوعية، الإنتاجية، الملفات الراكدة |
+| `js/ui/work-card.js` `work-actions.js` `work-drawer.js` `work-views.js` `work-grid.js` `work-panels.js` `work-links.js` | البطاقة، ورقة الإجراءات والنماذج، المجلّد، العروض الأحد عشر، قائمة DataGrid، المراجعات/الإعدادات/الإنتاجية، لوحة «المهام المرتبطة» في صفحات السجلات |
+| `css/work-center.css` | أنماط `.wc-*` (جوال أولًا ثم أعمدة على الشاشات الواسعة) |
+| `js/tests/work-center-tests.js` | 70 اختبارًا (Node + `tests.html`) |
+| `tools/node-tests/work-center-browser-tests.mjs` | Chromium حقيقي: `WC_BROWSER_SCENARIO=functional|mobile|perf|offline|all`، و`WC_PERF_SCALE` لتكبير بذرة الأداء |
+
+حُذف وحل محله: `js/modules/action-center.js`, `js/services/action-center.js` (وكانا يخصان صفحة القوائم الخمس القديمة؛ ما ورد عنهما أدناه في v2.7.0 تاريخي).
+
+## المخازن والترحيل (v14)
+
+- `workItems` — صف لكل مهمة مستقلة (`kind:'native'`, `sourceType:'task'`, `id=uid()`) أو لكل **طبقة** فوق سجل أصلي (`kind:'overlay'`)؛ 18 فهرسًا (`kind`, `dueDate`, `status`, `completedAt`, `pinnedAt`, `archivedAt`, `sourceType`, `sourceId`, `fileId`, `caseId`, `clientId`, `relatedId`, `recurrenceId`, `createdAt`, `updatedAt` + `kind_dueDate`, `recurrenceId_occurrenceDate`, `status_dueDate`).
+- `workItemComments` (3 فهارس) و`workItemRecurrences` (4 فهارس).
+- الطبقة تحمل فقط ما لا يملكه السجل الأصلي: تثبيت، وسوم، حالة تشغيلية، تجاوز أولوية، عدّاد التأجيل والموعد الأصلي، الإنجاز/الإلغاء/الأرشفة. **استثناء مقصود من قاعدة `uid()`:** معرّفها حتمي `"<sourceType>::<sourceId>"` (يمنع سباق إنشاء طبقتين لمصدر واحد، ويتحقق منه `deepHealth`).
+- الترحيل الرسمي: `SCHEMA_MIGRATIONS` + `migrationPlan(from,to)` في `js/db/schema.js`؛ **إضافي فقط** (مخازن وفهارس عبر `upgradeSchema`)، `destructive:false`, `backfill:false`. النسخ الاحتياطية v13 القديمة تُقبل. `repair.js` لا يمس المخازن الجديدة عمدًا.
+
+## نقاط التكامل مع بقية التطبيق
+
+- `js/app.js`: `PAGES.actionCenter` ← `workCenterPage/bindWorkCenter`؛ المسار الثابت `rec:workItems:ID` يفتح مجلّد العنصر؛ شارة الشريط (`scheduleWorkBadge`)؛ مرجع الاختصارات؛ `resetViewState` يمسح `__wc`.
+- `js/domain/entities.js`: `ENTITIES.workItems` (للنموذج الموحّد `openEntityForm`)؛ `js/ui/form.js`: حقول `newOnly` وتبديل خيارات الأولوية/الحالة من إعدادات المستخدم وإشعار «إنشاء مهمة متابعة» بعد نتيجة/تأجيل جلسة.
+- `js/services/entity-save.js`: `case 'workItems'`؛ `js/services/operations.js`: خياران `extraStores`/`withinTransaction`؛ `js/db/repository.js`: `getManyRaw` و`byIndexRaw` (قراءتان تشملان المحذوف منطقيًا: للطبقات ولقيم القوائم المتقاعدة).
+- `js/domain/lookup-defaults.js`: أربع فئات `workItemType/workItemTag/workItemPostponeReason/workItemStatus` وخطاف تحقق اختياري `check` لكل فئة؛ `js/services/lookups.js`: `saveLookupValue` يستدعي الخطاف ويمسح ذاكرته عند `db:restored`؛ `js/modules/databases.js`: يعلن `db:restored` بعد الاستعادة فوق القاعدة الحالية.
+- `js/services/search-engine.js`: مصدر `workItems` (المهام المستقلة فقط، `routeOf` → `actionCenter?item=ID`) — **لا محرك بحث ثانٍ**.
+- `js/services/integrity.js`: قواعد علاقات ومدقّق `work-item-invalid`؛ `js/services/grid-relations.js`: `workItems` ضمن `hasLegalFileColumns` (أعمدة الملف/الموكل/الخصم المركزية في قائمة DataGrid).
+- `js/ui/palette.js`: أوامر مركز العمل و«+ مهمة مرتبطة بالصفحة الحالية» و«ترحيل أعمال اليوم» (بتأكيد).
+- `js/modules/record-page.js`, `file-page.js`, `home.js`: أزرار «+ مهمة» ولوحات «المهام المرتبطة» والشارة.
+- `sw.js`: الأصول الجديدة في precache وذاكرة `ahmad-khudair-law-office-v5.7.0-work-center2`؛ `index.html`: `css/work-center.css`.
+- `css/pro.css` و`css/ui.css`: إصلاح أيقونة زر لوحة الأوامر `#command-btn` في الشريط العلوي (كانت `svg` بلا حجم: 137px عند 1280 و0 بين 901 و1200)؛ حذف بقايا `font-size:0` و`::after` 🔍 القديمة.
+
+## قواعد للتطوير اللاحق
+
+- لا تنسخ اسمًا/رقمًا/محكمة إلى `workItems`؛ خزّن معرّفات فقط (والعنوان المشتق يُحسب عند العرض).
+- أي كتابة عبر `work-items.js` (معاملة واحدة)؛ لا `put` مباشر من الواجهة؛ لا بيانات شخصية خام في `metadata`.
+- لا `getAll` ولا «تحميل الكل ثم التصفية»: استعلام مفهرس + مؤشر + سقف + إلغاء. تبديل العرض لا يعيد الجلب (`rt.cache`)، وأي تغيّر بيانات يمسحها (`rt.reload()` الافتراضي).
+- مصدر جديد = `registerWorkSource`؛ قاعدة تنبيه = عنصر في `ATTENTION_RULES`؛ حالات/ألوان/تسميات من إعدادات مركز العمل (prefs)، والأنواع/الوسوم/أسباب التأجيل من Lookups.
+- لا حاسبات مواعيد قانونية، ولا خدمات خارجية، ولا `location.reload()`.
+
+---
+
 # v5.6.0 — تحديث مستقل للجداول: أعمدة الملف / الأطراف وPrintContext
 
 **2026-10-01 — Universal DataGrid الموجود فقط؛ بلا تغيير Schema 13 أو البطاقات أو نظام التخصيص العام.** عقد التطوير والتغطية وإعادة تشغيل الاختبارات: [`docs/DATAGRID-CONTEXT.md`](docs/DATAGRID-CONTEXT.md).
@@ -164,7 +220,7 @@
 `UI → App/Services → Domain → Repository → IndexedDB`
 
 ## Stores
-36 IndexedDB stores: clients, staff, files, cases, fileClients, caseClients, opponents, caseOpponents, caseRelations, powersOfAttorney, hearings, procedures, appointments, communications, caseNotes, witnesses (historical only; UI retired), expertReports, judgments, execution, fees, feePayments, documentReferences, activityLog, lookups, settings, fileNumberCounters, meta, fileParties, fileRelations, clientFiles, taxonomy, caseTemplates, assets, fileAssets, serviceRecords, bailiffs. Schema v13 declares 159 indexes; integrity audit verifies each declaration at runtime.
+39 IndexedDB stores: clients, staff, files, cases, fileClients, caseClients, opponents, caseOpponents, caseRelations, powersOfAttorney, hearings, procedures, appointments, communications, caseNotes, witnesses (historical only; UI retired), expertReports, judgments, execution, fees, feePayments, documentReferences, activityLog, lookups, settings, fileNumberCounters, meta, fileParties, fileRelations, clientFiles, taxonomy, caseTemplates, assets, fileAssets, serviceRecords, bailiffs, **workItems, workItemComments, workItemRecurrences (v14 — Work Center)**. Schema v14 declares 184 indexes (159 in v13 + 25); integrity audit verifies each declaration at runtime. (The "Current release" lines above this section are historical.)
 
 ## Completed operational areas
 Clients / Files / Cases / Opponents / POA / Hearings / Procedures / Appointments / Communications / Notes / Expert Reports / Judgments / Execution / Fees / Payments / Document References / File Parties & Relations / Bailiffs & Service Records / Search / Reports / Backup / Multi-DB / Doctor / PWA shell. Witness records remain in the database for history/integrity but are absent from user-facing routes and lists.
@@ -251,8 +307,8 @@ Performance rule: UI list screens should migrate from `Office.list()` to `Office
 
 
 ## v2.7.0
-- `js/services/action-center.js`: indexed daily/weekly work queue aggregation.
-- `js/modules/action-center.js`: Action Center UI with tabs and direct record navigation.
+- `js/services/action-center.js`: indexed daily/weekly work queue aggregation. *(حُذف في v5.7.0 واستُبدل بـ`js/services/work-query.js`.)*
+- `js/modules/action-center.js`: Action Center UI with tabs and direct record navigation. *(حُذف في v5.7.0 واستُبدل بـ`js/modules/work-center.js`.)*
 - `files.nextStepDate` indexed; schema version 9.
 - Dedicated `actionCenter` route; dashboard links to the center.
 

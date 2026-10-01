@@ -75,10 +75,37 @@ export function staticCommands(app){
  quick('خصم','opponents','userX','خصم جديد');
  quick('جلسة','hearings','calendar','جلسة جديدة');
  quick('عمل إداري','procedures','clipboard','مهمة إجراء جديد');
+ quick('مهمة (مركز العمل)','workItems','clipboard','مهمة جديدة تذكير متابعة task');
  quick('مواعيد','appointments','clock','موعد جديد');
  quick('اتصال','communications','phone','اتصال جديد');
  quick('ملاحظة','caseNotes','note','ملاحظة جديدة');
  quick('أتعاب','fees','wallet','اتعاب جديدة');
+ // مركز العمل: تنقل مباشر + أوامر تعدّل بيانات تطلب تأكيدًا قبل التنفيذ
+ const wc=(id,label,route,keywords='')=>cmds.push({id:'wc:'+id,label,icon:ROUTE_ICONS.actionCenter,group:'مركز العمل',keywords:'مركز العمل '+keywords,run:()=>app.go(route)});
+ wc('today','مركز العمل — اليوم','actionCenter?range=today','اليوم');
+ wc('overdue','مركز العمل — المتأخر','actionCenter?range=overdue','متأخر');
+ wc('week','مركز العمل — هذا الأسبوع','actionCenter?range=week','أسبوع');
+ wc('kanban','مركز العمل — كانبان','actionCenter?view=kanban','لوحة حالات');
+ wc('matrix','مركز العمل — مصفوفة أيزنهاور','actionCenter?view=matrix','أولويات');
+ wc('attention','مركز العمل — يحتاج انتباهي','actionCenter?view=attention','تنبيه');
+ wc('review-day','مراجعة نهاية اليوم','actionCenter?review=day','ملخص اليوم');
+ wc('review-week','مراجعة الأسبوع','actionCenter?review=week','ملخص الأسبوع');
+ cmds.push({id:'wc:carry',label:'ترحيل أعمال اليوم المتبقية إلى غدًا (يعدّل البيانات — بتأكيد)',icon:ROUTE_ICONS.actionCenter,group:'مركز العمل',keywords:'ترحيل تأجيل غدًا مركز العمل',kbd:'تأكيد',run:async()=>{
+  const [{dailyReview},{bulkApply},{confirmBox},{toast}]=await Promise.all([import('../services/work-insights.js'),import('../services/work-items.js'),import('./modal.js'),import('./toast.js')]);
+  const data=await dailyReview(app.office);
+  if(!data.carryOver.length)return toast('لا عناصر غير منجزة قابلة للترحيل اليوم.','info');
+  if(!await confirmBox(`ترحيل ${data.carryOver.length} عنصرًا غير منجز إلى غدًا؟ يُحفظ الموعد الأصلي ويزيد عدّاد التأجيل. الجلسات لا تُرحَّل.`,{okText:'ترحيل إلى غدًا'}))return;
+  const out=await bulkApply(app.office,data.carryOver,'postpone',{option:'tomorrow',reason:'ترحيل من لوحة الأوامر'});
+  toast(`تم ترحيل ${out.done.length}${out.failed.length?` — تعذّر ${out.failed.length}`:''}`,out.failed.length?'warn':'ok');app.refresh();
+ }});
+ cmds.push({id:'wc:linked',label:'+ مهمة مرتبطة بالصفحة الحالية',icon:'clipboard',group:'مركز العمل',keywords:'مهمة مرتبطة ملف موكل جلسة',kbd:'+',run:async()=>{
+  const route=String(app.route||'').split('?')[0];
+  const m=/^(client|file|case):(.+)$/.exec(route),r=/^rec:([A-Za-z]+):(.+)$/.exec(route);
+  const target=m?[{client:'clients',file:'files',case:'cases'}[m[1]],m[2]]:r&&r[1]!=='workItems'?[r[1],r[2]]:null;
+  const {toast}=await import('./toast.js');
+  if(!target)return toast('افتح ملفًا أو موكلًا أو قضية أو سجلًا (جلسة/عمل/حكم/إعلان…) لإنشاء مهمة مرتبطة به.','info');
+  const {openLinkedTaskForm}=await import('./work-actions.js');openLinkedTaskForm(app,target[0],target[1]);
+ }});
  cmds.push({id:'qa:search',label:'بحث موحد شامل',icon:'search',group:'إجراءات سريعة',keywords:'بحث',run:()=>app.go('search')});
  cmds.push({id:'qa:backup',label:'إنشاء نسخة احتياطية الآن',icon:'save',group:'إجراءات سريعة',keywords:'نسخة احتياط',run:()=>app.go('backup')});
  return cmds;

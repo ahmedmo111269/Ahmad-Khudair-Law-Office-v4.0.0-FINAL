@@ -75,14 +75,8 @@ export async function homePage(app){
 }
 
 export function bindHome(app){
- // شارة عناصر العمل على زر «مركز العمل» في الشريط الجانبي — عدّاد حي من بيانات لوحة اليوم
- const acBtn=document.querySelector('#sidebar [data-route="actionCenter"]');
- if(acBtn&&__lastBrief){
-  const b=__lastBrief;
-  const n=b.todayHearings.length+b.overdueProcedures.length+b.appointmentsNext3.length+b.followupsThisWeek.length+b.staleFiles.length;
-  acBtn.querySelector('.nav-badge')?.remove();
-  if(n)acBtn.insertAdjacentHTML('beforeend',`<span class="nav-badge"${n>99?` title="${n}"`:''}>${n>99?'99+':n}</span>`);
- }
+ // شارة «مركز العمل» في الشريط الجانبي: عدّاد حي من محرك مركز العمل نفسه (المتأخر + اليوم)، بلا استعلام مكرر.
+ import('./work-center.js').then(m=>m.scheduleWorkBadge(app,{force:true})).catch(()=>{});
  document.querySelectorAll('[data-dashboard-report]').forEach(b=>b.onclick=()=>{const [type,preset]=b.dataset.dashboardReport.split('|');app.go('reports?type='+encodeURIComponent(type)+'&preset='+encodeURIComponent(preset))});
  document.querySelectorAll('[data-route-report]').forEach(b=>b.onclick=()=>app.go('reports?type='+encodeURIComponent(b.dataset.routeReport)));
  document.querySelectorAll('[data-kpi]').forEach(b=>b.onclick=()=>app.go(b.dataset.kpi));

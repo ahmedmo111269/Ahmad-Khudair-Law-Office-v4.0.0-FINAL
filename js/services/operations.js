@@ -9,16 +9,20 @@ import {events} from '../core/events.js';
 const parentByStore={hearings:['caseId'],procedures:['fileId'],appointments:['fileId','clientId'],communications:['fileId','clientId'],caseNotes:['fileId']};
 const activityName={hearings:'جلسة',procedures:'إجراء/مهمة',appointments:'موعد',communications:'اتصال',caseNotes:'ملاحظة'};
 
-export async function saveOperational(office,store,input,id=null){
+/**
+ * opts (اختياري، لمركز العمل): extraStores = مخازن إضافية تدخل المعاملة نفسها؛ withinTransaction(tx,{row,old}) = كتابة
+ * إضافية (طبقة تشغيلية/سجل نشاط) تُنفَّذ داخل المعاملة نفسها فتنجح أو تُلغى مع حفظ السجل الأصلي معًا.
+ */
+export async function saveOperational(office,store,input,id=null,opts={}){
   if(!parentByStore[store]) throw new AppError(ERR.VALIDATION,'نوع السجل غير مدعوم.');
-  if(store==='hearings')return saveHearing(office,input,id);
+  if(store==='hearings')return saveHearing(office,input,id,opts);
   const old=id?await office.r[store].get(id):null;
   if(id&&!old) throw new AppError(ERR.NOT_FOUND,'السجل غير موجود.');
   const row={...(old||{}),...input,id:id||uid(),createdAt:old?.createdAt||Clock.now(),updatedAt:Clock.now(),version:(old?.version||0)+1,isArchived:old?.isArchived||false,isDeleted:old?.isDeleted||false,deletedAt:old?.deletedAt||null};
   // العمل الإداري/الملاحظة المربوطة بقضية فقط تأخذ ملف القضية تلقائيًا
   if(!row.fileId&&row.caseId&&store!=='hearings'){const c=await office.r.cases.get(row.caseId);if(c)row.fileId=c.fileId}
   if(!parentByStore[store].some(k=>row[k])) throw new AppError(ERR.VALIDATION,parentByStore[store].length>1?'يجب ربط السجل بملف أو موكل.':store==='hearings'?'يجب اختيار القضية / المرحلة.':'يجب اختيار الملف.',Object.fromEntries(parentByStore[store].map(k=>[k,'مطلوب'])));
-  const stores=[store,STORE.activityLog];
+  const stores=[store,STORE.activityLog,...(opts.extraStores||[])];
   const fileId=store==='hearings'?await caseFileId(office,row.caseId):row.fileId||null;
   if(store==='hearings')row.fileId=fileId;
   if(fileId) stores.push(STORE.files);
@@ -26,6 +30,7 @@ export async function saveOperational(office,store,input,id=null){
     await request(tx.objectStore(store).put(row));
     if(fileId){const f=await request(tx.objectStore(STORE.files).get(fileId));if(f&&!f.isDeleted){f.lastActivityAt=row.updatedAt;f.updatedAt=row.updatedAt;f.version=(f.version||0)+1;await request(tx.objectStore(STORE.files).put(f))}}
     await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:store,entityId:row.id,action:id?'update':'create',timestamp:Clock.now(),summary:`${id?'تحديث':'إنشاء'} ${activityName[store]}`,metadata:{},...(fileId?{fileId}:{})}));
+    if(opts.withinTransaction)await opts.withinTransaction(tx,{row,old});
     return row;
   });
   events.emit('entity:changed',{entityType:store,id:result.id});
@@ -34,7 +39,7 @@ export async function saveOperational(office,store,input,id=null){
 }
 
 /** Save a hearing and, when an adjournment date is supplied, create its independent next-session record atomically. */
-async function saveHearing(office,input,id=null){
+async function saveHearing(office,input,id=null,opts={}){
   const old=id?await office.r.hearings.get(id):null;
   if(id&&!old)throw new AppError(ERR.NOT_FOUND,'الجلسة غير موجودة.');
   const row={...(old||{}),...input,id:id||uid(),createdAt:old?.createdAt||Clock.now(),updatedAt:Clock.now(),version:(old?.version||0)+1,isArchived:old?.isArchived||false,isDeleted:old?.isDeleted||false,deletedAt:old?.deletedAt||null};
@@ -60,7 +65,7 @@ async function saveHearing(office,input,id=null){
     if(ancestor?.previousHearingId&&seen.size>=1000)throw new AppError(ERR.CONFLICT,'سلسلة الجلسات أعمق من الحد الآمن للتحقق.');
   }
   const now=row.updatedAt;
-  const outcome=await transaction(office.ctx,[STORE.hearings,STORE.activityLog,STORE.files],async tx=>{
+  const outcome=await transaction(office.ctx,[...new Set([STORE.hearings,STORE.activityLog,STORE.files,...(opts.extraStores||[])])],async tx=>{
     const hearings=tx.objectStore(STORE.hearings);
     await request(hearings.put(row));
     let createdFollowUp=false;
@@ -90,6 +95,7 @@ async function saveHearing(office,input,id=null){
     if(!file||file.isDeleted)throw new AppError(ERR.CONFLICT,'الملف المرتبط بالجلسة غير متاح.');
     file.lastActivityAt=now;file.updatedAt=now;file.version=(file.version||0)+1;await request(tx.objectStore(STORE.files).put(file));
     await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:'hearings',entityId:row.id,action:id?'update':'create',timestamp:now,summary:`${id?'تحديث':'إنشاء'} جلسة`,metadata:{},fileId}));
+    if(opts.withinTransaction)await opts.withinTransaction(tx,{row,old,createdFollowUp,updatedFollowUp});
     return {row,createdFollowUp,updatedFollowUp};
   });
   events.emit('entity:changed',{entityType:STORE.hearings,id:row.id});

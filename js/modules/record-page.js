@@ -18,6 +18,11 @@ import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
+import {linkedTasksPanelHtml,bindLinkedTasksPanel} from '../ui/work-links.js';
+
+// السجلات التي تقبل «مهمة مرتبطة» من مركز العمل (المعرّف فقط يُخزَّن في المهمة).
+const TASK_LINK_STORES=['hearings','procedures','appointments','communications','judgments','serviceRecords','expertReports','execution','caseNotes','powersOfAttorney','cases'];
+const taskScope=(store,id)=>store==='cases'?{caseId:id}:{relatedId:id};
 
 export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
  const items=fields.map(f=>{const v=displayValue(f,row,refs);if(skipEmpty&&!v)return '';const link=f.ref&&row[f.k]?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}</dd></div>`}).join('');
@@ -59,6 +64,7 @@ export async function clientPage(app,id){
  app.__rec={store:'clients',id,related:await clientRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[c],ENTITIES.clients.fields);
+ const clientWorkPanel=await linkedTasksPanelHtml(app.office,{clientId:id},{title:'مهام الموكل',collapseId:'client-work',centerRoute:`actionCenter?clientId=${encodeURIComponent(id)}`});
  const parts={
   data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.clients.fields,c,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:false}),
   files:section('files','الملفات',relatedCount(r,'files',r.files),'<div data-grid="files"></div>',{add:'<button class="ghost" data-add="files">+ ملف جديد لهذا الموكل</button>'}),
@@ -69,10 +75,12 @@ export async function clientPage(app,id){
   communications:section('communications','الاتصالات',relatedCount(r,'communications',r.communications),'<div data-grid="communications"></div>',{open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
  };
  return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
- <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
+ <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-wc-client-task>+ مهمة</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${clientWorkPanel}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
 }
 export async function bindClientPage(app,id){
  const root=document.querySelector('#main-content');const r=app.__rec.related;
+ bindLinkedTasksPanel(app,root,{relatedType:'clients',relatedId:id});
+ root.querySelector('[data-wc-client-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'clients',id,{onSaved:async()=>{toast('تمت إضافة المهمة');await app.refresh()}})});
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'client-details',root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,'clients',{id}));
  root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,'clients',id);
@@ -155,11 +163,14 @@ export async function recordPage(app,store,id){
   store==='serviceRecords'? '<button class="ghost" data-show-service-cycle>عرض دورة الإعلان</button><button class="primary" data-service-reannounce>+ إنشاء إعادة إعلان</button>':'',
   store==='cases'?'<button class="ghost" data-add="hearings">+ جلسة</button><button class="ghost" data-add="judgments">+ حكم</button><button class="ghost" data-case-service>+ إعلان / إنذار</button>':'',
   ['cases','hearings','judgments'].includes(store)&&row.fileId?'<button class="ghost" data-create-related-file>⤴ إنشاء ملف مستقل مرتبط</button>':'',
-  store==='fees'? '<button class="ghost" data-add="feePayments">+ دفعة</button>':''
+  store==='fees'? '<button class="ghost" data-add="feePayments">+ دفعة</button>':'',
+  TASK_LINK_STORES.includes(store)?`<button class="ghost" data-wc-linked-task>${store==='hearings'?'+ مهمة متابعة للجلسة':'+ مهمة مرتبطة'}</button>`:''
  ].join('');
+ const workPanel=TASK_LINK_STORES.includes(store)?await linkedTasksPanelHtml(app.office,taskScope(store,id),{title:'المهام المرتبطة',collapseId:`rec-work:${store}`,centerRoute:`actionCenter?${store==='cases'?'caseId':'relatedId'}=${encodeURIComponent(id)}`}):'';
  return `<div class="record-head"><div><small class="muted">${esc(ent.label)}</small><h2>${esc(ent.title(row)||ent.label)}</h2><div class="parent-links">${parentBtns}</div></div>
  <div class="head-actions">${extraBtns}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:true})}
+ ${workPanel}
  ${store==='hearings'?section('hearing-cycle','دورة الجلسات',hearingSequence?.items.length||0,`<ol class="hearing-cycle">${(hearingSequence?.items||[]).map((h,i)=>`<li style="--depth:${Math.min(6,h.__depth||0)}"><button type="button" data-cycle-hearing="${esc(h.id)}"><time>${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(h.hearingTime):''}</time><b>${esc(h.type||'جلسة')}</b><small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></button>${i<(hearingSequence?.items.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
  ${store==='serviceRecords'?section('service-cycle','دورة الإعلان / الإنذار',serviceSequence?.records.length||0,`${serviceSequence?.hasBranches?'<p class="notice">توجد أكثر من إعادة مرتبطة بسجل واحد؛ عُرضت الفروع كما سُجلت.</p>':''}${serviceSequence?.more?'<p class="notice">تعرض دورة الملف أول 5000 سجل نشط؛ استخدم التقرير العام لتضييق نطاق السجلات الأقدم.</p>':''}<ol class="hearing-cycle service-cycle">${(serviceSequence?.records||[]).map((r,i)=>`<li style="--depth:${Math.min(6,r.__depth||0)}"><button type="button" data-cycle-service="${esc(r.id)}"><time>${fmtDate(r.createdAt)||'بدون تاريخ'}${r.serviceDate?' — '+fmtDate(r.serviceDate):''}</time><b>${esc(r.actionType||r.type||'إعلان')} · ${esc(r.internalNumber||'')}</b><small>${esc(r.partyName||'')} ${r.partyRole?'— '+esc(r.partyRole):''} · ${esc(r.status||'')}</small></button>${i<(serviceSequence?.records.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
  ${store==='cases'?section('case-timeline','الخط الزمني الموحد للقضية',caseTimeline?.timeline.length||0,`<div data-case-timeline>${timelineHtml(caseTimeline,{compact:true})}</div>`,{open:Boolean(caseTimeline&&caseTimeline.timeline.length>0)}):''}
@@ -169,6 +180,11 @@ export async function recordPage(app,store,id){
 }
 export async function bindRecordPage(app,store,id){
  const root=document.querySelector('#main-content');const {row,children,activity}=app.__rec;
+ if(TASK_LINK_STORES.includes(store)){
+  const opts={relatedType:store,relatedId:id,title:store==='hearings'?'متابعة الجلسة':''};
+  bindLinkedTasksPanel(app,root,opts);
+  root.querySelector('[data-wc-linked-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,store,id,{title:opts.title,onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh()}})});
+ }
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:`rec:${store}`,root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,store,{id}));
  root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,store,id);

@@ -1,6 +1,7 @@
 // صفحة الملف القانوني الداخلي (الوحدة الأساسية). الرقم الداخلي مستقل عن أي رقم قضائي، والملف قد لا يحتوي قضية أصلًا.
 // التبويبات: ملخص، الأطراف، البيانات القضائية (المراحل/الأرقام)، الجلسات، الإجراءات، الأحكام، الملاحظات، العلاقات،
 // بيانات إضافية (حسب النوع)، الأتعاب والمستندات، سجل النشاط.
+import {linkedTasksPanelHtml,bindLinkedTasksPanel} from '../ui/work-links.js';
 import {esc} from '../ui/dom.js';
 import {toast} from '../ui/toast.js';
 import {modal,closeModal,confirmBox} from '../ui/modal.js';
@@ -59,7 +60,7 @@ export async function filePage(app,id){
  return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}<div class="record-head file-head" style="--cat:${esc(cat?.color||'var(--primary)')}"><div><small class="muted">ملف فرعي — الرقم الداخلي للمكتب (مستقل عن أرقام القضايا الرسمية)</small><h2>${fileNumberChip(f)} ${esc(f.title||'')}</h2>
   <p class="badges">${cat?`<span class="badge type cat-badge">${esc(cat.icon||'')} ${esc(cat.name)}${ftype?' · '+esc(ftype.name):''}</span>`:f.fileType?`<span class="badge type">${esc(f.fileType)}</span>`:''}${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
   <p class="muted small">${clients.length?`الموكل: ${clients.map(p=>`${esc(p.name)} (${esc(p.role||'موكل')})`).join('، ')}`:'لا يوجد موكل مرتبط بعد'}${opps.length?` — الخصم: ${opps.map(p=>esc(p.name)).join('، ')}`:''}${cur?` — المرحلة الحالية: ${esc(refLabel('cases',cur))}`:' — لا توجد أرقام قضائية (ملف بلا قضية)'}</p></div>
-  <div class="head-actions"><button class="ghost" data-file-pin aria-pressed="${isFavorite('file:'+id)}">${isFavorite('file:'+id)?'★ إلغاء التثبيت':'☆ تثبيت'}</button><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
+  <div class="head-actions"><button class="ghost" data-file-task>+ مهمة</button><button class="ghost" data-file-pin aria-pressed="${isFavorite('file:'+id)}">${isFavorite('file:'+id)?'★ إلغاء التثبيت':'☆ تثبيت'}</button><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
  ${stagePathHtml(stages,f.currentStageId||cur?.id,id)}
  <nav class="tabs file-tabs" role="tablist" aria-label="أقسام الملف القانوني">${orderedFileTabs().map(([k,l,icon])=>{const count=k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:null;return `<button type="button" role="tab" data-tab="${k}" data-section-id="${k}" title="${esc(l)}" aria-label="${esc(l)}${count!==null?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="${app.__fileTab.tab===k?'active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count!==null?` <small>${count}</small>`:''}</button>`}).join('')}</nav><div class="file-tab-controls"><button type="button" class="link" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button></div>
  <div id="file-tab" role="tabpanel"></div>`;
@@ -71,6 +72,7 @@ export async function bindFilePage(app,id){
   if(hiddenSectionIds('file-details').has(app.__fileTab.tab)){app.__fileTab.tab='summary';renderTab(app).catch(e=>app.fail(e))}
  }}));
  root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
+ root.querySelector('[data-file-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh()}})});
  root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{
   const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()});
   e.currentTarget.textContent=on?'★ إلغاء التثبيت':'☆ تثبيت';
@@ -109,6 +111,11 @@ function partyGroupsHtml(parties){
 async function renderTab(app){
  await renderTabContent(app);
  const el=document.querySelector('#file-tab');
+ if(app.__fileTab.tab==='summary'&&el){
+  const html=await linkedTasksPanelHtml(app.office,{fileId:app.__file.id},{title:'مهام الملف',collapseId:'file-work',centerRoute:`actionCenter?fileId=${encodeURIComponent(app.__file.id)}`});
+  el.insertAdjacentHTML('beforeend',html);
+  bindLinkedTasksPanel(app,el,{relatedType:'files',relatedId:app.__file.id});
+ }
  const main=document.querySelector('#main-content');
  enhanceCollapsiblePanels(main,`file:${app.__file.id}:${app.__fileTab.tab}`);
  bindCards(el);

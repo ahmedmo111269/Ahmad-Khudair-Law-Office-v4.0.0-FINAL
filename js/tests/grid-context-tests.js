@@ -1,4 +1,5 @@
 import {DatabaseContext} from '../db/database-context.js';
+import {SCHEMA_VERSION} from '../core/constants.js';
 import {ensureSchema,STORES} from '../db/schema.js';
 import {transaction,request} from '../db/unit-of-work.js';
 import {Office} from '../services/office.js';
@@ -24,7 +25,7 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 // No registry/default database is selected, modified, repaired or migrated here.
 export async function createGridFixture(){
  const name=`AhmadKhudairLawOfficeDB__test__grid_context__${Date.now()}_${Math.random().toString(36).slice(2)}`;
- const db=await new Promise((resolve,reject)=>{const request=indexedDB.open(name,13);request.onupgradeneeded=()=>ensureSchema(request.result);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+ const db=await new Promise((resolve,reject)=>{const request=indexedDB.open(name,SCHEMA_VERSION);request.onupgradeneeded=()=>ensureSchema(request.result);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
  const ctx=new DatabaseContext(db,{id:name,name:'اختبار الجداول'}),office=new Office(ctx);
  const base={createdAt:'2026-01-01T10:00:00.000Z',updatedAt:'2026-01-01T10:00:00.000Z',version:1,isDeleted:false};
  const rows={
@@ -435,12 +436,12 @@ export function runGridContextTests(test,expect){
    f.ctx.close();expect(await grid.print()).toBe(false);expect(closed).toBe(true);
   }finally{window.open=originalOpen;globalThis.alert=originalAlert}
  }));
- test('Grid data integrity: screen/query/print/export are read-only for all stores, IDs, links and Schema 13',withFixture(async f=>{
+ test('Grid data integrity: screen/query/print/export are read-only for all stores, IDs, links and the current schema version',withFixture(async f=>{
   const before=await f.snapshot();
   for(const store of ['clients','files','hearings','procedures','judgments','fileParties','fileRelations','communications','powersOfAttorney','feePayments']){
    const {grid}=await fixtureGrid(f,store);grid.sortBy(grid.getVisibleColumns()[0].key);await grid.getPrintDocument();await grid.docHtml();
   }
-  expect(await f.snapshot()).toBe(before);expect(f.db.version).toBe(13);
+  expect(await f.snapshot()).toBe(before);expect(f.db.version).toBe(SCHEMA_VERSION);
   expect(Object.keys(f.rows.files[0]).includes('clientName')).toBe(false);
  }));
 }

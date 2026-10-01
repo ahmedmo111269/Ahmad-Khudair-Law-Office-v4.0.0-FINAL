@@ -11,6 +11,9 @@ import {saveEntity} from '../services/entity-save.js';
 import {fileParties} from '../services/legal-files.js';
 import {Clock} from '../core/clock.js';
 import {userError,normalizeError} from '../core/errors.js';
+import {workItemFieldOverrides} from '../domain/work-items.js';
+import {getWorkConfig} from '../services/work-config.js';
+import {ensureWorkStatuses} from '../services/work-statuses.js';
 
 const SEARCH_INDEX={clients:'fullNameNormalized',files:'titleNormalized',cases:'caseNumber',opponents:'nameNormalized'};
 let dl=0;
@@ -29,9 +32,10 @@ const NEW_FILE_FIELDS=[
  {k:'priority',l:'الأولوية',t:'select',opts:[['normal','عادي'],['urgent','عاجل'],['critical','حرج']],g:'الخطوة الأولى'}
 ];
 
-export function formFields(store,{isNew=false,only=null}={}){
+export function formFields(store,{isNew=false,only=null,current=null}={}){
  if(store==='files'&&isNew)return NEW_FILE_FIELDS;
- let f=(ENTITIES[store]?.fields||[]).filter(x=>x.t!=='readonly');
+ let f=(ENTITIES[store]?.fields||[]).filter(x=>x.t!=='readonly'&&!(x.newOnly&&!isNew));
+ if(store==='workItems')f=workItemFieldOverrides(f,getWorkConfig(),current);
  if(only)f=f.filter(x=>only.includes(x.k));
  return f;
 }
@@ -102,6 +106,7 @@ function typeGroupHtml(type,values,ctx){
  */
 export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,title=null,only=null,stageOptions=null,hearingOptions=null,partyOptions=null,bailiffOptions=null,serviceOptions=null,typeFieldsOnly=false}={}){
  const office=app.office;const ent=ENTITIES[store];
+ if(store==='workItems')await ensureWorkStatuses(office);   // الحالات المخصصة (Lookups) لخيارات الحالة
  const old=id?await office.r[store].get(id):null;
  const isNew=!old;
  const values={...(old||{}),...preset};
@@ -111,6 +116,7 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
   if(store==='procedures'){values.status=values.status||'open';values.priority=values.priority||'normal'}
   if(store==='fileParties'){values.partyKind=values.partyKind||'client';values.isActive=values.isActive??true;values.isPrimary=values.isPrimary??false;}
   if(store==='hearings')values.status=values.status||'مجدولة';
+  if(store==='workItems'){values.priority=values.priority||'medium';values.status=values.status||'notStarted'}
   if(store==='serviceRecords'){values.actionType=values.actionType||'إعلان';values.status=values.status||'مسودة';values.year=values.year||Number(Clock.today().slice(0,4))}
   if(store==='bailiffs'&&values.isActive===undefined)values.isActive=true;
   if(store==='fees')values.currency=values.currency||'جنيه';
@@ -128,7 +134,7 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
   if(bailiffOptions===null)bailiffOptions=await office.r.bailiffs.byIndex('activeStatus','active',1000);
   if(serviceOptions===null)serviceOptions=targetFileId?await office.r.serviceRecords.byIndexKey('fileId_recordState',[targetFileId,'active'],5000):[];
  }
- let fields=typeFieldsOnly?[]:formFields(store,{isNew,only});
+ let fields=typeFieldsOnly?[]:formFields(store,{isNew,only,current:old});
  const typeFields=store==='files'&&(typeFieldsOnly||!only);
  const cats=[...fields,...(typeFields?Object.values(FILE_TYPE_GROUPS).flatMap(g=>g.fields):[])].filter(f=>f.lk).map(f=>f.lk);
  const [lookups,refLabels]=await Promise.all([getLookups(office,cats),resolveRefs(office,[values],fields)]);
@@ -197,9 +203,12 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
     row=await saveEntity(office,store,{...data,allowDuplicate:true},old?.id||null,old?.version??null);
    }
    closeModal();
-   if(store==='hearings'&&row.__followUpCreated)toast(`تم حفظ الجلسة وإنشاء جلسة تالية بتاريخ ${data.adjournedTo}`);
-   else if(store==='hearings'&&row.__followUpUpdated)toast(`تم حفظ الجلسة وتحديث تاريخ جلستها التالية إلى ${data.adjournedTo}`);
-   else toast(isNew?'تمت الإضافة':'تم الحفظ');
+   // بعد تسجيل نتيجة/تأجيل الجلسة نعرض «إنشاء مهمة متابعة» كخيار يختاره المستخدم فقط (لا إنشاء تلقائي لأي مهمة).
+   const offerFollowUp=store==='hearings'&&Boolean(row.result||row.adjournedTo||/تمت|حضر|مؤجل/.test(String(row.status||'')));
+   const say=msg=>offerFollowUp?toast(msg,'ok',{duration:9000,actionLabel:'إنشاء مهمة متابعة',action:()=>import('./work-actions.js').then(m=>m.openLinkedTaskForm(app,'hearings',row.id,{title:'متابعة الجلسة',onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh?.()}}))}):toast(msg);
+   if(store==='hearings'&&row.__followUpCreated)say(`تم حفظ الجلسة وإنشاء جلسة تالية بتاريخ ${data.adjournedTo}`);
+   else if(store==='hearings'&&row.__followUpUpdated)say(`تم حفظ الجلسة وتحديث تاريخ جلستها التالية إلى ${data.adjournedTo}`);
+   else say(isNew?'تمت الإضافة':'تم الحفظ');
    if(onSaved)await onSaved(row,isNew);
    else if(isNew&&store==='files')await app.go('file:'+row.id);
    else await app.refresh();
