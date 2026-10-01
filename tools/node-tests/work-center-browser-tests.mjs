@@ -142,6 +142,30 @@ async function functional() {
     assert.equal(q7.from, today()); assert.equal(q7.to, addDays(today(), 7));
   });
 
+  await verify('بطاقات الملخص قابلة للنقر: كل بطاقة تطبّق الفترة والعرض والمرشح الموافق لها', async () => {
+    const day = today();
+    const cases = [
+      ['overdue', {range: 'overdue', view: 'cards'}], ['tomorrow', {range: 'tomorrow', view: 'cards'}], ['todayCount', {range: 'today', view: 'cards'}],
+      ['hearingsNext7', {range: 'custom', view: 'cards', from: day, to: addDays(day, 7), filter: ['sources', ['hearings']]}],
+      ['inProgress', {range: 'all', view: 'kanban'}], ['waiting', {range: 'all', view: 'cards', filter: ['statuses', ['waiting']]}],
+      ['postponed', {range: 'all', view: 'cards', filter: ['statuses', ['postponed']]}], ['undated', {range: 'all', view: 'cards', filter: ['undatedOnly', true]}],
+      ['doneToday', {range: 'today', view: 'completed'}], ['pinned', {range: 'all', view: 'cards', filter: ['pinned', true]}]
+    ];
+    assert.equal(await page.locator('[data-wc-stat]').count(), cases.length, 'عدد البطاقات الإحصائية');
+    for (const [key, want] of cases) {
+      await page.click(`[data-wc-stat="${key}"]`); await ready(page);
+      const st = await rtState(page);
+      assert.equal(st.range, want.range, `${key}: الفترة`); assert.equal(st.view, want.view, `${key}: العرض`);
+      assert.equal(await page.locator('#wc-view-select').inputValue(), want.view, `${key}: قائمة العرض`);
+      if (want.from) { assert.equal(st.from, want.from, `${key}: من`); assert.equal(st.to, want.to, `${key}: إلى`); }
+      if (want.filter) assert.deepEqual(st.filters[want.filter[0]], want.filter[1], `${key}: المرشح`);
+      assert.equal(await page.locator('#wc-view .error-box,#wc-view .ux-state-error').count(), 0, `${key}: خطأ في العرض`);
+    }
+    await page.click('[data-wc-reset]'); await ready(page);
+    const back = await rtState(page);
+    assert.equal(back.range, 'today'); assert.equal(back.view, 'cards'); assert.deepEqual(back.filters, {});
+  });
+
   await verify('الاستمرارية: حالة طي فلاتر الوقت والفترة والعرض تُستعاد بعد إعادة تحميل التطبيق', async () => {
     await page.click('[data-wc-range="week"]'); await ready(page);
     await selectView(page, 'kanban');
@@ -710,6 +734,45 @@ async function functional() {
     const row = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.all(5000).then(r => r.find(x => x.title === 'WCTEST مهمة من صفحة العمل الإداري')));
     assert.equal(row.relatedType, 'procedures'); assert.equal(row.relatedId, proc); assert.equal(row.fileId, procRow.fileId);
     await goWC(page);
+  });
+
+  await verify('التعديل: «تعديل المهمة…» يفتح النموذج الموحّد بالقيم الحالية ويحفظ على الصف نفسه (المعرّف وتاريخ الإنشاء ثابتان والإصدار يزيد)', async () => {
+    const title = 'WCTEST للتعديل', renamed = 'WCTEST بعد التعديل';
+    const made = await page.evaluate(async ([name, day]) => {
+      const service = await import('/js/services/work-items.js');
+      return service.saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: name, dueDate: day, priority: 'low', status: 'notStarted', description: 'وصف أولي'});
+    }, [title, today()]);
+    await useTask(page, title);
+    await sheetAct(page, title, 'edit'); await page.waitForSelector('.entity-form');
+    assert.equal(await page.inputValue('.entity-form [name=title]'), title, 'النموذج لا يعرض القيمة الحالية');
+    assert.equal(await page.inputValue('.entity-form [name=description]'), 'وصف أولي');
+    await page.fill('.entity-form [name=title]', renamed); await page.fill('.entity-form [name=description]', 'وصف بعد التعديل');
+    await page.selectOption('.entity-form [name=priority]', 'urgent');
+    await clearToasts(page); await page.click('.entity-form [type=submit]'); await page.waitForSelector('.entity-form', {state: 'detached'}); await ready(page);
+    const row = await dbGet(page, 'workItems', made.id);
+    assert.equal(row.id, made.id); assert.equal(row.title, renamed); assert.equal(row.description, 'وصف بعد التعديل'); assert.equal(row.priority, 'urgent');
+    assert.equal(row.createdAt, made.createdAt, 'تاريخ الإنشاء تغيّر'); assert.equal(row.version, made.version + 1, 'الإصدار لم يزد'); assert.equal(row.dueDate, made.dueDate);
+    await setSearch(page, renamed);
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${made.id}"]`).count(), 1, 'البطاقة بالعنوان الجديد');
+    await page.evaluate(async id => { const service = await import('/js/services/work-items.js'); await service.deleteItem(window.__LAW_OFFICE_APP__.office, id); }, made.id);
+    await page.click('[data-wc-reset]'); await ready(page);
+  });
+
+  await verify('الاستمرارية: مهمة أُنشئت تبقى كما هي بعد إعادة تحميل التطبيق ويفتح رابطها الثابت مجلّدها بالمعرّف نفسه', async () => {
+    const title = 'WCTEST استمرار بعد التحديث';
+    const made = await page.evaluate(async ([name, day]) => {
+      const service = await import('/js/services/work-items.js');
+      return service.saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: name, dueDate: day, priority: 'high', status: 'notStarted', description: 'نص للتحقق'});
+    }, [title, today()]);
+    await page.waitForTimeout(700);
+    await reloadApp(page);
+    const after = await dbGet(page, 'workItems', made.id);
+    for (const key of ['id', 'title', 'description', 'dueDate', 'priority', 'status', 'createdAt', 'version', 'kind', 'sourceType', 'sourceId']) assert.equal(after[key], made[key], `الحقل ${key} تغيّر بعد التحميل`);
+    await page.evaluate(i => window.__LAW_OFFICE_APP__.go(`rec:workItems:${i}`), made.id);
+    await page.waitForSelector('.wc-drawer', {timeout: 20000});
+    assert.ok((await page.locator('.wc-drawer').textContent()).includes(title), 'المجلّد لا يعرض المهمة');
+    await page.keyboard.press('Escape'); await page.waitForSelector('.wc-drawer', {state: 'detached', timeout: 5000}).catch(() => {});
+    await page.evaluate(async id => { const service = await import('/js/services/work-items.js'); await service.deleteItem(window.__LAW_OFFICE_APP__.office, id); }, made.id);
   });
 
   await verify('لا أخطاء JavaScript ولا console.error (عدا الخطوط الخارجية) طوال السيناريو الوظيفي', async () => { assert.equal(page.__errors.length, 0, page.__errors.slice(0, 6).join('\n') + '\n' + JSON.stringify(await page.evaluate(() => window.__unhandled || []))); });
