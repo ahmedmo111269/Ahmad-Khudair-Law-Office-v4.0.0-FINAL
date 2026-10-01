@@ -730,6 +730,71 @@ export async function runWorkCenterTests(test, expect) {
       expect(all.items.slice(0, 60).every(i => rel.model(i))).toBe(true);
     } finally { db3.close(); indexedDB.deleteDatabase(name3); }
   });
+  test('مركز العمل/إسقاط: أرشفة السجل الأصلي (لا حذفه) تُبقي العنصر «المصدر غير متاح حاليًا» وتحفظ طبقته', async () => {
+    const {office, file} = await env();
+    const src = await saveOperational(office, 'procedures', {fileId: file.id, description: 'عمل سيُؤرشف مصدره', internalDueDate: tomorrow, status: 'open'});
+    const id = ref('procedures', src.id);
+    await C.setPinned(office, id, true);
+    await office.archive('procedures', src.id);
+    const orphan = await Q.getWorkItem(office, id);
+    expect(orphan.sourceAvailable).toBe(false); expect(orphan.isPinned).toBe(true);
+    const pinned = await Q.queryWorkItems(office, {drive: 'pinned'}, {limit: 50});
+    expect(idsOf(pinned.items).includes(id)).toBe(true);
+    await office.restore('procedures', src.id);
+    expect((await Q.getWorkItem(office, id)).sourceAvailable).toBe(true);
+  });
+  test('مركز العمل/صلاحيات: مقاعد المنشئ/المكلّف/الرؤية موجودة على المهام والتكرار ونقطة canActOn تسمح حاليًا', async () => {
+    const {office} = await env();
+    const row = await C.saveWorkItem(office, {title: 'مهمة صلاحيات', dueDate: today});
+    expect(row.createdBy).toBe('user'); expect(row.assigneeId).toBe(null); expect(row.visibility).toBe('office');
+    const def = await C.saveRecurrence(office, {title: 'تكرار صلاحيات', startDate: today, rule: {freq: 'weekly'}});
+    expect(def.createdBy).toBe('user'); expect(def.visibility).toBe('office');
+    expect(D.WORK_ROLES.join()).toBe('creator,assignee,editor,viewer'); expect(D.canActOn('delete', row, {id: 'x'})).toBe(true);
+  });
+  test('مركز العمل/واجهة: مساعدات البطاقة: «الخصم: X + N آخرين»، شارات الموعد، وكل الإشارات نصية (ليست لونًا فقط)', async () => {
+    const card = await import('../ui/work-card.js');
+    expect(card.partiesLine('الخصم', [{text: 'أحمد علي'}, {text: 'ب'}, {text: 'ج'}])).toBe('الخصم: أحمد علي + 2 آخرين');
+    expect(card.partiesLine('الخصم', [{text: 'أحمد علي'}, {text: 'ب'}])).toBe('الخصم: أحمد علي + 1 آخر');
+    expect(card.partiesLine('الخصم', [])).toBe('');
+    const late = card.dueChip({dueDate: addDays(today, -3), isOpen: true}, today); expect(late.tone).toBe('danger'); expect(late.text.includes('متأخر')).toBe(true);
+    expect(card.dueChip({dueDate: today, dueTime: '09:30', isOpen: true}, today).text).toBe('اليوم 09:30');
+    expect(card.dueChip({dueDate: tomorrow, isOpen: true}, today).text).toBe('غدًا'); expect(card.dueChip({dueDate: '', isOpen: true}, today).text).toBe('بلا موعد');
+    const {office, procedure} = await env();
+    const item = await Q.getWorkItem(office, ref('procedures', procedure.id));
+    const html = card.workCardHtml(item, {config: K.getWorkConfig(), today});
+    expect(html.includes('data-wc-id="procedures::')).toBe(true);
+    for (const p of D.DEFAULT_WORK_PRIORITIES) { const chip = card.priorityChip({priority: p.key}, K.getWorkConfig()); expect(chip.includes(p.label) && chip.includes(p.mark) && chip.includes(p.icon)).toBe(true); }
+    expect(card.statusChip({status: 'inProgress', statusLabel: 'قيد التنفيذ'}, K.getWorkConfig()).includes('قيد التنفيذ')).toBe(true);
+    expect(html.includes('aria-label=')).toBe(true); expect(html.includes('type="checkbox"')).toBe(true);
+  });
+  test('مركز العمل/واجهة: تجميع التاريخ وأقسام اليوم والآن/التالي صحيحة', async () => {
+    const views = await import('../ui/work-views.js');
+    const groups = views.groupByDate([{dueDate: '2026-01-01'}, {dueDate: '2026-01-01'}, {dueDate: '2026-01-02'}, {dueDate: ''}]);
+    expect(groups.map(g => g.items.length).join()).toBe('2,1,1');
+    expect([D.dayPartOf({dueDate: ''}), D.dayPartOf({dueDate: today, sourceType: 'hearings'}), D.dayPartOf({dueDate: today, dueTime: '09:00', sourceType: 'procedures'}), D.dayPartOf({dueDate: today, sourceType: 'communications'}), D.dayPartOf({dueDate: today, sourceType: 'procedures'})].join()).toBe('undated,hearings,morning,followups,admin');
+    const items = [{isOpen: true, dueTime: '09:00', id: 'a'}, {isOpen: true, dueTime: '10:20', id: 'b'}, {isOpen: true, dueTime: '15:00', id: 'c'}, {isOpen: false, dueTime: '10:10', id: 'd'}];
+    const nn = Q.nowAndNext(items, '10:10');
+    expect(nn.now.map(i => i.id).join()).toBe('b'); expect(nn.next.id).toBe('c');            // 09:00 بدأ قبل أكثر من 60 دقيقة؛ 10:20 خلال 30 دقيقة القادمة
+    const earlier = Q.nowAndNext(items, '09:30');
+    expect(earlier.now.map(i => i.id).join()).toBe('a'); expect(earlier.next.id).toBe('b');
+    expect(Q.nowAndNext([], '10:00').next).toBe(null);
+  });
+  test('مركز العمل/موفّر الجدول: DataGrid يستعلم بمؤشر ويطبّق بحث الأعمدة أثناء المرور ويعلن الفرز غير الزمني', async () => {
+    const {office} = await env();
+    const {createWorkGridProvider, workColumns} = await import('../ui/work-grid.js');
+    const relations = createGridRelations(office, 'workItems');
+    const rt = {office, relations, st: {range: 'custom', from: '', to: addDays(today, 60), pageSize: 25, filters: {}, q: ''}, items: new Map(), config: () => K.getWorkConfig(), spec: (extra = {}) => ({range: 'custom', from: '', to: addDays(today, 60), undated: true, ...extra}), register(i) { this.items.set(i.id, i); }};
+    const provider = createWorkGridProvider(rt);
+    const columns = workColumns(rt);
+    const first = await provider.getRows({pagination: {size: 25}}, {columns});
+    expect(first.rows.length).toBe(25); expect(first.hasMore).toBe(true); expect(Boolean(first.nextCursor)).toBe(true); expect(first.totalExact).toBe(false);
+    const second = await provider.getRows({pagination: {size: 25, cursor: first.nextCursor}}, {columns});
+    expect(second.rows.length > 0 && !second.rows.some(r => first.rows.some(x => x.id === r.id))).toBe(true);
+    const filtered = await provider.getRows({search: {text: 'الخصم الثاني'}, pagination: {size: 25}}, {columns});
+    expect(filtered.rows.length > 0 && filtered.rows.every(r => relations.items(r, 'opponent').some(o => o.text.includes('الخصم الثاني')) || (r.title + r.typeLabel).includes('الخصم الثاني'))).toBe(true);
+    const sorted = await provider.getRows({sort: [{key: 'title', dir: 'asc'}], pagination: {size: 25}}, {columns});
+    expect(sorted.sortStatus.global).toBe(false);
+  });
   test('مركز العمل/تنظيف: إغلاق قاعدة الاختبار', async () => {
     const {db} = await env();
     db.close(); indexedDB.deleteDatabase(dbName);

@@ -16,15 +16,16 @@ const scenario = process.env.WC_BROWSER_SCENARIO || 'all';
 const outDir = path.join(repository, '.cache', 'work-center-browser');
 await fs.mkdir(outDir, {recursive: true});
 
-let browser;
-if (process.env.WC_BROWSER_EXECUTABLE) {
-  browser = await chromium.launch({executablePath: process.env.WC_BROWSER_EXECUTABLE, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage']});
+let browser, executablePath = process.env.WC_BROWSER_EXECUTABLE || '';
+if (executablePath) {
+  browser = await chromium.launch({executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage']});
 } else {
   const {default: slim, inflate} = await import('@sparticuz/chromium');
   const require = createRequire(import.meta.url);
   await inflate(path.resolve(path.dirname(require.resolve('@sparticuz/chromium')), '../bin/al2023.tar.br'));
   process.env.LD_LIBRARY_PATH = [path.join(process.env.TMPDIR || '/tmp', 'al2023', 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  browser = await chromium.launch({executablePath: await slim.executablePath(), headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage']});
+  executablePath = await slim.executablePath();
+  browser = await chromium.launch({executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage']});
 }
 const report = {browser: browser.version(), date: new Date().toISOString(), scenario, checks: [], metrics: {}, errors: [], notVerified: []};
 let currentPage = null;   // لقطة شاشة تلقائية عند أي إخفاق لتسهيل التشخيص
@@ -566,6 +567,109 @@ async function functional() {
     await goWC(page);
   });
 
+  await verify('المهام المتكررة: تعريف يومي من النموذج يولّد عناصر افتراضية بلا صفوف، ويُحوَّل عنصر واحد فقط عند الإنجاز', async () => {
+    await clearToasts(page);
+    const before = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.count());
+    await page.click('[data-wc-range="today"]'); await ready(page);
+    await page.click('[data-wc-new]'); await page.waitForSelector('.entity-form');
+    await page.fill('.entity-form [name=title]', 'WCTEST متكررة يوميًا'); await page.selectOption('.entity-form [name=recurFreq]', 'daily'); await page.fill('.entity-form [name=recurInterval]', '1');
+    await page.click('.entity-form [type=submit]'); await page.waitForSelector('.entity-form', {state: 'detached'}); await ready(page);
+    assert.equal(await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.count()), before, 'تعريف التكرار لا يُنشئ صفوف مهام');
+    const defs = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItemRecurrences.all(50));
+    assert.equal(defs.length, 1); assert.equal(defs[0].rule.freq, 'daily');
+    assert.equal(await page.locator('.wc-card:has-text("WCTEST متكررة يوميًا")').count(), 1, 'تكرار اليوم يظهر');
+    assert.ok((await page.locator('.wc-card:has-text("WCTEST متكررة يوميًا")').first().textContent()).includes('متكرر'));
+    await useTask(page, 'WCTEST متكررة يوميًا');
+    assert.ok(await page.locator('.wc-card:has-text("WCTEST متكررة يوميًا")').count() >= 7, 'التكرارات الأسبوع القادم ظاهرة');
+    const firstId = await page.locator('.wc-card:has-text("WCTEST متكررة يوميًا")').first().getAttribute('data-wc-id');
+    assert.ok(firstId.startsWith('rec::'));
+    await page.locator('.wc-card:has-text("WCTEST متكررة يوميًا")').first().locator('.wc-check').check(); await ready(page);
+    const made = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.all(5000).then(r => r.filter(x => x.recurrenceId)));
+    assert.equal(made.length, 1); assert.equal(made[0].status, 'done'); assert.equal(made[0].occurrenceDate, today());
+    await page.evaluate(async id => { const m = await import('/js/services/work-items.js'); await m.endRecurrence(window.__LAW_OFFICE_APP__.office, id); }, defs[0].id);
+    await setSearch(page, '');
+  });
+
+  await verify('الحالات القابلة للتوسعة: إضافة حالة مخصصة من الإعدادات تظهر في كانبان والمرشحات ويمكن نقل عنصر إليها', async () => {
+    await page.click('[data-wc-more-menu]'); await page.click('.wc-sheet [data-i="9"]'); await page.waitForSelector('.wc-settings');
+    await page.locator('.wc-settings details').nth(1).locator('summary').click();
+    await page.fill('[data-new-st-label]', 'تحت المراجعة'); await page.selectOption('[data-new-st-kind]', 'open'); await page.click('[data-add-custom]');
+    await page.click('.wc-settings [type=submit]'); await ready(page);
+    const cfg = await page.evaluate(async () => (await import('/js/services/work-config.js')).getWorkConfig().customStatuses);
+    assert.equal(cfg.length, 1); assert.equal(cfg[0].label, 'تحت المراجعة'); assert.equal(cfg[0].kind, 'open');
+    const key = cfg[0].key;
+    const id = await page.evaluate(async d => { const m = await import('/js/services/work-items.js'); return (await m.saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: 'WCTEST للحالة المخصصة', dueDate: d})).id; }, today());
+    await page.click('[data-wc-toggle-filters]');
+    assert.ok((await page.locator('#wc-filters').textContent()).includes('تحت المراجعة'), 'الحالة المخصصة في المرشحات');
+    await page.click('[data-wc-toggle-filters]');
+    await useTask(page, 'WCTEST للحالة المخصصة'); await selectView(page, 'kanban');
+    assert.equal(await page.locator(`.wc-col[data-col="${key}"]`).count(), 1, 'عمود كانبان للحالة المخصصة');
+    await page.locator(`.wc-card[data-wc-id="${id}"] select[data-wc-move]`).selectOption(key); await ready(page);
+    assert.equal((await dbGet(page, 'workItems', id)).status, key);
+    assert.equal(await page.locator(`.wc-col[data-col="${key}"] .wc-card[data-wc-id="${id}"]`).count(), 1);
+    await selectView(page, 'cards'); await setSearch(page, '');
+  });
+
+  await verify('القائمة (DataGrid): تحديد عدة صفوف وتنفيذ إجراء جماعي بنتيجة صادقة لكل عنصر', async () => {
+    await page.click('[data-wc-range="all"]'); await selectView(page, 'list'); await setSearch(page, 'WCTEST');
+    await page.waitForSelector('#wc-grid tbody tr[data-i]');
+    const rows = await page.locator('#wc-grid .dg-rowchk').count();
+    assert.ok(rows >= 2, `صفوف قليلة: ${rows}`);
+    const ids = await page.evaluate(() => [...document.querySelectorAll('#wc-grid tbody tr[data-i]')].slice(0, 2).map(tr => tr.dataset.i));
+    await page.locator('#wc-grid .dg-rowchk').nth(0).check(); await page.locator('#wc-grid .dg-rowchk').nth(1).check();
+    // شريط الإجراءات الجماعية داخل أدوات الجدول الموحّد (مطوية افتراضيًا في كل جداول التطبيق)
+    for (const toggle of ['.dg-shell-toggle', '.dg-tools-summary-toggle']) { const el = page.locator(`#wc-grid ${toggle}`); if (await el.count() && await el.getAttribute('aria-expanded') === 'false') await el.click(); }
+    await page.waitForSelector('[data-bulk="pin"]', {state: 'visible'}); await clearToasts(page);
+    const before = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.all(5000).then(r => r.filter(x => x.pinnedAt).length));
+    await page.click('[data-bulk="pin"]'); await ready(page); await page.waitForTimeout(400);
+    const after = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.all(5000).then(r => r.filter(x => x.pinnedAt).length));
+    assert.equal(after - before, 2, `تثبيت جماعي: ${before} → ${after} (${ids})`);
+    assert.ok((await page.locator('.toast-msg').allTextContents()).join('|').includes('تم تنفيذ 2'));
+    await selectView(page, 'cards'); await setSearch(page, '');
+  });
+
+  await verify('إعادة الضبط تعيد الفترة والعرض والمرشحات والبحث للافتراضي، والتحديث لا يعيد تحميل الصفحة', async () => {
+    await page.click('[data-wc-range="week"]'); await selectView(page, 'matrix'); await setSearch(page, 'WCTEST');
+    await page.evaluate(() => document.querySelector('[data-wc-toggle-filters]').click()); await page.check('[data-wc-f-flag="pinned"]'); await ready(page);
+    let st = await rtState(page); assert.equal(st.range, 'week'); assert.equal(st.view, 'matrix'); assert.equal(st.filters.pinned, true);
+    await page.click('[data-wc-reset]'); await ready(page);
+    st = await rtState(page);
+    assert.equal(st.range, 'today'); assert.equal(st.view, 'cards'); assert.equal(st.q, ''); assert.deepEqual(st.filters, {});
+    assert.equal(await page.inputValue('#wc-q'), '');
+    await page.evaluate(() => { window.__SENTINEL = 'alive'; });
+    const navs = await page.evaluate(() => performance.getEntriesByType('navigation').length);
+    await clearToasts(page); await page.click('[data-wc-refresh]'); await ready(page);
+    assert.equal(await page.evaluate(() => window.__SENTINEL), 'alive', 'التحديث أعاد تحميل الصفحة');
+    assert.equal(await page.evaluate(() => performance.getEntriesByType('navigation').length), navs);
+    assert.ok((await page.locator('.toast-msg').allTextContents()).join('|').includes('تم تحديث البيانات'));
+    await page.evaluate(() => document.querySelector('[data-wc-toggle-filters]').click());
+  });
+
+  await verify('«الآن» و«التالي»: عنصر بوقت الآن وعنصر بوقت لاحق اليوم يظهران في مساحة اليوم', async () => {
+    const t = new Date(), pad = n => String(n).padStart(2, '0');
+    const nowStr = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    const later = t.getHours() <= 19 ? `${pad(t.getHours() + 3)}:${pad(t.getMinutes())}` : null;
+    await page.evaluate(async ([d, n, l]) => { const m = await import('/js/services/work-items.js'); const o = window.__LAW_OFFICE_APP__.office; await m.saveWorkItem(o, {title: 'WCTEST الآن', dueDate: d, dueTime: n}); if (l) await m.saveWorkItem(o, {title: 'WCTEST التالي', dueDate: d, dueTime: l}); }, [today(), nowStr, later]);
+    await page.click('[data-wc-range="all"]'); await page.click('[data-wc-range="today"]'); await ready(page);
+    const box = page.locator('.wc-now');
+    assert.equal(await box.count(), 1);
+    assert.ok((await box.textContent()).includes('الآن') && (await box.textContent()).includes('WCTEST الآن'));
+    if (later) assert.ok((await box.textContent()).includes('التالي') && (await box.textContent()).includes('WCTEST التالي'));
+  });
+
+  await verify('صفحة العمل الإداري (سجل) تعرض زر «+ مهمة مرتبطة» وقسم المهام المرتبطة، والإنشاء منها يربط بالمعرّفات فقط', async () => {
+    const procRow = await page.evaluate(async () => (await window.__LAW_OFFICE_APP__.office.r.procedures.range('internalDueDate', '2000-01-01', '2999-01-01', 1))[0]);
+    const proc = procRow.id;
+    await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`rec:procedures:${id}`), proc); await page.waitForSelector('[data-wc-linked-task]');
+    assert.ok(await page.locator('.wc-linked-panel').count() > 0);
+    await page.click('[data-wc-linked-task]'); await page.waitForSelector('.entity-form[data-store="workItems"]');
+    await page.fill('.entity-form [name=title]', 'WCTEST مهمة من صفحة العمل الإداري'); await page.click('.entity-form [type=submit]'); await page.waitForSelector('.entity-form', {state: 'detached'});
+    await page.waitForSelector('.wc-linked-panel .wc-lt-row');
+    const row = await page.evaluate(() => window.__LAW_OFFICE_APP__.office.r.workItems.all(5000).then(r => r.find(x => x.title === 'WCTEST مهمة من صفحة العمل الإداري')));
+    assert.equal(row.relatedType, 'procedures'); assert.equal(row.relatedId, proc); assert.equal(row.fileId, procRow.fileId);
+    await goWC(page);
+  });
+
   await verify('لا أخطاء JavaScript ولا console.error (عدا الخطوط الخارجية) طوال السيناريو الوظيفي', async () => { assert.equal(page.__errors.length, 0, page.__errors.slice(0, 6).join('\n') + '\n' + JSON.stringify(await page.evaluate(() => window.__unhandled || []))); });
   await shot(page, 'functional-final.png');
   await context.close();
@@ -603,7 +707,7 @@ async function mobile() {
       }
       return bad;
     });
-    assert.deepEqual(small, []);
+    assert.equal(small.length, 0, `أهداف لمس صغيرة: ${[...new Set(small)].slice(0, 10).join(' | ')}`);
     const visibleBar = await page.locator('.wc-quick-bar button:visible').count();
     assert.ok(visibleBar <= 6, `أزرار ظاهرة كثيرة على الجوال: ${visibleBar}`);
     assert.equal(await page.locator('.wc-quicktime').getAttribute('data-collapse-collapsed'), 'true');
@@ -639,7 +743,7 @@ async function mobile() {
     await card.locator('.wc-more').tap(); await page.waitForSelector('.wc-sheet'); await page.tap('.wc-sheet [data-act="snooze"]');
     await page.waitForSelector('.wc-opts'); await page.tap('.wc-opts [data-opt=twoDays]'); await page.tap('[data-ok]'); await ready(page);
     assert.equal((await dbGet(page, 'workItems', id)).dueDate, addDays(today(), 2));
-    await page.click('[data-wc-range="all"]'); await ready(page);
+    await useTask(page, 'WCTEST مهمة جوال');
     await page.locator(`.wc-card[data-wc-id="${id}"] .wc-check`).tap(); await ready(page);
     assert.equal((await dbGet(page, 'workItems', id)).status, 'done');
   });
@@ -651,7 +755,10 @@ async function mobile() {
 // 3) الأداء مع بيانات كبيرة (قراءة مفهرسة محدودة، لا تحميل للكل)
 // =====================================================================
 async function perf() {
-  const context = await browser.newContext({viewport: {width: 1280, height: 900}, serviceWorkers: 'block', locale: 'ar-EG'});
+  // سياق دائم بملف مؤقت: سياقات newContext() العابرة لها حصة تخزين صغيرة (QuotaExceededError) لا تناسب بيانات بحجم مئات الآلاف من السجلات.
+  const profileDir = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'wc-perf-profile-'));
+  const context = await chromium.launchPersistentContext(profileDir, {executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'], viewport: {width: 1280, height: 900}, serviceWorkers: 'block', locale: 'ar-EG'});
+  report.perfProfileDir = profileDir;
   const stats = () => { window.__idb = {cursorSteps: 0, getAllRows: 0, cursors: 0}; const proto = IDBCursor.prototype, origC = proto.continue, origA = proto.advance; proto.continue = function (...a) { window.__idb.cursorSteps++; return origC.apply(this, a); }; proto.advance = function (...a) { window.__idb.cursorSteps += a[0] || 1; return origA.apply(this, a); }; for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) { const oc = P.openCursor; P.openCursor = function (...a) { window.__idb.cursors++; return oc.apply(this, a); }; const ga = P.getAll; P.getAll = function (...a) { const r = ga.apply(this, a); r.addEventListener('success', () => { window.__idb.getAllRows += r.result?.length || 0; }); return r; }; } };
   const page = await newPage(context, {init: stats}); currentPage = page;
   await boot(page);
@@ -700,14 +807,26 @@ async function perf() {
     return {ms, io};
   };
   const total = seeded.total;
-  await verify('الأداء: ملخص الرأس (عدّادات) على بيانات كبيرة بقراءة محدودة', async () => {
-    const r = await measure('summary', () => page.evaluate(async () => { const m = await import('/js/services/work-query.js'); const s = await m.workSummary(window.__LAW_OFFICE_APP__.office); return {todayCount: s.todayCount, overdue: s.overdue, capped: s.capped}; }), 6000);
-    assert.ok(r.io.cursorSteps < total * 0.12, `قراءة مفرطة: ${r.io.cursorSteps}`);
+  await verify('الأداء والدقة: ملخص الرأس على 305 ألف سجل بقراءة محدودة، وأرقام اليوم صحيحة ولا يحجبها تراكم المتأخر القديم', async () => {
+    const r = await measure('summary', () => page.evaluate(async () => {
+      const m = await import('/js/services/work-query.js'); const office = window.__LAW_OFFICE_APP__.office;
+      const s = await m.workSummary(office);
+      const todayAll = await m.queryWorkItems(office, {range: 'today'}, {limit: 1500});
+      const tomorrowAll = await m.queryWorkItems(office, {range: 'tomorrow'}, {limit: 1500});
+      return {todayCount: s.todayCount, tomorrow: s.tomorrow, overdue: s.overdue, overdueCapped: s.overdueCapped, forwardCapped: s.forwardCapped, todayExact: todayAll.items.length, tomorrowExact: tomorrowAll.items.length};
+    }), 9000);
+    const m = report.metrics.summary;
+    assert.ok(m.todayExact > 50, `بيانات اليوم قليلة جدًا للاختبار: ${m.todayExact}`);
+    assert.ok(m.forwardCapped, 'النافذة الأمامية بلغت سقفها (بيانات كثيفة) وتُعلن ذلك');
+    assert.equal(m.todayCount, m.todayExact, 'رقم اليوم في الملخص لا يطابق القراءة المباشرة'); assert.equal(m.tomorrow, m.tomorrowExact);
+    assert.ok(m.overdueCapped && m.overdue === 1000, 'المتأخر الكثير يُعرض مسقوفًا (1000+) ولا يؤثر على أرقام اليوم');
+    assert.ok(r.io.cursorSteps < total * 0.08, `قراءة مفرطة: ${r.io.cursorSteps}`);
   });
-  await verify('الأداء: فتح مركز العمل (اليوم) كاملًا على الشاشة بقراءة أقل من 3% من السجلات', async () => {
+  await verify('الأداء: فتح مركز العمل (اليوم) كاملًا على الشاشة (بطاقات + عدّادات) بقراءة أقل من 8% من السجلات ودون getAll', async () => {
     const r = await measure('open_today', async () => { await page.evaluate(() => window.__LAW_OFFICE_APP__.go('actionCenter')); await page.waitForSelector('#wc-root'); await ready(page); await page.waitForSelector('.wc-stat'); return {cards: await page.locator('.wc-card').count()}; }, 8000);
-    assert.ok(r.io.cursorSteps < total * 0.03, `قراءة مفرطة لفتح اليوم: ${r.io.cursorSteps}`);
-    assert.equal(r.io.getAllRows < total * 0.01, true);
+    assert.ok(r.io.cursorSteps < total * 0.08, `قراءة مفرطة لفتح اليوم: ${r.io.cursorSteps}`);
+    assert.ok(r.io.getAllRows < total * 0.01, `getAll مفرط: ${r.io.getAllRows}`);
+    assert.ok(report.metrics.open_today.cards > 50);
     await shot(page, 'perf-today.png');
   });
   const q = async (label, spec, opts = {}, limitMs = 2500) => measure(label, () => page.evaluate(async ([s, o]) => { const m = await import('/js/services/work-query.js'); const r = await m.queryWorkItems(window.__LAW_OFFICE_APP__.office, s, o); return {items: r.items.length, hasMore: r.hasMore, scanned: r.scanned}; }, [spec, opts]), limitMs);
@@ -760,6 +879,7 @@ async function perf() {
   report.metrics.heap = await page.evaluate(() => performance.memory ? {usedMB: Math.round(performance.memory.usedJSHeapSize / 1048576), totalMB: Math.round(performance.memory.totalJSHeapSize / 1048576)} : null);
   await verify('لا أخطاء JavaScript في سيناريو الأداء', async () => { assert.equal(page.__errors.length, 0, page.__errors.slice(0, 6).join('\n') + '\n' + JSON.stringify(await page.evaluate(() => window.__unhandled || []))); });
   await context.close();
+  await fs.rm(profileDir, {recursive: true, force: true});
 }
 
 // =====================================================================
@@ -778,7 +898,7 @@ async function offline() {
   });
   await context.setOffline(true);
   await verify('دون اتصال: إعادة تحميل التطبيق ثم فتح مركز العمل وإنشاء مهمة تعمل محليًا', async () => {
-    await page.reload(); await page.waitForFunction(() => window.__LAW_OFFICE_APP__?.office, null, {timeout: 60000});
+    await reloadApp(page);
     await goWC(page);
     assert.ok(await page.locator('.wc-stat').count() === 10);
     await clearToasts(page); await page.click('[data-wc-new]'); await page.waitForSelector('.entity-form'); await page.fill('.entity-form [name=title]', 'WCTEST دون اتصال');

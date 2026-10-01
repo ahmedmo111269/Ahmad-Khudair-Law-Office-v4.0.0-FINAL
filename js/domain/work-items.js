@@ -21,6 +21,13 @@ export function parseOverlayId(id) {
 export const NO_DATE_KEY = '9999-99-99';
 export const NO_TIME_KEY = '99:99';
 
+// ---------- تصميم الصلاحيات المستقبلية (نقطة تمديد فقط؛ لا تنفيذ الآن) ----------
+// كل مهمة مستقلة تحمل createdBy / assigneeId / visibility حتى يمكن لاحقًا إضافة أدوار (منشئ/مكلّف/محرّر/مشاهد) دون ترحيل بيانات.
+// المكتب الحالي بمستخدم واحد، فالقرار مسموح دائمًا؛ وكل الواجهة تمر عبر canActOn ليكفي استبدالها لتفعيل الأدوار.
+export const WORK_ROLES = Object.freeze(['creator', 'assignee', 'editor', 'viewer']);
+export const WORK_VISIBILITY = Object.freeze(['office', 'private']);
+export function canActOn(action, item, actor = null) { void action; void item; void actor; return true; }
+
 // ---------- الحالات ----------
 // kind: open = لا يزال مطلوبًا · done = مكتمل · cancelled = ملغى. «مؤرشف» ليس حالة بل علم منفصل (archivedAt).
 export const DEFAULT_WORK_STATUSES = Object.freeze([

@@ -80,6 +80,7 @@
 .wc-card.is-dragging{opacity:.45}
 .wc-card.is-compact{padding:7px 9px}
 .wc-card.is-compact .wc-card-tools .wc-open{display:none}
+.wc-card-tools button{min-width:40px;min-height:40px}
 .wc-card.is-compact .wc-card-tools{flex-direction:row}
 .wc-card.is-compact .wc-title{font-size:.92rem}
 .wc-card-row{display:flex;gap:10px;align-items:flex-start;min-width:0}
@@ -91,6 +92,7 @@
 .wc-sub{font-size:.85rem;color:var(--text-muted)}
 .wc-card-tools{display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
 .wc-card-tools .wc-open{display:none}
+.wc-card-tools button{min-width:40px;min-height:40px}
 @media (min-width:640px){.wc-card-tools{flex-direction:row}.wc-card-tools .wc-open{display:inline-flex}}
 .wc-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
 .wc-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;min-height:24px;border:1px solid var(--border-subtle);border-radius:var(--radius-pill);background:var(--surface2);color:var(--text);font-size:.78rem;white-space:nowrap;max-width:100%}

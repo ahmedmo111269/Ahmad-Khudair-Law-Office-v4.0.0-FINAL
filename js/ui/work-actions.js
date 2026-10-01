@@ -10,7 +10,7 @@ import {openEntityForm} from './form.js';
 import {normalizeError, userError} from '../core/errors.js';
 import {Clock} from '../core/clock.js';
 import {formatDate} from '../core/format.js';
-import {SNOOZE_OPTIONS, snoozeTarget, isIsoDate, mergePriorities, mergeStatuses, normalizeTags, SOURCE_LABELS} from '../domain/work-items.js';
+import {SNOOZE_OPTIONS, snoozeTarget, isIsoDate, mergePriorities, mergeStatuses, normalizeTags, SOURCE_LABELS, canActOn} from '../domain/work-items.js';
 import {getWorkConfig} from '../services/work-config.js';
 import {getLookup, saveLookupValue} from '../services/lookups.js';
 import * as C from '../services/work-items.js';
@@ -39,7 +39,7 @@ export function actionsFor(item) {
   if (item.archivedAt) add('restore', 'استعادة من الأرشيف', '↩');
   else if (caps.archive) add('archive', 'أرشفة (قابلة للاستعادة)', '▣');
   if (caps.delete) add('delete', 'حذف المهمة…', '✖', {danger: true});
-  return acts;
+  return acts.filter(a => canActOn(a.key, item));
 }
 
 /** ورقة «المزيد»: كل أفعال العنصر في حوار واحد صالح للهاتف. */

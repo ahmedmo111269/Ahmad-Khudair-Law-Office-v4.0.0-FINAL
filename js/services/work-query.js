@@ -11,7 +11,7 @@ import {STORE} from '../db/schema.js';
 import {Clock, addDays} from '../core/clock.js';
 import {normalizeArabic, normalizeDigits} from '../core/search-normalizer.js';
 import {presetRange} from './entity-query.js';
-import {tokenizeQuery, matchTokens} from './search-engine.js';
+import {tokenizeQuery, matchTokens, searchAll} from './search-engine.js';
 import {createGridRelations} from './grid-relations.js';
 import {getWorkConfig} from './work-config.js';
 import {
@@ -23,7 +23,9 @@ import {
 } from '../domain/work-sources.js';
 
 export const PAGE = 100;
-export const MAX_SCAN = 20000;
+export const MAX_SCAN = 20000;            // أقصى عناصر تُسحب من المجاري لاستعلام بلا ربط علاقات
+export const MAX_HYDRATED_SCAN = 2500;    // عند اشتراط ربط العلاقات (مرشحات الجدول) كل دفعة تقرأ علاقاتها: سقف أصغر
+export const MAX_TEXT_SCAN = 8000;        // أقصى صفوف خام تُمسح لمطابقة نص العنصر نفسه في نطاق واسع
 const WI = STORE.workItems;
 const MIN_DATE = '0000-01-01', MAX_DATE = '9999-12-31';
 const cursorKey = cursor => typeof cursor === 'string' && cursor.startsWith('wc1:') ? cursor.slice(4) : '';
@@ -70,8 +72,8 @@ const upperFor = spec => `${spec.to || MAX_DATE}\uffff`;
 // يقرأ صفحات الفهرس تدريجيًا ويُخرج عناصر مرتبة بمفتاح الترتيب الكلي؛ مجموعة اليوم كاملة تُحمَّل قبل إخراجها
 // فيصح الترتيب بالوقت داخل اليوم الواحد حتى لو اختلف ترتيب المفتاح الأساسي.
 class GroupedStream {
-  constructor({fetchPage, build, accept, fromKey, name}) {
-    Object.assign(this, {fetchPage, build, accept, fromKey, name});
+  constructor({fetchPage, build, accept, fromKey, name, budget = null}) {
+    Object.assign(this, {fetchPage, build, accept, fromKey, name, budget});
     this.queue = []; this.pos = 0; this.cursor = null; this.done = false; this.group = []; this.groupDate = null; this.rawSeen = 0;
   }
   async ready() {
@@ -80,9 +82,12 @@ class GroupedStream {
   peek() { return this.pos < this.queue.length ? this.queue[this.pos] : null; }
   shift() { return this.queue[this.pos++]; }
   async load() {
+    // ميزانية مسح مشتركة (للبحث النصي في نطاق واسع): عند نفادها يتوقف المجرى ويُعلَن الاستعلام «جزئيًا».
+    if (this.budget && this.budget.left <= 0) { this.budget.hit = true; this.flush(); this.done = true; return; }
     const page = await this.fetchPage(this.cursor);
     this.cursor = page.nextCursor || null;
     this.rawSeen += page.rows.length;
+    if (this.budget) this.budget.left -= page.rows.length;
     for (const item of await this.build(page.rows)) {
       if (this.groupDate !== null && item.dueDate !== this.groupDate) this.flush();
       this.groupDate = item.dueDate; this.group.push(item);
@@ -120,7 +125,7 @@ function projectionStream(office, source, spec, ctx, {undated = false} = {}) {
   const lower = lowerFor(source, spec), upper = upperFor(spec);
   const raw = row => source.include(row) && isLiveSourceRow(row) && (source.overlayTerminal || kinds.has(source.sourceKind(row, null)));
   return new GroupedStream({
-    name: `${source.type}${undated ? ':undated' : ''}`, fromKey: ctx.fromKey, accept: ctx.accept,
+    name: `${source.type}${undated ? ':undated' : ''}`, fromKey: ctx.fromKey, accept: ctx.accept, budget: ctx.budget,
     fetchPage: cursor => {
       if (ctx.signal?.aborted) throw abortError();
       const base = {index: source.index, limit: PAGE, cursor, signal: ctx.signal, filter: undated ? (r => isLiveSourceRow(r) && !source.dateOf(r) && (source.overlayTerminal || kinds.has(source.sourceKind(r, null)))) : raw};
@@ -140,7 +145,7 @@ function projectionStream(office, source, spec, ctx, {undated = false} = {}) {
 function nativeStream(office, spec, ctx, {undated = false} = {}) {
   const lower = spec.from || MIN_DATE, upper = upperFor(spec);
   return new GroupedStream({
-    name: undated ? 'native:undated' : 'native', fromKey: ctx.fromKey, accept: ctx.accept,
+    name: undated ? 'native:undated' : 'native', fromKey: ctx.fromKey, accept: ctx.accept, budget: ctx.budget,
     fetchPage: cursor => {
       if (ctx.signal?.aborted) throw abortError();
       const base = {index: 'kind_dueDate', limit: PAGE, cursor, signal: ctx.signal};
@@ -156,7 +161,7 @@ function nativeStream(office, spec, ctx, {undated = false} = {}) {
 function orphanStream(office, spec, ctx, enabledTypes, {undated = false} = {}) {
   const lower = spec.from || MIN_DATE, upper = upperFor(spec);
   return new GroupedStream({
-    name: 'orphans', fromKey: ctx.fromKey, accept: ctx.accept,
+    name: 'orphans', fromKey: ctx.fromKey, accept: ctx.accept, budget: ctx.budget,
     fetchPage: cursor => {
       if (ctx.signal?.aborted) throw abortError();
       const base = {index: 'kind_dueDate', limit: PAGE, cursor, signal: ctx.signal};
@@ -224,6 +229,7 @@ function recurrenceStream(office, spec, ctx) {
 // ---------- نطاق الملف/القضية/الموكل/الخصم (مجموعات صغيرة محدودة) ----------
 const SCOPE_FILES_LIMIT = 200;
 export async function scopeFileIds(office, spec) {
+  if (spec.fileIds?.length) return spec.fileIds.slice(0, SCOPE_FILES_LIMIT);   // ملفات حُلّت مسبقًا (نتيجة البحث بالكيانات)
   const ids = new Set();
   if (spec.fileId) ids.add(spec.fileId);
   if (spec.caseId) { const c = await office.r.cases.get(spec.caseId); if (c?.fileId) ids.add(c.fileId); }
@@ -315,6 +321,33 @@ async function matchingCommentItemIds(office, tokens, signal) {
   return ids;
 }
 
+// ---------- البحث النصي: الكيانات أولًا عبر محرك البحث الشامل الموجود ثم نطاق الملفات بالفهارس ----------
+const SEARCH_ENTITY_STORES = ['files', 'cases', 'clients', 'opponents'];
+/**
+ * يحوّل نص البحث إلى «ملفات مطابقة» عبر searchAll (فهارس الأكواد/الأرقام/الأسماء المطبّعة + مسح محدود) بدل تحميل العناصر ثم تصفيتها.
+ * أسماء الأطراف والمحكمة ورقم الملف/القضية تُحلّ هنا؛ نص العنصر نفسه يُطابَق أثناء مرور المجاري بلا قراءة علاقات إضافية.
+ */
+export async function searchScope(office, q, signal = null) {
+  let result;
+  try { result = await searchAll(office, q, {stores: SEARCH_ENTITY_STORES, perStore: 60}); }
+  catch (error) { if (error?.name === 'AbortError') throw error; return {fileIds: [], partial: true}; }
+  if (signal?.aborted) throw abortError();
+  const files = new Set();
+  let partial = Boolean(result.partial);
+  for (const group of result.groups) {
+    partial ||= Boolean(group.more);
+    for (const hit of group.items) {
+      const row = hit.row;
+      if (group.store === 'files') files.add(row.id);
+      else if (group.store === 'cases') { if (row.fileId) files.add(row.fileId); }
+      else if (group.store === 'clients') (await scopeFileIds(office, {clientId: row.id})).forEach(id => files.add(id));
+      else if (group.store === 'opponents') (await scopeFileIds(office, {opponentId: row.id})).forEach(id => files.add(id));
+    }
+  }
+  if (files.size > SCOPE_FILES_LIMIT) partial = true;
+  return {fileIds: [...files].slice(0, SCOPE_FILES_LIMIT), partial};
+}
+
 // ---------- الاستعلام الرئيسي ----------
 /**
  * @returns {{items:object[], nextCursor:string|null, hasMore:boolean, partial:boolean, scanned:number}}
@@ -329,8 +362,19 @@ export async function queryWorkItems(office, specInput = {}, {cursor = null, lim
   const lowerDate = lower => fromDate && fromDate > lower ? (fromDate === NO_DATE_KEY ? MAX_DATE : fromDate) : lower;
   const sources = enabledWorkSources(spec.config).filter(s => !spec.sources.length || spec.sources.includes(s.type));
   const wantNative = !spec.sources.length || spec.sources.includes('task');
-  const accept = item => itemPassesFilters(item, spec);
-  const ctx = {fromKey, lowerDate, accept, signal};
+  const filters = item => itemPassesFilters(item, spec);
+  const tokens = spec.q ? tokenizeQuery(spec.q) : [];
+  const inWindow = item => inScopeWindow(item, spec);
+  let accept = filters, textScope = null, commentIds = new Set();
+  const budget = tokens.length ? {left: MAX_TEXT_SCAN, hit: false} : null;
+  if (tokens.length) {
+    [textScope, commentIds] = await Promise.all([searchScope(office, spec.q, signal), matchingCommentItemIds(office, tokens, signal)]);
+    const own = item => matchTokens(tokens, norm(workSearchFields(item, {})));
+    const scopeFiles = new Set(textScope.fileIds);
+    // نص العنصر نفسه (بلا علاقات) أو انتماؤه لملف طابقه البحث بالكيانات.
+    accept = item => filters(item) && (own(item) || (item.fileId && scopeFiles.has(item.fileId)));
+  }
+  const ctx = {fromKey, lowerDate, accept, signal, budget};
   const wantsUndated = spec.undated || spec.onlyUndated || (!spec.from && !spec.to);
   const untilNoDate = (fromKey && keyDate(fromKey) === NO_DATE_KEY) || spec.onlyUndated;
   let streams = [];
@@ -349,15 +393,19 @@ export async function queryWorkItems(office, specInput = {}, {cursor = null, lim
       streams.push(orphanStream(office, spec, ctx, new Set(sources.map(s => s.type)), {undated: true}));
     }
   }
-  const tokens = spec.q ? tokenizeQuery(spec.q) : [];
-  const needsRelations = Boolean(tokens.length || predicate);
+  if (tokens.length && !isScoped(spec)) {
+    // الملفات المطابقة بالأسماء/الأرقام: نقرأ عناصرها بفهارس الملف مباشرة (لا مسح للنطاق كله).
+    if (textScope.fileIds.length) streams.push(...scopedStreams(office, {...spec, fileIds: textScope.fileIds, fileId: '', caseId: '', clientId: '', opponentId: '', relatedId: ''}, {...ctx, accept: filters, budget: null}, sources));
+    if (commentIds.size) streams.push(new ArrayStream(async () => (await Promise.all([...commentIds].slice(0, 100).map(id => getWorkItem(office, id, {config: spec.config})))).filter(Boolean), fromKey, item => filters(item) && inWindow(item)));
+  }
+  const needsRelations = Boolean(predicate);
   const rel = needsRelations ? (relations || createGridRelations(office, 'workItems')) : null;
-  const commentHits = tokens.length ? await matchingCommentItemIds(office, tokens, signal) : new Set();
   const seen = new Set();
   const out = [];
-  let scanned = 0, partial = false;
+  let scanned = 0, partial = Boolean(textScope?.partial);
   const want = limit + 1;
   let nextHead = null;
+  const cap = needsRelations ? MAX_HYDRATED_SCAN : MAX_SCAN;
 
   const refill = async () => { await Promise.all(streams.map(s => s.ready())); };
   const minStream = () => {
@@ -381,22 +429,19 @@ export async function queryWorkItems(office, specInput = {}, {cursor = null, lim
     let kept = batch;
     if (needsRelations) {
       await rel.hydrate(batch, {signal});
-      kept = batch.filter(item => {
-        if (tokens.length && !commentHits.has(item.id) && !matchTokens(tokens, norm(workSearchFields(item, refsOf(rel, item))))) return false;
-        return !predicate || predicate(item);
-      });
+      kept = batch.filter(item => predicate(item));
     }
     out.push(...kept);
     if (out.length >= want) break;
-    if (scanned >= MAX_SCAN) { partial = true; break; }
+    if (scanned >= cap) { partial = true; break; }
   }
+  partial ||= Boolean(budget?.hit);
   // أول عنصر من الصفحة التالية = بداية المؤشر (شامل). عند بلوغ حد المسح نبدأ من أصغر رأس متبقٍ.
   const extra = out.length > limit ? out[limit] : null;
   if (extra) nextHead = extra.sortKey;
   else if (partial) { const s = minStream(); nextHead = s?.peek()?.sortKey || null; }
   const items = out.slice(0, limit);
   if (!extra && !partial) nextHead = null;
-  // العناصر التي سُحبت من المجاري ولم تُعرض (فائض الدفعة) لا تضيع: المؤشر يبدأ عند أول عنصر غير معروض.
   return {items, nextCursor: nextHead ? toCursor(nextHead) : null, hasMore: Boolean(nextHead), partial, scanned};
 }
 
@@ -458,7 +503,7 @@ async function driveQuery(office, spec, {cursor, limit, signal, predicate, relat
     if (items.length >= limit && (rest || page.hasMore)) { hasMore = true; nextCursor = rest ? page.itemCursors[consumed] : page.nextCursor; break; }
     if (!page.hasMore) break;
     pageCursor = page.nextCursor;
-    if (scanned >= MAX_SCAN) { partial = true; hasMore = true; nextCursor = pageCursor; break; }
+    if (scanned >= (needsRelations ? MAX_HYDRATED_SCAN : MAX_SCAN)) { partial = true; hasMore = true; nextCursor = pageCursor; break; }
   }
   return {items, nextCursor, hasMore: hasMore && Boolean(nextCursor), partial, scanned};
 }
@@ -505,15 +550,30 @@ export async function countWorkItems(office, specInput = {}, {cap = 500, signal 
   return {n: total, capped: false, partial};
 }
 
-/** حزمة أرقام الرأس: مسح واحد لنافذة [اليوم − عمق المتأخر، اليوم + نافذة الملخص] لكل مصدر. */
-export async function workSummary(office, {today = Clock.today(), signal = null, maxItems = 5000} = {}) {
+/**
+ * حزمة أرقام الرأس: ثلاث قراءات محدودة بسقف صريح بدل مسح واحد مشترك — فالمتأخر القديم الكثير لا يحجب أرقام اليوم أبدًا:
+ *   المتأخر (الأقدم أولًا، سقف overdue) · النافذة الأمامية [اليوم، اليوم + نافذة الملخص] (سقف forward) · بلا موعد (سقف undated).
+ * ما يتجاوز السقف يُعرض كـ«N+» عبر مؤشرات overdueCapped/forwardCapped/undatedCapped؛ وفي المكاتب الصغيرة الأرقام دقيقة.
+ */
+export const SUMMARY_CAPS = Object.freeze({overdue: 1000, forward: 3000, undated: 500});
+export async function workSummary(office, {today = Clock.today(), signal = null, caps = SUMMARY_CAPS} = {}) {
   const config = getWorkConfig();
   const windowEnd = addDays(today, config.summaryWindowDays);
   const result = {today, overdue: 0, todayCount: 0, tomorrow: 0, week: 0, later: 0, undated: 0, urgentToday: 0, hearingsToday: 0, hearingsTomorrow: 0, hearingsNext7: 0,
-    byPriority: {urgent: 0, high: 0, medium: 0, low: 0}, inProgress: 0, waiting: 0, postponed: 0, pinned: 0, doneToday: 0, capped: false, partial: false, nowCount: 0};
-  const page = await queryWorkItems(office, {range: 'custom', from: '', to: windowEnd, kinds: ['open'], undated: true}, {limit: maxItems, signal});
-  result.capped = page.hasMore; result.partial = page.partial;
-  for (const item of page.items) {
+    byPriority: {urgent: 0, high: 0, medium: 0, low: 0}, inProgress: 0, waiting: 0, postponed: 0, pinned: 0, doneToday: 0, capped: false, partial: false,
+    overdueCapped: false, forwardCapped: false, undatedCapped: false, forwardCappedAt: ''};
+  const open = {kinds: ['open']};
+  const [over, forward, undated, done] = await Promise.all([
+    queryWorkItems(office, {...open, range: 'overdue'}, {limit: caps.overdue, signal}),
+    queryWorkItems(office, {...open, range: 'custom', from: today, to: windowEnd}, {limit: caps.forward, signal}),
+    queryWorkItems(office, {...open, range: 'all', onlyUndated: true}, {limit: caps.undated, signal}),
+    queryWorkItems(office, {drive: 'completed', from: today, to: today}, {limit: 200, signal})
+  ]);
+  Object.assign(result, {overdueCapped: over.hasMore, forwardCapped: forward.hasMore, undatedCapped: undated.hasMore, partial: over.partial || forward.partial || undated.partial});
+  result.capped = result.overdueCapped || result.forwardCapped || result.undatedCapped;
+  // الأعداد صحيحة لكل تاريخ أصغر من تاريخ آخر عنصر محمّل؛ فأرقام اليوم/غدًا تبقى دقيقة حتى لو بلغت النافذة الأمامية سقفها لاحقًا.
+  result.forwardCappedAt = forward.hasMore ? (forward.items.at(-1)?.dueDate || '') : '';
+  for (const item of [...over.items, ...forward.items, ...undated.items]) {
     const bucket = classifyDue(item.dueDate, today);
     if (bucket === 'overdue') result.overdue++;
     else if (bucket === 'today') { result.todayCount++; if (item.priority === 'urgent') result.urgentToday++; }
@@ -521,14 +581,13 @@ export async function workSummary(office, {today = Clock.today(), signal = null,
     else if (bucket === 'week') result.week++;
     else if (bucket === 'later') result.later++;
     else result.undated++;
-    if (item.sourceType === 'hearings') { if (bucket === 'today') result.hearingsToday++; if (bucket === 'tomorrow') result.hearingsTomorrow++; const d = dayDiff(today, item.dueDate); if (bucket !== 'overdue' && d >= 0 && d <= 7) result.hearingsNext7++; }
+    if (item.sourceType === 'hearings') { if (bucket === 'today') result.hearingsToday++; if (bucket === 'tomorrow') result.hearingsTomorrow++; const d = item.dueDate ? dayDiff(today, item.dueDate) : -1; if (bucket !== 'overdue' && d >= 0 && d <= 7) result.hearingsNext7++; }
     result.byPriority[item.priority] = (result.byPriority[item.priority] || 0) + 1;
     if (item.status === 'inProgress') result.inProgress++;
     else if (item.status === 'waiting') result.waiting++;
     else if (item.status === 'postponed') result.postponed++;
     if (item.isPinned) result.pinned++;
   }
-  const done = await queryWorkItems(office, {drive: 'completed', from: today, to: today}, {limit: 200, signal});
   result.doneToday = done.items.length;
   return result;
 }

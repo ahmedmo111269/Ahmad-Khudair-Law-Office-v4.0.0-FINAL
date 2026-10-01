@@ -176,6 +176,7 @@ export async function saveWorkItem(office, input, id = null, expectedVersion = n
     createdAt: old?.createdAt || at, updatedAt: at, version: (old?.version || 0) + 1,
     isArchived: old?.isArchived || false, isDeleted: false, deletedAt: null,
     postponeCount: old?.postponeCount || 0, commentCount: old?.commentCount || 0, originalDueDate: old?.originalDueDate || '',
+    createdBy: old?.createdBy || 'user', assigneeId: old?.assigneeId ?? null, visibility: old?.visibility || 'office',   // مقاعد للصلاحيات المستقبلية
     pinnedAt: old?.pinnedAt ?? null, quadrant: input.quadrant !== undefined ? (input.quadrant || null) : (old?.quadrant ?? null),
     completedAt: old?.completedAt ?? null, completedBy: old?.completedBy ?? null, archivedAt: old?.archivedAt ?? null,
     recurrenceId: old?.recurrenceId || input.recurrenceId || '', occurrenceDate: old?.occurrenceDate || input.occurrenceDate || ''
@@ -496,6 +497,7 @@ export async function saveRecurrence(office, input, id = null) {
   const row = {
     ...(old || {}), ...linked, id: rowId, kind: 'recurrence', rule: normalizeRule(input.rule || old?.rule), startDate: input.startDate || old.startDate,
     status: input.status === 'ended' ? 'ended' : input.status === 'paused' ? 'paused' : (old?.status || 'active'),
+    createdBy: old?.createdBy || 'user', assigneeId: old?.assigneeId ?? null, visibility: old?.visibility || 'office',
     createdAt: old?.createdAt || at, updatedAt: at, version: (old?.version || 0) + 1, isDeleted: false
   };
   delete row.dueDate; delete row.dueTime;
@@ -533,6 +535,7 @@ export async function materializeOccurrence(office, defId, date) {
       dueDate: date, dueTime: def.dueTime || '', status: 'notStarted', priority: def.priority || 'medium', tags: def.tags || [],
       fileId: def.fileId || '', caseId: def.caseId || '', clientId: def.clientId || '', opponentId: def.opponentId || '',
       relatedType: def.relatedType || '', relatedId: def.relatedId || '', recurrenceId: defId, occurrenceDate: date,
+      createdBy: def.createdBy || 'user', assigneeId: def.assigneeId ?? null, visibility: def.visibility || 'office',
       originalDueDate: '', postponeCount: 0, commentCount: 0, pinnedAt: null, quadrant: null, completedAt: null, completedBy: null, archivedAt: null,
       isArchived: false, isDeleted: false, createdAt: at, updatedAt: at, version: 1
     };

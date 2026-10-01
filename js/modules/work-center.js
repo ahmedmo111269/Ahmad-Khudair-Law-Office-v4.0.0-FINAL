@@ -182,16 +182,17 @@ export async function bindWorkCenter(app, q) {
     try { s = await workSummary(office, {signal: null}); } catch (error) { if (error?.name !== 'AbortError') console.error('work summary', error); return; }
     if (!root.isConnected) return;
     rt.summary = s;
-    const stat = (key, n, label, tone = '', hint = '') => `<button type="button" class="wc-stat${tone ? ` wc-stat--${tone}` : ''}" data-wc-stat="${key}" title="${esc(hint || label)}"><b>${n}${s.capped && ['overdue', 'todayCount'].includes(key) ? '+' : ''}</b><span>${esc(label)}</span></button>`;
-    root.querySelector('#wc-stats').innerHTML = card({title: 'ملخص اليوم', size: 'full', collapsible: true, collapsed: false, persistKey: 'wc:stats', sectionId: 'stats', pageId: PAGE_ID, badge: s.capped ? '<span class="ux-badge ux-badge--warn">جزئي</span>' : '',
+    const stat = (key, n, label, tone = '', capped = false) => `<button type="button" class="wc-stat${tone ? ` wc-stat--${tone}` : ''}" data-wc-stat="${key}" title="${esc(capped ? `${label} — العدد جزئي (سقف الاستعلام)` : label)}"><b data-uxc-role="primaryValue">${n}${capped ? '+' : ''}</b><span data-uxc-role="caption">${esc(label)}</span></button>`;
+    const any = s.capped, exactThrough = day => s.forwardCapped && !(s.forwardCappedAt > day);   // هل رقم اليوم المحدد مقطوع؟
+    root.querySelector('#wc-stats').innerHTML = card({title: 'ملخص اليوم', size: 'full', collapsible: true, collapsed: false, persistKey: 'wc:stats', sectionId: 'stats', pageId: PAGE_ID, badge: s.capped ? '<span class="ux-badge ux-badge--warn" title="بعض الأعداد بلغت سقف الاستعلام المحدود وتُعرض بعلامة +">جزئي</span>' : '',
       body: `<div class="wc-stats" role="group" aria-label="عدّادات مركز العمل" data-uxc-id="wc:stats" data-uxc-type="component" data-uxc-title="بطاقات العدّادات">
-       ${stat('todayCount', s.todayCount, 'اليوم', 'info')}${stat('overdue', s.overdue, 'متأخر', s.overdue ? 'danger' : '')}${stat('tomorrow', s.tomorrow, 'غدًا')}
-       ${stat('hearingsNext7', s.hearingsNext7, 'جلسات خلال 7 أيام', s.hearingsToday ? 'info' : '')}${stat('inProgress', s.inProgress, 'قيد التنفيذ')}${stat('waiting', s.waiting, 'بانتظار')}
-       ${stat('postponed', s.postponed, 'مؤجل')}${stat('undated', s.undated, 'بلا موعد')}${stat('doneToday', s.doneToday, 'منجز اليوم', 'ok')}${stat('pinned', s.pinned, 'مثبّت')}</div>`});
+       ${stat('todayCount', s.todayCount, 'اليوم', 'info', exactThrough(s.today))}${stat('overdue', s.overdue, 'متأخر', s.overdue ? 'danger' : '', s.overdueCapped)}${stat('tomorrow', s.tomorrow, 'غدًا', '', exactThrough(addDays(s.today, 1)))}
+       ${stat('hearingsNext7', s.hearingsNext7, 'جلسات خلال 7 أيام', s.hearingsToday ? 'info' : '', exactThrough(addDays(s.today, 7)))}${stat('inProgress', s.inProgress, 'قيد التنفيذ', '', any)}${stat('waiting', s.waiting, 'بانتظار', '', any)}
+       ${stat('postponed', s.postponed, 'مؤجل', '', any)}${stat('undated', s.undated, 'بلا موعد', '', s.undatedCapped)}${stat('doneToday', s.doneToday, 'منجز اليوم', 'ok')}${stat('pinned', s.pinned, 'مثبّت', '', any)}</div>`});
     bindCards(root.querySelector('#wc-stats'));
     enhanceCollapsiblePanels(root.querySelector('#wc-stats'), PAGE_ID, {bulk: false});
     bindCustomizableComponents(root.querySelector('#wc-stats'));
-    root.querySelector('#wc-hero-sub').textContent = `${longDateAr()} — ${s.todayCount} لليوم${s.overdue ? ` · ${s.overdue} متأخر` : ''}${s.hearingsToday ? ` · ${s.hearingsToday === 1 ? 'جلسة واحدة' : s.hearingsToday === 2 ? 'جلستان' : `${s.hearingsToday} جلسات`} اليوم` : ''}`;
+    root.querySelector('#wc-hero-sub').textContent = `${longDateAr()} — ${s.todayCount} لليوم${s.overdue ? ` · ${s.overdue}${s.overdueCapped ? '+' : ''} متأخر` : ''}${s.hearingsToday ? ` · ${s.hearingsToday === 1 ? 'جلسة واحدة' : s.hearingsToday === 2 ? 'جلستان' : `${s.hearingsToday} جلسات`} اليوم` : ''}`;
     root.querySelector('#wc-notify').innerHTML = await notificationsHtml(rt, s);
     setNavBadge(s.overdue + s.todayCount);
   }

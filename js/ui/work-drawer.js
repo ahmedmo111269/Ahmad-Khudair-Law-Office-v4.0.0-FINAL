@@ -24,7 +24,7 @@ const ACTION_LABEL = {create: 'إنشاء', update: 'تحديث', complete: 'إ�
 
 const section = (key, title, body, {open = false, badge = ''} = {}) =>
   `<section class="panel wc-dsec" data-collapse-key="wc:drawer:${key}" data-collapse-default="${open ? 'open' : 'collapsed'}" data-section="${key}"><div class="panel-head"><h3>${esc(title)}</h3>${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>${body}</section>`;
-const dl = rows => `<dl class="wc-dl">${rows.filter(Boolean).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+const dl = rows => `<dl class="wc-dl">${rows.filter(Boolean).map(([k, v]) => `<div><dt data-uxc-role="fieldLabel">${esc(k)}</dt><dd data-uxc-role="primaryValue">${v}</dd></div>`).join('')}</dl>`;
 
 function smartLinks(item, relations) {
   const links = [];

@@ -38,15 +38,15 @@ export function dueChip(item, today) {
 /** اسم أيقونة SVG من مجموعة التطبيق (لا تعتمد على خط إيموجي) أو رمز نصي بسيط. */
 const glyph = name => svgIcon(name) || esc(name);
 export const chip = (text, {tone = '', icon = '', title = '', cls = ''} = {}) =>
-  `<span class="wc-chip${tone ? ` wc-chip--${tone}` : ''}${cls ? ` ${cls}` : ''}"${title ? ` title="${esc(title)}"` : ''}>${icon ? `<span class="wc-ic" aria-hidden="true">${glyph(icon)}</span>` : ''}${esc(text)}</span>`;
+  `<span class="wc-chip${tone ? ` wc-chip--${tone}` : ''}${cls ? ` ${cls}` : ''}" data-uxc-role="badge"${title ? ` title="${esc(title)}"` : ''}>${icon ? `<span class="wc-ic" aria-hidden="true">${glyph(icon)}</span>` : ''}${esc(text)}</span>`;
 
 export function priorityChip(item, config) {
   const p = priorityInfo(item.priority, config);
-  return `<span class="wc-chip wc-pri wc-pri--${esc(p.key)}" style="--wc-c:${esc(p.color)}" title="الأولوية: ${esc(p.label)}"><span class="wc-ic" aria-hidden="true">${esc(p.icon)}</span><b class="wc-mark" aria-hidden="true">${esc(p.mark)}</b>${esc(p.label)}</span>`;
+  return `<span class="wc-chip wc-pri wc-pri--${esc(p.key)}" data-uxc-role="badge" style="--wc-c:${esc(p.color)}" title="الأولوية: ${esc(p.label)}"><span class="wc-ic" aria-hidden="true">${esc(p.icon)}</span><b class="wc-mark" aria-hidden="true">${esc(p.mark)}</b>${esc(p.label)}</span>`;
 }
 export function statusChip(item, config) {
   const s = statusInfo(item.status, config);
-  return `<span class="wc-chip wc-st wc-st--${esc(item.status)}" style="--wc-c:${esc(s.color)}" title="الحالة"><span class="wc-ic" aria-hidden="true">${esc(s.icon)}</span>${esc(item.statusLabel || s.label)}</span>`;
+  return `<span class="wc-chip wc-st wc-st--${esc(item.status)}" data-uxc-role="status" style="--wc-c:${esc(s.color)}" title="الحالة"><span class="wc-ic" aria-hidden="true">${esc(s.icon)}</span>${esc(item.statusLabel || s.label)}</span>`;
 }
 export function chipsHtml(item, {config, today}) {
   const due = dueChip(item, today), out = [];
@@ -89,10 +89,10 @@ export function workCardHtml(item, {relations = null, config, today, drag = fals
   <div class="wc-card-row">
    <input type="checkbox" class="wc-check" data-wc-act="toggle" ${item.isDone ? 'checked' : ''} ${canToggle ? '' : 'disabled'} aria-label="${item.isDone ? 'إعادة فتح' : 'إنجاز'}: ${esc(item.title)}">
    <div class="wc-card-body">
-    <button type="button" class="wc-title" data-wc-act="open" title="فتح العمل">${esc(item.title)}</button>
-    ${item.subtitle && !compact ? `<div class="wc-sub">${esc(item.subtitle)}</div>` : ''}
+    <button type="button" class="wc-title" data-uxc-role="mainTitle" data-wc-act="open" title="فتح العمل">${esc(item.title)}</button>
+    ${item.subtitle && !compact ? `<div class="wc-sub" data-uxc-role="secondaryValue">${esc(item.subtitle)}</div>` : ''}
     <div class="wc-chips">${chipsHtml(item, {config, today})}</div>
-    ${compact ? '' : `<div class="wc-ctx">${contextHtml(item, relations)}</div>`}
+    ${compact ? '' : `<div class="wc-ctx" data-uxc-role="secondaryValue">${contextHtml(item, relations)}</div>`}
    </div>
    <div class="wc-card-tools">
     <button type="button" class="ghost small wc-open" data-wc-act="open">فتح العمل</button>
@@ -106,4 +106,4 @@ export function workCardHtml(item, {relations = null, config, today, drag = fals
 
 /** رأس مجموعة (تاريخ/أولوية/…): عنوان + عدّاد. */
 export const groupHeaderHtml = (title, count, {more = false, id = ''} = {}) =>
-  `<h4 class="wc-group-h"${id ? ` id="${esc(id)}"` : ''}><span>${esc(title)}</span><span class="wc-count" aria-label="${count} عنصر">${count}${more ? '+' : ''}</span></h4>`;
+  `<h4 class="wc-group-h" data-uxc-role="sectionTitle"${id ? ` id="${esc(id)}"` : ''}><span>${esc(title)}</span><span class="wc-count" aria-label="${count} عنصر">${count}${more ? '+' : ''}</span></h4>`;
