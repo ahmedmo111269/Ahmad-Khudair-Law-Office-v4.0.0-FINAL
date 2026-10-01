@@ -88,12 +88,12 @@ th{color:var(--text-muted);background:var(--surface2);font-weight:700}
 th,td{border-bottom-color:var(--border-subtle)}
 tbody tr{transition:background-color .12s}
 tbody tr:hover td{background-color:var(--row-hover)!important}
-.dg-table th,.dg-table td{padding:var(--row-pad) calc(10px * var(--density));border-inline-start-color:var(--border-subtle)}
-.dg-table thead th{background:var(--surface2);box-shadow:inset 0 -2px 0 var(--primary-border);padding:0}
+.dg-table th,.dg-table td{padding:var(--dg-rowpad,var(--row-pad)) calc(10px * var(--density));border-inline-start-color:var(--border-subtle)}
+.dg-table thead th{background:var(--dg-head-bg,var(--surface2));box-shadow:inset 0 -2px 0 var(--primary-border);padding:0}
 .dg-table tbody tr:nth-child(even) td{background-color:color-mix(in srgb,var(--surface2) 55%,var(--surface))}
 .dg-table tbody tr.dg-selected td{background-color:var(--row-selected)!important;box-shadow:inset 0 1px 0 var(--primary-border),inset 0 -1px 0 var(--primary-border)}
 .dg-table tbody tr.dg-selected td:first-child{box-shadow:inset -3px 0 0 var(--primary),inset 0 1px 0 var(--primary-border),inset 0 -1px 0 var(--primary-border)}
-.dg-scroll{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
+.dg-scroll{background:var(--surface);border-radius:var(--radius);border:1px solid var(--dg-borderc,var(--border))}
 .dg-table mark{background:color-mix(in srgb,var(--primary) 38%,transparent);color:var(--text-strong);border-radius:3px;padding:0 1px}
 .dg.dg-d-compact{--row-pad:4px}.dg.dg-d-normal{--row-pad:calc(8px * var(--density))}.dg.dg-d-comfortable{--row-pad:14px}
 .dg.dg-d-compact .dg-table td{font-size:12px}

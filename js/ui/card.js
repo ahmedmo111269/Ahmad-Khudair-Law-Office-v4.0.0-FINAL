@@ -53,7 +53,8 @@ export function card(o={}){
  const displayKey=String(o.displayKey||collapseId);
  const pageId=String(o.pageId||'');
  const disp=displayEnabled?resolveCardDisplay(displayKey,pageId):null;
- const displayAttrs=disp?` data-display-key="${esc(displayKey)}"${pageId?` data-page-id="${esc(pageId)}"`:''} data-cfont="${esc(disp.fontSize)}" data-cdensity="${esc(disp.density)}" data-clayout="${esc(disp.fieldLayout)}" data-csecondary="${disp.secondary?'on':'off'}" data-cborders="${disp.borders?'on':'off'}"`:'';
+ // الهوية الثابتة في نظام التخصيص الكامل: card:<displayKey> — لا تعتمد على الموضع أو الترتيب
+ const displayAttrs=disp?` data-display-key="${esc(displayKey)}" data-uxc-id="card:${esc(displayKey)}" data-uxc-type="card"${pageId?` data-page-id="${esc(pageId)}"`:''} data-cfont="${esc(disp.fontSize)}" data-cdensity="${esc(disp.density)}" data-clayout="${esc(disp.fieldLayout)}" data-csecondary="${disp.secondary?'on':'off'}" data-cborders="${disp.borders?'on':'off'}"`:'';
  const bodyId=`ux-card-body-${String(collapseId).replace(/[^\p{L}\p{N}_-]/gu,'-')}`;
  const head=`<header class="ux-card-head"${collapsible?` data-card-head="${esc(collapseId)}"`:''}>
   <div class="ux-card-title">${o.icon?`<span class="ux-card-ic" aria-hidden="true">${o.icon.startsWith('<')?o.icon:icon(o.icon)}</span>`:''}<h3>${esc(o.title||'')}</h3>${o.badge?`<span class="ux-card-badge">${o.badge}</span>`:''}${o.summary?`<span class="ux-card-summary muted small">${esc(o.summary)}</span>`:''}</div>

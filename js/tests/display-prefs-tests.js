@@ -16,8 +16,10 @@ import {applyCardDisplay} from '../ui/card-display.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {prefs} from '../core/preferences.js';
 import {_resetCollapseStateForTests} from '../ui/collapse-state.js';
+import {_resetComponentStylesForTests,resolveComponentStyle} from '../core/component-style.js';
+import {closeModal} from '../ui/modal.js';
 
-const clean=()=>{_resetDisplayPrefsForTests();_resetCollapseStateForTests()};
+const clean=()=>{_resetDisplayPrefsForTests();_resetCollapseStateForTests();_resetComponentStylesForTests()};
 
 export function runDisplayPrefsTests(test,expect){
  // ===== الأولوية: Card → Page → Global → Default =====
@@ -138,7 +140,7 @@ export function runDisplayPrefsTests(test,expect){
   expect(el.dataset.cborders).toBe('off');
  });
 
- test('بطاقة: فتح لوحة الإعدادات وتغيير حجم الخط يحدّث البطاقة ويحفظ (بلا إعادة رسم)',()=>{
+ test('بطاقة: زر ⚙ يفتح لوحة التخصيص العالمية — تغيير محلي يحفظ لهذه البطاقة فقط (بلا إعادة رسم)',async()=>{
   clean();
   const host=document.createElement('div');document.body.append(host);
   host.innerHTML=card({title:'بطاقة',body:'محتوى',persistKey:'live:card',collapsible:false});
@@ -146,18 +148,28 @@ export function runDisplayPrefsTests(test,expect){
   bindCards(host);
   const gear=cardEl.querySelector('[data-card-display]');
   expect(Boolean(gear)).toBe(true);
+  // الهوية الثابتة في نظام التخصيص الكامل
+  expect(cardEl.dataset.uxcId).toBe('card:live:card');
+  expect(cardEl.dataset.uxcType).toBe('card');
   gear.click();
-  const panel=cardEl.querySelector('.ux-display-pop');
+  const panel=document.querySelector('#modal-root .uxc-modal');
   expect(Boolean(panel)).toBe(true);
-  const before=cardEl.dataset.cfont;
-  panel.querySelector('[data-seg="fontSize"] button[data-v="xl"]').click();
-  expect(cardEl.dataset.cfont).toBe('xl');
-  expect(cardEl.dataset.cfont===before?false:true).toBe(true);
-  // محفوظ مركزيًا
-  expect(resolveCardDisplay('live:card','').fontSize).toBe('xl');
-  // إعادة الضبط من اللوحة
-  panel.querySelector('[data-dp-reset]').click();
-  expect(resolveCardDisplay('live:card','').fontSize).toBe(DISPLAY_DEFAULTS.card.fontSize);
+  // حجم الخط الحر: يُحفظ Override مستقلًا لهذه البطاقة ويُطبق عليها فورًا
+  const range=panel.querySelector('[data-uxc-range="base.fontSize"]');
+  range.value='22';
+  range.dispatchEvent(new Event('change',{bubbles:true}));
+  expect(resolveComponentStyle('card:live:card',{type:'card'}).base.fontSize).toBe(22);
+  expect(cardEl.style.getPropertyValue('--cd-fs')).toBe((22/15.5).toFixed(3));
+  // الكثافة عبر نظام العرض الموحّد الموجود — تُحفظ في display-prefs للبطاقة نفسها
+  panel.querySelector('[data-coarse="density"] button[data-v="compact"]').click();
+  await new Promise(r=>setTimeout(r,30));
+  expect(resolveCardDisplay('live:card','').density).toBe('compact');
+  expect(cardEl.dataset.cdensity).toBe('compact');
+  // ↺ لكل خاصية على حدة: مسح حجم الخط الحر وحده — الكثافة تبقى
+  panel.querySelector('[data-uxc-clear="base.fontSize"]').click();
+  expect(resolveComponentStyle('card:live:card',{type:'card'}).base?.fontSize).toBe(undefined);
+  expect(resolveCardDisplay('live:card','').density).toBe('compact');
+  closeModal();
   host.remove();
  });
 
