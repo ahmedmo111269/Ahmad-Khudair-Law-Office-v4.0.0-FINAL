@@ -174,7 +174,7 @@ WC_BROWSER_SCENARIO=all node work-center-browser-tests.mjs   # functional | mobi
 WC_PERF_SCALE=3.3 WC_BROWSER_SCENARIO=perf WC_REPORT_FILE=report-perf-1m.json node work-center-browser-tests.mjs
 GRID_BASELINE=6576265 GRID_BROWSER_SCENARIO=full node grid-browser-tests.mjs   # حزمة المتصفح الرسمية السابقة مع مقارنة الأساس
 tests.html                                            # حزمة المتصفح الكاملة (تعمل في الصفحة نفسها)
-node tools/release-audit.mjs                          # بوابة الإصدار
+cd ../.. && node tools/release-audit.mjs              # بوابة الإصدار (يجب تشغيلها من جذر المستودع)
 ```
 
 اختبارات Node في `js/tests/work-center-tests.js` (63 اختبارًا: مجال، ترحيل v13→v14 حقيقي، نسخ احتياطي، أوامر، إسقاط، ترقيم مؤشر، سلامة، بحث، تكرار، مراجعات). اختبارات المتصفح في `tools/node-tests/work-center-browser-tests.mjs`. الأدلة المحلية في `.cache/work-center-browser/` (غير ملتزمة في Git).
