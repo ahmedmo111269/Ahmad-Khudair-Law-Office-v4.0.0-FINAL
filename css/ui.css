@@ -77,9 +77,10 @@
 .card-collapse-toggle{flex:none;min-width:32px;padding:3px 8px;line-height:1.2}
 .panel.card-collapsed> :not(.panel-collapse-head){display:none!important}
 .dg-more{text-align:center}.dg-more button{margin:8px}
-.dg.dg-font-small .dg-table td,.dg.dg-font-small .dg-sort{font-size:11px}
-.dg.dg-font-medium .dg-table td,.dg.dg-font-medium .dg-sort{font-size:13px}
-.dg.dg-font-large .dg-table td,.dg.dg-font-large .dg-sort{font-size:16px}
+/* --dg-fpx: حجم الخط الحر المحفوظ في «مظهر الجدول» لكل جدول على حدة */
+.dg.dg-font-small .dg-table td,.dg.dg-font-small .dg-sort{font-size:var(--dg-fpx,11px)}
+.dg.dg-font-medium .dg-table td,.dg.dg-font-medium .dg-sort{font-size:var(--dg-fpx,13px)}
+.dg.dg-font-large .dg-table td,.dg.dg-font-large .dg-sort{font-size:var(--dg-fpx,16px)}
 .dg:fullscreen,.dg.dg-fullscreen:not(:fullscreen){width:100vw;height:100vh;max-height:100vh;z-index:9999;border-radius:0;background:var(--surface);display:flex;flex-direction:column}
 .dg:fullscreen .dg-scroll,.dg.dg-fullscreen:not(:fullscreen) .dg-scroll{max-height:none;flex:1;min-height:0}
 .dg:fullscreen .dg-table,.dg.dg-fullscreen:not(:fullscreen) .dg-table{min-width:100%}

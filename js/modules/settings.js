@@ -11,6 +11,8 @@ import {renderAppearance,bindAppearance} from './appearance.js';
 import {COLLAPSE_MODES,COLLAPSE_MODE_LABELS,getCollapsePreferences,setDefaultCollapseState,resetCollapseStates,countPinnedCollapseStates} from '../ui/collapse-state.js';
 import {CARD_FONT_SIZES,CARD_FONT_LABELS,CARD_DENSITIES,CARD_DENSITY_LABELS,FIELD_LAYOUTS,FIELD_LAYOUT_LABELS,GRID_FONT_SIZES,GRID_FONT_LABELS,GRID_DENSITIES,GRID_DENSITY_LABELS,resolvePageDisplay,resolveGridDisplay,setGlobalDisplay,resetAllDisplay} from '../core/display-prefs.js';
 import {applyPageDisplay} from '../ui/page-layout.js';
+import {getStyleCounts,resetUniversalDefaults,resetAllComponentOverrides,applyAllComponentStyles} from '../core/component-style.js';
+import {openGlobalStyleCustomizer,openTypeDefaultCustomizer} from '../ui/component-customizer.js';
 
 const COLLAPSE_DESCRIPTIONS={
  collapsed:'العناصر الجديدة غير المهيأة — الأقسام والبطاقات — تبدأ مطوية؛ تبقى الجداول الرئيسية ظاهرة. الحالات التي اخترتها سابقًا لا تتغير.',
@@ -47,11 +49,32 @@ function renderDisplaySettings(){
   <p class="muted small">إعادة الضبط تمسح الإعداد العام وتخصيصات العرض لكل البطاقات والصفحات، وتُبقي ترتيب الأقسام وإعدادات كل جدول المحفوظة لديه. لا يُحذف أي سجل أو بيان.</p>
  </section>`;
 }
+const uxcCountsText=()=>{
+ const c=getStyleCounts();
+ return `${c.components} عنصرًا بتخصيص مستقل · ${c.types} افتراضي نوع محفوظ · العام: ${c.global?'مخصص':'افتراضي'}`;
+};
+const UNIVERSAL_TYPES=['card','section','stage','page','panel','component'];
+const UNIVERSAL_TYPE_NAMES={card:'البطاقات',section:'الأقسام',stage:'المراحل',page:'الصفحات',panel:'اللوحات',component:'المكونات الأخرى'};
+function renderUniversalStyleSettings(){
+ return `<section class="panel universal-style-settings" data-collapse-id="universal-style-settings" data-collapse-default="open"><div class="panel-head"><h3>التخصيص الكامل — النظام المركزي</h3><span class="muted small" data-uxc-counts>${uxcCountsText()}</span></div>
+  <p class="muted small">نظام تخصيص واحد لكل عنصر في البرنامج عبر <b>Component ID + Component Type + Scoped Preferences</b>. كل بطاقة أو قسم أو مرحلة أو صفحة أو لوحة لها زر «⚙ تخصيص العرض» مستقل: النصوص بأنواعها الخمسة عشر، الألوان، الخلفية، الحدود، الحواف، الظلال، المسافات، والحجم — بسلسلة أولويات <b>العنصر ← افتراضي النوع ← الصفحة ← العام ← تصميم النظام</b>. تعديل عنصر لا ينتقل تلقائيًا لأي عنصر آخر؛ الانتقال يتم بأمر صريح من داخل لوحة العنصر («تطبيق على…» أو «حفظ كإعداد افتراضي»). إعدادات كل جدول تبقى داخل أدوات الجدول نفسه (🎨 في رأس الجدول).</p>
+  <div class="action-stack">
+   <button type="button" class="ghost" data-uxc-global>🎨 الافتراضي العام لكل العناصر (النصوص والخط)</button>
+   <div class="head-actions">${UNIVERSAL_TYPES.map(t=>`<button type="button" class="ghost small" data-uxc-type="${t}">افتراضي ${UNIVERSAL_TYPE_NAMES[t]}</button>`).join('')}</div>
+  </div>
+  <div class="collapse-setting-actions">
+   <button type="button" class="ghost danger" data-uxc-reset-defaults>↺ إعادة الافتراضي العام وافتراضيات الأنواع</button>
+   <button type="button" class="ghost danger" data-uxc-reset-overrides>↺ مسح تخصيصات كل العناصر</button>
+  </div>
+  <p class="muted small">إعادة الضبط هنا تمسح مستويات الوراثة الأعم فقط أو Overrides العناصر — بحسب الزر — ولا تحذف أي بيانات أو سجلات، ولا تمس إعدادات الجداول المحفوظة لكل جدول ولا ترتيب الأقسام.</p>
+ </section>`;
+}
 async function renderGeneral(app){
  const cat=app.__lookupCat=app.__lookupCat||'fileType';
  const rows=await lookupRows(app.office,cat);
  return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">إعدادات التشغيل المحلية والقوائم التي تظهر في النماذج.</p></div></div><!--TABS-->
  ${renderDisplaySettings()}
+ ${renderUniversalStyleSettings()}
  ${renderCollapseSettings()}
  <section class="panel"><div class="panel-head"><h3>القوائم القابلة للتعديل</h3><span class="muted small">القيم تظهر كاقتراحات في النماذج ويمكن دائمًا كتابة قيمة أخرى. حذف قيمة لا يغيّر السجلات القديمة التي استخدمتها.</span></div>
   <div class="lookup-admin"><label>القائمة<select id="lk-cat">${Object.entries(LOOKUP_CATEGORIES).map(([k,v])=>`<option value="${k}"${k===cat?' selected':''}>${esc(v.label)}</option>`).join('')}</select></label>
@@ -101,6 +124,18 @@ export function bindSettings(app){
  root.querySelector('[data-display-reset-all]')?.addEventListener('click',async()=>{
   if(!await confirmBox('إعادة إعدادات العرض بالكامل إلى الافتراضي؟ يمسح الإعداد العام وتخصيصات الخط والكثافة لكل البطاقات والصفحات. لا يمس ترتيب الأقسام ولا إعدادات الجداول المحفوظة ولا أي بيانات.',{okText:'إعادة إعدادات العرض'}))return;
   resetAllDisplay();liveApply();toast('تمت إعادة إعدادات العرض إلى الافتراضي');
+ });
+ // التخصيص الكامل: الافتراضي العام وافتراضيات الأنواع وإعادة الضبط الواسعة (بتأكيد)
+ root.querySelector('[data-uxc-global]')?.addEventListener('click',()=>openGlobalStyleCustomizer());
+ root.querySelectorAll('[data-uxc-type]').forEach(b=>b.addEventListener('click',()=>openTypeDefaultCustomizer(b.dataset.uxcType)));
+ const uxcRefresh=()=>{const c=root.querySelector('[data-uxc-counts]');if(c)c.textContent=uxcCountsText()};
+ root.querySelector('[data-uxc-reset-defaults]')?.addEventListener('click',async()=>{
+  if(!await confirmBox('إعادة الافتراضي العام وافتراضيات الأنواع في نظام التخصيص الكامل؟ تخصيصات كل عنصر الفردية (Overrides) وتخصيصات الصفحات تبقى كما هي. لا يمس أي بيانات.',{okText:'إعادة الافتراضيات العامة'}))return;
+  resetUniversalDefaults();applyAllComponentStyles(document);uxcRefresh();toast('أُعيدت الافتراضيات العامة إلى وضعها الأصلي');
+ });
+ root.querySelector('[data-uxc-reset-overrides]')?.addEventListener('click',async()=>{
+  if(!await confirmBox('مسح تخصيصات العرض لكل العناصر (بطاقات/أقسام/مراحل/صفحات)؟ عملية واسعة النطاق: تمسح Override كل عنصر فيعود إلى الإعداد الموروث (نوع ← صفحة ← عام ← افتراضي)، وتُبقي الافتراضي العام وافتراضيات الأنواع وإعدادات الجداول المحفوظة. لا يحذف أو يغير أي بيانات أو سجلات.',{okText:'مسح تخصيصات العناصر'}))return;
+  resetAllComponentOverrides();applyAllComponentStyles(document);uxcRefresh();toast('أُعيدت كل العناصر إلى الإعداد الموروث');
  });
  root.querySelector('#collapse-default-state')?.addEventListener('change',e=>{
   const mode=e.currentTarget.value;setDefaultCollapseState(mode);

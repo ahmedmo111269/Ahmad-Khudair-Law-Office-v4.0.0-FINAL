@@ -19,6 +19,7 @@ import {
  CARD_FONT_SIZES,CARD_FONT_LABELS,CARD_DENSITIES,CARD_DENSITY_LABELS,stepCardFontSize
 } from '../core/display-prefs.js';
 import {applyCardDisplay} from './card-display.js';
+import {clearComponentStyle} from '../core/component-style.js';
 import {isCollapsePinned,toggleCollapsePin} from './collapse-state.js';
 import {syncCollapsePin} from './collapsible.js';
 
@@ -163,6 +164,7 @@ export function openPageCustomizer(app,{pageId,root,onChanged}={}){
   <ol class="pl-list" id="pl-list"></ol>
   <p class="muted small pl-hint">اسحب من المقبض ⋮⋮ لإعادة الترتيب. الأقسام المخفية تبقى بياناتها كما هي ويمكن إظهارها من هنا دائمًا.</p>
   <div class="form-actions">
+   <button type="button" class="ghost" data-pl-style title="اللوحة العالمية: النصوص والألوان والخلفية والحدود والظلال والمسافات لهذه الصفحة">🎨 تخصيص عرض الصفحة</button>
    <button type="button" class="ghost danger" data-pl-reset>↺ استعادة الافتراضي لهذه الصفحة</button>
    <button type="button" class="primary" data-pl-done>تم</button>
   </div>`);
@@ -283,11 +285,19 @@ export function openPageCustomizer(app,{pageId,root,onChanged}={}){
    change({type:'display'});
    return;
   }
+  if(e.target.closest('[data-pl-style]')){
+   // اللوحة العالمية الموحدة — إعدادات الصفحة المستقلة (page:<pageId>) في نظام
+   // التخصيص الكامل: لا تمس صفحة أخرى، ولا تتجاوز Override أي عنصر داخلها.
+   const {openComponentCustomizer}=await import('./component-customizer.js');
+   openComponentCustomizer({id:`page:${pageId}`,type:'page',title:layout.title,el:host,pageId:''});
+   return;
+  }
   if(e.target.closest('[data-pl-done]')){closeModal();return}
   if(e.target.closest('[data-pl-reset]')){
    const ok=await confirmBox('استعادة الترتيب والإظهار وإعدادات العرض الافتراضية لهذه الصفحة؟ هذا يمسح تفضيلات العرض المحفوظة لها فقط — لا يُحذف أو يتغير أي بيانات أو سجلات.',{okText:'استعادة الافتراضي'});
    if(!ok)return;
    resetPagePreferences(pageId);
+   clearComponentStyle(`page:${pageId}`); // مستوى الصفحة في نظام التخصيص الكامل — عناصر الصفحة تحتفظ بـ Override الخاص بها
    change({type:'reset'});
    toast('تمت استعادة إعدادات الصفحة الافتراضية');
   }

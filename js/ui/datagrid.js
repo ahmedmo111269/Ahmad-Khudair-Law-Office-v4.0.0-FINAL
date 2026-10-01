@@ -45,6 +45,20 @@ const NOVAL=['empty','notEmpty','isTrue','isFalse','today','yesterday','thisWeek
 const n=v=>normalizeArabic(String(v??''));
 const EMPTY='(فارغ)';
 
+// ===== مظهر الجدول (إعدادات عرض مستقلة لكل جدول ضمن Universal DataGrid) =====
+// تُحفظ داخل مفتاح الجدول نفسه grid:<storageKey> وتُطبق كـ CSS Variables على
+// جذر الجدول — تغيير محلي فوري بلا إعادة رسم وبلا أي مساس بالبيانات.
+const hexOk=v=>typeof v==='string'&&/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v.trim())?v.trim().toLowerCase():'';
+const numOk=(v,min,max,step)=>{const n=Number(v);if(!Number.isFinite(n))return null;const q=Math.round(n/step)*step;return Math.round(Math.min(max,Math.max(min,q))*100)/100};
+function sanitizeAppear(raw){
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return {};
+ const a={};
+ const fp=numOk(raw.fontPx,10,20,.5);if(fp!==null)a.fontPx=fp;
+ const rp=numOk(raw.rowPad,2,18,1);if(rp!==null)a.rowPad=rp;
+ for(const k of ['headBg','headColor','textColor','rowBg','borderColor']){const c=hexOk(raw[k]);if(c)a[k]=c}
+ return a;
+}
+
 export function mountGrid(root,opts){
  const o={title:'',emptyText:'لا توجد سجلات.',pageSize:300,storageKey:'',onRowClick:null,selectable:false,...opts};
  const provider=o.dataProvider||o.provider||null;
@@ -68,6 +82,7 @@ export function mountGrid(root,opts){
   searchCol:byKey.has(saved.searchCol)?saved.searchCol:'',
   span:['wide','full'].includes(saved.span)?saved.span:'',
   tableWidth:Math.max(100,Math.min(220,Number(saved.tableWidth)||100)),
+  appear:sanitizeAppear(saved.appear),
   shellCollapsed:resolveCollapseState(shellCollapseKey,{fallback:false,legacy:typeof saved.shellCollapsed==='boolean'?saved.shellCollapsed:undefined,primary:true}),
   toolsCollapsed:resolveCollapseState(toolsCollapseKey,{fallback:true,legacy:typeof saved.toolsCollapsed==='boolean'?saved.toolsCollapsed:undefined}),
   remotePageSize:[25,50,100].includes(Number(saved.remotePageSize))?Number(saved.remotePageSize):([25,50,100].includes(Number(o.pageSize))?Number(o.pageSize):25),
@@ -92,7 +107,7 @@ export function mountGrid(root,opts){
  root.classList.add('dg');
  const bodyId=`dg-body-${instance}`,toolsId=`dg-tools-${instance}`;
  root.dataset.collapseReady='true';root.dataset.collapseType='grid';root.dataset.collapseKey=shellCollapseKey;root.dataset.collapseCollapsed=String(st.shellCollapsed);
- root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}" aria-controls="${bodyId}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'›':'⌄'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button>${collapsePinMarkup(shellCollapseKey,isCollapsePinned(shellCollapseKey),'collapse-pin dg-shell-pin')}</div><div class="dg-body" id="${bodyId}"><div class="dg-tools-summary"><button type="button" class="dg-tools-summary-toggle" aria-expanded="${st.toolsCollapsed?'false':'true'}" aria-controls="${toolsId}"><span class="dg-tools-label">🔍 عوامل التصفية والتخصيص</span><span class="dg-tools-active"></span><span class="dg-tools-view"></span><span class="dg-tools-caret" aria-hidden="true">${st.toolsCollapsed?'›':'⌄'}</span></button>${collapsePinMarkup(toolsCollapseKey,isCollapsePinned(toolsCollapseKey),'collapse-pin dg-tools-pin')}</div><div class="dg-tools-panel" id="${toolsId}"${st.toolsCollapsed?' hidden':''}><div class="dg-toolbar"><button type="button" class="ghost dg-filter-toggle" aria-expanded="${!st.filterCollapsed}" aria-label="${st.filterCollapsed?'فتح':'طي'} عوامل التصفية" title="إظهار أو إخفاء عوامل التصفية">${st.filterCollapsed?'›':'⌄'} عوامل التصفية</button>${collapsePinMarkup(filterCollapseKey,isCollapsePinned(filterCollapseKey),'collapse-pin dg-filter-pin')}
+ root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}" aria-controls="${bodyId}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'›':'⌄'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button>${collapsePinMarkup(shellCollapseKey,isCollapsePinned(shellCollapseKey),'collapse-pin dg-shell-pin')}<button type="button" class="dg-head-gear" title="تخصيص مظهر الجدول" aria-label="تخصيص مظهر الجدول" aria-haspopup="dialog">🎨</button></div><div class="dg-body" id="${bodyId}"><div class="dg-tools-summary"><button type="button" class="dg-tools-summary-toggle" aria-expanded="${st.toolsCollapsed?'false':'true'}" aria-controls="${toolsId}"><span class="dg-tools-label">🔍 عوامل التصفية والتخصيص</span><span class="dg-tools-active"></span><span class="dg-tools-view"></span><span class="dg-tools-caret" aria-hidden="true">${st.toolsCollapsed?'›':'⌄'}</span></button>${collapsePinMarkup(toolsCollapseKey,isCollapsePinned(toolsCollapseKey),'collapse-pin dg-tools-pin')}</div><div class="dg-tools-panel" id="${toolsId}"${st.toolsCollapsed?' hidden':''}><div class="dg-toolbar"><button type="button" class="ghost dg-filter-toggle" aria-expanded="${!st.filterCollapsed}" aria-label="${st.filterCollapsed?'فتح':'طي'} عوامل التصفية" title="إظهار أو إخفاء عوامل التصفية">${st.filterCollapsed?'›':'⌄'} عوامل التصفية</button>${collapsePinMarkup(filterCollapseKey,isCollapsePinned(filterCollapseKey),'collapse-pin dg-filter-pin')}
   <input class="dg-quick" type="search" placeholder="بحث فوري في النتائج… ( / )" aria-label="بحث داخل النتائج">
   <select class="dg-scope" aria-label="نطاق البحث" title="بحث في كل الأعمدة أو عمود محدد"><option value="">كل الأعمدة</option>${cols.filter(c=>c.searchable).map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select>
   <button type="button" class="ghost dg-adv-btn">تصفية مركّبة</button>
@@ -131,8 +146,22 @@ export function mountGrid(root,opts){
  if($('.dg-span'))$('.dg-span').value=st.span||'';
  if($('.dg-width'))$('.dg-width').value=st.tableWidth;
  $('.dg-csearch-btn').classList.toggle('dg-chip-active',st.colSearchOn);
+ // مظهر الجدول المحفوظ: متغيرات CSS على الجذر — كل جدول يحتفظ بإعداداته الخاصة
+ const applyAppear=()=>{
+  const a=st.appear||{},sx=root.style;
+  const set=(k,v)=>{if(v)sx.setProperty(k,v);else sx.removeProperty(k)};
+  set('--dg-fpx',a.fontPx?`${a.fontPx}px`:'');
+  set('--dg-head-bg',a.headBg||'');
+  set('--dg-head-color',a.headColor||'');
+  set('--dg-text',a.textColor||'');
+  set('--dg-row-bg',a.rowBg||'');
+  set('--dg-rowpad',a.rowPad!=null?`${a.rowPad}px`:'');
+  set('--dg-borderc',a.borderColor||'');
+  root.classList.toggle('dg-customrowbg',Boolean(a.rowBg));
+ };
+ applyAppear();
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,remotePageSize:st.remotePageSize})};
+ const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,remotePageSize:st.remotePageSize,appear:st.appear})};
  const makeQuery=()=>createGridQuery({
   search:{text:st.quick,column:st.searchCol},
   filters:{logic:'and',rules:[
@@ -439,6 +468,60 @@ export function mountGrid(root,opts){
  root.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();$('.dg-quick').focus()}});
  $('.dg-cards-btn').addEventListener('click',()=>{st.cards=!st.cards;persist();renderBody()});
  $('.dg-density').addEventListener('change',e=>{st.density=e.target.value;rowH=0;persist();renderBody()});
+ // ===== 🎨 تخصيص مظهر الجدول — popover داخل Universal DataGrid (البند: إعدادات الجدول تبقى ضمن الجدول) =====
+ $('.dg-head-gear')?.addEventListener('click',e=>{
+  closePop();pop=document.createElement('div');pop.className='dg-pop dg-appear-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','تخصيص مظهر الجدول');
+  const ctl=(key,label,inner)=>`<div class="uxc-ctl" data-ap="${key}"><span class="uxc-ctl-lbl">${label}</span><div class="uxc-ctl-in">${inner}<button type="button" class="link uxc-clear" data-apc="${key}" title="إعادة هذه القيمة للوضع الافتراضي" aria-label="إعادة ${label} للافتراضي" hidden>↺</button></div></div>`;
+  const rng=(key,label,min,max,step,val)=>ctl(key,label,`<input type="range" data-apr="${key}" min="${min}" max="${max}" step="${step}" value="${val??min}" aria-label="${label}"><output data-apo>${val!=null?val+'px':'—'}</output>`);
+  const clr=(key,label,val)=>ctl(key,label,`<input type="color" data-apcolor="${key}" value="${val||'#d4af37'}" aria-label="${label}"><input type="text" class="uxc-hex" data-aphex="${key}" value="${val||''}" placeholder="افتراضي" maxlength="7" dir="ltr" spellcheck="false" aria-label="${label} — hex">`);
+  pop.innerHTML=`<div class="dg-pop-head"><b>🎨 مظهر الجدول — إعدادات هذا الجدول وحده</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
+   <div class="dg-appear">
+    ${rng('fontPx','حجم خط الخلايا',10,20,.5,st.appear.fontPx)}
+    ${rng('rowPad','ارتفاع الصف (حشو)',2,18,1,st.appear.rowPad)}
+    ${clr('headBg','خلفية رأس الجدول',st.appear.headBg)}
+    ${clr('headColor','لون نص الرأس',st.appear.headColor)}
+    ${clr('textColor','لون نص الخلايا',st.appear.textColor)}
+    ${clr('rowBg','لون خلفية الصفوف',st.appear.rowBg)}
+    ${clr('borderColor','لون حدود الجدول',st.appear.borderColor)}
+   </div>
+   <p class="muted small">تُحفظ القيم ضمن إعدادات هذا الجدول المحفوظة لديه — الجداول الأخرى لا تتغير، ولا تُعاد قراءة أي بيانات. الحجم/الكثافة/الأعمدة/الفرز/التصفية/طرق العرض تبقى في أدوات الجدول نفسها.</p>
+   <div class="dg-pop-actions"><button type="button" class="ghost dg-appear-reset">↺ إعادة مظهر الجدول</button></div>`;
+  place(pop,e.currentTarget);
+  const drawValues=()=>{
+   pop.querySelectorAll('[data-ap]').forEach(row=>{
+    const k=row.dataset.ap,v=st.appear[k];
+    const r=row.querySelector('[data-apr]');if(r){if(v!=null)r.value=String(v);const ot=row.querySelector('[data-apo]');if(ot)ot.textContent=v!=null?v+'px':'—'}
+    const c=row.querySelector('[data-apcolor]');if(c)c.value=v||'#d4af37';
+    const h=row.querySelector('[data-aphex]');if(h)h.value=v||'';
+    const cb=row.querySelector('[data-apc]');if(cb)cb.hidden=v==null||v==='';
+   });
+  };
+  const setKey=(key,value)=>{
+   if(value===null||value===undefined||value==='')delete st.appear[key];else st.appear[key]=value;
+   persist();applyAppear();
+   if(key==='rowPad'||key==='fontPx'){rowH=0;if(virtualOn())renderBody()}
+   drawValues();
+  };
+  pop.querySelector('.dg-x').onclick=closePop;
+  pop.querySelector('.dg-appear-reset').onclick=()=>{st.appear={};persist();applyAppear();rowH=0;renderBody();drawValues();toast('أُعيد مظهر هذا الجدول إلى الافتراضي — إعدادات الأعمدة والفلاتر كما هي')};
+  pop.addEventListener('input',ev=>{
+   const r=ev.target.closest('[data-apr]');
+   if(r){const ot=r.closest('[data-ap]')?.querySelector('[data-apo]');if(ot)ot.textContent=r.value+'px';clearTimeout(r._apt);const k=r.dataset.apr,v=Number(r.value);r._apt=setTimeout(()=>setKey(k,v),140);return}
+   const c=ev.target.closest('[data-apcolor]');
+   if(c){const h=c.closest('[data-ap]')?.querySelector('[data-aphex]');if(h)h.value=c.value;clearTimeout(c._apt);const k=c.dataset.apcolor,v=c.value;c._apt=setTimeout(()=>setKey(k,v),120);return}
+   const h=ev.target.closest('[data-aphex]');
+   if(h){const v=h.value.trim().toLowerCase();if(v===''||/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/.test(v)){clearTimeout(h._apt);const k=h.dataset.aphex;h._apt=setTimeout(()=>{setKey(k,v||null);const cc=pop.querySelector(`[data-apcolor="${k}"]`);if(cc&&v)cc.value=v},250)}}
+  });
+  pop.addEventListener('change',ev=>{
+   const r=ev.target.closest('[data-apr]');if(r){clearTimeout(r._apt);setKey(r.dataset.apr,Number(r.value));return}
+   const c=ev.target.closest('[data-apcolor]');if(c){clearTimeout(c._apt);setKey(c.dataset.apcolor,c.value)}
+  });
+  pop.addEventListener('click',ev=>{
+   const cb=ev.target.closest('[data-apc]');
+   if(cb)setKey(cb.dataset.apc,null);
+  });
+  drawValues();
+ });
  let raf=0;$('.dg-scroll').addEventListener('scroll',()=>{if(!virtualOn()||raf)return;raf=requestAnimationFrame(()=>{raf=0;renderWindow(false)})},{passive:true});
  $('.dg-print').addEventListener('click',()=>printGrid());
  $('.dg-export').addEventListener('change',e=>{const v=e.target.value;e.target.value='';if(v)exportGrid(v)});
@@ -474,7 +557,7 @@ export function mountGrid(root,opts){
   st.shellCollapsed=resolveCollapseState(shellCollapseKey,{fallback:false,primary:true});
   st.filters.clear();st.adv={logic:'and',rules:[]};st.quick='';st.sort=[];st.groupBy='';st.hidden=new Set(cols.filter(c=>c.hidden).map(c=>c.key));st.remotePageSize=25;
   const freshDisplay=resolveGridDisplay();
-  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize=freshDisplay.fontSize||'medium';st.density=freshDisplay.density||'';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.searchCol='';st.span='';st.tableWidth=100;st.qaOn=true;
+  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize=freshDisplay.fontSize||'medium';st.density=freshDisplay.density||'';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.searchCol='';st.span='';st.tableWidth=100;st.qaOn=true;st.appear={};applyAppear();rowH=0;
   $('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value=st.fontSize;$('.dg-density').value=st.density;$('.dg-page-size').value='25';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
   renderAdv();changeQuery();toast('أُعيد ضبط الجدول إلى الإعدادات الافتراضية');
  });
@@ -581,7 +664,7 @@ export function mountGrid(root,opts){
   pop.querySelector('.dg-resetw')?.addEventListener('click',()=>{st.widths={};refresh()});
  });
  // ===== طرق العرض المحفوظة (فلاتر + فرز + أعمدة باسم) =====
- const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order],widths:{...st.widths},fontSize:st.fontSize,density:st.density,cards:st.cards,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:{...st.colSearch},colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn});
+ const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order],widths:{...st.widths},fontSize:st.fontSize,density:st.density,cards:st.cards,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:{...st.colSearch},colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,appear:{...st.appear}});
  function restore(v){
   st.quick=v.quick||'';$('.dg-quick').value=st.quick;
   st.filters=new Map((v.filters||[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f.set?new Set(f.set):null}]));
@@ -592,6 +675,7 @@ export function mountGrid(root,opts){
   st.pinned=(Array.isArray(v.pinned)?v.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS);st.colSearch=v.colSearch&&typeof v.colSearch==='object'?{...v.colSearch}:{};st.colSearchOn=Boolean(v.colSearchOn);
   st.searchCol=byKey.has(v.searchCol)?v.searchCol:'';st.span=['wide','full'].includes(v.span)?v.span:'';st.tableWidth=Math.max(100,Math.min(220,Number(v.tableWidth)||100));st.qaOn=v.qaOn!==false;
   if($('.dg-scope'))$('.dg-scope').value=st.searchCol;if($('.dg-span'))$('.dg-span').value=st.span;if($('.dg-width'))$('.dg-width').value=st.tableWidth;
+  st.appear=sanitizeAppear(v.appear);applyAppear();rowH=0;
   st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;changeQuery();
  }
  $('.dg-views-btn').addEventListener('click',e=>{

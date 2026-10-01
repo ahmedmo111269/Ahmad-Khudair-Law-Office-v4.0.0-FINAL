@@ -14,6 +14,7 @@ import {lookupRows} from '../services/lookups.js';
 import {ensureClientFile,clientFileSummary,clientFileEvents,taxonomy,createLegalFileInClientFile,saveClientFile,archiveClientFile,reopenClientFile,
  addStage,setCurrentStage,setStageLifecycle,moveStage,removePlannedStage} from '../services/client-files.js';
 import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
+import {openCustomizerForElement} from '../ui/component-customizer.js';
 
 // لوحة ملف الموكل ضمن نظام ترتيب الأقسام المركزي — نفس النظام لكل الصفحات.
 registerPageLayout({pageId:'client-file',title:'ملف الموكل',sections:[
@@ -207,11 +208,13 @@ export async function hydrateLookups(app,root){
 
 // ======================= شريط المراحل داخل الملف القانوني =======================
 const ICON={done:'✓',active:'●',planned:'○',skipped:'⤼'};
-export function stagePathHtml(stages,currentId){
+// كل مرحلة لها هوية ثابتة في نظام التخصيص الكامل (stage:<caseId>) — تخصيصها
+// مستقل تمامًا عن بقية المراحل، وشريط المراحل نفسه مكوّن قابل للتخصيص (stagepath:<fileId>).
+export function stagePathHtml(stages,currentId,fileId=''){
  const live=stages.filter(s=>!s.isDeleted);
- return `<section class="stage-path" aria-label="مراحل الملف">
+ return `<section class="stage-path" aria-label="مراحل الملف"${fileId?` data-uxc-id="stagepath:${esc(fileId)}" data-uxc-type="section" data-uxc-title="شريط المراحل" data-uxc-gear`:''}>
   <div class="sp-head"><b>المراحل</b><span class="muted small">اضغط على أي مرحلة لإدارتها — المسار اقتراح وليس إلزامًا</span><span class="sp-actions"><button class="ghost small" data-sp-add>+ مرحلة</button><button class="ghost small" data-sp-related>⤴ إنشاء ملف مرتبط</button></span></div>
-  <ol class="sp-list">${live.map(s=>{const lc=s.lifecycle||(s.id===currentId?'active':'done');return `<li class="sp-${lc}${s.id===currentId?' sp-current':''}"><button type="button" data-sp="${esc(s.id)}" title="${esc(LIFECYCLE[lc]||'')}"><i>${ICON[lc]||'•'}</i><span>${esc(s.stageType||s.nameSnapshot||'مرحلة')}</span>${s.caseNumber?`<small>${esc(s.caseNumber)}${s.caseYear?'/'+esc(s.caseYear):''}</small>`:s.outcome?`<small>${esc(s.outcome)}</small>`:''}</button></li>`}).join('')||'<li class="muted small sp-empty">لا توجد مراحل. أضف أول مرحلة عندما تحتاجها.</li>'}</ol></section>`;
+  <ol class="sp-list">${live.map(s=>{const lc=s.lifecycle||(s.id===currentId?'active':'done');return `<li class="sp-${lc}${s.id===currentId?' sp-current':''}" data-uxc-id="stage:${esc(s.id)}" data-uxc-type="stage" data-uxc-title="${esc(s.stageType||s.nameSnapshot||'مرحلة')}"><button type="button" data-sp="${esc(s.id)}" title="${esc(LIFECYCLE[lc]||'')}"><i>${ICON[lc]||'•'}</i><span>${esc(s.stageType||s.nameSnapshot||'مرحلة')}</span>${s.caseNumber?`<small>${esc(s.caseNumber)}${s.caseYear?'/'+esc(s.caseYear):''}</small>`:s.outcome?`<small>${esc(s.outcome)}</small>`:''}</button></li>`}).join('')||'<li class="muted small sp-empty">لا توجد مراحل. أضف أول مرحلة عندما تحتاجها.</li>'}</ol></section>`;
 }
 export function bindStagePath(app,file,stages){
  const root=document.querySelector('.stage-path');if(!root)return;
@@ -237,6 +240,7 @@ export function bindStagePath(app,file,stages){
     ${lc!=='planned'?'<button class="ghost" data-a="planned">○ إرجاعها لمخططة</button>':''}
     <button class="ghost" data-a="up" ${i?'':'disabled'}>▲ تقديم</button><button class="ghost" data-a="down" ${i<stages.length-1?'':'disabled'}>▼ تأخير</button>
     <button class="ghost" data-a="open">✎ البيانات القضائية للمرحلة (الرقم، المحكمة، الدائرة…)</button>
+    <button class="ghost" data-a="style" title="تخصيص شكل هذه المرحلة وحدها — لا يتأثر أي مرحلة أخرى">🎨 تخصيص عرض هذه المرحلة</button>
     ${!s.caseNumber&&!s.filingDate?'<button class="ghost danger" data-a="remove">✕ حذف المرحلة</button>':''}
    </div>
    <form id="sp-out" class="inline-form"><label>النتيجة / التصرف<input name="outcome" list="sp-outs" value="${esc(s.outcome||'')}" placeholder="اختر أو اكتب — «أخرى» مسموحة دائمًا"></label><datalist id="sp-outs">${outcomes.map(o=>`<option value="${esc(o)}">`).join('')}</datalist><button class="primary">حفظ النتيجة</button></form>`);
@@ -246,6 +250,7 @@ export function bindStagePath(app,file,stages){
    else if(['done','skipped','planned'].includes(a))run(setStageLifecycle(app.office,file.id,s.id,a));
    else if(a==='up'||a==='down')run(moveStage(app.office,file.id,s.id,a==='up'?-1:1));
    else if(a==='open')app.go('case:'+s.id);
+   else if(a==='style'){const li=document.querySelector(`[data-uxc-id="stage:${CSS.escape(s.id)}"]`);if(li)openCustomizerForElement(li);else toast('تعذر العثور على عنصر المرحلة في الصفحة الحالية','error')}
    else if(a==='remove')confirmBox(`حذف مرحلة «${esc(s.stageType)}» من المسار؟`,{okText:'حذف'}).then(ok=>ok&&run(removePlannedStage(app.office,file.id,s.id)));
   };
  });

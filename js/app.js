@@ -37,6 +37,7 @@ import {icon} from './ui/icons.js';
 import {buildSidebar,initSidebarState,toggleCollapsed,toggleMobile,closeMobile,isDesktop,setActiveRoute} from './ui/sidebar.js';
 import {bindCards} from './ui/card.js';
 import {applyPageDisplay,applyPageLayout} from './ui/page-layout.js';
+import {applyUniversalStyles} from './ui/component-customizer.js';
 import {Clock} from './core/clock.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
@@ -145,6 +146,9 @@ class App{
    this.__layoutId=page.layoutId||baseRoute;
    applyPageDisplay(main,this.__layoutId);
    applyPageLayout(main,this.__layoutId);
+   // نظام التخصيص الكامل والمستقل: كل عنصر (صفحة/قسم/بطاقة/مرحلة/مكون مسجل)
+   // تُطبق إعداداته المحفوظة بهويته الثابتة — نقل أنماط فقط، بلا إعادة رسم.
+   applyUniversalStyles(main,this.__layoutId);
    main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());

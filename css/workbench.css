@@ -4,7 +4,7 @@
 .dg-shell-count{color:var(--text-muted);font-weight:600;font-size:12.5px}
 .dg.dg-shell-closed .dg-body{display:none}
 .dg.dg-shell-closed{border-color:var(--border)}
-.dg-coltitle{flex:1;border:0;background:transparent;text-align:start;padding:9px 8px;font-weight:700;color:var(--text);font-size:12.5px;white-space:nowrap;min-width:0}
+.dg-coltitle{flex:1;border:0;background:transparent;text-align:start;padding:9px 8px;font-weight:700;color:var(--dg-head-color,var(--text));font-size:12.5px;white-space:nowrap;min-width:0}
 .dg-coltitle:hover,.dg-filtered .dg-coltitle{color:var(--primary)}
 .dg-sort{flex:none;border:0;background:transparent;color:var(--text-muted);padding:0 8px;min-width:34px}
 .dg-rank{display:inline-grid;place-items:center;min-width:15px;height:15px;margin-inline-start:2px;border-radius:99px;background:var(--primary);color:var(--on-primary);font-size:10px;font-weight:800}
