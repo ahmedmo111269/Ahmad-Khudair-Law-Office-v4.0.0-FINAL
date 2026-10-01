@@ -12,6 +12,18 @@ import {getFavorites} from '../services/favorites.js';
 import {prefs} from '../core/preferences.js';
 import {dateSignal} from '../ui/signals.js';
 import {card,cardEmpty,statusBadge} from '../ui/card.js';
+import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
+
+// أقسام الصفحة الرئيسية في نظام ترتيب الأقسام المركزي.
+// «آخر ما فُتح» افتراضيًا في نهاية الترتيب ومطوي — والقرار النهائي للمستخدم
+// (سحب/أزرار ▲▼ من «تخصيص الصفحة») ويُحفظ في تفضيلات العرض.
+registerPageLayout({pageId:'dashboard',title:'الصفحة الرئيسية',sections:[
+ {id:'favs',title:'مثبّتات',icon:'★'},
+ {id:'kpis',title:'ملخص العمل',icon:'◈'},
+ {id:'work',title:'جلسات اليوم والأعمال الإدارية',icon:'◷'},
+ {id:'shortcuts',title:'تقارير العمل السريع',icon:'▤'},
+ {id:'agenda',title:'الأجندة',icon:'📅'},
+ {id:'recents',title:'آخر ما فُتح',icon:'🕘'}]});
 
 let __lastBrief=null;
 const KPI=(k,n,txt,route,accent='')=>`<button class="kpi${accent?` kpi-${accent}`:''}" data-kpi="${esc(route)}"><b>${formatNumber(n)}${n>=100?'+':''}</b><span>${esc(txt)}</span></button>`;
@@ -38,25 +50,26 @@ export async function homePage(app){
   KPI('s',r.staleFiles.length,'ملفات بلا نشاط','actionCenter',r.staleFiles.length?'warn':'')
  ];
  return `${demoBanner}<div class="hero hero-home"><div><h2>${g}، مكتب الأستاذ أحمد محمد خضير</h2><p class="hero-date">${longDateAr()}</p></div>
-  <div class="hero-quick"><button class="primary" data-quick-add>+ إضافة</button><button class="ghost" data-goto="actionCenter">مركز العمل</button><button class="ghost" data-goto="reports?type=hearings&preset=today">تقرير اليوم</button>${last?.route&&last.route!=='dashboard'?`<button class="ghost resume-chip" data-goto="${esc(last.route)}">متابعة: ${esc(last.title||'آخر صفحة')}</button>`:''}</div></div>
- ${favs.length?card({icon:'folder',title:'مثبّتات',size:'full',collapsible:true,persistKey:'home:favs',badge:statusBadge(String(favs.length),'info'),body:`<div class="fav-row">${favs.map(x=>`<button class="recent-chip" data-goto="${esc(x.route)}">${esc(x.title)}</button>`).join('')}</div>`}):''}
- <section class="panel kpi-panel" data-collapse-id="home-kpis"><div class="panel-head"><h3>ملخص العمل</h3><span class="badge">${kpis.length} مؤشرات</span></div><div class="kpi-strip" role="group" aria-label="ملخص العمل">${kpis.join('')}</div></section>
- ${recents.length?`<section class="recents-bar" aria-label="آخر ما فُتح"><span class="recents-lbl">آخر ما فُتح:</span><div class="recents-chips">${recents.map(x=>`<button class="recent-chip" data-recent="${esc(x.route)}"><span class="rc-ic" aria-hidden="true">${esc(x.icon==='calendar'?'📅':x.icon==='users'?'👤':x.icon==='gavel'?'⚖':'📁')}</span><span class="rc-t">${esc(x.title)}</span></button>`).join('')}</div></section>`:''}
- <div class="dashboard-grid ux-grid ux-grid--2">
-  ${card({icon:'calendar',title:'جلسات اليوم',tone:r.todayHearings.length?'':'',badge:statusBadge(String(r.todayHearings.length),r.todayHearings.length?'info':''),actions:`<button class="link" data-dashboard-report="hearings|today">تقرير الجلسات</button>`,collapsible:true,persistKey:'home:todayHearings',
+  <div class="hero-quick"><button class="primary" data-quick-add>+ إضافة</button><button class="ghost" data-goto="actionCenter">مركز العمل</button><button class="ghost" data-goto="reports?type=hearings&preset=today">تقرير اليوم</button>${last?.route&&last.route!=='dashboard'?`<button class="ghost resume-chip" data-goto="${esc(last.route)}">متابعة: ${esc(last.title||'آخر صفحة')}</button>`:''}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button></div></div>
+ ${favs.length?card({icon:'folder',title:'مثبّتات',size:'full',collapsible:true,persistKey:'home:favs',sectionId:'favs',pageId:'dashboard',badge:statusBadge(String(favs.length),'info'),body:`<div class="fav-row">${favs.map(x=>`<button class="recent-chip" data-goto="${esc(x.route)}">${esc(x.title)}</button>`).join('')}</div>`}):''}
+ <section class="panel kpi-panel" data-collapse-id="home-kpis" data-section-id="kpis"><div class="panel-head"><h3>ملخص العمل</h3><span class="badge">${kpis.length} مؤشرات</span></div><div class="kpi-strip" role="group" aria-label="ملخص العمل">${kpis.join('')}</div></section>
+ <div class="dashboard-grid ux-grid ux-grid--2" data-section-id="work">
+  ${card({icon:'calendar',title:'جلسات اليوم',tone:r.todayHearings.length?'':'',badge:statusBadge(String(r.todayHearings.length),r.todayHearings.length?'info':''),actions:`<button class="link" data-dashboard-report="hearings|today">تقرير الجلسات</button>`,collapsible:true,persistKey:'home:todayHearings',pageId:'dashboard',
    body:r.todayHearings.length?r.todayHearings.slice(0,12).map(x=>workRow('hearings:'+x.id,x.hearingTime||'بدون وقت',x.reason||x.type||'جلسة',`${d(x.hearingDate)}${x.caseNumber?' — قضية '+x.caseNumber:''}`,{text:'جلسة اليوم'})).join(''):cardEmpty('لا توجد جلسات مسجلة اليوم.',{icon:'calendar'})})}
-  ${card({icon:'clipboard',title:'الأعمال الإدارية المتأخرة',tone:r.overdueProcedures.length?'warn':'',badge:statusBadge(String(r.overdueProcedures.length),r.overdueProcedures.length?'danger':''),actions:`<button class="link" data-dashboard-report="procedures|overdue">تقرير الأعمال</button>`,collapsible:true,persistKey:'home:overdue',
+  ${card({icon:'clipboard',title:'الأعمال الإدارية المتأخرة',tone:r.overdueProcedures.length?'warn':'',badge:statusBadge(String(r.overdueProcedures.length),r.overdueProcedures.length?'danger':''),actions:`<button class="link" data-dashboard-report="procedures|overdue">تقرير الأعمال</button>`,collapsible:true,persistKey:'home:overdue',pageId:'dashboard',
    body:r.overdueProcedures.length?r.overdueProcedures.slice(0,12).map(x=>workRow('procedures:'+x.id,d(x.internalDueDate)||'بدون تاريخ',x.description||x.type||'إجراء',label(x.priority||'normal'),{text:'عمل مطلوب'})).join(''):cardEmpty('لا توجد أعمال إدارية متأخرة.',{icon:'check'})})}
-  ${card({icon:'calendar',title:'الجلسات القادمة',badge:statusBadge(String(r.upcomingHearings.length),''),actions:`<button class="link" data-dashboard-report="hearings|week">هذا الأسبوع</button>`,collapsible:true,persistKey:'home:upcomingHearings',
+  ${card({icon:'calendar',title:'الجلسات القادمة',badge:statusBadge(String(r.upcomingHearings.length),''),actions:`<button class="link" data-dashboard-report="hearings|week">هذا الأسبوع</button>`,collapsible:true,persistKey:'home:upcomingHearings',pageId:'dashboard',
    body:r.upcomingHearings.length?r.upcomingHearings.slice(0,12).map(x=>{const sig=dateSignal(x.hearingDate);return workRow('hearings:'+x.id,d(x.hearingDate),`${x.hearingTime||''} — ${x.reason||x.type||'جلسة'}`,x.caseNumber?`قضية ${x.caseNumber}`:'',sig?{text:sig.text==='اليوم'?'جلسة اليوم':sig.text==='غدًا'?'جلسة غدًا':'جلسة '+sig.text}:null)}).join(''):cardEmpty('لا توجد جلسات قادمة ضمن الفترة المعروضة.',{icon:'calendar'})})}
-  ${card({icon:'clipboard',title:'أعمال إدارية قادمة',badge:statusBadge(String(r.upcomingProcedures.length),''),actions:`<button class="link" data-dashboard-report="procedures|week">هذا الأسبوع</button>`,collapsible:true,persistKey:'home:upcomingProcedures',
+  ${card({icon:'clipboard',title:'أعمال إدارية قادمة',badge:statusBadge(String(r.upcomingProcedures.length),''),actions:`<button class="link" data-dashboard-report="procedures|week">هذا الأسبوع</button>`,collapsible:true,persistKey:'home:upcomingProcedures',pageId:'dashboard',
    body:r.upcomingProcedures.length?r.upcomingProcedures.slice(0,12).map(x=>{const sig=dateSignal(x.internalDueDate);return workRow('procedures:'+x.id,d(x.internalDueDate),x.description||x.type||'إجراء',label(x.status||'pending'),sig?{text:'عمل '+sig.text}:null)}).join(''):cardEmpty('لا توجد أعمال إدارية قادمة ضمن الفترة المعروضة.',{icon:'clipboard'})})}
  </div>
- ${card({icon:'report',title:'تقارير العمل السريع',size:'full',cls:'daily-shortcuts',collapsible:true,persistKey:'home:shortcuts',
+ ${card({icon:'report',title:'تقارير العمل السريع',size:'full',cls:'daily-shortcuts',collapsible:true,persistKey:'home:shortcuts',sectionId:'shortcuts',pageId:'dashboard',
   body:`<div class="shortcut-grid"><button data-dashboard-report="hearings|tomorrow">جلسات غدًا</button><button data-dashboard-report="hearings|nextWeek">جلسات الأسبوع التالي</button><button data-dashboard-report="hearings|month">جلسات هذا الشهر</button><button data-dashboard-report="procedures|tomorrow">أعمال غدًا</button><button data-dashboard-report="procedures|nextWeek">أعمال الأسبوع التالي</button><button data-dashboard-report="procedures|month">أعمال هذا الشهر</button><button data-route-report="clients">الموكلون</button><button data-route-report="cases">القضايا</button></div>`})}
- ${card({icon:'calendar',title:'الأجندة',size:'lg',cls:'agenda',collapsible:true,persistKey:'home:agenda',
+ ${card({icon:'calendar',title:'الأجندة',size:'lg',cls:'agenda',collapsible:true,persistKey:'home:agenda',sectionId:'agenda',pageId:'dashboard',
   actions:`<div class="agenda-modes" role="group" aria-label="طريقة عرض الأجندة"><button type="button" data-agenda-mode="day">يوم</button><button type="button" data-agenda-mode="week">أسبوع</button><button type="button" data-agenda-mode="month">شهر</button><button type="button" data-agenda-mode="list">قائمة</button></div>`,
-  body:`<div class="agenda-layout" id="agenda-layout"><div id="home-calendar"></div><div class="agenda-day"><h4 id="agenda-title"></h4><div id="agenda-grid"></div></div></div>`})}`;
+  body:`<div class="agenda-layout" id="agenda-layout"><div id="home-calendar"></div><div class="agenda-day"><h4 id="agenda-title"></h4><div id="agenda-grid"></div></div></div>`})}
+ ${recents.length?card({icon:'clock',title:'آخر ما فُتح',size:'full',cls:'recents-section',collapsible:true,collapsed:true,persistKey:'home:recents',sectionId:'recents',pageId:'dashboard',summary:'السجلات التي فتحتها مؤخرًا — تُفتح بنقرة، والقسم مطوي افتراضيًا لتبقى الصفحة نظيفة',badge:statusBadge(String(recents.length),'info'),
+  body:`<div class="recents-bar"><div class="recents-chips">${recents.map(x=>`<button class="recent-chip" data-recent="${esc(x.route)}"><span class="rc-ic" aria-hidden="true">${esc(x.icon==='calendar'?'📅':x.icon==='users'?'👤':x.icon==='gavel'?'⚖':'📁')}</span><span class="rc-t">${esc(x.title)}</span></button>`).join('')}</div></div>`}):''}`;
 }
 
 export function bindHome(app){
@@ -73,6 +86,7 @@ export function bindHome(app){
  document.querySelectorAll('[data-kpi]').forEach(b=>b.onclick=()=>app.go(b.dataset.kpi));
  document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>app.go(b.dataset.goto));
  document.querySelector('[data-quick-add]')?.addEventListener('click',()=>import('./quick-add.js').then(m=>m.openQuickAdd(app)));
+ document.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'dashboard'}));
  document.querySelectorAll('[data-open-rec]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.openRec));
  document.querySelectorAll('[data-recent]').forEach(b=>b.onclick=()=>app.go(b.dataset.recent));
  const refs=new Map();

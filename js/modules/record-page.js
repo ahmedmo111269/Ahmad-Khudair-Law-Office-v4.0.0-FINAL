@@ -2,8 +2,7 @@
 // كل صفحة: قسم بيانات كاملة قابل للطي مع زر تعديل، وأقسام جداول قابلة للطي للسجلات المرتبطة.
 import {esc} from '../ui/dom.js';
 import {toast} from '../ui/toast.js';
-import {confirmBox,modal,closeModal} from '../ui/modal.js';
-import {prefs} from '../core/preferences.js';
+import {confirmBox} from '../ui/modal.js';
 import {openEntityForm} from '../ui/form.js';
 import {ENTITIES,displayValue,label,fmtDate,phonesOf} from '../domain/entities.js';
 import {resolveRefs,clientRelated,opponentRelated,refLabel} from '../services/entity-query.js';
@@ -18,13 +17,14 @@ import {buildCaseTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
+import {registerPageLayout,resolveSectionOrder,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
 
 export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
  const items=fields.map(f=>{const v=displayValue(f,row,refs);if(skipEmpty&&!v)return '';const link=f.ref&&row[f.k]?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}</dd></div>`}).join('');
  return items?`<dl class="kv">${items}</dl>`:'<p class="muted">لا توجد بيانات مسجلة بعد. اضغط «تعديل البيانات» لإضافتها.</p>';
 }
 export function section(key,title,count,body,{open=true,add=''}={}){
- return `<details class="rec-section" data-sec="${esc(key)}" ${open?'open':''}><summary><span>${esc(title)}</span>${count!==null&&count!==undefined?`<span class="count">${count}</span>`:''}</summary>${add?`<div class="sec-actions">${add}</div>`:''}<div class="sec-body">${body}</div></details>`;
+ return `<details class="rec-section" data-sec="${esc(key)}" data-section-id="${esc(key)}" ${open?'open':''}><summary><span>${esc(title)}</span>${count!==null&&count!==undefined?`<span class="count">${count}</span>`:''}</summary>${add?`<div class="sec-actions">${add}</div>`:''}<div class="sec-body">${body}</div></details>`;
 }
 const refRoute={files:'file',cases:'case',clients:'client',opponents:'opponent'};
 function relatedCount(r,key,rows){return `${rows.length}${r.more?.[key]?'+':''}`}
@@ -35,12 +35,14 @@ function relatedLimitNotice(r){
  return `<div class="notice" role="status"><b>عرض محدود:</b> قد توجد سجلات مرتبطة إضافية. عُرضت ${limited.map(key=>esc(labels[key])).join('، ')} حتى حد الصفحة؛ استخدم القوائم والبحث العام للوصول إلى بقية السجلات. لم تُحذف أو تُغيّر أي بيانات.</div>`;
 }
 const CLIENT_SECTIONS=[['data','البيانات الكاملة'],['files','الملفات'],['cases','القضايا والمراحل'],['poa','التوكيلات'],['hearings','الجلسات'],['appointments','المواعيد'],['communications','الاتصالات']];
-function orderedClientSectionKeys(){const saved=prefs.get('client-sections:order',[]),valid=new Set(CLIENT_SECTIONS.map(x=>x[0])),order=Array.isArray(saved)?saved.filter((k,i)=>valid.has(k)&&saved.indexOf(k)===i):[];return [...order,...CLIENT_SECTIONS.map(x=>x[0]).filter(k=>!order.includes(k))]}
-function clientSectionOrderDialog(app){
- let order=orderedClientSectionKeys();const card=modal('<div data-client-section-order></div>'),content=card.querySelector('[data-client-section-order]');
- const redraw=()=>{content.innerHTML=`<h2 class="modal-title">ترتيب أقسام الموكل</h2><p class="muted small">غيّر ترتيب بيانات الموكل والملفات والقضايا والتوكيلات وغيرها. يُحفظ الترتيب كتفضيل لهذا المستخدم فقط.</p><ol class="tab-order-list">${order.map((key,i)=>{const name=CLIENT_SECTIONS.find(x=>x[0]===key)?.[1]||key;return `<li><span>${esc(name)}</span><button type="button" class="link" data-move="-1" data-key="${esc(key)}" ${i===0?'disabled':''} aria-label="تقديم">▲</button><button type="button" class="link" data-move="1" data-key="${esc(key)}" ${i===order.length-1?'disabled':''} aria-label="تأخير">▼</button></li>`}).join('')}</ol><div class="form-actions"><button type="button" class="ghost" data-reset>الترتيب الافتراضي</button><button type="button" class="primary" data-save>حفظ الترتيب</button><button type="button" class="ghost" data-cancel>إلغاء</button></div>`;
-  content.querySelector('[data-reset]').onclick=()=>{order=CLIENT_SECTIONS.map(x=>x[0]);redraw()};content.querySelector('[data-save]').onclick=async()=>{await prefs.set('client-sections:order',order);closeModal();toast('تم حفظ ترتيب أقسام الموكل');app.refresh()};content.querySelector('[data-cancel]').onclick=closeModal;content.querySelectorAll('[data-move]').forEach(button=>button.onclick=()=>{const i=order.indexOf(button.dataset.key),j=i+Number(button.dataset.move);if(j<0||j>=order.length)return;order.splice(i,1);order.splice(j,0,button.dataset.key);redraw()})
- };redraw();
+// أقسام صفحة الموكل ضمن نظام ترتيب الأقسام المركزي (SectionLayoutManager).
+// الترتيب القديم المحفوظ في client-sections:order يُرحَّل مرة واحدة إلى المخزن الموحّد.
+registerPageLayout({pageId:'client-details',title:'صفحة الموكل',sections:CLIENT_SECTIONS.map(([id,title])=>({id,title}))});
+// صفحة الخصم: نفس النظام بأقسامها.
+registerPageLayout({pageId:'opponent-details',title:'صفحة الخصم',sections:[{id:'data',title:'البيانات الكاملة'},{id:'files',title:'الملفات'},{id:'cases',title:'القضايا والمراحل'},{id:'hearings',title:'الجلسات'}]});
+function orderedClientSectionKeys(){
+ migrateLegacySectionOrder('client-details','client-sections:order');
+ return resolveSectionOrder('client-details');
 }
 export function bindRefLinks(app,root){root.querySelectorAll('[data-open-ref]').forEach(el=>el.addEventListener('click',()=>{const [s,id]=el.dataset.openRef.split(':');if(refRoute[s])app.go(`${refRoute[s]}:${id}`);else app.go(`rec:${s}:${id}`)}))}
 
@@ -67,11 +69,11 @@ export async function clientPage(app,id){
   communications:section('communications','الاتصالات',relatedCount(r,'communications',r.communications),'<div data-grid="communications"></div>',{open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
  };
  return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
- <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-order-client-sections>⚙ ترتيب الأقسام</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
+ <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
 }
 export async function bindClientPage(app,id){
  const root=document.querySelector('#main-content');const r=app.__rec.related;
- root.querySelector('[data-order-client-sections]')?.addEventListener('click',()=>clientSectionOrderDialog(app));
+ root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'client-details',root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,'clients',{id}));
  root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,'clients',id);
  root.querySelectorAll('[data-add]').forEach(b=>b.onclick=async()=>{const s=b.dataset.add;if(s==='files'){const {openLegalFileWizard}=await import('./client-file.js');return openLegalFileWizard(app,{clientId:id})}openEntityForm(app,s,{preset:{clientId:id}})});
@@ -95,7 +97,7 @@ export async function opponentPage(app,id){
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[o],ENTITIES.opponents.fields);
  return `<div class="record-head"><div><small class="muted">خصم</small><h2>${esc(o.name)}</h2><p class="badges">${phonesOf(o).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${o.capacity?`<span class="badge">${esc(o.capacity)}</span>`:''}</p></div>
- <div class="head-actions"><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
+ <div class="head-actions"><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:false})}
  ${relatedLimitNotice(r)}${section('files','الملفات',relatedCount(r,'files',r.files),'<div data-grid="files"></div>')}
  ${section('cases','القضايا والمراحل',relatedCount(r,'cases',r.cases),'<div data-grid="cases"></div>')}
@@ -103,6 +105,7 @@ export async function opponentPage(app,id){
 }
 export async function bindOpponentPage(app,id){
  const root=document.querySelector('#main-content');const r=app.__rec.related;
+ root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'opponent-details',root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,'opponents',{id}));
  root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,'opponents',id);
  const roleCol={key:'opponentRole',label:'صفة الخصم',get:x=>x.opponentRole,text:x=>x.opponentRole||''};
@@ -115,6 +118,16 @@ export async function bindOpponentPage(app,id){
 
 // ===== صفحة عامة لأي سجل + القضية/المرحلة =====
 const CASE_CHILDREN=[['hearings','الجلسات'],['judgments','الأحكام'],['procedures','الأعمال الإدارية'],['expertReports','الخبراء'],['serviceRecords','المحضرين والإعلانات'],['execution','التنفيذ']];
+/** أقسام صفحة السجل العامة حسب المتجر — تُسجَّل في نظام ترتيب الأقسام المركزي. */
+function recordSectionsFor(store){
+ const secs=[{id:'data',title:'البيانات الكاملة'}];
+ if(store==='hearings')secs.push({id:'hearing-cycle',title:'دورة الجلسات'});
+ if(store==='serviceRecords')secs.push({id:'service-cycle',title:'دورة الإعلان / الإنذار'});
+ if(store==='cases'){secs.push({id:'case-timeline',title:'الخط الزمني الموحد للقضية'});CASE_CHILDREN.forEach(([id,title])=>secs.push({id,title}))}
+ if(store==='fees')secs.push({id:'payments',title:'الدفعات'});
+ secs.push({id:'activity',title:'سجل النشاط'});
+ return secs;
+}
 async function createRelatedFromRecord(app,row,store){
  const file=row.fileId?await app.office.r.files.get(row.fileId):null;
  const clientFile=file?.clientFileId?await app.office.r.clientFiles.get(file.clientFileId):null;
@@ -123,6 +136,7 @@ async function createRelatedFromRecord(app,row,store){
 }
 export async function recordPage(app,store,id){
  const ent=ENTITIES[store];if(!ent)return notFound('السجل');
+ registerPageLayout({pageId:`rec:${store}`,title:`صفحة ${ent.label}`,sections:recordSectionsFor(store)});
  const row=await app.office.r[store].get(id);
  if(!row||row.isDeleted)return notFound(ent.label);
  const refs=await resolveRefs(app.office,[row],ent.fields);
@@ -144,7 +158,7 @@ export async function recordPage(app,store,id){
   store==='fees'? '<button class="ghost" data-add="feePayments">+ دفعة</button>':''
  ].join('');
  return `<div class="record-head"><div><small class="muted">${esc(ent.label)}</small><h2>${esc(ent.title(row)||ent.label)}</h2><div class="parent-links">${parentBtns}</div></div>
- <div class="head-actions">${extraBtns}<button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
+ <div class="head-actions">${extraBtns}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:true})}
  ${store==='hearings'?section('hearing-cycle','دورة الجلسات',hearingSequence?.items.length||0,`<ol class="hearing-cycle">${(hearingSequence?.items||[]).map((h,i)=>`<li style="--depth:${Math.min(6,h.__depth||0)}"><button type="button" data-cycle-hearing="${esc(h.id)}"><time>${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(h.hearingTime):''}</time><b>${esc(h.type||'جلسة')}</b><small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></button>${i<(hearingSequence?.items.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
  ${store==='serviceRecords'?section('service-cycle','دورة الإعلان / الإنذار',serviceSequence?.records.length||0,`${serviceSequence?.hasBranches?'<p class="notice">توجد أكثر من إعادة مرتبطة بسجل واحد؛ عُرضت الفروع كما سُجلت.</p>':''}${serviceSequence?.more?'<p class="notice">تعرض دورة الملف أول 5000 سجل نشط؛ استخدم التقرير العام لتضييق نطاق السجلات الأقدم.</p>':''}<ol class="hearing-cycle service-cycle">${(serviceSequence?.records||[]).map((r,i)=>`<li style="--depth:${Math.min(6,r.__depth||0)}"><button type="button" data-cycle-service="${esc(r.id)}"><time>${fmtDate(r.createdAt)||'بدون تاريخ'}${r.serviceDate?' — '+fmtDate(r.serviceDate):''}</time><b>${esc(r.actionType||r.type||'إعلان')} · ${esc(r.internalNumber||'')}</b><small>${esc(r.partyName||'')} ${r.partyRole?'— '+esc(r.partyRole):''} · ${esc(r.status||'')}</small></button>${i<(serviceSequence?.records.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
@@ -155,6 +169,7 @@ export async function recordPage(app,store,id){
 }
 export async function bindRecordPage(app,store,id){
  const root=document.querySelector('#main-content');const {row,children,activity}=app.__rec;
+ root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:`rec:${store}`,root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,store,{id}));
  root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,store,id);
  bindRefLinks(app,root);

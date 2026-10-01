@@ -13,6 +13,7 @@ import {formatDate} from '../core/format.js';
 import {toast} from './toast.js';
 import {resolveCollapseState,saveCollapseState,clearCollapseState,getCollapseRecord,isCollapsePinned,getCollapsePreferences} from './collapse-state.js';
 import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
+import {resolveGridDisplay} from '../core/display-prefs.js';
 
 let gridInstance=0;
 
@@ -60,7 +61,7 @@ export function mountGrid(root,opts){
  const toolsCollapseKey=`datagrid:${collapseScope}:tools`;
  const filterCollapseKey=`datagrid:${collapseScope}:filters`;
  const order=(Array.isArray(saved.order)?saved.order:[]).filter(k=>byKey.has(k));cols.forEach(c=>{if(!order.includes(c.key))order.push(c.key)});
- const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map((Array.isArray(saved.filters)?saved.filters:[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f?.set?new Set(f.set):null}])),adv:saved.adv&&Array.isArray(saved.adv.rules)?saved.adv:{logic:'and',rules:[]},quick:saved.quick||'',groupBy:byKey.has(saved.groupBy)?saved.groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),widths:{...(saved.widths||{})},fontSize:['small','medium','large'].includes(saved.fontSize)?saved.fontSize:'medium',filterCollapsed:resolveCollapseState(filterCollapseKey,{fallback:true,legacy:typeof saved.filterCollapsed==='boolean'?saved.filterCollapsed:undefined}),shown:o.pageSize,cards:Boolean(saved.cards),density:saved.density||'',views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:String(saved.activeView||''),
+ const st={sort:(Array.isArray(saved.sort)?saved.sort:[]).filter(x=>byKey.has(x.key)),filters:new Map((Array.isArray(saved.filters)?saved.filters:[]).filter(([k])=>byKey.has(k)).map(([k,f])=>[k,{...f,set:f?.set?new Set(f.set):null}])),adv:saved.adv&&Array.isArray(saved.adv.rules)?saved.adv:{logic:'and',rules:[]},quick:saved.quick||'',groupBy:byKey.has(saved.groupBy)?saved.groupBy:'',hidden:new Set(saved.hidden||cols.filter(c=>c.hidden).map(c=>c.key)),widths:{...(saved.widths||{})},fontSize:['small','medium','large'].includes(saved.fontSize)?saved.fontSize:(resolveGridDisplay().fontSize||'medium'),filterCollapsed:resolveCollapseState(filterCollapseKey,{fallback:true,legacy:typeof saved.filterCollapsed==='boolean'?saved.filterCollapsed:undefined}),shown:o.pageSize,cards:Boolean(saved.cards),density:['','compact','normal','comfortable','mobile'].includes(saved.density)?saved.density:(resolveGridDisplay().density||''),views:Array.isArray(saved.views)?saved.views:[],sel:-1,activeView:String(saved.activeView||''),
   pinned:(Array.isArray(saved.pinned)?saved.pinned:[]).filter(k=>byKey.has(k)).slice(0,MAX_PINS),
   colSearch:saved.colSearch&&typeof saved.colSearch==='object'&&!Array.isArray(saved.colSearch)?{...saved.colSearch}:{},
   colSearchOn:Boolean(saved.colSearchOn),selected:new Set(),
@@ -349,7 +350,10 @@ export function mountGrid(root,opts){
   sb.hidden=!(o.selectable&&cnt);
   if(cnt){sb.querySelector('.dg-sel-count').textContent=`تم تحديد ${fmtN(cnt)} صف — الإجراءات على الصفوف المحددة`}
   const slot=sb.querySelector('.dg-bulk-slot');
-  if(slot)slot.innerHTML=(o.bulkActions||[]).map(a=>`<button type="button" class="ghost small dg-bulk${a.danger?' danger':''}" data-bulk="${esc(a.id)}">${esc(a.label)}</button>`).join('');
+  // «فتح المحدد» إجراء مدمج واحد في الجدول الموحّد (زر .dg-open-sel الثابت في شريط التحديد).
+  // أي إجراء جماعي قادم من الصفحة بنفس المعرف open يُستبعد هنا من مصدره المركزي حتى
+  // لا يظهر زران مكرران بنفس الوظيفة في أي جدول (كان سبب التكرار: الزر المدمج + bulkActions معًا).
+  if(slot)slot.innerHTML=(o.bulkActions||[]).filter(a=>a&&a.id!=='open').map(a=>`<button type="button" class="ghost small dg-bulk${a.danger?' danger':''}" data-bulk="${esc(a.id)}">${esc(a.label)}</button>`).join('');
  }
  function renderChips(){
   const chips=[];
@@ -469,8 +473,9 @@ export function mountGrid(root,opts){
   st.toolsCollapsed=resolveCollapseState(toolsCollapseKey,{fallback:true});
   st.shellCollapsed=resolveCollapseState(shellCollapseKey,{fallback:false,primary:true});
   st.filters.clear();st.adv={logic:'and',rules:[]};st.quick='';st.sort=[];st.groupBy='';st.hidden=new Set(cols.filter(c=>c.hidden).map(c=>c.key));st.remotePageSize=25;
-  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize='medium';st.density='';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.searchCol='';st.span='';st.tableWidth=100;st.qaOn=true;
-  $('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value='medium';$('.dg-page-size').value='25';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
+  const freshDisplay=resolveGridDisplay();
+  order.splice(0,order.length,...cols.map(c=>c.key));st.widths={};st.fontSize=freshDisplay.fontSize||'medium';st.density=freshDisplay.density||'';st.cards=false;st.colSearch={};st.colSearchOn=false;st.pinned=[];st.views=[];st.activeView='';st.searchCol='';st.span='';st.tableWidth=100;st.qaOn=true;
+  $('.dg-quick').value='';$('.dg-groupby').value='';$('.dg-font').value=st.fontSize;$('.dg-density').value=st.density;$('.dg-page-size').value='25';$('.dg-csearch-btn').classList.remove('dg-chip-active');if($('.dg-scope'))$('.dg-scope').value='';if($('.dg-span'))$('.dg-span').value='';if($('.dg-width'))$('.dg-width').value=100;
   renderAdv();changeQuery();toast('أُعيد ضبط الجدول إلى الإعدادات الافتراضية');
  });
  $('thead').addEventListener('click',e=>{

@@ -1,0 +1,151 @@
+/* =====================================================================
+   نظام العرض الموحّد (Universal Display System) — v5.5
+   ---------------------------------------------------------------------
+   طبقة واحدة فوق البطاقات والجداول والأقسام الحالية:
+   • قياس الخط/الكثافة/طريقة العرض عبر data-attributes على البطاقة أو الصفحة.
+   • التسلسل البصري: عنوان الحقل (هادئ) ← القيمة (قوية) ← الثانوية (أخف).
+   • زر «إعدادات العرض» (⚙) ولوحته (Popover على سطح المكتب، Bottom Sheet على الهاتف).
+   • نافذة «تخصيص الصفحة»: سحب وإفلات + ▲▼ + إظهار/إخفاء.
+   القيم الافتراضية (md/cozy/normal) تطابق التصميم الحالي — تحسين لا إعادة تصميم.
+   المتغيرات تُورَّث، فتجاوز البطاقة (data-* على .ux-card) يسبق تجاوز الصفحة (#main-content).
+   ===================================================================== */
+
+/* ---------- رموز القياس (تُضبط من data-attributes) ---------- */
+[data-cfont="sm"]{--cd-fs:.9;--cd-lbl:.86}
+[data-cfont="md"]{--cd-fs:1;--cd-lbl:1}
+[data-cfont="lg"]{--cd-fs:1.13;--cd-lbl:1.1}
+[data-cfont="xl"]{--cd-fs:1.27;--cd-lbl:1.22}
+:root{--cd-fs:1;--cd-lbl:1}
+
+[data-cdensity="compact"]{--cd-gap:6px;--cd-gap-row:5px;--cd-gap-col:12px;--cd-padscale:.78;--cd-rowpad:5px 8px}
+[data-cdensity="cozy"]{--cd-gap:10px;--cd-gap-row:8px;--cd-gap-col:16px;--cd-padscale:1;--cd-rowpad:8px 10px}
+[data-cdensity="roomy"]{--cd-gap:16px;--cd-gap-row:13px;--cd-gap-col:22px;--cd-padscale:1.25;--cd-rowpad:12px 14px}
+
+[data-clayout="normal"]{--cd-kv-min:220px}
+[data-clayout="comfortable"]{--cd-kv-min:300px}
+[data-clayout="expanded"]{--cd-kv-min:100%}
+
+/* ---------- تسلسل بصري واضح داخل «البيانات الكاملة» (.kv) ---------- */
+.kv{grid-template-columns:repeat(auto-fill,minmax(min(var(--cd-kv-min,220px),100%),1fr));gap:var(--cd-gap-row,8px) var(--cd-gap-col,16px)}
+.kv-item{padding:calc(5px * var(--cd-lbl,1)) 0;border-bottom-width:1px}
+.kv dt{
+ font-size:calc(12px * var(--cd-lbl,1));
+ color:var(--text-muted);
+ font-weight:700;
+ letter-spacing:.2px;
+ margin-bottom:calc(3px * var(--cd-lbl,1));
+}
+.kv dd{
+ font-size:calc(15.5px * var(--cd-fs,1));
+ line-height:1.55;
+ color:var(--text-strong);
+ font-weight:600;
+ margin:0;
+}
+.kv dd .link{font-size:inherit;font-weight:inherit;color:var(--primary)}
+[data-cborders="off"] .kv-item{border-bottom:0}
+
+/* ---------- تسلسل بصري داخل info-stack (بطاقات الملخص) ---------- */
+.info-stack{gap:var(--cd-gap,10px)}
+.info-row{padding:var(--cd-rowpad,8px 10px);gap:calc(3px * var(--cd-lbl,1))}
+.info-k{font-size:calc(11.5px * var(--cd-lbl,1));letter-spacing:.2px}
+.info-v{font-size:calc(15.5px * var(--cd-fs,1));line-height:1.5}
+.info-s{font-size:calc(12.5px * var(--cd-fs,1))}
+[data-cborders="off"] .info-row{border-color:transparent;background:transparent}
+[data-csecondary="off"] .info-s{display:none}
+
+/* ---------- جسم البطاقة وعنوانها يتبعان قياس الخط والكثافة ---------- */
+.ux-card-body{padding:calc(var(--card-pad) * var(--cd-padscale,1));font-size:calc(1em * var(--cd-fs,1))}
+.ux-card--dense .ux-card-body{padding:calc(8px * var(--cd-padscale,1)) calc(10px * var(--cd-padscale,1))}
+.ux-card-title h3{font-size:calc(15px * var(--cd-fs,1))}
+[data-csecondary="off"] .ux-card-summary{display:none}
+.ux-card{position:relative}
+
+/* ---------- زر «إعدادات العرض» (⚙) — صغير وأنيق ---------- */
+.ux-card-display{
+ flex:none;display:inline-grid;place-items:center;
+ width:30px;height:30px;min-width:30px;padding:0;
+ border:0;border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;
+ transition:background var(--transition),color var(--transition);
+}
+.ux-card-display svg{width:16px;height:16px}
+.ux-card-display:hover,.ux-card-display[aria-expanded="true"]{background:var(--surface2);color:var(--primary)}
+.ux-card-display:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ---------- لوحة إعدادات العرض: Popover (سطح المكتب) ---------- */
+.ux-display-pop{
+ position:absolute;z-index:60;top:50px;inset-inline-end:8px;
+ width:min(320px,calc(100vw - 24px));
+ display:flex;flex-direction:column;gap:10px;
+ padding:12px;background:var(--surface);
+ border:1px solid var(--border);border-radius:calc(var(--radius) + 2px);
+ box-shadow:var(--shadow-lg);
+}
+.ux-dp-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ux-dp-head b{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--text-strong)}
+.ux-dp-head b svg{width:15px;height:15px;color:var(--primary)}
+.ux-dp-close{font-size:16px;line-height:1;padding:4px 8px}
+.ux-dp-row{display:grid;gap:6px}
+.ux-dp-lbl{font-size:11.5px;font-weight:700;color:var(--text-muted)}
+.ux-dp-stepper{display:flex;align-items:center;gap:6px}
+.ux-dp-stepper .ux-seg{flex:1 1 auto}
+.ux-dp-stepper>button{flex:none;min-width:38px;font-weight:700}
+.ux-dp-check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer}
+.ux-dp-check input{accent-color:var(--primary);width:16px;height:16px}
+.ux-dp-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid var(--border)}
+.ux-dp-foot small{flex-basis:100%}
+
+/* ---------- عنصر التحكم المتجزّئ (Segmented) الموحّد ---------- */
+.ux-seg{display:inline-flex;flex-wrap:wrap;gap:3px;padding:3px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;min-width:0}
+.ux-seg button{
+ flex:1 1 auto;min-width:0;border:0;background:transparent;color:var(--text-muted);
+ padding:6px 8px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;
+ white-space:nowrap;transition:background var(--transition),color var(--transition);
+}
+.ux-seg button:hover{color:var(--text-strong)}
+.ux-seg button.on{background:var(--primary);color:var(--on-primary)}
+.ux-seg button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+
+/* ---------- نافذة «تخصيص الصفحة» ---------- */
+.pl-display{display:grid;gap:10px;padding:10px 0;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.pl-field{display:grid;gap:6px}
+.pl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:min(52vh,440px);overflow:auto}
+.pl-row{
+ display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+ padding:8px 10px;background:var(--surface);
+ border:1px solid var(--border);border-radius:var(--radius-sm);
+}
+.pl-row.is-off{opacity:.6}
+.pl-row.dragging{opacity:.5}
+.pl-row.drag-over{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-ring,var(--primary-soft))}
+.pl-handle{cursor:grab;color:var(--text-muted);font-size:15px;line-height:1;padding:4px 2px;touch-action:none;user-select:none}
+.pl-name{flex:1 1 auto;min-width:120px;font-weight:600;color:var(--text-strong);display:flex;align-items:center;gap:6px}
+.pl-ic{opacity:.8}
+.pl-moves{display:inline-flex;gap:2px}
+.pl-moves button{min-width:34px;min-height:34px;font-size:13px;border-radius:8px}
+.pl-pin{min-width:34px;min-height:34px;font-size:15px;border-radius:8px}
+.pl-pin.is-pinned{background:var(--primary-soft);color:var(--primary)}
+.pl-vis{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer}
+.pl-vis input{accent-color:var(--primary);width:16px;height:16px}
+.pl-hint{margin:8px 0 0}
+.section-hidden{display:none!important}
+
+/* ---------- الهاتف: لوحة الإعدادات تصبح Bottom Sheet ---------- */
+@media(max-width:640px){
+ .ux-display-pop{
+  position:fixed;top:auto;bottom:0;inset-inline:0;inset-inline-end:0;
+  width:100%;max-width:100%;max-height:82vh;overflow:auto;
+  border-radius:16px 16px 0 0;border-width:1px 0 0;
+  padding:14px 14px calc(14px + env(safe-area-inset-bottom,0px));
+  animation:ux-sheet-up .18s ease-out;
+ }
+ @keyframes ux-sheet-up{from{transform:translateY(12px);opacity:.6}to{transform:none;opacity:1}}
+ .ux-card-display,.ux-dp-stepper>button,.ux-dp-close{min-width:40px;min-height:40px;width:40px}
+ .ux-seg button{padding:9px 8px;font-size:12.5px}
+ .pl-row{gap:6px}
+ .pl-moves button,.pl-pin{min-width:40px;min-height:40px}
+}
+
+/* ---------- الطباعة والحركة المخفضة ---------- */
+@media print{.ux-card-display,.ux-display-pop,.pl-list,.pl-display{display:none!important}}
+@media(prefers-reduced-motion:reduce){.ux-display-pop{animation:none}}

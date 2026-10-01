@@ -13,6 +13,16 @@ import {RELATED_SUGGESTIONS,GENERIC_RELATED,RELATION_TYPES,LIFECYCLE} from '../d
 import {lookupRows} from '../services/lookups.js';
 import {ensureClientFile,clientFileSummary,clientFileEvents,taxonomy,createLegalFileInClientFile,saveClientFile,archiveClientFile,reopenClientFile,
  addStage,setCurrentStage,setStageLifecycle,moveStage,removePlannedStage} from '../services/client-files.js';
+import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
+
+// لوحة ملف الموكل ضمن نظام ترتيب الأقسام المركزي — نفس النظام لكل الصفحات.
+registerPageLayout({pageId:'client-file',title:'ملف الموكل',sections:[
+ {id:'stats',title:'ملخص ملف الموكل'},
+ {id:'recent-files',title:'آخر الملفات التي تم التعامل معها'},
+ {id:'followup',title:'ملفات تحتاج متابعة'},
+ {id:'hearings',title:'آخر الجلسات'},
+ {id:'procedures',title:'آخر الأعمال الإدارية'},
+ {id:'stopped',title:'الملفات المتوقفة',defaultHidden:false}]});
 
 const plural=(n,one,two,few,many)=>n===0?`لا ${many}`:n===1?`${one} واحد`:n===2?two:n<=10?`${n} ${few}`:`${n} ${many}`;
 const filesWord=n=>plural(n,'ملف','ملفان','ملفات','ملف');
@@ -38,9 +48,9 @@ export async function clientFilePage(app,clientId,query){
   <div class="cf-id"><div class="cf-avatar" aria-hidden="true">${esc((fresh.fullName||'؟').trim().charAt(0))}</div>
    <div><h2>${esc(fresh.fullName)}</h2><p class="cf-code">${fileNumberChip({clientCode:cf.clientCode||fresh.clientCode})}<span class="badge ${cf.isArchived?'warn':'open'}">${esc(cf.status||'نشط')}</span>${fresh.clientType?`<span class="badge">${esc(fresh.clientType)}</span>`:''}</p>
    <dl class="cf-meta">${phone?`<div><dt>الهاتف</dt><dd><a href="tel:${esc(phone)}" dir="ltr">${esc(phone)}</a></dd></div>`:''}<div><dt>المحامي المسؤول</dt><dd>${esc(cf.responsibleLawyer||'—')}</dd></div><div><dt>فتح الملف</dt><dd>${formatDate(cf.openedAt)}</dd></div><div><dt>آخر نشاط</dt><dd>${rel(s.files[0]?.lastActivityAt||cf.lastActivityAt)}</dd></div></dl></div></div>
-  <div class="cf-actions"><button class="primary" data-new-lf>+ إضافة ملف قانوني</button><button class="ghost" data-cf-edit>تعديل ملف الموكل</button>${cf.isArchived?'<button class="ghost" data-cf-reopen>إعادة فتح</button>':'<button class="ghost" data-cf-archive>أرشفة</button>'}</div>
+  <div class="cf-actions"><button class="primary" data-new-lf>+ إضافة ملف قانوني</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-cf-edit>تعديل ملف الموكل</button>${cf.isArchived?'<button class="ghost" data-cf-reopen>إعادة فتح</button>':'<button class="ghost" data-cf-archive>أرشفة</button>'}</div>
  </section>
- <section class="panel cf-stats-panel" data-collapse-id="client-file-stats"><div class="panel-head"><h3>ملخص ملف الموكل</h3><span class="badge">${s.total} ملف</span></div><div class="cf-stats">
+ <section class="panel cf-stats-panel" data-collapse-id="client-file-stats" data-section-id="stats"><div class="panel-head"><h3>ملخص ملف الموكل</h3><span class="badge">${s.total} ملف</span></div><div class="cf-stats">
   <div class="stat"><b>${s.total}</b><span>إجمالي الملفات</span></div>
   <div class="stat stat-ok"><b>${s.active}</b><span>نشطة</span></div>
   <div class="stat stat-muted"><b>${s.closed}</b><span>منتهية</span></div>
@@ -57,11 +67,11 @@ export async function clientFilePage(app,clientId,query){
   <div class="cat-grid">${used.map(c=>catCard(c,s.byCategory.get(c.id),clientId)).join('')}
    <button class="cat-card cat-add" data-new-lf><span class="cat-icon">＋</span><b>ملف في قسم آخر</b><small>${tax.categories.length-used.length} قسمًا متاحًا</small></button></div>
   <div class="grid2 cf-panels">
-   ${panel('آخر الملفات التي تم التعامل معها',s.files.slice(0,6).map(f=>fileLine(f,tax)).join(''))}
-   ${panel('ملفات تحتاج متابعة',s.needsFollowUp.map(f=>fileLine(f,tax,'لا نشاط منذ '+rel(f.lastActivityAt))).join('')||'<p class="muted small">لا توجد ملفات متأخرة المتابعة 👌</p>')}
-   <section class="panel"><div class="panel-head"><h3>آخر الجلسات</h3></div><div id="cf-hearings"><div class="loading small">…</div></div></section>
-   <section class="panel"><div class="panel-head"><h3>آخر الأعمال الإدارية</h3></div><div id="cf-procs"><div class="loading small">…</div></div></section>
-   ${s.stoppedFiles.length?panel('الملفات المتوقفة',s.stoppedFiles.map(f=>fileLine(f,tax)).join('')):''}
+   ${panel('آخر الملفات التي تم التعامل معها',s.files.slice(0,6).map(f=>fileLine(f,tax)).join(''),'recent-files')}
+   ${panel('ملفات تحتاج متابعة',s.needsFollowUp.map(f=>fileLine(f,tax,'لا نشاط منذ '+rel(f.lastActivityAt))).join('')||'<p class="muted small">لا توجد ملفات متأخرة المتابعة 👌</p>','followup')}
+   <section class="panel" data-section-id="hearings"><div class="panel-head"><h3>آخر الجلسات</h3></div><div id="cf-hearings"><div class="loading small">…</div></div></section>
+   <section class="panel" data-section-id="procedures"><div class="panel-head"><h3>آخر الأعمال الإدارية</h3></div><div id="cf-procs"><div class="loading small">…</div></div></section>
+   ${s.stoppedFiles.length?panel('الملفات المتوقفة',s.stoppedFiles.map(f=>fileLine(f,tax)).join(''),'stopped'):''}
   </div>`}</div>`;
  }
  const types=tax.typesOf(cat.id);
@@ -71,7 +81,7 @@ export async function clientFilePage(app,clientId,query){
  <div class="type-chips" role="tablist"><button class="chip ${!type?'active':''}" data-go="cfile:${esc(clientId)}?cat=${esc(cat.id)}">الكل <small>${s.byCategory.get(cat.id)||0}</small></button>${typeCounts.filter(([,n])=>n).map(([t,n])=>`<button class="chip ${type?.id===t.id?'active':''}" data-go="cfile:${esc(clientId)}?cat=${esc(cat.id)}&type=${esc(t.id)}">${esc(t.name)} <small>${n}</small></button>`).join('')}${untyped?`<span class="chip">بدون نوع <small>${untyped}</small></span>`:''}</div>
  <div id="cf-files"></div></div>`;
 }
-const panel=(title,body)=>`<section class="panel"><div class="panel-head"><h3>${title}</h3></div><div class="cf-lines">${body||'<p class="muted small">لا يوجد.</p>'}</div></section>`;
+const panel=(title,body,sectionId='')=>`<section class="panel"${sectionId?` data-section-id="${sectionId}"`:''}><div class="panel-head"><h3>${title}</h3></div><div class="cf-lines">${body||'<p class="muted small">لا يوجد.</p>'}</div></section>`;
 function catCard(c,n,clientId){return `<button class="cat-card" data-go="cfile:${esc(clientId)}?cat=${esc(c.id)}" style="--cat:${esc(c.color||'var(--primary)')}"><span class="cat-icon">${esc(c.icon||'📁')}</span><b>${esc(c.name)}</b><small>${filesWord(n)}</small></button>`}
 function fileLine(f,tax,note=''){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId);return `<button class="cf-line" data-go="file:${esc(f.id)}"><span class="cf-line-icon">${esc(c?.icon||'📁')}</span><span class="cf-line-main"><b>${esc(f.title||'')}</b><small>${fileNumberChip(f,{withKind:false})} · ${esc(t?.name||f.fileType||'')}${f.__stage?` · ${esc(f.__stage.stageType||'')}`:''}${f.__shared?' · ملف مشترك':''}</small></span><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span>${note?`<small class="muted">${esc(note)}</small>`:''}</button>`}
 function fileCard(f,tax){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId),st=f.__stage;return `<article class="lf-card" style="--cat:${esc(c?.color||'var(--primary)')}"><header><span>${esc(c?.icon||'📁')}</span><div><b>${esc(f.title||'')}</b><small>${fileNumberChip(f,{withKind:false})}</small></div><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span></header>
@@ -82,6 +92,7 @@ export async function bindClientFilePage(app,clientId){
  const root=document.querySelector('#main-content .cfile-page');if(!root)return;const {s,catId,typeId,q,cf}=app.__cfile;const tax=s.tax;
  root.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b){e.preventDefault();app.go(b.dataset.go)}});
  root.querySelectorAll('[data-new-lf]').forEach(b=>b.onclick=()=>openLegalFileWizard(app,{clientId,categoryId:b.dataset.cat||catId||'',fileTypeId:b.dataset.type||typeId||''}));
+ root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'client-file',root}));
  root.querySelector('[data-cf-edit]')?.addEventListener('click',()=>editClientFile(app,cf));
  root.querySelector('[data-cf-archive]')?.addEventListener('click',async()=>{const r=await confirmBox('أرشفة ملف الموكل؟ لا تُحذف أي ملفات، ويمكن إعادة فتحه في أي وقت. (تُرفض الأرشفة إذا وُجدت ملفات نشطة)',{okText:'أرشفة',input:true,label:'السبب (اختياري)'});if(!r.ok)return;try{await archiveClientFile(app.office,cf.id,r.value);toast('تمت الأرشفة');app.refresh()}catch(err){toast(userError(err),'error')}});
  root.querySelector('[data-cf-reopen]')?.addEventListener('click',async()=>{await reopenClientFile(app.office,cf.id);toast('تمت إعادة الفتح');app.refresh()});

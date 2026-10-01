@@ -8,11 +8,15 @@
 // الأحجام: sm (معلومة سريعة) • md (تشغيلية) • lg (تفاصيل) • full (عرض كامل).
 // الحالات: loading / empty / error / success.
 // الفتح والطي يُحفظان مركزيًا لكل بطاقة في تفضيلات المستخدم (ui:collapse-state)، مع ترحيل قراءة المفتاح القديم ui:cards.
+// إعدادات العرض (الخط/الكثافة/طريقة العرض) تأتي من DisplayPreferences المركزي
+// بأولوية: البطاقة ← الصفحة ← العام ← الافتراضي (ui/core/display-prefs.js).
 import {esc} from './dom.js';
 import {icon} from './icons.js';
 import {prefs} from '../core/preferences.js';
 import {resolveCollapseState,saveCollapseState,isCollapsePinned} from './collapse-state.js';
 import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
+import {resolveCardDisplay} from '../core/display-prefs.js';
+import {cardDisplayButtonMarkup,bindCardDisplay} from './card-display.js';
 
 const LEGACY_PREF_KEY='ui:cards';
 
@@ -24,7 +28,11 @@ export const CARD_SIZE={sm:'ux-card--sm',md:'ux-card--md',lg:'ux-card--lg',full:
  * opts: {title, icon, badge (html), actions (html), body (html), footer (html),
  *        size: 'sm'|'md'|'lg'|'full', tone: ''|'warn'|'danger'|'ok',
  *        collapsible: false disables collapsing (enabled by default), persistKey: stable key,
- *        collapsed: explicit initial state, id, cls, dense, summary}
+ *        collapsed: explicit initial state, id, cls, dense, summary,
+ *        display: false disables the per-card display settings (enabled by default),
+ *        displayKey: stable key for display prefs (defaults to persistKey),
+ *        pageId: page scope for the Card → Page → Global → Default override chain,
+ *        sectionId: registers the card as a reorderable page section}
  */
 export function card(o={}){
  const size=CARD_SIZE[o.size]||CARD_SIZE.md;
@@ -40,13 +48,20 @@ export function card(o={}){
  const collapsed=collapsible?resolveCollapseState(collapseKey,{fallback:o.collapsed??true,legacy,configured:o.collapsed!==undefined}):false;
  const pinned=collapsible&&isCollapsePinned(collapseKey);
  if(collapsed)parts.push('is-collapsed');
+ // إعدادات العرض الفعالة لهذه البطاقة (بطاقة ← صفحة ← عام ← افتراضي)
+ const displayEnabled=o.display!==false;
+ const displayKey=String(o.displayKey||collapseId);
+ const pageId=String(o.pageId||'');
+ const disp=displayEnabled?resolveCardDisplay(displayKey,pageId):null;
+ const displayAttrs=disp?` data-display-key="${esc(displayKey)}"${pageId?` data-page-id="${esc(pageId)}"`:''} data-cfont="${esc(disp.fontSize)}" data-cdensity="${esc(disp.density)}" data-clayout="${esc(disp.fieldLayout)}" data-csecondary="${disp.secondary?'on':'off'}" data-cborders="${disp.borders?'on':'off'}"`:'';
  const bodyId=`ux-card-body-${String(collapseId).replace(/[^\p{L}\p{N}_-]/gu,'-')}`;
  const head=`<header class="ux-card-head"${collapsible?` data-card-head="${esc(collapseId)}"`:''}>
   <div class="ux-card-title">${o.icon?`<span class="ux-card-ic" aria-hidden="true">${o.icon.startsWith('<')?o.icon:icon(o.icon)}</span>`:''}<h3>${esc(o.title||'')}</h3>${o.badge?`<span class="ux-card-badge">${o.badge}</span>`:''}${o.summary?`<span class="ux-card-summary muted small">${esc(o.summary)}</span>`:''}</div>
   ${o.actions?`<div class="ux-card-actions">${o.actions}</div>`:''}
+  ${displayEnabled?cardDisplayButtonMarkup(displayKey,o.title||''):''}
   ${collapsible?`${collapsePinMarkup(collapseKey,pinned,'collapse-pin ux-card-pin')}<button type="button" class="ux-card-toggle" aria-expanded="${!collapsed}" aria-controls="${esc(bodyId)}" aria-label="${collapsed?'توسيع':'طي'} البطاقة: ${esc(o.title||'')}">${icon('chevron')}</button>`:''}
  </header>`;
- return `<section class="${parts.join(' ')}"${o.id?` id="${esc(o.id)}"`:''}${collapsible?` data-card-key="${esc(collapseId)}" data-collapse-key="${esc(collapseKey)}" data-collapse-type="card" data-collapse-ready="true" data-collapse-collapsed="${collapsed}"`:''}>
+ return `<section class="${parts.join(' ')}"${o.id?` id="${esc(o.id)}"`:''}${o.sectionId?` data-section-id="${esc(o.sectionId)}"`:''}${displayAttrs}${collapsible?` data-card-key="${esc(collapseId)}" data-collapse-key="${esc(collapseKey)}" data-collapse-type="card" data-collapse-ready="true" data-collapse-collapsed="${collapsed}"`:''}>
   ${head}<div class="ux-card-body"${collapsible?` id="${esc(bodyId)}" aria-hidden="${collapsed}"`:''}>${o.body??''}</div>${o.footer?`<footer class="ux-card-foot"${collapsible?` aria-hidden="${collapsed}"`:''}>${o.footer}</footer>`:''}</section>`;
 }
 
@@ -137,6 +152,8 @@ export function bindCards(root=document){
   btn.addEventListener('click',e=>{e.stopPropagation();const open=menu.hidden;root.querySelectorAll('.ux-menu:not([hidden])').forEach(m=>{if(m!==menu)m.hidden=true});menu.hidden=!open;if(open)menu.querySelector('.ux-menu-item')?.focus()});
   menu.addEventListener('click',()=>{menu.hidden=true});
  });
+ // إعدادات العرض (⚙) — نظام البطاقات المركزي، تغيير محلي بلا إعادة رسم للصفحة
+ bindCardDisplay(root);
 }
 const onOutside=e=>{if(!e.target.closest('.ux-menu-wrap'))document.querySelectorAll('.ux-menu:not([hidden])').forEach(m=>m.hidden=true)};
 document.addEventListener('click',onOutside);

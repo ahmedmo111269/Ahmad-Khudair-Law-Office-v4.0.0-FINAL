@@ -1,6 +1,8 @@
 // تفضيلات المستخدم (الثيم، الأعمدة، الفلاتر المحفوظة...) في IndexedDB مستقلة عن قواعد بيانات المكتب،
 // حتى لا يتغير المظهر عند التبديل بين قواعد البيانات. نسخة مرآة في localStorage للتطبيق الفوري قبل الرسم.
 const DB='akl-preferences',STORE='prefs',MIRROR='akl:prefs:';
+/** بادئة مرآة localStorage — تُصدَّر حتى تقرأها طبقة تفضيلات العرض المركزية فقط. */
+export const MIRROR_PREFIX=MIRROR;
 const userId=(()=>{try{let u=localStorage.getItem('akl:userId');if(!u){u='user-'+Math.random().toString(36).slice(2,10);localStorage.setItem('akl:userId',u)}return u}catch{return 'local-user'}})();
 const cache=new Map();
 let dbp=null;

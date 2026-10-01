@@ -36,6 +36,7 @@ import {openPalette,closePalette,paletteOpen} from './ui/palette.js';
 import {icon} from './ui/icons.js';
 import {buildSidebar,initSidebarState,toggleCollapsed,toggleMobile,closeMobile,isDesktop,setActiveRoute} from './ui/sidebar.js';
 import {bindCards} from './ui/card.js';
+import {applyPageDisplay,applyPageLayout} from './ui/page-layout.js';
 import {Clock} from './core/clock.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
@@ -57,11 +58,11 @@ for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>li
 // صفحات السجل: client:ID, opponent:ID, file:ID, case:ID, rec:STORE:ID
 function recordRoute(route){
  let m=/^(client|opponent|file|case):(.+)$/.exec(route);
- if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0]}}
+ if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];const layouts={client:'client-details',opponent:'opponent-details',file:'file-details',case:'rec:cases'};return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0],layoutId:layouts[m[1]]}}
  m=/^cfile:(.+)$/.exec(route);
- if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients'};
+ if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients',layoutId:'client-file'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
- if(m&&m[1]!=='witnesses'&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1]};
+ if(m&&m[1]!=='witnesses'&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1],layoutId:'rec:'+m[1]};
  return null;
 }
 
@@ -139,6 +140,11 @@ class App{
    await page.bind?.(this,query);
    enhanceCollapsiblePanels(main,baseRoute);
    bindCards(main);
+   // نظام العرض الموحّد: إعدادات عرض الصفحة (الصفحة ← العام ← الافتراضي) ثم ترتيب/إظهار
+   // الأقسام المحفوظ — نقل DOM فقط، بلا إعادة رسم وبلا إعادة قراءة أي بيانات.
+   this.__layoutId=page.layoutId||baseRoute;
+   applyPageDisplay(main,this.__layoutId);
+   applyPageLayout(main,this.__layoutId);
    main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());

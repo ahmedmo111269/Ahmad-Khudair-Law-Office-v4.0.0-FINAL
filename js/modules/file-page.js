@@ -23,15 +23,23 @@ import {taxonomy,saveFileMeta,reclassifyFile,fileAssets,ASSET_KINDS,saveAsset,li
 import {stagePathHtml,bindStagePath,metaInput,hydrateLookups} from './client-file.js';
 import {renderFileServiceTab,bindFileServiceTab} from './service-records.js';
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
-import {prefs} from '../core/preferences.js';
 import {buildFileTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
+import {registerPageLayout,resolveSectionOrder,hiddenSectionIds,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
 
 const TABS=[['summary','ملخص','◈'],['timeline','الخط الزمني','⏳'],['parties','الأطراف','⚖'],['judicial','البيانات القضائية','▣'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷'],['judgments','الأحكام','⚖'],['notes','الملاحظات','▤'],['relations','العلاقات','↔'],['serviceRecords','المحضرين والإعلانات','📬'],['typeData','بيانات نوع العمل','▧'],['assets','العقارات والمركبات','⌂'],['extra','بيانات إضافية (قديمة)','▤'],['money','الأتعاب والمستندات','＄'],['activity','سجل النشاط','≋']];
 const BASE_KEYS=['fileNumber','title','fileType','mainCategory','subCategory','status','priority','openedAt','responsibleLawyer','coLawyers','staff','nextStep','nextStepDate','closedAt','closeReason','notes','lastActivityAt'];
-function orderedFileTabs(){const saved=prefs.get('file-tabs:order',[])||[];const rank=new Map(saved.map((k,i)=>[k,i]));return [...TABS].sort((a,b)=>(rank.get(a[0])??TABS.findIndex(x=>x[0]===a[0]))-(rank.get(b[0])??TABS.findIndex(x=>x[0]===b[0])))}
+// تبويبات الملف = أقسام صفحة في النظام المركزي الواحد (SectionLayoutManager):
+// نفس التخزين ونفس نافذة «تخصيص الصفحة» لكل الصفحات — لا نظام ترتيب ثانٍ.
+// الترتيب القديم في file-tabs:order يُرحَّل مرة واحدة إلى المخزن الموحّد.
+registerPageLayout({pageId:'file-details',title:'أقسام الملف القانوني',sections:TABS.map(([id,title,icon])=>({id,title,icon,canHide:id!=='summary'}))});
+function orderedFileTabs(){
+ migrateLegacySectionOrder('file-details','file-tabs:order');
+ const rank=new Map(resolveSectionOrder('file-details').map((k,i)=>[k,i]));
+ return [...TABS].sort((a,b)=>(rank.get(a[0])??0)-(rank.get(b[0])??0));
+}
 
 export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
@@ -42,6 +50,8 @@ export async function filePage(app,id){
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
  app.__file={id,f,parties,stages,tax,serviceCount};
  app.__fileTab=app.__fileTab&&app.__fileTab.id===id?app.__fileTab:{id,tab:'summary'};
+ // إذا أخفى المستخدم التبويب النشط من «تخصيص الصفحة»، نعود إلى الملخص (لا بيانات تُفقَد).
+ if(hiddenSectionIds('file-details').has(app.__fileTab.tab))app.__fileTab.tab='summary';
  const clients=parties.filter(p=>p.partyKind==='client'),opps=parties.filter(p=>p.partyKind==='opponent');
  const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
  return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}<div class="record-head file-head" style="--cat:${esc(cat?.color||'var(--primary)')}"><div><small class="muted">ملف فرعي — الرقم الداخلي للمكتب (مستقل عن أرقام القضايا الرسمية)</small><h2>${fileNumberChip(f)} ${esc(f.title||'')}</h2>
@@ -49,13 +59,15 @@ export async function filePage(app,id){
   <p class="muted small">${clients.length?`الموكل: ${clients.map(p=>`${esc(p.name)} (${esc(p.role||'موكل')})`).join('، ')}`:'لا يوجد موكل مرتبط بعد'}${opps.length?` — الخصم: ${opps.map(p=>esc(p.name)).join('، ')}`:''}${cur?` — المرحلة الحالية: ${esc(refLabel('cases',cur))}`:' — لا توجد أرقام قضائية (ملف بلا قضية)'}</p></div>
   <div class="head-actions"><button class="ghost" data-file-pin aria-pressed="${isFavorite('file:'+id)}">${isFavorite('file:'+id)?'★ إلغاء التثبيت':'☆ تثبيت'}</button><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
  ${stagePathHtml(stages,f.currentStageId||cur?.id)}
- <nav class="tabs file-tabs" role="tablist" aria-label="أقسام الملف القانوني">${orderedFileTabs().map(([k,l,icon])=>{const count=k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:null;return `<button type="button" role="tab" data-tab="${k}" title="${esc(l)}" aria-label="${esc(l)}${count!==null?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="${app.__fileTab.tab===k?'active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count!==null?` <small>${count}</small>`:''}</button>`}).join('')}</nav><div class="file-tab-controls"><button type="button" class="link" data-order-file-tabs>⚙ ترتيب تبويبات الملف</button></div>
+ <nav class="tabs file-tabs" role="tablist" aria-label="أقسام الملف القانوني">${orderedFileTabs().map(([k,l,icon])=>{const count=k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:null;return `<button type="button" role="tab" data-tab="${k}" data-section-id="${k}" title="${esc(l)}" aria-label="${esc(l)}${count!==null?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="${app.__fileTab.tab===k?'active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count!==null?` <small>${count}</small>`:''}</button>`}).join('')}</nav><div class="file-tab-controls"><button type="button" class="link" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button></div>
  <div id="file-tab" role="tabpanel"></div>`;
 }
 
 export async function bindFilePage(app,id){
  const root=document.querySelector('#main-content');const {f}=app.__file;
- root.querySelector('[data-order-file-tabs]')?.addEventListener('click',()=>fileTabOrderDialog(app));
+ root.querySelector('[data-order-file-tabs]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'file-details',root,onChanged:()=>{
+  if(hiddenSectionIds('file-details').has(app.__fileTab.tab)){app.__fileTab.tab='summary';renderTab(app).catch(e=>app.fail(e))}
+ }}));
  root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
  root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{
   const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()});
@@ -70,14 +82,6 @@ export async function bindFilePage(app,id){
  bindStagePath(app,f,app.__file.stages);
  root.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
  await renderTab(app);
-}
-
-function fileTabOrderDialog(app){
- let order=orderedFileTabs().map(([key])=>key);
- const card=modal('<div data-tab-order-content></div>'),content=card.querySelector('[data-tab-order-content]');
- const redraw=()=>{content.innerHTML=`<h2 class="modal-title">ترتيب تبويبات الملف</h2><p class="muted small">يُحفظ الترتيب كتفضيل لهذا المستخدم ولا يغيّر بيانات الملفات.</p><ol class="tab-order-list">${order.map((key,i)=>{const [,name,icon]=TABS.find(t=>t[0]===key)||[];return `<li><span>${icon||''} ${esc(name||key)}</span><button type="button" class="link" data-move="-1" data-key="${esc(key)}" ${i===0?'disabled':''} aria-label="تقديم">▲</button><button type="button" class="link" data-move="1" data-key="${esc(key)}" ${i===order.length-1?'disabled':''} aria-label="تأخير">▼</button></li>`}).join('')}</ol><div class="form-actions"><button type="button" class="ghost" data-reset>الترتيب الافتراضي</button><button type="button" class="primary" data-save>حفظ الترتيب</button><button type="button" class="ghost" data-cancel>إلغاء</button></div>`;
-  content.querySelector('[data-reset]').onclick=()=>{order=TABS.map(t=>t[0]);redraw()};content.querySelector('[data-save]').onclick=async()=>{await prefs.set('file-tabs:order',order);closeModal();toast('تم حفظ ترتيب التبويبات');app.refresh()};content.querySelector('[data-cancel]').onclick=closeModal;content.querySelectorAll('[data-move]').forEach(button=>button.onclick=()=>{const i=order.indexOf(button.dataset.key),j=i+Number(button.dataset.move);if(j<0||j>=order.length)return;order.splice(i,1);order.splice(j,0,button.dataset.key);redraw()})};
- redraw();
 }
 
 const reload=app=>app.refresh();
@@ -124,7 +128,7 @@ async function renderTabContent(app){
   const sig=nextH?dateSignal(nextH.hearingDate):null;
   const fsig=fileSignal(f);
   const clientParty=parties.find(p=>p.clientId);
-  const snap=card({icon:'folder',title:f.title||'ملف',size:'full',collapsible:true,persistKey:'file:snap:'+id,badge:statusBadge(fsig?.text||label(f.status||'نشط'),fsig?.tone||'ok'),
+  const snap=card({icon:'folder',title:f.title||'ملف',size:'full',collapsible:true,persistKey:'file:snap:'+id,pageId:'file-details',badge:statusBadge(fsig?.text||label(f.status||'نشط'),fsig?.tone||'ok'),
    body:infoStack([
     {k:'رقم الملف',v:formatFileNumber(f.fileNumber)||'—',sub:f.fileType||''},
     {k:'الموكل',v:clientParty?.name||clientParty?.partyName||'غير مرتبط',sub:clientParty?.role||''},
