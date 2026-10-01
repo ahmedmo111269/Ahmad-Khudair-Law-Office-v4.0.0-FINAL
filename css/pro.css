@@ -136,6 +136,9 @@ body:not(.sidebar-collapsed) #main-nav hr{display:none}
 @media(min-width:901px){#sidebar-backdrop{display:none}}
 
 /* ---------- 11) الهاتف: شريط علوي مضغوط مع تنقل حاضر ---------- */
+/* أيقونة لوحة الأوامر svg بلا width/height ولا قاعدة حجم عامة للصنف .ic: كانت تتمدد لعرض الزر (≈137px فوق 1200px) وتنهار إلى صفر حين يُخفى النص (≤1200px) فيسدّ مكانها إيموجي قديم على الهاتف فقط. */
+.top-actions #command-btn .ic{width:18px;height:18px;flex:none}
+.top-actions #command-btn{min-height:42px}   /* بارتفاع أزرار الشريط المجاورة (42px) وهدف لمس ≥ 40px */
 @media(max-width:1200px){
   .top-actions #nav-back span,.top-actions #nav-close span,.top-actions #nav-home span{display:none}
   .top-actions #command-btn span,.top-actions #command-btn kbd{display:none}

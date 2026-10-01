@@ -42,6 +42,7 @@
 - `js/ui/palette.js`: أوامر مركز العمل و«+ مهمة مرتبطة بالصفحة الحالية» و«ترحيل أعمال اليوم» (بتأكيد).
 - `js/modules/record-page.js`, `file-page.js`, `home.js`: أزرار «+ مهمة» ولوحات «المهام المرتبطة» والشارة.
 - `sw.js`: الأصول الجديدة في precache وذاكرة `ahmad-khudair-law-office-v5.7.0-work-center2`؛ `index.html`: `css/work-center.css`.
+- `css/pro.css` و`css/ui.css`: إصلاح أيقونة زر لوحة الأوامر `#command-btn` في الشريط العلوي (كانت `svg` بلا حجم: 137px عند 1280 و0 بين 901 و1200)؛ حذف بقايا `font-size:0` و`::after` 🔍 القديمة.
 
 ## قواعد للتطوير اللاحق
 

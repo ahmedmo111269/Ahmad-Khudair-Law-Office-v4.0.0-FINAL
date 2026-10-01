@@ -86,6 +86,20 @@ async function setSearch(page, q) { await page.fill('#wc-q', q); await page.wait
 async function useTask(page, title) { await page.click('[data-wc-range="all"]'); await ready(page); await setSearch(page, title); }
 async function reloadApp(page) { await page.reload(); await page.waitForFunction(() => window.__LAW_OFFICE_APP__?.office, null, {timeout: 60000}); await pollUntil(page, () => window.__LAW_OFFICE_APP__.booting === false, 60000); await page.waitForTimeout(300); }
 async function shot(page, name) { await page.screenshot({path: path.join(outDir, name), fullPage: true}); }
+/** قياس زر لوحة الأوامر في الشريط العلوي (كانت أيقونته svg بلا حجم: ≈137px على 1280 وصفرًا بين 901 و1200). */
+const commandBtnMetrics = page => page.evaluate(() => {
+  const b = document.querySelector('#command-btn'), svg = b.querySelector('svg'), bar = document.querySelector('.topbar');
+  const r = b.getBoundingClientRect(), s = svg.getBoundingClientRect(), t = bar.getBoundingClientRect();
+  return {svg: [Math.round(s.width), Math.round(s.height)], btn: [Math.round(r.width), Math.round(r.height)], after: getComputedStyle(b, '::after').content,
+    inBar: r.top >= t.top - 1 && r.bottom <= t.bottom + 1, sw: document.documentElement.scrollWidth, iw: window.innerWidth};
+});
+const assertCommandBtn = (m, {contained = true} = {}) => {
+  assert.ok(m.svg[0] >= 14 && m.svg[0] <= 24 && m.svg[1] >= 14 && m.svg[1] <= 24, `حجم الأيقونة ${m.svg}`);
+  assert.ok(m.btn[0] >= 40 && m.btn[1] >= 40, `حجم الزر ${m.btn}`);
+  if (contained) assert.ok(m.inBar, 'الزر يتجاوز الشريط العلوي');
+  assert.equal(m.after, 'none', 'رمز 🔍 قديم مكرر بجوار الأيقونة');
+  assert.ok(m.sw <= m.iw, 'تمرير أفقي');
+};
 
 // =====================================================================
 // 1) السيناريو الوظيفي على سطح المكتب
@@ -96,6 +110,11 @@ async function functional() {
   await boot(page);
   await goWC(page);
   const T = 'WCTEST مهمة اختبار';
+
+  await verify('الشريط العلوي (1280px): أيقونة لوحة الأوامر بحجم أيقونة لا بعرض الزر، وبلا رمز مكرر، والزر داخل الشريط ومعه النص', async () => {
+    assertCommandBtn(await commandBtnMetrics(page));
+    assert.ok((await page.locator('#command-btn').innerText()).includes('لوحة الأوامر'), 'النص ظاهر على الشاشة العريضة');
+  });
 
   await verify('الصفحة: تبويبات الفترات العشر وعدّادات الرأس والإجراءات السريعة المطلوبة وكل العروض', async () => {
     assert.equal(await page.locator('.wc-tab').count(), 10);
@@ -838,6 +857,12 @@ async function mobile() {
   const page = await newPage(context); currentPage = page;
   await boot(page); await goWC(page);
   const views = ['cards', 'list', 'kanban', 'matrix', 'priorities', 'calendar', 'overdue', 'upcoming', 'completed', 'attention', 'productivity'];
+  await verify('الجوال 390px: زر لوحة الأوامر بأيقونة واحدة بحجم أيقونة (بلا رمز مكرر) وبهدف لمس ≥ 40px داخل الشريط', async () => {
+    // الاحتواء داخل .topbar لا يُفحص على الجوال عمدًا: ارتفاعه ثابت 60px مع flex-wrap فيلتف صف الإجراءات لسطر ثانٍ خارج صندوقه — خلل سابق في main
+    // (مقيس بالقيم نفسها قبل التعديل وبعده) موثّق في docs/KNOWN-LIMITATIONS.md ولا يخص الأيقونة.
+    assertCommandBtn(await commandBtnMetrics(page), {contained: false});
+    assert.ok(!(await page.locator('#command-btn').innerText()).includes('لوحة الأوامر'), 'النص يُخفى على الجوال');
+  });
   await verify('الجوال 390px: لا تمرير أفقي للصفحة في أي عرض ولا نافذة تتجاوز العرض', async () => {
     for (const range of ['today', 'week', 'all']) {
       await page.click(`[data-wc-range="${range}"]`); await ready(page);
