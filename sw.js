@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.7.0-work-center2';
+const CACHE='ahmad-khudair-law-office-v5.8.0-execution';
 const ASSETS=[
   "./",
   "./index.html",
@@ -20,6 +20,7 @@ const ASSETS=[
   "./css/display.css",
   "./css/component-style.css",
   "./css/work-center.css",
+  "./css/execution.css",
   "./css/topnav.css",
   "./css/themes.css",
   "./css/ui.css",
@@ -48,6 +49,8 @@ const ASSETS=[
   "./js/db/schema.js",
   "./js/db/unit-of-work.js",
   "./js/domain/entities.js",
+  "./js/domain/execution.js",
+  "./js/domain/entitlement-engine.js",
   "./js/domain/work-items.js",
   "./js/domain/work-sources.js",
   "./js/domain/lookup-defaults.js",
@@ -70,6 +73,7 @@ const ASSETS=[
   "./js/modules/reports.js",
   "./js/modules/search.js",
   "./js/modules/service-records.js",
+  "./js/modules/execution-center.js",
   "./js/modules/settings.js",
   "./js/modules/taxonomy-editor.js",
   "./js/services/work-config.js",
@@ -93,6 +97,13 @@ const ASSETS=[
   "./js/services/judicial.js",
   "./js/services/legal-files.js",
   "./js/services/lifecycle.js",
+  "./js/services/execution.js",
+  "./js/services/execution-ledger.js",
+  "./js/services/execution-differences.js",
+  "./js/services/execution-poa.js",
+  "./js/services/execution-balance.js",
+  "./js/services/execution-print.js",
+  "./js/services/execution-migration.js",
   "./js/services/lookups.js",
   "./js/services/maintenance.js",
   "./js/services/office.js",
@@ -129,6 +140,7 @@ const ASSETS=[
   "./js/ui/date-input.js",
   "./js/ui/dom.js",
   "./js/ui/form.js",
+  "./js/ui/execution-forms.js",
   "./js/ui/icons.js",
   "./js/ui/lookup.js",
   "./js/ui/modal.js",

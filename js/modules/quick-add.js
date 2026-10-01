@@ -5,7 +5,7 @@ import {ENTITIES} from '../domain/entities.js';
 import {icon} from '../ui/icons.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 
-const QI={files:'folder',clients:'users',opponents:'userX',cases:'gavel',hearings:'calendar',procedures:'clipboard',powersOfAttorney:'stamp',appointments:'clock',communications:'phone',caseNotes:'note',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',serviceRecords:'stamp',bailiffs:'scale'};
+const QI={files:'folder',clients:'users',opponents:'userX',cases:'gavel',hearings:'calendar',procedures:'clipboard',powersOfAttorney:'stamp',appointments:'clock',communications:'phone',caseNotes:'note',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',serviceRecords:'stamp',bailiffs:'scale',executionParties:'users',executionValuePeriods:'chart',executionReceipts:'wallet',executionPOAs:'stamp',executionActions:'hammer'};
 const ITEMS=Object.keys(QI).filter(s=>ENTITIES[s]).map(s=>[s,QI[s]]);
 export function openQuickAdd(app){
  const card=modal(`<h2 class="modal-title">إضافة جديد</h2><input type="search" class="qa-filter" placeholder="فلترة سريعة… (مثل: جلسة، موكل، أتعاب)" aria-label="فلترة قائمة الإضافة"><div class="quick-grid">${ITEMS.map(([s,i])=>`<button type="button" class="quick-item" data-qa="${s}" data-label="${esc(normalizeArabic(ENTITIES[s].label))}"><span class="quick-ic" aria-hidden="true">${icon(i)}</span>${ENTITIES[s].label}</button>`).join('')}</div>`);

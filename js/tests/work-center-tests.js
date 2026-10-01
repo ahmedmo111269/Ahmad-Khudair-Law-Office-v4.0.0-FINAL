@@ -303,9 +303,12 @@ export async function runWorkCenterTests(test, expect) {
 
   // ===== 2) الترحيل v13 → v14 =====
   test('مركز العمل/ترحيل: سجل الترحيلات الرسمي يصف v14 إضافيًا غير مدمر', () => {
-    expect(SCHEMA_VERSION).toBe(14); expect(SCHEMA_MIGRATIONS.at(-1).version).toBe(14);
+    expect(SCHEMA_VERSION).toBe(15); expect(SCHEMA_MIGRATIONS.at(-1).version).toBe(14); expect(SCHEMA_MIGRATIONS.some(m => m.version === 15)).toBe(true);
     const plan = migrationPlan(13, 14);
     expect(plan.addsStores.join()).toBe('workItems,workItemComments,workItemRecurrences'); expect(plan.destructive).toBe(false); expect(migrationPlan(14, 14).steps.length).toBe(0);
+    const execPlan = migrationPlan(14, 15);
+    expect(execPlan.addsStores.join()).toBe('executionParties,executionValuePeriods,executionLedger,executionAllocations,executionReceipts,executionActions,executionPOAs,differenceRecords,executionSettlements,executionAdjustments,executionTemplates');
+    expect(execPlan.destructive).toBe(false); expect(migrationPlan(15, 15).steps.length).toBe(0);
   });
   test('مركز العمل/ترحيل: ترقية قاعدة v13 حقيقية تحفظ كل السجلات وتضيف المخازن والفهارس', async () => {
     const name = `AhmadKhudairLawOfficeDB__test__migrate__${Date.now()}`;
@@ -331,7 +334,7 @@ export async function runWorkCenterTests(test, expect) {
   test('مركز العمل/ترحيل: نسخة احتياطية v13 قديمة (بلا المخازن الجديدة) تُقبل وتُستعاد والمخازن الجديدة فارغة', async () => {
     const {db, office} = await env();
     const payload = await exportDatabase(office.ctx);
-    expect(payload.schemaVersion).toBe(14); expect(Array.isArray(payload.stores.workItems)).toBe(true);
+    expect(payload.schemaVersion).toBe(15); expect(Array.isArray(payload.stores.workItems)).toBe(true); expect(Array.isArray(payload.stores.executionLedger)).toBe(true);
     const legacy = JSON.parse(JSON.stringify(payload));
     legacy.schemaVersion = 13; for (const s of ['workItems', 'workItemComments', 'workItemRecurrences']) delete legacy.stores[s];
     legacy.manifest.storeNames = legacy.manifest.storeNames.filter(s => !['workItems', 'workItemComments', 'workItemRecurrences'].includes(s));

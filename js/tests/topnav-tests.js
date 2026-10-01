@@ -18,9 +18,9 @@ const ALL_ROUTES = ['dashboard', 'actionCenter', 'files', 'clients', 'opponents'
 const fresh = () => { document.body.innerHTML = SHELL; return buildTopNav(); };
 
 export async function runTopNavTests(test, expect) {
-  test('تنقل علوي: كل عناصر القائمة السابقة محفوظة بنفس المسارات (27 مسارًا)', () => {
+  test('تنقل علوي: كل عناصر القائمة السابقة محفوظة بنفس المسارات (28 مسارًا بعد إضافة مركز التنفيذ)', () => {
     expect(new Set(NAV_ROUTES).size).toBe(NAV_ROUTES.length);
-    expect(NAV_ROUTES.length).toBe(27);
+    expect(NAV_ROUTES.length).toBe(28);
     for (const r of ALL_ROUTES) expect(NAV_ROUTES.includes(r)).toBe(true);
     expect(NAV_GROUPS.length).toBe(6);
   });
@@ -35,7 +35,7 @@ export async function runTopNavTests(test, expect) {
     expect(orderedTabIds(cfg).length).toBe(6);
     const groups = orderedGroups(cfg);
     expect(groups.length).toBe(6);
-    expect(groups.flatMap(g => g.items.map(i => i.route)).length).toBe(27);
+    expect(groups.flatMap(g => g.items.map(i => i.route)).length).toBe(28);
   });
   test('تنقل علوي: تطبيع التخصيص يتجاهل المجهول ويحمي من الإخفاء الكامل', () => {
     const bad = normalizeNavConfig({tabOrder: ['system', 'ghost', 'general', 'system'], hiddenTabs: ['ghost'], hiddenItems: ['ghostRoute'], itemOrder: {data: ['clients', 'ghostRoute']}});

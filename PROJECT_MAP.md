@@ -1,3 +1,52 @@
+# v5.8.0 — خريطة قسم التنفيذ (Execution) · Schema 15
+
+**2026-10-01 — قسم تنفيذ فوق بيانات المكتب القائمة (التنفيذ المدني والجزائي والأسرة).** العقد والتفصيل والقرارات وما لم يُتحقق منه: [`docs/EXECUTION.md`](docs/EXECUTION.md). `APP_VERSION=5.8.0`, `SCHEMA_VERSION=15`, **50 مخزنًا و267 فهرسًا**.
+
+**المبدأ:** كل رقم مالي مشتق من سجل بمصدره ومعادلته؛ لا حقل رصيد يُحرَّر يدويًا؛ الفترات تُبنى عند الطلب؛ الدفتر Append-Only؛ التنبيهات تنظيمية لا قانونية.
+
+## الطبقات والملفات
+
+`js/modules/execution-center.js` (صفحة + بطاقة) ← `js/ui/execution-forms.js` (نوافذ الإجراءات) ← `js/services/execution*.js` (أوامر وقراءات مقيّدة بالمؤشرات) ← `js/domain/execution.js` + `js/domain/entitlement-engine.js` (منطق نقي) ← Repository ← IndexedDB.
+
+| الملف | الدور |
+|---|---|
+| `js/domain/execution.js` | القوائم المرجعية (نوع التنفيذ/الدورية/القيمة/الدفتر/الحالات/طرق التخصيص/حالات الفروق/أنواع التوكيل/أنواع الإجراءات/سياسات التناسب)، أدوات العملة والتواريخ، معادلات الفترات، المدققات، `EXECUTION_LIMITS` |
+| `js/domain/entitlement-engine.js` | الشرائح المرشحة، بناء الفترات، `balanceAsOf`/`balanceSummary` (وضعا المعرفة/الأثر)، `outstandingPeriods`، `allocationPlan`، `analyticalAllocation`، `balanceTrace`، `analyzeSliceImpact`، `simulateValueChange`، `executionAlerts` |
+| `js/services/execution.js` | التنفيذات/الأطراف/الأحكام/الشرائح/الإجراءات + `executionBundle`/`summarizeExecution`/`executionListRow`/`hydrateExecutionRows`/`listExecutionRows`/`executionCenterStats`/`refreshExecutionSearchText`/`createResultFile` |
+| `js/services/execution-ledger.js` | القيود والمصروفات والعكس والتصحيح والتحصيل وإعادة التخصيص و`allocationContext`/`ledgerBreakdown` |
+| `js/services/execution-differences.js` | أثر الشريحة، التسويات (`createSettlement`→`decideSettlement`→`postSettlement`)، `settlementReview`، `recomputeSettlement` |
+| `js/services/execution-poa.js` | مسودة التوكيل بمصادر كل مبلغ، الحفظ، إعادة التوكيل، `poaDetail`، ترقيم `POA-YYYY-NNNN` |
+| `js/services/execution-balance.js` | الرصيد وشجرة التتبع، اللقطة التاريخية، مقارنة حكمين، المحاكي، الخط الزمني، التنبيهات، صفوف المؤشرات |
+| `js/services/execution-print.js` | قوالب `executionTemplates` (توكيل/كشف رصيد) وبناء المستند والطباعة على مسار الطباعة القائم |
+| `js/services/execution-migration.js` | ترحيل v15 غير المدمر + تقرير المراجعة |
+| `js/modules/execution-center.js` | `executionCenterPage/bindExecutionCenter`, `executionDetailPage/bindExecutionDetail`, `EXECUTION_LIST_COLUMNS` |
+| `js/ui/execution-forms.js` | 15 نافذة إجراء (تنفيذ/طرف/حكم/شريحة/تحصيل/مصروف/عكس/إعادة تخصيص/تسوية/توكيل/إجراء/لقطة/محاكي/مقارنة/طباعة) |
+| `css/execution.css` | أنماط `.exec-*` على متغيرات الثيم القائمة |
+| `js/tests/execution-tests.js` · `tools/node-tests/execution-browser-tests.mjs` | 61 اختبارًا (Node + `tests.html`) · 32 فحصًا في Chromium حقيقي |
+
+## المخازن والترحيل (v15)
+
+- مخازن جديدة: `executionParties`, `executionValuePeriods` (شرائح القيمة), `executionLedger`, `executionAllocations`, `executionReceipts`, `executionActions`, `executionPOAs`, `differenceRecords`, `executionSettlements`, `executionAdjustments`, `executionTemplates`.
+- حقول مضافة على القائم: `execution` (نوع/جهة/رقم رسمي/حتى تاريخ الاستحقاق/سياسة التناسب/تاريخ المراجعة/`needsReview`/`searchTextNormalized`/`sequence`) و`judgments` (سلسلة: `executionId`, `sequence`, `judgmentKind`, `previousJudgmentId`, `effectiveFrom/To`).
+- `SCHEMA_MIGRATIONS` v15 و`migrationPlan(from,to)`: **إضافي فقط** (`destructive:false`, `backfill:false`)، ولا اختراع تواريخ: الناقص يُعلَّم للمراجعة بالعربية مع سبب، بعلامة `execution-migration-v1` وسقف 20,000 صفًا وidempotent.
+- لا صفوف فترات مخزّنة: `buildEntitlementPeriods` تبنيها عند الطلب بمفتاح `نوع::YYYY-MM-DD`.
+
+## نقاط التكامل مع بقية التطبيق
+
+- `js/app.js`: `PAGES.executionCenter` + مسار البطاقة `exc:<id>` (store التمييز `executionCenter`)، و`store:'executionCenter'` للبطاقة.
+- `js/ui/nav-model.js`: مسار `executionCenter` («مركز التنفيذ») بجانب سجل التنفيذ العام (28 مسارًا).
+- `js/domain/entities.js`: حقول `execution` وثمانية كيانات تنفيذ للنموذج الموحّد؛ `js/services/entity-save.js`: حالات المخازن الجديدة (المالية منها ترفض التعديل المباشر برسالة عربية).
+- `js/services/search-engine.js`: مصادر التنفيذ الستة و`FAST_INDEXES`؛ `js/services/entity-query.js`: `rowText`؛ فهرس `execution.searchTextNormalized`.
+- `js/services/maintenance.js`: `migrateExecutionData` ← `report.execution`؛ `js/services/integrity.js`: الحقول الدنيا وقواعد العلاقات لمخازن التنفيذ؛ `js/services/backup.js`: يغطيها تلقائيًا عبر `STORES`.
+- `js/modules/quick-add.js`: إضافة تنفيذ سريعة؛ `sw.js`: precache لكل ملفات التنفيذ + `css/execution.css` بذاكرة `v5.8.0-execution`؛ `index.html`: ملف الأنماط.
+
+## قواعد للتطوير اللاحق
+
+- لا تكتب من الواجهة مباشرة: كل تعديل يمر بخدمة تطبيقية وبمعاملة واحدة وسجل نشاط بلا بيانات شخصية خام في `metadata`.
+- لا تُعدَّل شريحة أو حركة تاريخية: الجديد شريحة/عكس/تصحيح مرتبط بالأصل.
+- لا تجمع القيمة الجديدة على القديمة (لا ازدواج)؛ ولا تفترض FIFO قاعدة قانونية.
+- الفترات لا تُخزَّن ولا تُنشأ مسبقًا؛ أي رقم جديد يحتاج `equation` ومصدرًا ظاهرًا.
+
 # v5.7.0 — خريطة مركز العمل (Work Center / Command Center) · Schema 14
 
 **2026-10-01 — طبقة تشغيل فوق بيانات المكتب الموجودة (`actionCenter`).** العقد التفصيلي وقرارات التصميم والقياسات وما لم يُتحقق منه: [`docs/WORK-CENTER.md`](docs/WORK-CENTER.md). `APP_VERSION=5.7.0`, `SCHEMA_VERSION=14`.
