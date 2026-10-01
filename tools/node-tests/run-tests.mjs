@@ -23,6 +23,7 @@ const {runCollapseStateTests}=await import(`${R}/tests/collapse-state-tests.js`)
 const {runGridProviderTests}=await import(`${R}/tests/grid-provider-tests.js`);
 const {runDisplayPrefsTests}=await import(`${R}/tests/display-prefs-tests.js`);
 const {runComponentStyleTests}=await import(`${R}/tests/component-style-tests.js`);
+const {runGridContextTests}=await import(`${R}/tests/grid-context-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -54,6 +55,7 @@ await runCollapseStateTests(test,expect);
 await runGridProviderTests(test,expect);
 runDisplayPrefsTests(test,expect);
 runComponentStyleTests(test,expect);
+runGridContextTests(test,expect);
 
 const r=await run();
 for(const [status,name,msg] of r.results){

@@ -2,6 +2,10 @@
 // بحث فوري متدرج: الأقسام الرئيسية أولًا ثم باقي الأقسام في الخلفية، تصنيف النتائج بالمصدر،
 // تمييز المطابقة، نطاقات اختيار، عمليات بحث محفوظة، سجل بحث، وتنقل كامل بالكيبورد.
 import {esc} from '../ui/dom.js';
+import {mountGrid} from '../ui/datagrid.js';
+import {columnsFor} from './list-page.js';
+import {resolveRefs} from '../services/entity-query.js';
+import {createGridRelations,hasLegalFileColumns} from '../services/grid-relations.js';
 import {highlightMatch} from '../ui/palette.js';
 import {getRecent} from '../services/recents.js';
 import {icon} from '../ui/icons.js';
@@ -76,7 +80,7 @@ function rowHtml(it,q){
 function groupHtml(g,q,{withMore=false}={}){
  return `<section class="search-group" data-group="${esc(g.store)}"><div class="section-head"><h3>${icon(g.icon)} ${esc(g.label)}${g.note?` <small class="muted">(${esc(g.note)})</small>`:''}</h3>
   <span class="group-meta">${g.partial?'<span class="badge warn">نتائج جزئية</span>':''}<span class="badge">${g.items.length}${g.more?'+':''}</span>${g.more&&withMore?`<button class="link" data-more-store="${esc(g.store)}">المزيد في ${esc(g.label)}</button>`:''}</span></div>
-  <div class="group-rows">${g.items.map(it=>rowHtml(it,q)).join('')}</div></section>`;
+  <div class="group-rows">${hasLegalFileColumns(g.store)?'<div data-search-grid><div class="loading small">جارٍ تجهيز بيانات الجدول…</div></div>':g.items.map(it=>rowHtml(it,q)).join('')}</div></section>`;
 }
 
 export function bindSearch(app){
@@ -84,6 +88,18 @@ export function bindSearch(app){
  const input=root.querySelector('#advanced-q'),out=root.querySelector('#advanced-results'),status=root.querySelector('#advanced-status'),clear=root.querySelector('#search-clear');
  const st=state(app);
  let seq=0,timer=0;
+ const resultGrids=new Map();
+ const disposeResults=()=>{resultGrids.forEach(grid=>grid.destroy());resultGrids.clear()};
+ const periodFilter=it=>st.period==='all'||inPeriod(it.row,ENTITIES[it.store]?.dateField||'createdAt',st.period==='y'?`${localDate().slice(0,4)}-01-01`:st.from,st.period==='y'?`${localDate().slice(0,4)}-12-31`:st.to);
+ async function mountResultGrid(group,q,element,my){
+  if(!element||!hasLegalFileColumns(group.store))return;
+  const rows=group.items.map(item=>item.row),hits=new Map(group.items.map(item=>[item.row.id,item]));
+  const relations=createGridRelations(app.office,group.store);
+  const [refs]=await Promise.all([resolveRefs(app.office,rows,ENTITIES[group.store].fields),relations.hydrate(rows)]);
+  if(my!==seq||!element.isConnected)return;
+  const filters=[`بحث شامل: ${q}`,st.period==='y'?'هذه السنة':st.period==='custom'?`الفترة: ${st.from||'…'} — ${st.to||'…'}`:''].filter(Boolean);
+  resultGrids.set(group.store,mountGrid(element,{title:`نتائج البحث — ${group.label}`,storageKey:`search:${group.store}`,collapseKey:`search:${group.store}:grid`,rows,columns:columnsFor(group.store,refs,{relations}),pageSize:100,highlightText:q,...relations.gridOptions({filters}),onRowClick:row=>{pushHistory(q);const hit=hits.get(row.id);if(hit?.route)app.go(hit.route)}}));
+ }
  const filterSummary=root.querySelector('[data-search-filter-summary]');
  const syncFilterSummary=()=>{
   if(!filterSummary)return;
@@ -102,14 +118,13 @@ export function bindSearch(app){
  };
  drawSaved();
 
- const renderGroups=(groups,q,{withMore=false}={})=>{out.innerHTML=groups.map(g=>groupHtml(g,q,{withMore})).join('')||`<div class="empty"><h3>لا نتائج مطابقة</h3><p>جرّب كلمات أقل أو جزءًا من الاسم، أو تحقق من الكتابة (أ/إ وة/ه تُعامل تلقائيًا كواحدة).</p></div>`;enhanceCollapsiblePanels(out,'search:results',{bulk:false});enhanceCollapsiblePanels(root,'search')};
- const renderIdle=()=>{out.innerHTML=idleHtml();enhanceCollapsiblePanels(out,'search:idle',{bulk:false});enhanceCollapsiblePanels(root,'search')};
+ const renderGroups=async(groups,q,{withMore=false,my=seq}={})=>{disposeResults();out.innerHTML=groups.map(g=>groupHtml(g,q,{withMore})).join('')||`<div class="empty"><h3>لا نتائج مطابقة</h3><p>جرّب كلمات أقل أو جزءًا من الاسم، أو تحقق من الكتابة (أ/إ وة/ه تُعامل تلقائيًا كواحدة).</p></div>`;enhanceCollapsiblePanels(out,'search:results',{bulk:false});enhanceCollapsiblePanels(root,'search');await Promise.all(groups.map(group=>mountResultGrid(group,q,out.querySelector(`[data-group="${CSS.escape(group.store)}"] [data-search-grid]`),my)))};
+ const renderIdle=()=>{disposeResults();out.innerHTML=idleHtml();enhanceCollapsiblePanels(out,'search:idle',{bulk:false});enhanceCollapsiblePanels(root,'search')};
 
  const run=async()=>{
   const q=input.value.trim();st.q=q;
   const my=++seq;
   drawSaved();
-  const periodFilter=it=>inPeriod(it.row,ENTITIES[it.store]?.dateField||'createdAt',st.period==='y'?`${localDate().slice(0,4)}-01-01`:st.from,st.period==='y'?`${localDate().slice(0,4)}-12-31`:st.to);
   if(q.length<2){
    status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.';
    renderIdle();
@@ -119,18 +134,20 @@ export function bindSearch(app){
   const stores=scoped?[st.scope]:PRIMARY_STORES;
   const per=scoped?24:8;
   status.textContent='جارٍ البحث في '+(scoped?ENTITIES[st.scope]?.plural:'الأقسام الرئيسية')+'…';
-  out.innerHTML='<div class="loading small">…</div>';
+  disposeResults();out.innerHTML='<div class="loading small">…</div>';
   let r=await searchAll(app.office,q,{stores,perStore:per});
   if(my!==seq)return;
   const groups=r.groups.map(g=>({...g,items:g.items.filter(periodFilter)})).filter(g=>g.items.length);
-  renderGroups(groups,q,{withMore:true});
+  await renderGroups(groups,q,{withMore:true,my});
+  if(my!==seq)return;
   if(!scoped){
    const rest=allSearchStores().filter(s=>!PRIMARY_STORES.includes(s));
    status.textContent=`${groups.reduce((n,g)=>n+g.items.length,0)} نتيجة أولية — نتابع الآن في باقي الأقسام…`;
    r=await searchAll(app.office,q,{stores:rest,perStore:6});
    if(my!==seq)return;
    for(const g of r.groups.map(g=>({...g,items:g.items.filter(periodFilter)})).filter(g=>g.items.length))groups.push(g);
-   renderGroups(groups,q,{withMore:true});
+   await renderGroups(groups,q,{withMore:true,my});
+   if(my!==seq)return;
   }
   const total=groups.reduce((n,g)=>n+g.items.length,0);
   status.textContent=total?`عُرضت ${total} نتيجة${r.tookMs!=null?` خلال ${r.tookMs<850?r.tookMs+'ms':(r.tookMs/1000).toFixed(1)+'s'}`:''} — Enter لحفظ البحث في السجل، ↑↓ للتنقل.`:'لم يتم العثور على نتائج مطابقة — جرّب كلمات أقل أو جزءًا من الاسم.';
@@ -155,13 +172,15 @@ export function bindSearch(app){
  out.addEventListener('click',async e=>{
   const open=e.target.closest('[data-search-open]');if(open){pushHistory(input.value.trim());app.go(open.dataset.searchOpen);return}
   const more=e.target.closest('[data-more-store]');if(!more)return;
-  const store=more.dataset.moreStore,q=input.value.trim();
+  const store=more.dataset.moreStore,q=input.value.trim(),my=seq;
+  resultGrids.get(store)?.destroy();resultGrids.delete(store);
   const sec=out.querySelector(`[data-group="${CSS.escape(store)}"] .group-rows`);
   if(sec)sec.innerHTML='<div class="loading small">…</div>';
   const r=await searchStore(app.office,store,q,{limit:24});
-  const g={store,label:ENTITIES[store]?.plural||store,icon:(SEARCH_SOURCES.find(s=>s.store===store)||{}).icon||'file',items:r.items,more:r.more,partial:false};
+  if(my!==seq)return;
+  const g={store,label:ENTITIES[store]?.plural||store,icon:(SEARCH_SOURCES.find(s=>s.store===store)||{}).icon||'file',items:r.items.filter(periodFilter),more:r.more,partial:false};
   const section=out.querySelector(`[data-group="${CSS.escape(store)}"]`);
-  if(section)section.outerHTML=groupHtml(g,q,{withMore:true});
+  if(section){section.outerHTML=groupHtml(g,q,{withMore:true});await mountResultGrid(g,q,out.querySelector(`[data-group="${CSS.escape(store)}"] [data-search-grid]`),my)}
  });
 
  // فلاتر النطاق والفترة
@@ -173,11 +192,15 @@ export function bindSearch(app){
  // لوحة المفاتيح: ↑↓ للتنقل، Enter للفتح أو لحفظ البحث في السجل والمسار، Esc للمسح
  input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>run().catch(err=>app.fail(err)),250)});
  input.addEventListener('keydown',e=>{
-  const items=[...out.querySelectorAll('.search-result')];
+  const items=[...out.querySelectorAll('.search-result,.dg tbody tr[data-i]')];
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
    e.preventDefault();if(!items.length)return;
    const cur=items.findIndex(x=>x.classList.contains('kbd-focus'));
    const nx=items[e.key==='ArrowDown'?Math.min(items.length-1,cur+1):Math.max(0,cur<=0?0:cur-1)];
+   // A grid result may be inside a collapsed result group/table. Reveal the
+   // selected row temporarily through the existing collapse controller, without
+   // changing pinned or saved preferences just to navigate search results.
+   if(nx.closest('.dg'))for(let parent=nx.parentElement;parent;parent=parent.parentElement)if(parent.dataset.collapseReady==='true'&&parent.dataset.collapseCollapsed==='true')parent.dispatchEvent(new CustomEvent('collapse:bulk',{detail:{collapsed:false,persist:false}}));
    items.forEach(x=>x.classList.remove('kbd-focus'));nx.classList.add('kbd-focus');nx.scrollIntoView({block:'nearest'});
   }else if(e.key==='Enter'){
    e.preventDefault();

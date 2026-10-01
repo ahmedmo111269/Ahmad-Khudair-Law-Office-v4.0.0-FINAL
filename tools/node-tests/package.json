@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node run-tests.mjs",
+    "test:grid-browser": "node grid-browser-tests.mjs"
   },
   "keywords": [],
   "author": "",
@@ -12,5 +13,10 @@
   "dependencies": {
     "fake-indexeddb": "^4.0.2",
     "linkedom": "^0.18.13"
+  },
+  "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
+    "pdfjs-dist": "^6.3.289",
+    "playwright": "^1.63.0"
   }
 }

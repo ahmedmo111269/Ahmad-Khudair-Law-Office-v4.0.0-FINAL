@@ -186,7 +186,7 @@ export async function bindRecordPage(app,store,id){
  root.querySelector('[data-next-hearing]')?.addEventListener('click',()=>openEntityForm(app,'hearings',{preset:{fileId:row.fileId,caseId:row.caseId,previousHearingId:row.id,hearingDate:row.adjournedTo||'',court:row.court||'',chamber:row.chamber||'',type:row.type||'',reason:row.nextAction||row.reason||'',relatedPartyIds:row.relatedPartyIds||[]},title:'إضافة الجلسة التالية'}));
  const jobs=[];
  for(const [s,rows] of Object.entries(children))jobs.push(sectionGrid(app,root.querySelector(`[data-grid="${s}"]`),s,rows,{storageKey:`rec:${store}:${s}`}));
- jobs.push(sectionGrid(app,root.querySelector('[data-grid="activityLog"]'),'activityLog',activity.sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))),{storageKey:'rec:activity'}));
+ jobs.push(sectionGrid(app,root.querySelector('[data-grid="activityLog"]'),'activityLog',activity.sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))),{storageKey:`rec:${store}:activity`}));
  await Promise.all(jobs);
 }
 export function notFound(what){return `<div class="empty"><h3>${esc(what)} غير موجود</h3><p>ربما حُذف منطقيًا أو أن الرابط قديم.</p></div>`}

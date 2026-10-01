@@ -6,7 +6,8 @@
 import {esc} from './dom.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {applyGridQuery,createGridQuery,sortGridRows,GRID_FILTER_OPERATORS,isValueFreeGridFilter} from '../core/grid-query.js';
-import {defineGridColumns} from './grid-columns.js';
+import {defineGridColumns,gridPreferenceKey} from './grid-columns.js';
+import {createPrintContext,printColumns} from '../core/grid-print-context.js';
 import {APP_NAME} from '../core/constants.js';
 import {prefs} from '../core/preferences.js';
 import {formatDate} from '../core/format.js';
@@ -67,10 +68,10 @@ export function mountGrid(root,opts){
  const byKey=new Map(cols.map(c=>[c.key,c]));
  let rows=o.rows||[];
  const instance=++gridInstance;
- const PK='grid:'+(o.storageKey||'');
- const legacy=(()=>{try{return JSON.parse(localStorage.getItem('grid:'+o.storageKey)||'null')}catch{return null}})();
- const saved=(o.storageKey&&prefs.get(PK))||legacy||{};
- const collapseScope=String(o.collapseKey||o.storageKey||`anonymous:${instance}`);
+ const PK=gridPreferenceKey(o.gridId||o.storageKey);
+ const legacy=(()=>{if(!PK)return null;try{return JSON.parse(localStorage.getItem(PK)||'null')}catch{return null}})();
+ const saved=(PK&&prefs.get(PK))||legacy||{};
+ const collapseScope=String(o.collapseKey||o.gridId||o.storageKey||`anonymous:${instance}`);
  const shellCollapseKey=`datagrid:${collapseScope}:section`;
  const toolsCollapseKey=`datagrid:${collapseScope}:tools`;
  const filterCollapseKey=`datagrid:${collapseScope}:filters`;
@@ -105,6 +106,7 @@ export function mountGrid(root,opts){
  let hl=null;const collapsed=new Set();
  let view=[];
  root.classList.add('dg');
+ root.dataset.gridId=PK||`grid:anonymous:${instance}`;
  const bodyId=`dg-body-${instance}`,toolsId=`dg-tools-${instance}`;
  root.dataset.collapseReady='true';root.dataset.collapseType='grid';root.dataset.collapseKey=shellCollapseKey;root.dataset.collapseCollapsed=String(st.shellCollapsed);
  root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}" aria-controls="${bodyId}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'›':'⌄'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button>${collapsePinMarkup(shellCollapseKey,isCollapsePinned(shellCollapseKey),'collapse-pin dg-shell-pin')}<button type="button" class="dg-head-gear" title="تخصيص مظهر الجدول" aria-label="تخصيص مظهر الجدول" aria-haspopup="dialog">🎨</button></div><div class="dg-body" id="${bodyId}"><div class="dg-tools-summary"><button type="button" class="dg-tools-summary-toggle" aria-expanded="${st.toolsCollapsed?'false':'true'}" aria-controls="${toolsId}"><span class="dg-tools-label">🔍 عوامل التصفية والتخصيص</span><span class="dg-tools-active"></span><span class="dg-tools-view"></span><span class="dg-tools-caret" aria-hidden="true">${st.toolsCollapsed?'›':'⌄'}</span></button>${collapsePinMarkup(toolsCollapseKey,isCollapsePinned(toolsCollapseKey),'collapse-pin dg-tools-pin')}</div><div class="dg-tools-panel" id="${toolsId}"${st.toolsCollapsed?' hidden':''}><div class="dg-toolbar"><button type="button" class="ghost dg-filter-toggle" aria-expanded="${!st.filterCollapsed}" aria-label="${st.filterCollapsed?'فتح':'طي'} عوامل التصفية" title="إظهار أو إخفاء عوامل التصفية">${st.filterCollapsed?'›':'⌄'} عوامل التصفية</button>${collapsePinMarkup(filterCollapseKey,isCollapsePinned(filterCollapseKey),'collapse-pin dg-filter-pin')}
@@ -161,11 +163,11 @@ export function mountGrid(root,opts){
  };
  applyAppear();
  const visibleCols=()=>order.map(k=>byKey.get(k)).filter(c=>c&&!st.hidden.has(c.key));
- const persist=()=>{if(o.storageKey)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,remotePageSize:st.remotePageSize,appear:st.appear})};
+ const persist=()=>{if(PK)prefs.set(PK,{hidden:[...st.hidden],order:[...order],sort:st.sort,density:st.density,cards:st.cards,views:st.views,activeView:st.activeView,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:st.adv,quick:st.quick,groupBy:st.groupBy,widths:st.widths,fontSize:st.fontSize,pinned:[...st.pinned],colSearch:st.colSearch,colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,remotePageSize:st.remotePageSize,appear:st.appear})};
  const makeQuery=()=>createGridQuery({
   search:{text:st.quick,column:st.searchCol},
   filters:{logic:'and',rules:[
-   ...[...st.filters].map(([key,f])=>({key,op:f.op||'',v1:f.v1||'',v2:f.v2||'',set:f.set?[...f.set]:null})),
+   ...[...st.filters].map(([key,f])=>({key,op:f.op||'',v1:f.v1||'',v2:f.v2||'',set:f.set?[...f.set]:null,valueType:f.valueType,setValueType:f.setValueType})),
    ...Object.entries(st.colSearch).filter(([,value])=>value).map(([key,value])=>({key,op:'contains',v1:value}))
   ]},
   advanced:{logic:st.adv.logic,rules:st.adv.rules.filter(rule=>byKey.has(rule.key)&&(isValueFreeGridFilter(rule.op)||rule.v1!==''||rule.v2!==''))},
@@ -207,7 +209,7 @@ export function mountGrid(root,opts){
    o.onProviderState?.({phase:'error',query,error,meta:providerMeta});
   }
  }
- const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards;
+ const virtualOn=()=>view.length>VIRTUAL_THRESHOLD&&!st.groupBy&&!st.cards&&st.density!=='mobile';
  let rowH=0,vStart=-1;
  const allSelected=()=>view.length>0&&view.every(isRowSelected);
 
@@ -256,18 +258,19 @@ export function mountGrid(root,opts){
  }
  function menuItems(row){try{const items=(typeof o.rowMenu==='function'?o.rowMenu(row):o.rowMenu)||[];return Array.isArray(items)?items:[];}catch{return []}}
  function compute(){
-  hl=highlighters(st.quick);vStart=-1;
+  hl=highlighters(st.quick||o.highlightText);vStart=-1;
   const query=makeQuery();
   // Array-backed feature grids use the same query engine locally; database-backed
   // grids have already applied the query while streaming a single cursor page.
   view=remote?(st.groupBy?sortGridRows(rows,query.sort,cols,[st.groupBy]):[...rows]):applyGridQuery(rows,query,cols);
  }
+ function columnWidth(c,widths=st.widths){return Math.max(c.minWidth,Math.min(c.maxWidth,Number(widths?.[c.key])||c.width||c.minWidth))}
  function renderHead(){
   const sortMark=k=>{const i=st.sort.findIndex(s=>s.key===k);if(i<0)return '<span class="dg-sortidle" aria-hidden="true">↕</span>';return `<span class="dg-sortmark">${st.sort[i].dir==='asc'?'▲':'▼'}<b class="dg-rank">${i+1}</b></span>`};
   const vc=visibleCols();
   const selTh=o.selectable?`<th class="dg-sel-th"><input type="checkbox" class="dg-sel-all" aria-label="تحديد كل النتائج الحالية"${allSelected()?' checked':''}${view.length?'':' disabled'}></th>`:'';
   const qaTh=showQa()?'<th class="dg-qa-th" aria-label="إجراءات"></th>':'';
-  $('thead').innerHTML=`<tr class="dg-hrow">${selTh}${vc.map(c=>{const w=Math.max(c.minWidth,Math.min(c.maxWidth,Number(st.widths[c.key])||c.width||c.minWidth));const pin=c.pinnable&&st.pinned.includes(c.key);
+  $('thead').innerHTML=`<tr class="dg-hrow">${selTh}${vc.map(c=>{const w=columnWidth(c);const pin=c.pinnable&&st.pinned.includes(c.key);
    const title=c.filterable?`<button type="button" class="dg-coltitle" title="تصفية عمود ${esc(c.label)}">${esc(c.label)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</button>`:`<span class="dg-coltitle">${esc(c.label)}${pin?'<span class="dg-pinmark" title="مثبّت">📌</span>':''}</span>`;
    return `<th data-key="${esc(c.key)}" style="width:${w}px;min-width:${w}px;max-width:${c.maxWidth}px" class="${st.filters.has(c.key)?'dg-filtered':''}${pin?' dg-pin-th':''}"><div class="dg-th">${title}${c.sortable?`<button type="button" class="dg-sort" title="فرز: تصاعدي ثم تنازلي ثم إلغاء. Shift للفرز المتعدد" aria-label="فرز ${esc(c.label)}">${sortMark(c.key)}</button>`:''}${c.filterable?`<button type="button" class="dg-fbtn" aria-label="تصفية ${esc(c.label)}" title="تصفية العمود">▾</button>`:''}</div>${c.resizable===false?'':`<span class="dg-resizer" role="separator" tabindex="0" aria-label="تغيير عرض ${esc(c.label)}"></span>`}</th>`}).join('')}${qaTh}</tr>
    ${st.colSearchOn?`<tr class="dg-csrow">${o.selectable?'<th class="dg-sel-th"></th>':''}${vc.map(c=>`<th data-cs="${esc(c.key)}">${c.searchable?`<input type="search" class="dg-cs" data-key="${esc(c.key)}" value="${esc(st.colSearch[c.key]||'')}" placeholder="بحث…" aria-label="بحث في ${esc(c.label)}">`:''}</th>`).join('')}${showQa()?'<th></th>':''}</tr>`:''}`;
@@ -275,7 +278,18 @@ export function mountGrid(root,opts){
   if(all){all.indeterminate=view.some(isRowSelected)&&!allSelected()}
   layoutPins();
  }
- function cellHtml(c,r){const t=c.text(r);return `<td data-k="${esc(c.key)}" data-label="${esc(c.label)}"${c.type==='number'?' class="num"':''} title="${esc(t)}">${hl?markHtml(t,hl):esc(t)}</td>`}
+ function cellHtml(c,r){
+  const t=c.text(r),items=c.items?c.items(r).map(item=>typeof item==='object'?item:{text:String(item)}).filter(item=>item.text):null;
+  const marked=text=>hl?markHtml(text,hl):esc(text);
+  let content=marked(t);
+  if(items){
+   const shown=items.slice(0,c.compactLimit),remaining=items.length-shown.length;
+   const details=remaining>0||items.some(item=>item.detail);
+   const width=columnWidth(c);
+   content=`<span class="dg-cell-list" style="max-width:min(100%,${Math.max(1,width-20)}px)"><span class="dg-cell-entries">${shown.map(item=>`<span class="dg-cell-item">${marked(item.text)}</span>`).join('')}</span><span class="dg-cell-list-foot">${details?`<button type="button" class="link dg-cell-more" data-column="${esc(c.key)}" aria-label="عرض التفاصيل الكاملة: ${esc(c.label)}">${remaining?`<bdi dir="ltr">+${remaining}</bdi>`:'التفاصيل'}</button>`:''}</span></span>`;
+  }
+  return `<td data-k="${esc(c.key)}" data-label="${esc(c.label)}"${!t?' data-empty="true"':''}${c.type==='number'?' class="num"':''} title="${esc(t)}">${content}</td>`;
+ }
  const rowHtml=(r,i,vc)=>{
   const sel=o.selectable&&isRowSelected(r);
   const qa=showQa()?`<td class="dg-qa" data-label="إجراءات"><button type="button" class="ghost small dg-qa-btn" data-i="${i}" aria-label="إجراءات سريعة">⋯</button></td>`:'';
@@ -389,7 +403,11 @@ export function mountGrid(root,opts){
   if(st.quick)chips.push(['q','',`بحث: «${st.quick}»`]);
   const csCount=Object.values(st.colSearch).filter(Boolean).length;
   if(csCount)chips.push(['c','',`بحث الأعمدة (${csCount})`]);
-  for(const [k,f] of st.filters){const c=byKey.get(k);if(!c)continue;let t;if(f.set)t=[...f.set].slice(0,3).map(v=>v===EMPTY?'(فارغ)':v).join('، ')+(f.set.size>3?` +${f.set.size-3}`:'');else{const op=(OPS[c.type]||OPS.text).find(x=>x[0]===f.op)?.[1]||f.op;t=`${op} ${f.v1||''}${f.v2?' – '+f.v2:''}`}chips.push(['f',k,`${c.label}: ${t}`])}
+  for(const [k,f] of st.filters){const c=byKey.get(k);if(!c)continue;let t;const value=(v,reference)=>v===EMPTY?EMPTY:reference?c.referenceLabel?.(v)||v:v;
+   if(f.set)t=[...f.set].slice(0,3).map(v=>value(v,f.setValueType==='reference'||f.valueType==='reference')).join('، ')+(f.set.size>3?` +${f.set.size-3}`:'');
+   else{const op=(OPS[c.type]||OPS.text).find(x=>x[0]===f.op)?.[1]||f.op;t=`${op} ${value(f.v1||'',f.valueType==='reference')}${f.v2?' – '+f.v2:''}`}
+   chips.push(['f',k,`${c.label}: ${t}`]);
+  }
   const rules=st.adv.rules.filter(x=>byKey.get(x.key));if(rules.length)chips.push(['a','',`تصفية مركّبة (${rules.length} ${st.adv.logic==='or'?'أيٌّ منها':'كلها'})`]);
   st.sort.forEach((x,i)=>{const c=byKey.get(x.key);if(c)chips.push(['s',x.key,`فرز ${i+1}: ${c.label} ${x.dir==='asc'?'▲':'▼'}`])});
   const el=$('.dg-chips');el.hidden=!chips.length;
@@ -452,8 +470,8 @@ export function mountGrid(root,opts){
  $('.dg-font').addEventListener('change',e=>{st.fontSize=e.target.value;persist();renderBody()});
  $('.dg-fullscreen').addEventListener('click',async()=>{if(document.fullscreenElement===root){try{await document.exitFullscreen()}catch{}root.classList.remove('dg-fullscreen')}else if(root.requestFullscreen){try{await root.requestFullscreen()}catch{root.classList.toggle('dg-fullscreen')}}else root.classList.toggle('dg-fullscreen');renderBody()});
  root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});
- $('thead').addEventListener('pointerdown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle)return;e.preventDefault();const th=handle.closest('th'),key=th?.dataset.key;if(!key)return;const startX=e.clientX,startW=th.getBoundingClientRect().width,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl';let w=startW;const move=ev=>{w=Math.max(90,Math.min(900,startW+(rtl?startX-ev.clientX:ev.clientX-startX)));th.style.width=w+'px';th.style.minWidth=w+'px';th.style.maxWidth=w+'px'};const end=()=>{document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',end,true);document.removeEventListener('pointercancel',end,true);st.widths[key]=Math.round(w);persist();renderBody()};document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',end,true);document.addEventListener('pointercancel',end,true)});
- $('thead').addEventListener('keydown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle||!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const th=handle.closest('th'),key=th.dataset.key,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl',delta=(e.key==='ArrowRight'?1:-1)*(rtl?-1:1)*12,w=Math.max(90,Math.min(900,(Number(st.widths[key])||th.getBoundingClientRect().width)+delta));st.widths[key]=w;persist();renderHead();[...$('thead').querySelectorAll('th')].find(x=>x.dataset.key===key)?.querySelector('.dg-resizer')?.focus()});
+ $('thead').addEventListener('pointerdown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle)return;e.preventDefault();const th=handle.closest('th'),key=th?.dataset.key;if(!key)return;const startX=e.clientX,startW=th.getBoundingClientRect().width,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl';let w=startW;const move=ev=>{w=Math.max(byKey.get(key).minWidth,Math.min(byKey.get(key).maxWidth,startW+(rtl?startX-ev.clientX:ev.clientX-startX)));th.style.width=w+'px';th.style.minWidth=w+'px';th.style.maxWidth=w+'px'};const end=()=>{document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',end,true);document.removeEventListener('pointercancel',end,true);st.widths[key]=Math.round(w);persist();renderBody()};document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',end,true);document.addEventListener('pointercancel',end,true)});
+ $('thead').addEventListener('keydown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle||!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const th=handle.closest('th'),key=th.dataset.key,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl',delta=(e.key==='ArrowRight'?1:-1)*(rtl?-1:1)*12,w=Math.max(byKey.get(key).minWidth,Math.min(byKey.get(key).maxWidth,(Number(st.widths[key])||th.getBoundingClientRect().width)+delta));st.widths[key]=w;persist();renderHead();[...$('thead').querySelectorAll('th')].find(x=>x.dataset.key===key)?.querySelector('.dg-resizer')?.focus()});
  $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.colSearch={};st.activeView='';$('.dg-quick').value='';renderAdv();changeQuery()});
  $('.dg-chips').addEventListener('click',e=>{
   if(e.target.closest('.dg-chips-clear')){$('.dg-clear').click();return}
@@ -524,7 +542,7 @@ export function mountGrid(root,opts){
  });
  let raf=0;$('.dg-scroll').addEventListener('scroll',()=>{if(!virtualOn()||raf)return;raf=requestAnimationFrame(()=>{raf=0;renderWindow(false)})},{passive:true});
  $('.dg-print').addEventListener('click',()=>printGrid());
- $('.dg-export').addEventListener('change',e=>{const v=e.target.value;e.target.value='';if(v)exportGrid(v)});
+ $('.dg-export').addEventListener('change',e=>{const v=e.target.value;e.target.value='';if(v)Promise.resolve(exportGrid(v)).catch(error=>toast(`تعذر التصدير: ${error?.message||''}`,'error'))});
  $('.dg-more').addEventListener('click',e=>{if(e.target.closest('.dg-showmore')){st.shown+=o.pageSize;renderBody()}});
  // بحث الأعمدة: تبديل الصف + إدخال مباشر بلا فقدان تركيز
  $('.dg-csearch-btn').addEventListener('click',()=>{st.colSearchOn=!st.colSearchOn;$('.dg-csearch-btn').classList.toggle('dg-chip-active',st.colSearchOn);$('.dg-csearch-btn').setAttribute('aria-pressed',String(st.colSearchOn));persist();render();if(st.colSearchOn)root.querySelector('.dg-cs')?.focus()});
@@ -550,7 +568,7 @@ export function mountGrid(root,opts){
  $('.dg-sel-print').addEventListener('click',()=>printGrid(selectedRows()));
  // إعادة ضبط الجدول بالكامل (إعدادات العرض فقط — لا تمس أي بيانات)
  $('.dg-reset-btn').addEventListener('click',()=>{
-  if(o.storageKey){prefs.remove(PK);try{localStorage.removeItem(`grid:${o.storageKey}`)}catch{}}
+  if(PK){prefs.remove(PK);try{localStorage.removeItem(PK)}catch{}}
   clearCollapseState(filterCollapseKey);clearCollapseState(toolsCollapseKey);clearCollapseState(shellCollapseKey);
   st.filterCollapsed=resolveCollapseState(filterCollapseKey,{fallback:true});
   st.toolsCollapsed=resolveCollapseState(toolsCollapseKey,{fallback:true});
@@ -573,7 +591,7 @@ export function mountGrid(root,opts){
  });
  const selectRow=tr=>{st.sel=Number(tr.dataset.i);root.querySelectorAll('tr.dg-selected').forEach(x=>x.classList.remove('dg-selected'));tr.classList.add('dg-selected')};
  const clickRow=tr=>{selectRow(tr);const r=view[Number(tr.dataset.i)];if(r&&o.onRowClick)o.onRowClick(r)};
- $('tbody').addEventListener('click',e=>{const qa=e.target.closest('.dg-qa-btn');if(qa){e.stopPropagation();const r=view[Number(qa.dataset.i)];if(r)openMenu(qa,r,qa.getBoundingClientRect().left,qa.getBoundingClientRect().bottom+4);return}const tr=e.target.closest('tr[data-i]');if(tr&&!e.target.closest('.dg-sel-td')&&!e.target.closest('.dg-qa'))clickRow(tr)});
+ $('tbody').addEventListener('click',e=>{const more=e.target.closest('.dg-cell-more');if(more){e.stopPropagation();const row=view[Number(more.closest('tr').dataset.i)],column=byKey.get(more.dataset.column);if(row&&column)openCellDetails(more,column,row);return}const qa=e.target.closest('.dg-qa-btn');if(qa){e.stopPropagation();const r=view[Number(qa.dataset.i)];if(r)openMenu(qa,r,qa.getBoundingClientRect().left,qa.getBoundingClientRect().bottom+4);return}const tr=e.target.closest('tr[data-i]');if(tr&&!e.target.closest('.dg-sel-td')&&!e.target.closest('.dg-qa'))clickRow(tr)});
  $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]');if(!tr)return;
   if(e.key==='Enter'&&e.target!==tr){const inp=e.target.closest('input,button,a,select,textarea');if(inp)return}
   if(e.key==='Enter'){clickRow(tr)}
@@ -593,6 +611,12 @@ export function mountGrid(root,opts){
   const top=r.bottom+4,h=el.offsetHeight;el.style.top=Math.max(8,Math.min(top,window.innerHeight-h-8))+'px';
   setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
  }
+ function openCellDetails(anchor,column,row){
+  closePop();pop=document.createElement('div');pop.className='dg-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label',column.label);
+  pop.innerHTML=`<div class="dg-pop-head"><b>${esc(column.label)}</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div><ul class="dg-cell-details">${column.items(row).map(item=>`<li><b>${esc(item.text)}</b>${item.detail?`<small>${esc(item.detail)}</small>`:''}</li>`).join('')}</ul>`;
+  place(pop,anchor);pop.querySelector('.dg-x').onclick=()=>{closePop();anchor.focus()};
+  pop.addEventListener('keydown',event=>{if(event.key==='Escape'){closePop();anchor.focus()}});pop.querySelector('.dg-x').focus();
+ }
  function valueInputs(type,op,v1='',v2=''){
   if(NOVAL.includes(op))return '';
   const it=type==='number'?'number':type==='date'?'date':'text';
@@ -602,16 +626,23 @@ export function mountGrid(root,opts){
   closePop();
   const c=byKey.get(key),type=c.type||'text',f=st.filters.get(key)||{op:OPS[type][0][0],v1:'',v2:'',set:null};
   const pinned=st.pinned.includes(key);
-  const distinct=new Map();for(const r of rows){const t=c.text(r)||EMPTY;distinct.set(t,(distinct.get(t)||0)+1)}
-  const values=[...distinct.entries()].sort((a,b)=>String(a[0]).localeCompare(String(b[0]),'ar',{numeric:true})).slice(0,1000);
+  const refFacet=Boolean(c.references);
+  const distinct=new Map();
+  for(const r of rows){
+   const entries=refFacet?(c.references(r).length?c.references(r):[{id:EMPTY,label:EMPTY}]):[{id:c.text(r)||EMPTY,label:c.text(r)||EMPTY}];
+   for(const entry of entries){const previous=distinct.get(entry.id);distinct.set(entry.id,{label:entry.label,count:(previous?.count||0)+1})}
+  }
+  if(f.valueType==='reference'&&f.op==='eq'&&f.v1&&!distinct.has(f.v1))distinct.set(f.v1,{label:c.referenceLabel?.(f.v1)||f.v1,count:0});
+  const values=[...distinct.entries()].sort((a,b)=>a[1].label.localeCompare(b[1].label,'ar',{numeric:true})).slice(0,1000);
+  const referenceChoice=refFacet?`<label class="dg-pop-cond">اختيار محدد بالهوية<select class="dg-ref-choice" aria-label="اختيار ${esc(c.label)} محدد"><option value="">بدون اختيار محدد</option>${values.filter(([id])=>id!==EMPTY).map(([id,entry])=>`<option value="${esc(id)}"${f.valueType==='reference'&&f.v1===id?' selected':''}>${esc(entry.label)}</option>`).join('')}</select></label>`:'';
   pop=document.createElement('div');pop.className='dg-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','تصفية '+c.label);
   const presets=type==='date'?`<div class="dg-presets" aria-label="فترات جاهزة">${[['today','اليوم'],['yesterday','أمس'],['thisWeek','هذا الأسبوع'],['thisMonth','هذا الشهر'],['thisYear','السنة الحالية']].map(([k,l])=>`<button type="button" class="chip" data-preset-op="${k}">${l}</button>`).join('')}</div>`:'';
   pop.innerHTML=`<div class="dg-pop-head"><b>${esc(c.label)}</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
    <div class="dg-pop-sort"><button type="button" class="ghost" data-dir="asc">فرز تصاعدي ▲</button><button type="button" class="ghost" data-dir="desc">فرز تنازلي ▼</button><button type="button" class="ghost" data-dir="none">بدون فرز</button><button type="button" class="ghost dg-pintoggle" title="يبقى العمود ظاهرًا أثناء التمرير الأفقي">${pinned?'📌 إلغاء التثبيت':'📌 تثبيت العمود'}</button></div>
    ${presets}
-   <label class="dg-pop-cond">شرط<select class="dg-op">${OPS[type].map(([v,l])=>`<option value="${v}"${v===f.op?' selected':''}>${l}</option>`).join('')}</select></label><div class="dg-vals">${valueInputs(type,f.op,f.v1,f.v2)}</div>
+   ${referenceChoice}<label class="dg-pop-cond">شرط نصي<select class="dg-op">${OPS[type].map(([v,l])=>`<option value="${v}"${v===f.op?' selected':''}>${l}</option>`).join('')}</select></label><div class="dg-vals">${valueInputs(type,f.op,f.valueType==='reference'?'':f.v1,f.v2)}</div>
    ${remote?'<small class="dg-facet-note">القيم الظاهرة من الصفحة الحالية فقط؛ شرط التصفية يطبّق على نتائج الاستعلام كلها.</small>':''}
-   <div class="dg-pop-list"><input type="search" class="dg-lsearch" placeholder="بحث في القيم…"><div class="dg-list-tools"><button type="button" class="link dg-checkall">تحديد الكل</button><button type="button" class="link dg-checknone">إلغاء الكل</button></div><label class="dg-all"><input type="checkbox" class="dg-allbox" ${!f.set?'checked':''}> تحديد الكل</label><div class="dg-checks">${values.map(([v,cnt])=>`<label><input type="checkbox" value="${esc(v)}" ${!f.set||f.set.has(v)?'checked':''}> <span>${esc(v)}</span> <small>${cnt}</small></label>`).join('')}</div>${distinct.size>1000?'<small class="muted">تُعرض أول 1000 قيمة.</small>':''}</div>
+   <div class="dg-pop-list"><input type="search" class="dg-lsearch" placeholder="بحث في القيم…"><div class="dg-list-tools"><button type="button" class="link dg-checkall">تحديد الكل</button><button type="button" class="link dg-checknone">إلغاء الكل</button></div><label class="dg-all"><input type="checkbox" class="dg-allbox" ${!f.set?'checked':''}> تحديد الكل</label><div class="dg-checks">${values.map(([v,entry])=>`<label><input type="checkbox" value="${esc(v)}" ${!f.set||f.set.has(f.setValueType==='reference'||f.valueType==='reference'?v:entry.label)?'checked':''}> <span>${esc(entry.label)}</span> <small>${entry.count}</small></label>`).join('')}</div>${distinct.size>1000?'<small class="muted">تُعرض أول 1000 قيمة.</small>':''}</div>
    <div class="dg-pop-actions"><button type="button" class="primary dg-apply">تطبيق</button><button type="button" class="ghost dg-reset">مسح تصفية العمود</button></div>`;
   place(pop,th);
   const q=s=>pop.querySelector(s);
@@ -621,16 +652,20 @@ export function mountGrid(root,opts){
   q('.dg-checkall').onclick=()=>{pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=true);q('.dg-allbox').checked=true};
   q('.dg-checknone').onclick=()=>{pop.querySelectorAll('.dg-checks input').forEach(i=>i.checked=false);q('.dg-allbox').checked=false};
   q('.dg-pintoggle').onclick=()=>{togglePin(key);closePop()};
-  q('.dg-op').onchange=e=>{q('.dg-vals').innerHTML=valueInputs(type,e.target.value,q('.dg-v1')?.value||'',q('.dg-v2')?.value||'')};
+  q('.dg-op').onchange=e=>{if(q('.dg-ref-choice'))q('.dg-ref-choice').value='';q('.dg-vals').innerHTML=valueInputs(type,e.target.value,q('.dg-v1')?.value||'',q('.dg-v2')?.value||'')};
+  q('.dg-ref-choice')?.addEventListener('change',()=>{q('.dg-vals').innerHTML=valueInputs(type,'eq','','');q('.dg-op').value='eq'});
+  q('.dg-vals').addEventListener('input',()=>{if(q('.dg-ref-choice'))q('.dg-ref-choice').value='' });
   q('.dg-lsearch').oninput=e=>{const s=n(e.target.value);pop.querySelectorAll('.dg-checks label').forEach(l=>l.hidden=Boolean(s)&&!n(l.textContent).includes(s))};
   q('.dg-allbox').onchange=e=>pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=e.target.checked);
   q('.dg-reset').onclick=()=>{st.filters.delete(key);closePop();st.shown=o.pageSize;changeQuery()};
   q('.dg-apply').onclick=()=>{
+   const identity=q('.dg-ref-choice')?.value;
+   if(identity){st.filters.set(key,{op:'eq',v1:identity,v2:'',set:null,valueType:'reference'});closePop();st.shown=o.pageSize;changeQuery();return}
    const op=q('.dg-op').value,v1=q('.dg-v1')?.value??'',v2=q('.dg-v2')?.value??'';
    const boxes=[...pop.querySelectorAll('.dg-checks input')];const checked=boxes.filter(b=>b.checked).map(b=>b.value);
    const set=checked.length===boxes.length?null:new Set(checked);
    const hasCond=NOVAL.includes(op)||v1!==''||v2!=='';
-   if(!set&&!hasCond)st.filters.delete(key);else st.filters.set(key,{op:hasCond?op:'',v1,v2,set});
+   if(!set&&!hasCond)st.filters.delete(key);else st.filters.set(key,{op:hasCond?op:'',v1,v2,set,...(refFacet&&set?{setValueType:'reference'}:{})});
    closePop();st.shown=o.pageSize;changeQuery();
   };
   pop.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();if(e.key==='Enter'&&e.target.matches('input:not([type=checkbox])'))q('.dg-apply').click()});
@@ -714,15 +749,69 @@ export function mountGrid(root,opts){
  });
 
  // ===== الطباعة والتصدير =====
- function matrix(full=true,srcRows=null){const src=srcRows||view;const vc=visibleCols().filter(c=>full||!(c.sensitive||SENSITIVE.test(c.key)));return {head:vc.map(c=>c.label),body:src.map(r=>vc.map(c=>c.text(r)))}}
- function tableHtml(full=false,srcRows=null){const {head,body}=matrix(full,srcRows);return `<table border="1" cellspacing="0" cellpadding="4" dir="rtl"><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
- function docHtml(forPrint,full=false,srcRows=null){
-  const now=new Date();const stamp=`${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
-  const src=srcRows||view;
-  const filt=[st.quick&&`بحث: ${st.quick}`,...[...st.filters.keys()].map(k=>`تصفية: ${byKey.get(k)?.label}`),st.adv.rules.length&&`شروط مركبة: ${st.adv.rules.length}`,st.groupBy&&`تجميع: ${byKey.get(st.groupBy)?.label}`,srcRows&&`صفوف محددة: ${srcRows.length}`].filter(Boolean).join(' — ');
-  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(o.title||'تقرير')}</title><style>body{font-family:"Noto Sans Arabic","Segoe UI",Tahoma,sans-serif;margin:18px;color:#111}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#444}table{border-collapse:collapse;width:100%;font-size:11px;margin-top:10px}th{background:#eef1f5}th,td{border:1px solid #999;padding:4px 6px;text-align:right;vertical-align:top}thead{display:table-header-group}tr{page-break-inside:avoid}${forPrint?'@page{size:A4 landscape;margin:10mm}':''}</style></head><body><h1>${esc(APP_NAME)}</h1><p><b>${esc(o.title||'تقرير')}</b> — عدد السجلات: ${src.length} — تاريخ الطباعة: ${stamp}</p>${filt?`<p>${esc(filt)}</p>`:''}${tableHtml(full,srcRows)}${forPrint?'<script>window.onload=()=>{window.print()}<\\/script>':''}</body></html>`;
+ const exportColumns=full=>visibleCols().filter(c=>full||!(c.sensitive||SENSITIVE.test(c.key)));
+ function matrix(full=true,srcRows=null,columns=null){
+  const src=srcRows===null?view:srcRows,vc=columns||exportColumns(full);
+  return {head:vc.map(c=>c.label),body:src.map(r=>vc.map(c=>c.text(r)))};
  }
- function printGrid(srcRows=null){const w=window.open('','_blank');if(!w){alert('اسمح بالنوافذ المنبثقة للطباعة.');return}w.document.open();w.document.write(docHtml(true,false,srcRows));w.document.close()}
+ function tableHtml(full=false,srcRows=null,columns=null,widths=null){
+  const vc=columns||exportColumns(full),{head,body}=matrix(full,srcRows,vc);
+  const totalWidth=vc.reduce((sum,c)=>sum+columnWidth(c,widths),0)||1;
+  const colgroup=widths?`<colgroup>${vc.map(c=>`<col style="width:${(columnWidth(c,widths)/totalWidth*100).toFixed(2)}%">`).join('')}</colgroup>`:'';
+  return `<table border="1" cellspacing="0" cellpadding="4" dir="rtl">${colgroup}<thead><tr>${head.map((h,i)=>`<th data-column="${esc(vc[i].key)}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+ }
+ function documentSnapshot(forPrint=false,full=false,srcRows=null){
+  const snapshot={src:[...(srcRows===null?view:srcRows)],query:makeQuery(),columns:exportColumns(full),widths:{...st.widths},date:new Date(),selected:srcRows!==null,remote,tableTitle:o.title||'تقرير'};
+  snapshot.contextInput=typeof o.printContext==='function'?o.printContext({query:snapshot.query,rows:snapshot.src,date:snapshot.date}):(o.printContext||{});
+  return snapshot;
+ }
+ async function resolveDocumentContext(snapshot){
+  const context=await snapshot.contextInput;
+  const value=o.resolvePrintContext?await o.resolvePrintContext({context,query:snapshot.query,columns:cols,rows:snapshot.src,date:snapshot.date}):context;
+  return createPrintContext(value,{tableTitle:snapshot.tableTitle,query:snapshot.query,columns:cols,date:snapshot.date});
+ }
+ function buildDocument(snapshot,context,{forPrint=false,autoPrint=false}={}){
+  const vc=forPrint?printColumns(snapshot.columns,snapshot.src,context):snapshot.columns;
+  const field=(label,value)=>value?`<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`:'';
+  const clientNames=context.clients.map(client=>client.name).join('، ');
+  const fields=field(context.clients.length>1?'الموكلون':'الموكل',clientNames)+field('رقم الملف / نوع الملف',context.legalFile?.label)+field('رقم الدعوى / القضية',context.caseNumber)+field('تاريخ الطباعة',context.dateLabel);
+  const selection=snapshot.selected?` — الصفوف المحددة: ${snapshot.src.length}`:'';
+  const pageNote=snapshot.remote?snapshot.selected?' — صفوف محددة عبر الصفحات؛ ليست كل النتائج':` — الصفحة الحالية: ${snapshot.query.pagination.page} (ليست جميع صفحات النتائج)`:'';
+  const filters=context.filters.length?`<p class="dg-print-filters"><b>${snapshot.selected?'فلاتر العرض وقت الطباعة (لا تُطبق مجددًا على الصفوف المحددة):':'فلاتر العرض وقت الطباعة:'}</b> ${esc(context.filters.join(' — '))}</p>`:'';
+  const officeName=APP_NAME.replace(/^⚖️\s*/, '');
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(context.tableTitle)}</title><style>
+   body{font-family:"Noto Sans Arabic","Segoe UI",Tahoma,sans-serif;margin:18px;color:#111;font-size:12px}
+   .dg-print-header{border-bottom:2px solid #26364b;padding-bottom:10px;margin-bottom:12px;break-inside:avoid}
+   .dg-print-office{font-size:17px;font-weight:700;margin:0 0 8px;color:#26364b}h1{font-size:16px;margin:0 0 10px}
+   .dg-print-context{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 22px;margin:0 0 8px}
+   .dg-print-context div{display:flex;gap:6px;align-items:baseline}.dg-print-context dt{font-weight:700;white-space:nowrap}.dg-print-context dd{margin:0;overflow-wrap:anywhere}
+   p{margin:4px 0;line-height:1.6}.dg-print-meta,.dg-print-filters{font-size:11px;color:#444}
+   table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:11px;margin-top:10px}th{background:#eef1f5;font-weight:700}
+   th,td{border:1px solid #999;padding:5px 6px;text-align:right;vertical-align:top;white-space:pre-line;overflow-wrap:anywhere}
+   thead{display:table-header-group}tbody{display:table-row-group}tr{break-inside:avoid;page-break-inside:avoid}
+   ${forPrint?'@page{size:A4 landscape;margin:10mm}':''}
+  </style></head><body><header class="dg-print-header"><p class="dg-print-office">${esc(officeName)}</p><h1>${esc(context.tableTitle)}</h1><dl class="dg-print-context">${fields}</dl><p class="dg-print-meta">عدد السجلات: ${snapshot.src.length}${selection}${pageNote}</p>${filters}</header>${tableHtml(true,snapshot.src,vc,snapshot.widths)}${autoPrint?'<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script>':''}</body></html>`;
+ }
+ // Backward compatible synchronous HTML for a context-free grid; ID-resolved
+ // contexts are asynchronous. Word export and print share the same document path.
+ function docHtml(forPrint=false,full=false,srcRows=null){
+  const snapshot=documentSnapshot(forPrint,full,srcRows);
+  if(o.resolvePrintContext||typeof o.printContext==='function')return resolveDocumentContext(snapshot).then(context=>buildDocument(snapshot,context,{forPrint}));
+  return buildDocument(snapshot,createPrintContext(snapshot.contextInput,{tableTitle:snapshot.tableTitle,query:snapshot.query,columns:cols,date:snapshot.date}),{forPrint});
+ }
+ async function printGrid(srcRows=null){
+  if(remote&&(providerMeta.loading||providerMeta.error)){toast('انتظر اكتمال تحميل الصفحة قبل الطباعة.','error');return false}
+  const snapshot=documentSnapshot(true,true,srcRows);
+  // Open during the user's gesture, BEFORE awaiting IndexedDB: popup blockers
+  // otherwise prevent printing in real browsers.
+  const w=window.open('','_blank');if(!w){alert('اسمح بالنوافذ المنبثقة للطباعة.');return false}
+  try{
+   w.opener=null;w.document.open();w.document.write('<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>إعداد الطباعة</title><body><p>جارٍ إعداد بيانات الطباعة…</p></body></html>');w.document.close();
+   const context=await resolveDocumentContext(snapshot);
+   if(w.closed)return false;
+   w.document.open();w.document.write(buildDocument(snapshot,context,{forPrint:true,autoPrint:true}));w.document.close();return true;
+  }catch(error){try{w.close()}catch{}toast(`تعذر إعداد الطباعة: ${error?.message||'خطأ في قراءة السياق'}`,'error');return false}
+ }
  function download(content,name,type){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
  function exportGrid(kind,srcRows=null){
   const full=kind.endsWith(':full');kind=kind.replace(':full','');
@@ -730,7 +819,7 @@ export function mountGrid(root,opts){
   if(kind==='csv'){const q=v=>`"${String(v??'').replace(/"/g,'""')}"`;download('\ufeff'+[head,...body].map(r=>r.map(q).join(',')).join('\r\n'),base+'.csv','text/csv;charset=utf-8')}
   else if(kind==='txt'){download('\ufeff'+[head,...body].map(r=>r.map(v=>String(v??'').replace(/[\t\r\n]+/g,' ')).join('\t')).join('\r\n'),base+'.txt','text/plain;charset=utf-8')}
   else if(kind==='xls'){download('\ufeff'+`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" dir="rtl"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${tableHtml(full,srcRows)}</body></html>`,base+'.xls','application/vnd.ms-excel;charset=utf-8')}
-  else if(kind==='doc'){download('\ufeff'+docHtml(false,false,srcRows),base+'.doc','application/msword;charset=utf-8')}
+  else if(kind==='doc'){const html=docHtml(false,false,srcRows);if(html?.then)return html.then(content=>download('\ufeff'+content,base+'.doc','application/msword;charset=utf-8'));download('\ufeff'+html,base+'.doc','application/msword;charset=utf-8')}
  }
 
  let menuEl=null;
@@ -777,6 +866,10 @@ export function mountGrid(root,opts){
   getQuery:()=>makeQuery(),
   reload({resetPage=true}={}){if(remote){if(resetPage){pageIndex=0;pageCursors.splice(1);pageCursors[0]=null}return loadProviderRows()}render();return Promise.resolve()},
   applyFilter(key,op,v1,v2=''){st.filters.set(key,{op,v1,v2,set:null});changeQuery()},
+  applyReferenceFilter(key,id){if(!byKey.get(key)?.references)throw new TypeError('The column has no identity-backed references.');st.filters.set(key,{op:'eq',v1:String(id),v2:'',set:null,valueType:'reference'});changeQuery()},
+  clearFilter(key){st.filters.delete(key);changeQuery()},
+  getGridId:()=>root.dataset.gridId,
+  getVisibleColumns:()=>visibleCols(),
   sortBy(key,dir='asc'){st.sort=[{key,dir}];changeQuery()},
   togglePin(key){togglePin(key)},
   getSelection(){return selectedRows()},
@@ -785,6 +878,9 @@ export function mountGrid(root,opts){
   setColSearch(key,val){if(val)st.colSearch[key]=val;else delete st.colSearch[key];changeQuery()},
   isColSearchOn(){return st.colSearchOn},
   exportData:kind=>exportGrid(kind),
-  docHtml:()=>docHtml(false)
+  docHtml:()=>docHtml(false),
+  print:srcRows=>printGrid(srcRows??null),
+  async getPrintContext({srcRows=null}={}){return resolveDocumentContext(documentSnapshot(true,true,srcRows))},
+  async getPrintDocument({srcRows=null,autoPrint=false}={}){const snapshot=documentSnapshot(true,true,srcRows);return buildDocument(snapshot,await resolveDocumentContext(snapshot),{forPrint:true,autoPrint})}
  };
 }

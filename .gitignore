@@ -1,2 +1,5 @@
 node_modules/
 tools/node-tests/node_modules/
+
+# Local browser-test evidence (screenshots/PDF/logs), not release artifacts.
+.cache/

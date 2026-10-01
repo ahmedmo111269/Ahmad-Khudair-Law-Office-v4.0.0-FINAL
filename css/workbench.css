@@ -172,3 +172,18 @@ tr:hover .dg-qa-btn,tr:focus-within .dg-qa-btn{background:var(--primary-soft);co
 .collapse-page-actions label,.collapse-page-actions>small{grid-column:1/-1;display:flex;gap:7px;align-items:center;font-size:11.5px;color:var(--text-muted)}
 .collapse-page-actions label input{accent-color:var(--primary)}
 @media(max-width:640px){.collapse-page-tools{margin-inline-start:0}.collapse-page-actions{position:static;min-width:0;margin-top:5px}.collapse-page-tools[open]{width:100%}}
+
+/* DataGrid multi-valued cells only — no card/page customization changes. */
+.dg .dg-cell-list{display:block;min-width:0;line-height:1.4}
+.dg .dg-cell-entries{display:block;min-height:2.8em}
+.dg .dg-cell-item{display:block;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dg .dg-cell-list-foot{display:block;min-height:1.4em;font-size:.88em}
+.dg .dg-cell-more{padding:0 4px;min-height:0;font-size:inherit;line-height:1.4;text-align:start}
+.dg .dg-cell-more:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.dg-pop .dg-cell-details{list-style:none;padding:0;margin:8px 0;max-height:55vh;overflow:auto}
+.dg-pop .dg-cell-details li{padding:8px 4px;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.dg-pop .dg-cell-details small{display:block;color:var(--text-muted);margin-top:4px}
+.dg.dg-cards td[data-empty="true"],.dg.dg-d-mobile td[data-empty="true"]{display:none}
+@media(max-width:640px){.dg .dg-cell-list-foot{min-height:28px}.dg .dg-cell-more{min-height:28px}.dg.dg-cards .dg-cell-item{white-space:normal}.dg.dg-cards .dg-cell-entries{min-height:0}}
+.search-group .dg tr.kbd-focus>td{background:var(--row-selected,var(--surface2))}
+.search-group .dg tr.kbd-focus{outline:2px solid var(--primary);outline-offset:-2px}

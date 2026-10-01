@@ -10,7 +10,7 @@ const required=['index.html','tests.html','manifest.webmanifest','sw.js','js/app
 for(const f of required) if(!fs.existsSync(path.join(root,f))) failures.push(`MISSING ${f}`);
 
 const files=[];
-function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){if(['.git','node_modules'].includes(e.name))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else files.push(p)}}
+function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){if(['.git','node_modules','.cache'].includes(e.name))continue;const p=path.join(d,e.name);if(e.isDirectory())walk(p);else files.push(p)}}
 walk(root);
 const js=files.filter(f=>f.endsWith('.js')||f.endsWith('.mjs'));
 const rel=f=>path.relative(root,f);

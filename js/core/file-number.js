@@ -62,6 +62,14 @@ export function fileKindLabel(record){
 }
 const KIND_NAMES={main:'ملف رئيسي',sub:'ملف فرعي',service:'إعلان'};
 
+/** رقم الملف الداخلي / نوعه فقط. Never include the title or a person's name. */
+export function formatLegalFile(record, {typeName = ''} = {}){
+ if(!record)return '';
+ const number=formatFileNumber(record);
+ const type=String(typeName||record.fileType||record.typeSnapshot?.type||'').trim();
+ return [number,type].filter(Boolean).join(' — ');
+}
+
 /** رقم القضية / المرحلة لدى الجهة الرسمية — منفصل تمامًا عن رقم الملف الداخلي. */
 export function formatOfficialNumber(caseRow){
  if(!caseRow)return '';

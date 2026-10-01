@@ -2,6 +2,8 @@
 // القوائم الرئيسية تعرض صفحات cursor من 25/50/100 سجلًا؛ التقارير والأقسام تبقى محدودة بحسب حاجتها.
 import {esc} from '../ui/dom.js';
 import {mountGrid} from '../ui/datagrid.js';
+import {legalFileColumns} from '../ui/grid-columns.js';
+import {createGridRelations,gridPageContext,hasLegalFileColumns} from '../services/grid-relations.js';
 import {mountCalendar} from '../ui/calendar.js';
 import {openEntityForm} from '../ui/form.js';
 import {toast} from '../ui/toast.js';
@@ -12,25 +14,33 @@ import {formatFileNumber} from '../core/file-number.js';
 import {prefs} from '../core/preferences.js';
 import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
 
-export function columnsFor(store,refs,{extra=[]}={}){
+export function columnsFor(store,refs,{extra=[],relations=null}={}){
  const ent=ENTITIES[store];
  let fields=[...ent.fields];
  if(store==='files')fields=[...fields,...Object.values(FILE_TYPE_GROUPS).flatMap(g=>g.fields.map(f=>({...f,grid:false})))];
- const cols=fields.map(f=>({key:f.k,label:f.l,type:f.ref?'text':columnType(f),hidden:!f.grid,
+ const cols=fields.map(f=>({key:f.k,label:f.l,type:f.ref?'text':columnType(f),hidden:!f.grid||(store==='files'&&['fileType','partyNames'].includes(f.k)),index:f.ref?false:undefined,
   get:r=>f.t==='phones'?phonesOf(r).join(' '):f.ref?refs.get(r[f.k])||'':r[f.k],
   text:r=>displayValue(f,r,refs)}));
  if(store==='files')cols.push({key:'isArchived',label:'مؤرشف',type:'bool',hidden:true,get:r=>Boolean(r.isArchived),text:r=>r.isArchived?'نعم':'لا'});
- return [...cols,...extra];
+ let shared=[];
+ if(hasLegalFileColumns(store)){
+  const keys=store==='files'?{fileKey:'fileNumber'}:store==='clients'?{fileKey:'legalFiles',clientKey:'fullName'}:store==='opponents'?{fileKey:'legalFiles',opponentKey:'name'}:store==='fileRelations'?{fileKey:'sourceFileId'}:{};
+  shared=legalFileColumns(relations,keys);
+  if(store==='fileRelations')shared.push(...legalFileColumns(relations,{side:'target',fileKey:'targetFileId',clientKey:'targetClientId',opponentKey:'targetOpponentId',fileTitle:'رقم الملف المرتبط / نوعه',clientTitle:'الموكل (الملف المرتبط)',opponentTitle:'الخصم (الملف المرتبط)'}));
+ }
+ const replaced=new Set(shared.map(column=>column.key));
+ return [...shared,...cols.filter(column=>!replaced.has(column.key)),...extra];
 }
 export function routeFor(store,row){const r=ENTITIES[store]?.route;if(!r)return null;return r.startsWith('rec:')?`${r}:${row.id}`:`${r}:${row.id}`}
 export function openRow(app,store,row){const r=routeFor(store,row);if(r)app.go(r)}
 
 // شبكة داخل قسم (صفحات السجل): صفوف معروفة مسبقًا
-export async function sectionGrid(app,el,store,rows,{storageKey,title,extra=[],collapseKey}={}){
- const refs=await resolveRefs(app.office,rows,ENTITIES[store].fields);
- const gridStorageKey=storageKey||'sec:'+store;
+export async function sectionGrid(app,el,store,rows,{storageKey,title,extra=[],collapseKey,printContext}={}){
+ const relations=createGridRelations(app.office,store);
+ const [refs]=await Promise.all([resolveRefs(app.office,rows,ENTITIES[store].fields),relations.hydrate(rows)]);
  const pageKey=String(app.route||'page').split('?')[0];
- return mountGrid(el,{columns:columnsFor(store,refs,{extra}),rows,title:title||ENTITIES[store].plural,storageKey:gridStorageKey,collapseKey:collapseKey||`${pageKey}:grid:${gridStorageKey}`,pageSize:100,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات.',selectable:true,...gridActions(app,store,()=>app.refresh())});
+ const gridStorageKey=storageKey||`sec:${pageKey.split(':')[0]}:${store}`;
+ return mountGrid(el,{columns:columnsFor(store,refs,{extra,relations}),rows,title:title||ENTITIES[store].plural,storageKey:gridStorageKey,collapseKey:collapseKey||`${pageKey}:grid:${gridStorageKey}`,pageSize:100,onRowClick:r=>openRow(app,store,r),emptyText:'لا توجد سجلات.',selectable:true,...relations.gridOptions(printContext||gridPageContext(app.route)),...gridActions(app,store,()=>app.refresh())});
 }
 
 const LIST_VIEW_KEY=store=>`ui:list-view:${store}`;
@@ -70,7 +80,8 @@ export function bindListPage(app,store){
  const ent=ENTITIES[store];const st=state(app)[store];
  const root=document.querySelector('#main-content');
  let grid=null;
- const gridRefs=new Map(); // خريطة تسميات المراجع للصفحة الحالية فقط
+ const gridRefs=new Map(); // تسميات المراجع؛ سجلات العلاقات تبقى في WeakMap مستقلة
+ const relations=createGridRelations(app.office,store);
  const status=root.querySelector('.list-status');
  const filterBadge=root.querySelector('[data-list-filter-count]');
  const syncFilterSummary=()=>{const n=listFilterCount(st);if(filterBadge)filterBadge.textContent=n?`${n} فلاتر نشطة`:'لا توجد فلاتر نشطة'};
@@ -89,11 +100,16 @@ export function bindListPage(app,store){
  async function load(){
   saveListView(store,st);syncFilterSummary();
   if(!grid){
-   const provider=createEntityGridProvider(app.office,store,{getBaseQuery:()=>({q:st.q,...currentScope(),dateField:ent.dateField})});
+   const provider=createEntityGridProvider(app.office,store,{
+    getBaseQuery:()=>({q:st.q,...currentScope(),dateField:ent.dateField}),
+    prepareQuery:(query,{columns})=>relations.loadFilterLabels(query,columns),
+    prepareRows:async(pageRows,{signal})=>{await Promise.all([resolveRefs(app.office,pageRows,ent.fields,gridRefs),relations.hydrate(pageRows,{signal})])}
+   });
    grid=mountGrid(root.querySelector('#list-grid'),{
-    columns:columnsFor(store,gridRefs),rows:[],dataProvider:provider,pageSize:25,
+    columns:columnsFor(store,gridRefs,{relations}),rows:[],dataProvider:provider,pageSize:25,
+    ...relations.gridOptions(()=>({filters:scopeSummary()?[scopeSummary()]:[]})),
     title:ent.plural,storageKey:'list:'+store,collapseKey:`list:${store}:grid`,
-    onRowsLoaded:pageRows=>resolveRefs(app.office,pageRows,ent.fields,gridRefs),
+    // References are already hydrated before the provider applies filters/search.
     onProviderState:({phase,error})=>{
      if(phase==='loading')status.textContent='جارٍ تحميل الصفحة المطلوبة…';
      else if(phase==='ready')status.textContent=scopeSummary();

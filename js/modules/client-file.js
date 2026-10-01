@@ -4,6 +4,8 @@ import {esc} from '../ui/dom.js';
 import {toast} from '../ui/toast.js';
 import {modal,closeModal,confirmBox} from '../ui/modal.js';
 import {mountGrid} from '../ui/datagrid.js';
+import {legalFileColumns} from '../ui/grid-columns.js';
+import {createGridRelations} from '../services/grid-relations.js';
 import {formatDate,formatDateTime} from '../core/format.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {userError} from '../core/errors.js';
@@ -105,11 +107,12 @@ export async function bindClientFilePage(app,clientId){
   if(q){const {normalizeArabic}=await import('../core/search-normalizer.js');const n=normalizeArabic(q);list=list.filter(f=>normalizeArabic([formatFileNumber(f.fileNumber),f.fileNumber,f.title,f.fileType,f.mainCategory,f.searchText].join(' ')).includes(n))}
   else{list=list.filter(f=>f.categoryId===catId&&(!typeId||f.fileTypeId===typeId))}
   grid.innerHTML=`<div class="lf-cards">${list.map(f=>fileCard(f,tax)).join('')||'<p class="muted">لا توجد ملفات.</p>'}</div><div class="lf-grid"></div>`;
-  mountGrid(grid.querySelector('.lf-grid'),{title:'ملفات الموكل',storageKey:'cfile:files',collapseKey:`client-file:${clientId}:files-grid`,rows:list,onRowClick:f=>app.go('file:'+f.id),emptyText:'لا توجد ملفات.',columns:[
-   {key:'fileNumber',label:'رقم الملف الفرعي',get:f=>formatFileNumber(f.fileNumber)},{key:'title',label:'الملف'},{key:'type',label:'النوع',get:f=>tax.byId.get(f.fileTypeId)?.name||f.fileType||''},
+  const relations=createGridRelations(app.office,'files');await relations.hydrate(list);
+  mountGrid(grid.querySelector('.lf-grid'),{title:'ملفات الموكل',storageKey:'cfile:files',collapseKey:`client-file:${clientId}:files-grid`,rows:list,onRowClick:f=>app.go('file:'+f.id),emptyText:'لا توجد ملفات.',...relations.gridOptions({clientId,filters:[q&&`بحث: ${q}`,catId&&`القسم: ${tax.byId.get(catId)?.name||''}`,typeId&&`النوع: ${tax.byId.get(typeId)?.name||''}`].filter(Boolean)}),columns:[
+   ...legalFileColumns(relations,{fileKey:'fileNumber'}),{key:'title',label:'عنوان الملف'},{key:'type',label:'النوع',hidden:true,get:f=>tax.byId.get(f.fileTypeId)?.name||f.fileType||''},
    {key:'cat',label:'القسم',get:f=>tax.byId.get(f.categoryId)?.name||'',hidden:Boolean(catId)},
    {key:'stage',label:'المرحلة الحالية',get:f=>f.__stage?.stageType||''},{key:'court',label:'المحكمة',get:f=>f.__stage?.courtId||''},
-   {key:'caseNo',label:'رقم القضية',get:f=>f.__stage?.caseNumber?`${f.__stage.caseNumber}${f.__stage.caseYear?'/'+f.__stage.caseYear:''}`:(f.x_refNumber||'')},
+   {key:'caseNo',label:'رقم القضية الرسمي',get:f=>relations.officialNumber(f)},
    {key:'status',label:'الحالة',get:f=>label(f.status||'')},{key:'lastActivityAt',label:'آخر نشاط',type:'date',get:f=>f.lastActivityAt,text:f=>formatDate(f.lastActivityAt)}]});
  }
  if(root.querySelector('#cf-hearings')){

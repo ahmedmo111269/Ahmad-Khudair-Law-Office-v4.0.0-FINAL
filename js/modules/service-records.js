@@ -6,6 +6,7 @@ import { mountGrid } from '../ui/datagrid.js';
 import { openEntityForm } from '../ui/form.js';
 import { columnsFor, openRow } from './list-page.js';
 import { resolveRefs } from '../services/entity-query.js';
+import { createGridRelations } from '../services/grid-relations.js';
 import { fileServiceRecords, reannounceServiceRecord } from '../services/service-records.js';
 import { ENTITIES, fmtDate } from '../domain/entities.js';
 import { userError } from '../core/errors.js';
@@ -63,11 +64,13 @@ export async function bindFileServiceTab(app, file, stages, parties) {
   const upcomingHearingIds = new Set(hearingRows.filter(h => h.hearingDate >= today).map(h => h.id));
   const selected=Object.hasOwn(SERVICE_FILTERS,state.selectedFilter)?state.selectedFilter:'all';
   let visibleRows=serviceRowsForFilter(state.rows,selected,today,weekEnd,upcomingHearingIds);
-  const refs = await resolveRefs(app.office, visibleRows, ENTITIES.serviceRecords.fields);
+  const relations = createGridRelations(app.office, 'serviceRecords');
+  const [refs] = await Promise.all([resolveRefs(app.office, state.rows, ENTITIES.serviceRecords.fields), relations.hydrate(state.rows)]);
   const grid = mountGrid(root.querySelector('[data-service-grid]'), {
     title: `إعلانات وإنذارات الملف ${formatFileNumber(file.fileNumber)}`,
     storageKey: 'file:serviceRecords', collapseKey: `file:${file.id}:service-records:grid`, rows: visibleRows,
-    columns: columnsFor('serviceRecords', refs),
+    columns: columnsFor('serviceRecords', refs, {relations}),
+    ...relations.gridOptions(() => ({fileId: file.id, filters: state.selectedFilter && state.selectedFilter !== 'all' ? [SERVICE_FILTERS[state.selectedFilter]] : []})),
     emptyText: 'لا توجد سجلات مطابقة للفلاتر الحالية.',
     onRowClick: row => openRow(app, 'serviceRecords', row)
   });

@@ -4,8 +4,10 @@ import { createGridQuery, matchesGridQuery, sortGridRows } from '../core/grid-qu
 
 export function createIndexedDbDataProvider(repository, {
   resolveScope = () => ({}),
-  indexForSort = (sort, column) => column?.index || sort?.index || sort?.key || null,
-  countProvider = null
+  indexForSort = (sort, column) => column?.index === false ? null : column?.index || sort?.index || sort?.key || null,
+  countProvider = null,
+  prepareRows = null,
+  prepareQuery = null
 } = {}) {
   if (!repository?.page || !repository?.ctx?.db) throw new TypeError('An IndexedDB repository with page() is required.');
 
@@ -23,6 +25,7 @@ export function createIndexedDbDataProvider(repository, {
       repository.ctx.assert();
       if (signal?.aborted) throw abortError();
       const query = createGridQuery(inputQuery);
+      await prepareQuery?.(query, {columns, signal});
       const scope = await resolveScope(query, { columns, signal }) || {};
       if (signal?.aborted) throw abortError();
 
@@ -43,12 +46,14 @@ export function createIndexedDbDataProvider(repository, {
       const useIndexedScopeRange=Boolean(scopeIndex&&index===scopeIndex);
       const usePrimaryScopeKey=Boolean(scope.key!==undefined&&!scope.index&&index===null);
       let direction = scope.direction === 'prev' ? 'prev' : 'next';
-      if ((!hasScopeRange||!useIndexedScopeRange) && usableSortIndex && index===usableSortIndex) direction = sort.dir === 'desc' ? 'prev' : 'next';
+      // The same index can honor both the bounded range and the requested
+      // ordering. Never scan descending batches then advertise global ASC.
+      if (usableSortIndex && index===usableSortIndex) direction = sort.dir === 'desc' ? 'prev' : 'next';
       else if (!hasScopeRange && !usableSortIndex && !scope.direction) direction = 'prev';
 
       const queryFilter = row => matchesGridQuery(row, query, columns);
       const scopeFilter = typeof scope.filter === 'function' ? scope.filter : null;
-      const result = await repository.page({
+      const paging = {
         index,
         key: useIndexedScopeRange||usePrimaryScopeKey ? scope.key : undefined,
         lower: useIndexedScopeRange ? scope.lower : undefined,
@@ -58,13 +63,18 @@ export function createIndexedDbDataProvider(repository, {
         cursor: query.pagination.cursor,
         limit: query.pagination.size,
         direction,
-        signal,
-        filter: row => queryFilter(row) && (!scopeFilter || scopeFilter(row))
-      });
+        signal
+      };
+      // Related values must exist BEFORE the query is evaluated, not only after
+      // a cursor page has been selected. Read bounded batches and resume exactly
+      // after the last matched row; no global getAll or duplicate/omitted rows.
+      const result = typeof prepareRows === 'function'
+        ? await preparedPage(repository, paging, prepareRows, {columns, query, signal}, scopeFilter, scope.preparedFilter)
+        : await repository.page({...paging, filter: row => queryFilter(row) && (!scopeFilter || scopeFilter(row))});
       if (signal?.aborted) throw abortError();
 
       const rows = query.sort.length ? sortGridRows(result.items, query.sort, columns) : result.items;
-      const orderedByRequestedSort = Boolean(sort && usableSortIndex && index === usableSortIndex && query.sort.length === 1);
+      const orderedByRequestedSort = Boolean(sort && usableSortIndex && index === usableSortIndex && direction === (sort.dir === 'desc' ? 'prev' : 'next') && query.sort.length === 1);
       return {
         rows,
         nextCursor: result.nextCursor,
@@ -95,4 +105,26 @@ export function createIndexedDbDataProvider(repository, {
 
 function abortError() {
   return new DOMException('The grid query was superseded.', 'AbortError');
+}
+
+async function preparedPage(repository, paging, prepareRows, context, scopeFilter, preparedFilter) {
+  const items = [], itemCursors = [];
+  let cursor = paging.cursor;
+  while (true) {
+    if (context.signal?.aborted) throw abortError();
+    const batch = await repository.page({...paging, cursor, limit: 100, filter: scopeFilter, includeItemCursors: true});
+    await prepareRows(batch.items, context);
+    if (context.signal?.aborted) throw abortError();
+    for (let index = 0; index < batch.items.length; index++) {
+      const row = batch.items[index];
+      if (!matchesGridQuery(row, context.query, context.columns) || preparedFilter && !preparedFilter(row)) continue;
+      items.push(row); itemCursors.push(batch.itemCursors[index]);
+      if (items.length > paging.limit) return {
+        items: items.slice(0, paging.limit), hasMore: true,
+        nextCursor: itemCursors[paging.limit - 1], prevCursor: null
+      };
+    }
+    if (!batch.hasMore || !batch.nextCursor) return {items, hasMore: false, nextCursor: null, prevCursor: null};
+    cursor = batch.nextCursor;
+  }
 }

@@ -2,6 +2,9 @@
 // مع الطباعة والتصدير (Excel/Word/CSV/TXT). القراءة محدودة بحد أقصى 5000 صف لكل تقرير.
 import {esc} from '../ui/dom.js';
 import {mountGrid} from '../ui/datagrid.js';
+import {legalFileColumns,defineGridColumns} from '../ui/grid-columns.js';
+import {createGridRelations} from '../services/grid-relations.js';
+import {applyGridQuery} from '../core/grid-query.js';
 import {ENTITIES,FILE_TYPE_GROUPS,fmtDate,label} from '../domain/entities.js';
 import {loadRows,resolveRefs,presetRange,PRESETS,agenda} from '../services/entity-query.js';
 import {columnsFor,openRow} from './list-page.js';
@@ -89,21 +92,24 @@ async function run(app){
  if(st.type==='agenda'){
   if(!from&&!to){from=localDate().slice(0,4)+'-01-01';to=localDate().slice(0,4)+'-12-31'}
   let rows=await agenda(app.office,from||'0000-01-01',to||'9999-12-31',st.limit);
-  if(st.q){const {rowText,normQ}=await import('../services/entity-query.js');const q=normQ(st.q);rows=rows.filter(r=>rowText(r).includes(q))}
-  const refs=await resolveRefs(app.office,rows,[{k:'fileId',ref:'files'},{k:'caseId',ref:'cases'}]);
+  const relations=createGridRelations(app.office,'agenda');
+  const [refs]=await Promise.all([resolveRefs(app.office,rows,[{k:'caseId',ref:'cases'}]),relations.hydrate(rows)]);
   const title=st.title||`الأجندة الموحدة (${periodTxt})`;
-  mountGrid(el,{title,storageKey:'report:agenda',collapseKey:'reports:agenda-grid',rows,onRowClick:r=>app.go(r.store==='files'?'file:'+r.id:`rec:${r.store}:${r.id}`),columns:[
+  const columns=[...legalFileColumns(relations),
    {key:'kind',label:'النوع'},{key:'date',label:'التاريخ',type:'date',text:r=>fmtDate(r.date)},{key:'time',label:'الوقت'},{key:'title',label:'البيان'},{key:'details',label:'التفاصيل'},{key:'status',label:'الحالة',text:r=>label(r.status)||''},
-   {key:'fileId',label:'الملف',get:r=>refs.get(r.fileId)||'',text:r=>refs.get(r.fileId)||''},{key:'caseId',label:'القضية / المرحلة',get:r=>refs.get(r.caseId)||'',text:r=>refs.get(r.caseId)||''}]});
+   {key:'caseId',label:'القضية / المرحلة',get:r=>refs.get(r.caseId)||'',text:r=>refs.get(r.caseId)||''}];
+  if(st.q)rows=applyGridQuery(rows,{search:{text:st.q}},defineGridColumns(columns));
+  mountGrid(el,{title,storageKey:'report:agenda',collapseKey:'reports:agenda-grid',rows,...relations.gridOptions({filters:[`الفترة: ${fmtDate(from)} — ${fmtDate(to)}`,st.q&&`بحث: ${st.q}`].filter(Boolean)}),onRowClick:r=>app.go(r.store==='files'?'file:'+r.id:`rec:${r.store}:${r.id}`),columns});
   status.textContent=`${title}: ${rows.length} عنصر`;return;
  }
  const ent=ENTITIES[st.type];
  const filter=st.preset==='overdue'?(x=>!x.status||['open','pending'].includes(x.status)):null;
- const {rows,more}=await loadRows(app.office,st.type,{q:st.q,from,to,dateField:st.dateField,limit:st.limit,filter});
- const refs=await resolveRefs(app.office,rows,ent.fields);
+ const relations=createGridRelations(app.office,st.type),refs=new Map();
+ const columns=defineGridColumns(columnsFor(st.type,refs,{relations}));
+ const {rows,more}=await loadRows(app.office,st.type,{q:st.q,from,to,dateField:st.dateField,limit:st.limit,filter,columns,prepareRows:async(rows,{signal})=>{await Promise.all([relations.hydrate(rows,{signal}),resolveRefs(app.office,rows,ent.fields,refs)])}});
  const dfl=dateFields(st.type).find(x=>x[0]===st.dateField)?.[1]||'';
  const title=st.title||`تقرير ${ent.plural}${from||to?` — ${dfl}: ${periodTxt}`:''}${st.q?` — بحث: ${st.q}`:''}`;
- const grid=mountGrid(el,{title,storageKey:'report:'+st.type,collapseKey:`reports:${st.type}:grid`,rows,columns:columnsFor(st.type,refs),onRowClick:r=>openRow(app,st.type,r),emptyText:'لا توجد سجلات مطابقة لشروط التقرير.'});
+ const grid=mountGrid(el,{title,storageKey:'report:'+st.type,collapseKey:`reports:${st.type}:grid`,rows,columns,...relations.gridOptions({filters:[from||to?`${dfl}: ${periodTxt}`:'',st.q&&`بحث: ${st.q}`,st.preset==='overdue'?'الأعمال المتأخرة المفتوحة':''].filter(Boolean)}),onRowClick:r=>openRow(app,st.type,r),emptyText:'لا توجد سجلات مطابقة لشروط التقرير.'});
  if(st.dateField&&(from||to))grid.sortBy(st.dateField,'asc');
  status.innerHTML=`<b>${esc(title)}</b>: ${rows.length} سجل${more?` — <span class="warn-text">وصل التقرير إلى الحد الأقصى (${st.limit}). ضيّق الفترة أو البحث أو ارفع الحد.</span>`:''}`;
 }
