@@ -50,6 +50,7 @@ export const SEARCH_SOURCES=[
  {store:'opponents',icon:'userX',weight:85,title:r=>r.name||'خصم',sub:r=>[r.capacity,r.nationalId].filter(Boolean).join(' · ')},
  {store:'hearings',icon:'calendar',weight:80,title:r=>`جلسة ${fdate(r.hearingDate)}${r.hearingTime?' '+r.hearingTime:''}`,sub:r=>[r.court,r.chamber,r.reason,r.result].filter(Boolean).join(' · ')},
  {store:'procedures',icon:'clipboard',weight:75,title:r=>r.description||r.type||'عمل إداري',sub:r=>[r.type,r.internalDueDate&&('استحقاق '+fdate(r.internalDueDate)),r.status].filter(Boolean).join(' · ')},
+ {store:'workItems',icon:'clipboard',weight:77,title:r=>r.title||'مهمة',sub:r=>[r.type,r.dueDate&&('موعد '+fdate(r.dueDate)),r.status].filter(Boolean).join(' · '),extra:r=>r.kind==='native',routeOf:r=>`actionCenter?item=${encodeURIComponent(r.id)}`,note:'المهام'},
  {store:'serviceRecords',icon:'stamp',weight:70,title:r=>`${r.internalNumber||r.noticeNumber||'إعلان'} ${r.partyName||''}`.trim(),sub:r=>[r.actionType,r.status,r.serviceDate&&fdate(r.serviceDate)].filter(Boolean).join(' · '),extra:r=>r.recordState!=='deleted'},
  {store:'fileParties',icon:'users',weight:65,title:r=>r.partyName||r.name||'طرف',sub:r=>[r.role,r.roleGroup].filter(Boolean).join(' · '),routeOf:r=>r.fileId?`file:${r.fileId}`:r.clientId?`client:${r.clientId}`:r.opponentId?`opponent:${r.opponentId}`:'',note:'الأطراف'},
  {store:'judgments',icon:'landmark',weight:60,title:r=>`حكم ${fdate(r.judgmentDate)}${r.judgmentNumber?' '+(r.judgmentNumber):''}`.trim(),sub:r=>[r.judgmentType,r.court,r.judgmentStatus].filter(Boolean).join(' · ')},

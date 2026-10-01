@@ -12,7 +12,8 @@ const REQUIRED={
   execution:['id','caseId','status'],fees:['id','fileId','agreedAmount'],feePayments:['id','feeId','amount','date'],
   documentReferences:['id','fileId','title'],powersOfAttorney:['id','clientId'],activityLog:['id','entityType','entityId','action','timestamp'],
   fileParties:['id','fileId','partyKind','role'],fileRelations:['id','sourceFileId','targetFileId'],
-  serviceRecords:['id','fileId','actionType','status'],bailiffs:['id','name']
+  serviceRecords:['id','fileId','actionType','status'],bailiffs:['id','name'],
+  workItemComments:['id','workItemId','body'],workItemRecurrences:['id','title','rule','startDate']
 };
 const OPEN=(db,name,mode='readonly')=>db.transaction(name,mode).objectStore(name);
 const scan=(db,name,visit,{maxRows=Infinity}={})=>new Promise((resolve,reject)=>{const s=OPEN(db,name);const c=s.openCursor();let n=0;c.onerror=()=>reject(c.error);c.onsuccess=()=>{const cur=c.result;if(!cur||n>=maxRows){resolve(n);return}n++;try{visit(cur.value);cur.continue()}catch(e){reject(e)}}});
@@ -29,7 +30,7 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
   }
   if(scanRows){
     const sets={};
-    for(const n of ['clients','files','cases','opponents','fees','staff','fileParties','fileRelations','hearings','serviceRecords','bailiffs']){sets[n]=new Set();if(!out.schemaIssues.some(x=>x.store===n&&x.type==='missing-store'))await scan(ctx.db,n,row=>{if(row?.id)sets[n].add(row.id)})}
+    for(const n of ['clients','files','cases','opponents','fees','staff','fileParties','fileRelations','hearings','serviceRecords','bailiffs','workItems']){sets[n]=new Set();if(!out.schemaIssues.some(x=>x.store===n&&x.type==='missing-store'))await scan(ctx.db,n,row=>{if(row?.id)sets[n].add(row.id)})}
     const relationRules=[
       ['fileClients','fileId','files','clientId','clients'],['caseClients','caseId','cases','clientId','clients'],['caseOpponents','caseId','cases','opponentId','opponents'],
       ['caseRelations','sourceCaseId','cases','targetCaseId','cases'],['powersOfAttorney','clientId','clients','fileId','files'],
@@ -40,7 +41,9 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
       ['caseNotes','fileId','files','caseId','cases'],['witnesses','caseId','cases'],['expertReports','caseId','cases'],['judgments','caseId','cases'],['execution','caseId','cases'],
       ['serviceRecords','fileId','files','caseId','cases'],['serviceRecords','hearingId','hearings','partyId','fileParties'],
       ['serviceRecords','previousServiceId','serviceRecords','bailiffId','bailiffs'],
-      ['fees','fileId','files'],['feePayments','feeId','fees'],['documentReferences','fileId','files']
+      ['fees','fileId','files'],['feePayments','feeId','fees'],['documentReferences','fileId','files'],
+      // مركز العمل: روابط المهام المستقلة معرّفات فقط. الطبقة (overlay) لا تُفحص مقابل مصدرها عمدًا: فقدان المصدر حالة مسموحة («المصدر غير متاح حاليًا»).
+      ['workItems','fileId','files','clientId','clients'],['workItems','caseId','cases'],['workItemComments','workItemId','workItems'],['workItemRecurrences','fileId','files','clientId','clients']
     ];
     for(const rule of relationRules){
       if(out.relationIssues.length>=maxIssues)break;
@@ -55,6 +58,14 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
       if(!ctx.db.objectStoreNames.contains(name))continue;
       await scan(ctx.db,name,row=>{if(out.dataIssues.length>=maxIssues)return;const missing=fields.filter(k=>!has(row,k));if(missing.length)out.dataIssues.push({type:'missing-required',store:name,id:row.id,fields:missing})});
     }
+    if(ctx.db.objectStoreNames.contains('workItems'))await scan(ctx.db,'workItems',row=>{
+      if(out.dataIssues.length>=maxIssues)return;
+      const bad=[];
+      if(row.kind==='native'){for(const k of ['id','title','status','createdAt'])if(!has(row,k))bad.push(k);if(row.sourceType!=='task'||row.sourceId!==row.id)bad.push('sourceId')}
+      else if(row.kind==='overlay'){for(const k of ['id','sourceType','sourceId'])if(!has(row,k))bad.push(k);if(row.id!==`${row.sourceType}::${row.sourceId}`)bad.push('id')}
+      else bad.push('kind');
+      if(bad.length)out.dataIssues.push({type:'work-item-invalid',store:'workItems',id:row.id,fields:bad});
+    });
     for(const name of ['clients','files','cases','opponents']){
       if(!ctx.db.objectStoreNames.contains(name))continue;
       await scan(ctx.db,name,row=>{if(out.softDeleteIssues.length>=maxIssues)return;if(row.isDeleted&&(!row.deletedAt||!row.deletedBy))out.softDeleteIssues.push({type:'deleted-without-audit',store:name,id:row.id});if(row.isDeleted===false&&row.deletedAt)out.softDeleteIssues.push({type:'active-with-delete-date',store:name,id:row.id})});

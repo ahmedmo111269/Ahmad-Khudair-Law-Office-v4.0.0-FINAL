@@ -6,6 +6,8 @@ export class Repository{
  constructor(ctx,store){this.ctx=ctx;this.store=store}
  async get(id){this.ctx.assert();return req(this.ctx.db.transaction(this.store,'readonly').objectStore(this.store).get(id))}
  async getMany(ids=[]){this.ctx.assert();const unique=[...new Set((ids||[]).filter(Boolean))];if(!unique.length)return [];const tx=this.ctx.db.transaction(this.store,'readonly'),s=tx.objectStore(this.store);return new Promise((resolve,reject)=>{const out=[];let left=unique.length;for(const id of unique){const r=s.get(id);r.onerror=()=>reject(r.error);r.onsuccess=()=>{if(r.result&&!r.result.isDeleted)out.push(r.result);if(--left===0)resolve(out)}}})}
+ /** Keyed read that also returns soft-deleted rows (callers decide what a deleted/archived row means, e.g. work-item overlays). */
+ async getManyRaw(ids=[]){this.ctx.assert();const unique=[...new Set((ids||[]).filter(Boolean))];if(!unique.length)return [];const tx=this.ctx.db.transaction(this.store,'readonly'),s=tx.objectStore(this.store);return new Promise((resolve,reject)=>{const out=[];let left=unique.length;for(const id of unique){const r=s.get(id);r.onerror=()=>reject(r.error);r.onsuccess=()=>{if(r.result)out.push(r.result);if(--left===0)resolve(out)}}})}
  async all(limit=5000){this.ctx.assert();if(limit>100000)throw new AppError(ERR.VALIDATION,'حد القراءة كبير جدًا. استخدم pagination بدل القراءة الكاملة.');return req(this.ctx.db.transaction(this.store,'readonly').objectStore(this.store).getAll(null,limit))}
  async put(row){this.ctx.assert();return req(this.ctx.db.transaction(this.store,'readwrite').objectStore(this.store).put(row))}
  async add(row){this.ctx.assert();return req(this.ctx.db.transaction(this.store,'readwrite').objectStore(this.store).add(row))}

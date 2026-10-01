@@ -22,7 +22,7 @@ export function hasLegalFileColumns(store) {
   return ['clients','opponents','files','cases','hearings','procedures','judgments',
     'fileRelations','fileParties','serviceRecords','appointments','communications',
     'powersOfAttorney','caseNotes','expertReports','execution','fees','feePayments',
-    'documentReferences','activityLog','witnesses','agenda'].includes(store);
+    'documentReferences','activityLog','witnesses','agenda','workItems'].includes(store);
 }
 
 export function createGridRelations(office, store) {

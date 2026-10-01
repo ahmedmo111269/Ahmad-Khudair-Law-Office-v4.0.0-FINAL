@@ -34,7 +34,11 @@ export const STORE = Object.freeze({
   assets: 'assets',
   fileAssets: 'fileAssets',
   serviceRecords: 'serviceRecords',
-  bailiffs: 'bailiffs'
+  bailiffs: 'bailiffs',
+  // v14 — مركز العمل (Work Center). مخازن تشغيلية فقط؛ لا تنسخ أي بيانات قانونية من الملفات/الجلسات/الموكلين.
+  workItems: 'workItems',
+  workItemComments: 'workItemComments',
+  workItemRecurrences: 'workItemRecurrences'
 });
 
 // Index declarations use short aliases for compound keys. Schema upgrades are additive:
@@ -82,7 +86,17 @@ const IDX = {
     bailiffId: 'bailiffId', type: 'type', status: 'status', createdAt: 'createdAt', submittedAt: 'submittedAt', serviceDate: 'serviceDate',
     recordState: 'recordState', a: ['fileId', 'serviceDate'], b: ['status', 'submittedAt'], c: ['fileId', 'recordState']
   },
-  bailiffs: { nameNormalized: 'nameNormalized', court: 'court', section: 'section', office: 'office', activeStatus: 'activeStatus' }
+  bailiffs: { nameNormalized: 'nameNormalized', court: 'court', section: 'section', office: 'office', activeStatus: 'activeStatus' },
+  // v14. صف واحد لكل «عنصر عمل مستقل» (kind='native') أو «طبقة تشغيلية» فوق سجل أصلي (kind='overlay', id='<store>::<sourceId>').
+  // dueDate: '' للمهام بلا موعد حتى تُفهرس (النص الفارغ مفتاح صالح) أما null/undefined فلا تُفهرس.
+  workItems: {
+    kind: 'kind', dueDate: 'dueDate', status: 'status', completedAt: 'completedAt', pinnedAt: 'pinnedAt', archivedAt: 'archivedAt',
+    sourceType: 'sourceType', sourceId: 'sourceId', fileId: 'fileId', caseId: 'caseId', clientId: 'clientId', relatedId: 'relatedId',
+    recurrenceId: 'recurrenceId', createdAt: 'createdAt', updatedAt: 'updatedAt',
+    a: ['kind', 'dueDate'], b: ['recurrenceId', 'occurrenceDate'], c: ['status', 'dueDate']
+  },
+  workItemComments: { workItemId: 'workItemId', createdAt: 'createdAt', a: ['workItemId', 'createdAt'] },
+  workItemRecurrences: { status: 'status', startDate: 'startDate', fileId: 'fileId', createdAt: 'createdAt' }
 };
 
 export const SCHEMA = {};
@@ -97,6 +111,24 @@ for (const [name, indexes] of Object.entries(IDX)) {
   SCHEMA[name] = { keyPath: 'id', indexes: copy };
 }
 export const STORES = Object.values(STORE);
+
+// Official, additive migration registry. Each entry is the complete description of what an upgrade to `version`
+// does to an existing database. Upgrades never rewrite, move or delete rows (see ADR in PROJECT_MAP).
+export const SCHEMA_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    version: 14,
+    title: 'مركز العمل: عناصر العمل والتعليقات وتعريفات التكرار',
+    addsStores: Object.freeze(['workItems', 'workItemComments', 'workItemRecurrences']),
+    destructive: false,
+    backfill: false
+  })
+]);
+
+/** Pure description of the work an upgrade will do (used by tests, diagnostics and backup/restore inspection). */
+export function migrationPlan(fromVersion = 0, toVersion = Infinity) {
+  const steps = SCHEMA_MIGRATIONS.filter(step => step.version > fromVersion && step.version <= toVersion);
+  return { steps, addsStores: [...new Set(steps.flatMap(step => step.addsStores))], destructive: steps.some(step => step.destructive) };
+}
 
 export function ensureSchema(db) {
   for (const name of STORES) {

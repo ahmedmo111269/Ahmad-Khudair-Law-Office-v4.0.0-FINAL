@@ -11,6 +11,8 @@ import {saveEntity} from '../services/entity-save.js';
 import {fileParties} from '../services/legal-files.js';
 import {Clock} from '../core/clock.js';
 import {userError,normalizeError} from '../core/errors.js';
+import {workItemFieldOverrides} from '../domain/work-items.js';
+import {getWorkConfig} from '../services/work-config.js';
 
 const SEARCH_INDEX={clients:'fullNameNormalized',files:'titleNormalized',cases:'caseNumber',opponents:'nameNormalized'};
 let dl=0;
@@ -31,7 +33,8 @@ const NEW_FILE_FIELDS=[
 
 export function formFields(store,{isNew=false,only=null}={}){
  if(store==='files'&&isNew)return NEW_FILE_FIELDS;
- let f=(ENTITIES[store]?.fields||[]).filter(x=>x.t!=='readonly');
+ let f=(ENTITIES[store]?.fields||[]).filter(x=>x.t!=='readonly'&&!(x.newOnly&&!isNew));
+ if(store==='workItems')f=workItemFieldOverrides(f,getWorkConfig());
  if(only)f=f.filter(x=>only.includes(x.k));
  return f;
 }
@@ -111,6 +114,7 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
   if(store==='procedures'){values.status=values.status||'open';values.priority=values.priority||'normal'}
   if(store==='fileParties'){values.partyKind=values.partyKind||'client';values.isActive=values.isActive??true;values.isPrimary=values.isPrimary??false;}
   if(store==='hearings')values.status=values.status||'مجدولة';
+  if(store==='workItems'){values.priority=values.priority||'medium';values.status=values.status||'notStarted'}
   if(store==='serviceRecords'){values.actionType=values.actionType||'إعلان';values.status=values.status||'مسودة';values.year=values.year||Number(Clock.today().slice(0,4))}
   if(store==='bailiffs'&&values.isActive===undefined)values.isActive=true;
   if(store==='fees')values.currency=values.currency||'جنيه';

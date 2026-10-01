@@ -352,6 +352,22 @@ export const ENTITIES={
   {k:'relationType',l:'نوع العلاقة',t:'lookup',lk:'fileRelationType',grid:true,g:'العلاقة'},
   {k:'targetFileId',l:'الملف المرتبط',t:'ref',ref:'files',req:true,grid:true,g:'العلاقة'},
   {k:'notes',l:'ملاحظات',t:'textarea',grid:true,g:'العلاقة'}]},
+ // v14 — مركز العمل: المهام المستقلة فقط (الجلسات/الأعمال/المواعيد تبقى كيانات أصلية). التسميات الظاهرة تُبدَّل بإعدادات المستخدم عبر workItemFieldOverrides.
+ workItems:{label:'مهمة',plural:'المهام وعناصر العمل',title:r=>r.title||'مهمة',route:'actionCenter',dateField:'dueDate',dateIndex:'dueDate',fields:[
+  {k:'title',l:'عنوان المهمة',t:'text',req:true,grid:true,g:'المهمة'},
+  {k:'description',l:'الوصف / الملاحظات',t:'textarea',grid:true,g:'المهمة'},
+  {k:'dueDate',l:'الموعد',t:'date',grid:true,g:'الموعد'},
+  {k:'dueTime',l:'الوقت (اختياري)',t:'time',g:'الموعد'},
+  {k:'priority',l:'الأولوية',t:'select',opts:[['urgent','عاجل جدًا'],['high','مرتفعة'],['medium','متوسطة'],['low','منخفضة']],grid:true,g:'التصنيف'},
+  {k:'status',l:'الحالة',t:'select',opts:[['notStarted','لم يبدأ'],['inProgress','قيد التنفيذ'],['waiting','بانتظار'],['postponed','مؤجل'],['done','مكتمل'],['cancelled','ملغى']],grid:true,g:'التصنيف'},
+  {k:'type',l:'النوع',t:'lookup',lk:'workItemType',grid:true,g:'التصنيف'},
+  {k:'tags',l:'الوسوم (افصل بفاصلة)',t:'text',grid:true,g:'التصنيف'},
+  {k:'fileId',l:'الملف (اختياري)',t:'ref',ref:'files',g:'الربط (اختياري)'},
+  {k:'caseId',l:'القضية / المرحلة (اختياري)',t:'ref',ref:'cases',g:'الربط (اختياري)'},
+  {k:'clientId',l:'الموكل (اختياري)',t:'ref',ref:'clients',g:'الربط (اختياري)'},
+  {k:'recurFreq',l:'التكرار',t:'select',opts:[['daily','يوميًا'],['weekly','أسبوعيًا'],['monthly','شهريًا'],['yearly','سنويًا']],newOnly:true,g:'التكرار (اختياري)'},
+  {k:'recurInterval',l:'كل كم مرة (1 = كل مرة)',t:'number',newOnly:true,g:'التكرار (اختياري)'},
+  {k:'recurUntil',l:'ينتهي في (اختياري)',t:'date',newOnly:true,g:'التكرار (اختياري)'}]},
  activityLog:{label:'نشاط',plural:'سجل النشاط',title:r=>r.summary||'نشاط',dateField:'timestamp',dateIndex:'timestamp',readOnly:true,fields:[
   {k:'timestamp',l:'الوقت',t:'readonly',dt:'datetime',grid:true},
   {k:'entityType',l:'نوع السجل',t:'readonly',grid:true},
