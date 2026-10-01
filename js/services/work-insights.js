@@ -123,4 +123,3 @@ export async function productivity(office, {today = Clock.today(), days = 14, si
   const total = series.reduce((n, d) => n + d.count, 0);
   return {days, from, to: today, series, total, average: Math.round((total / days) * 10) / 10, bySource, summary, capped: done.hasMore};
 }
-

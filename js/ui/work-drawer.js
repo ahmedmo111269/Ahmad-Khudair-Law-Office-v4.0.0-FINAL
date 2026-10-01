@@ -180,4 +180,3 @@ export async function openWorkDrawer(wc, id) {
   });
   return true;
 }
-

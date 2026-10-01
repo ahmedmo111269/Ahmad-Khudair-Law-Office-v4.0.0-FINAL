@@ -418,4 +418,3 @@ export async function refreshWorkBadge(app) {
     if (n) btn.insertAdjacentHTML('beforeend', `<span class="nav-badge"${n > 99 ? ` title="${n}"` : ''}>${n > 99 ? '99+' : n}</span>`);
   } catch (error) { if (error?.name !== 'AbortError') console.error('work badge', error); }
 }
-
