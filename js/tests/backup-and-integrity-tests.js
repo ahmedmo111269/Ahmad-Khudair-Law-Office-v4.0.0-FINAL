@@ -60,7 +60,7 @@ export async function runBackupAndIntegrityTests(test, expect) {
   test('v13 database declares every store and index (including service and party relations)', () => {
     expect(out.storeListMatches).toBe(true);
     expect(out.indexes.every(row => row.status === 'ok')).toBe(true);
-    expect(out.indexCount).toBe(267);   // 184 (v13+v14) + 83 فهرسًا لمخازن ومجالات قسم التنفيذ في v15 (11 مخزنًا جديدًا + فهارس judgments/execution)
+    expect(out.indexCount).toBe(284);   // 267 فهرسًا حتى v15 + 17 فهرسًا لمخازن المزامنة الأربعة في v16
     expect(out.indexes.length).toBe(out.indexCount);
   });
   test('v13 deep integrity scan resolves linked party, file, bailiff and service records', () => {
@@ -71,7 +71,7 @@ export async function runBackupAndIntegrityTests(test, expect) {
   test('backup v3 manifest and digest validate, and tampering is rejected', () => {
     expect(out.backup.valid).toBe(true);
     expect(out.backup.integrity.verified).toBe(true);
-    expect(out.backup.schemaVersion).toBe(15);
+    expect(out.backup.schemaVersion).toBe(16);
     expect(out.tamperRejected).toBe(true);
   });
   test('full replace restore retains service data and removes destination-only rows', () => {

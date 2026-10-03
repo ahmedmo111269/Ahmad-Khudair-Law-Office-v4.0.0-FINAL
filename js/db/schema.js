@@ -52,7 +52,12 @@ export const STORE = Object.freeze({
   differenceRecords: 'differenceRecords',
   executionSettlements: 'executionSettlements',
   executionAdjustments: 'executionAdjustments',
-  executionTemplates: 'executionTemplates'
+  executionTemplates: 'executionTemplates',
+  // v16 — سجل تغييرات مزامنة تفاضلي، حالة/أجهزة/تعارضات داخل قاعدة IndexedDB نفسها.
+  syncChanges: 'syncChanges',
+  syncState: 'syncState',
+  syncConflicts: 'syncConflicts',
+  syncPeers: 'syncPeers'
 });
 
 // Index declarations use short aliases for compound keys. Schema upgrades are additive:
@@ -141,8 +146,20 @@ const IDX = {
   },
   executionSettlements: { executionId: 'executionId', status: 'status', newJudgmentId: 'newJudgmentId', fileId: 'fileId', a: ['executionId', 'status'] },
   executionAdjustments: { executionId: 'executionId', ledgerId: 'ledgerId', kind: 'kind', status: 'status', fileId: 'fileId', a: ['executionId', 'status'] },
-  executionTemplates: { kind: 'kind', createdAt: 'createdAt' }
+  executionTemplates: { kind: 'kind', createdAt: 'createdAt' },
+  syncChanges: {
+    changeId: 'changeId', originDeviceId: 'originDeviceId', originSequence: 'originSequence',
+    entity: 'entity', entityId: 'entityId', changedAt: 'changedAt',
+    a: ['originDeviceId', 'originSequence'], b: ['entity', 'entityId']
+  },
+  syncState: {},
+  syncConflicts: { status: 'status', entity: 'entity', entityId: 'entityId', peerDeviceId: 'peerDeviceId', detectedAt: 'detectedAt', a: ['status', 'detectedAt'], b: ['entity', 'entityId'] },
+  syncPeers: { deviceId: 'deviceId', lastSyncAt: 'lastSyncAt' }
 };
+
+const UNIQUE_INDEXES = Object.freeze({
+  syncChanges: Object.freeze(['changeId', 'originDeviceId_originSequence'])
+});
 
 export const SCHEMA = {};
 for (const [name, indexes] of Object.entries(IDX)) {
@@ -153,13 +170,32 @@ for (const [name, indexes] of Object.entries(IDX)) {
   for (const alias of ['a', 'b', 'c']) {
     if (indexes[alias]) copy[indexes[alias].join('_')] = indexes[alias];
   }
-  SCHEMA[name] = { keyPath: 'id', indexes: copy };
+  SCHEMA[name] = {
+    keyPath: name === STORE.syncChanges ? 'sequence' : 'id',
+    autoIncrement: name === STORE.syncChanges,
+    indexes: copy,
+    uniqueIndexes: UNIQUE_INDEXES[name] || []
+  };
 }
 export const STORES = Object.values(STORE);
+// المخازن التشغيلية وحدها تدخل في Change Log. تُستثنى سجلات النشاط/المزامنة والميتا لأنها بنية تحتية؛
+// يُسجَّل نشاط المزامنة في Activity Log الموجود بدل نسخ السجل كاملًا بين الأجهزة.
+export const SYNCABLE_STORES = Object.freeze(STORES.filter(name => ![
+  STORE.activityLog, STORE.meta, STORE.syncChanges, STORE.syncState, STORE.syncConflicts, STORE.syncPeers
+].includes(name)));
 
 // Official, additive migration registry. Each entry is the complete description of what an upgrade to `version`
 // does to an existing database. Upgrades never rewrite, move or delete rows (see ADR in PROJECT_MAP).
 export const SCHEMA_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    version: 16,
+    title: 'المزامنة ثنائية الاتجاه: سجل تغييرات تفاضلي، حالة الأجهزة، والتعارضات مع Tombstones',
+    addsStores: Object.freeze(['syncChanges', 'syncState', 'syncConflicts', 'syncPeers']),
+    // مخازن وفهارس فقط؛ لا تعديل أو حذف لبيانات المكتب القائمة. خط الأساس القديم يُنشأ لاحقًا
+    // على دفعات وبعد موافقة المستخدم وأخذ النسخة الاحتياطية، وليس أثناء فتح التطبيق.
+    destructive: false,
+    backfill: false
+  }),
   Object.freeze({
     version: 15,
     title: 'قسم التنفيذ: الشرائح والحركات المالية والتخصيصات والمحاضر والتوكيلات والفروق والتسويات والإجراءات',
@@ -190,9 +226,14 @@ export function migrationPlan(fromVersion = 0, toVersion = Infinity) {
 export function ensureSchema(db) {
   for (const name of STORES) {
     const def = SCHEMA[name];
-    const store = db.objectStoreNames.contains(name) ? null : db.createObjectStore(name, { keyPath: def.keyPath });
+    const store = db.objectStoreNames.contains(name) ? null : db.createObjectStore(name, {
+      keyPath: def.keyPath,
+      ...(def.autoIncrement ? {autoIncrement: true} : {})
+    });
     if (store) {
-      for (const [indexName, keyPath] of Object.entries(def.indexes)) store.createIndex(indexName, keyPath, { unique: false });
+      for (const [indexName, keyPath] of Object.entries(def.indexes)) {
+        store.createIndex(indexName, keyPath, {unique: def.uniqueIndexes.includes(indexName)});
+      }
     }
   }
 }
@@ -202,7 +243,7 @@ export function upgradeSchema(db, tx) {
   for (const [name, def] of Object.entries(SCHEMA)) {
     const store = tx.objectStore(name);
     for (const [indexName, keyPath] of Object.entries(def.indexes)) {
-      if (!store.indexNames.contains(indexName)) store.createIndex(indexName, keyPath, { unique: false });
+      if (!store.indexNames.contains(indexName)) store.createIndex(indexName, keyPath, {unique: def.uniqueIndexes.includes(indexName)});
     }
   }
 }

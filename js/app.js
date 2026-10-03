@@ -26,6 +26,10 @@ import {analyticsPage,bindAnalytics} from './modules/analytics.js';
 import {integrityPage,bindIntegrity} from './modules/integrity.js';
 import {repairPage,bindRepair} from './modules/repair.js';
 import {renderSettings,bindSettings} from './modules/settings.js';
+import {renderSyncPage,bindSyncPage} from './modules/sync.js';
+import {syncStatus} from './services/sync-engine.js';
+import {networkStatus,ONLINE,OFFLINE} from './core/network-status.js';
+import {PWAUpdateService} from './services/pwa-updates.js';
 import {runMaintenance} from './services/maintenance.js';
 import {initTheme} from './ui/theme.js';
 import {bindThemeMenu} from './ui/theme-menu.js';
@@ -54,6 +58,7 @@ const PAGES={
  repair:{title:'مركز الإصلاح والاسترداد',render:app=>repairPage(app),bind:app=>bindRepair(app)},
  databases:{title:'قواعد البيانات',render:app=>renderDatabases(app),bind:app=>bindDatabases(app)},
  backup:{title:'النسخ الاحتياطي',render:app=>renderBackup(app),bind:app=>bindBackup(app)},
+ sync:{title:'المزامنة',render:app=>renderSyncPage(app),bind:app=>bindSyncPage(app)},
  settings:{title:'الإعدادات',render:app=>renderSettings(app),bind:app=>bindSettings(app)}
 };
 for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>listPage(app,s,q),bind:app=>bindListPage(app,s)};
@@ -106,6 +111,25 @@ class App{
   // تفويض واحد لكل عناصر التنقل، فيبقى صالحًا بعد أي إعادة رسم للشريط (التخصيص مثلًا)
   $('#sidebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
   this.initShortcuts();
+  this.bindNetworkAwareness();
+ }
+ bindNetworkAwareness(){
+  networkStatus.start();
+  this.networkUnsubscribe=networkStatus.subscribe(({status,changed})=>{
+   updateNetworkBadge(status);
+   if(!changed)return;
+   if(status===OFFLINE){toast('📵 لا يوجد اتصال بالإنترنت — البرنامج يعمل بوضع Offline.','info',{duration:5200});return}
+   const context=this.ctx;
+   if(!context){toast('🟢 عاد الاتصال بالإنترنت.','ok');return}
+   syncStatus(context).then(state=>{
+    if(!networkStatus.isOnline())return;
+    if(state.pendingChanges||state.unresolvedConflicts){
+     toast(`🟢 عاد الاتصال. توجد ${state.pendingChanges} تغييرات جاهزة للمزامنة؛ لم تبدأ تلقائيًا.`, 'info', {duration:7500,action:()=>this.go('sync'),actionLabel:'مزامنة الآن'});
+    }else toast('🟢 عاد الاتصال بالإنترنت.','ok');
+   }).catch(()=>toast('🟢 عاد الاتصال بالإنترنت.','ok'));
+  },{immediate:true});
+  this.pwaUpdates=new PWAUpdateService({network:networkStatus,notify:(message,type='info')=>toast(message,type,{duration:6000})});
+  this.pwaUpdates.start().catch(error=>console.info('PWA update service unavailable',error));
  }
  // اختصارات لوحة المفاتيح: Ctrl+K اللوحة، ? المساعدة، Alt+رقم للتنقل السريع
  initShortcuts(){
@@ -184,5 +208,12 @@ class App{
  fail(e){const err=normalizeError(e);console.error(err.code,err,e);const retry=this.route||'dashboard';$('#main-content').innerHTML=`<div class="error-box" role="alert"><h2>تعذر تنفيذ العملية</h2><p>${esc(userError(err))}</p><div class="error-actions"><button class="primary" data-retry>إعادة المحاولة</button><button class="ghost" data-error-home>الرئيسية</button><button class="ghost" data-error-diagnostics>سلامة البيانات</button></div><small class="muted">رمز التشخيص: ${esc(err.code)}</small></div>`;document.querySelector('[data-retry]')?.addEventListener('click',()=>this.go(retry,{replace:true}));document.querySelector('[data-error-home]')?.addEventListener('click',()=>this.go('dashboard'));document.querySelector('[data-error-diagnostics]')?.addEventListener('click',()=>this.go('integrity'))}
 }
 const app=new App();
-function updateNetworkBadge(){const e=document.querySelector('#network-badge');if(!e)return;e.textContent=navigator.onLine?'محلي':'وضع عدم الاتصال';e.classList.toggle('is-offline',!navigator.onLine);e.classList.toggle('is-online',navigator.onLine)}
-window.addEventListener('online',updateNetworkBadge);window.addEventListener('offline',updateNetworkBadge);window.addEventListener('error',e=>{console.error('window error',e.error||e.message)});window.addEventListener('unhandledrejection',e=>{console.error('unhandled rejection',e.reason)});updateNetworkBadge();window.__LAW_OFFICE_APP__=app;initTheme();decorateNav();installDateInputs(document.body);bindThemeMenu(app);app.boot();
+function updateNetworkBadge(status=networkStatus.getState()){
+ const e=document.querySelector('#network-badge');if(!e)return;
+ const online=status===ONLINE;
+ e.textContent=online?'🟢 متصل':'⚪ عدم الاتصال';
+ e.setAttribute('aria-label',online?'متصل بالشبكة؛ البيانات محلية':'عدم الاتصال؛ البرنامج يعمل محليًا');
+ e.title=online?'الاتصال بالشبكة متاح؛ بيانات المكتب محفوظة محليًا':'لا يوجد اتصال بالإنترنت — استمر في العمل محليًا';
+ e.classList.toggle('is-offline',!online);e.classList.toggle('is-online',online);
+}
+window.addEventListener('error',e=>{console.error('window error',e.error||e.message)});window.addEventListener('unhandledrejection',e=>{console.error('unhandled rejection',e.reason)});updateNetworkBadge();window.__LAW_OFFICE_APP__=app;initTheme();decorateNav();installDateInputs(document.body);bindThemeMenu(app);app.boot();

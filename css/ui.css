@@ -196,7 +196,7 @@
  .top-actions{gap:4px}
  .nav-cluster span{font-size:0}
  .nav-cluster button{padding:8px 9px;font-size:15px}
- .topbar h1{font-size:16px}#db-badge,#network-badge{display:none}
+ .topbar h1{font-size:16px}#db-badge{display:none}#network-badge{display:inline-flex;font-size:.68rem;padding:3px 7px;white-space:nowrap}
  .agenda-layout{grid-template-columns:1fr}
  .record-head{padding:12px}.record-head .head-actions{width:100%}
 }

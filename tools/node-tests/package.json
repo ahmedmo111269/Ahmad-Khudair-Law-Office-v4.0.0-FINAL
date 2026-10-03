@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node run-tests.mjs",
     "test:grid-browser": "node grid-browser-tests.mjs",
-    "test:execution-browser": "node execution-browser-tests.mjs"
+    "test:execution-browser": "node execution-browser-tests.mjs",
+    "test:offline-sync-browser": "node offline-sync-browser-tests.mjs"
   },
   "keywords": [],
   "author": "",
