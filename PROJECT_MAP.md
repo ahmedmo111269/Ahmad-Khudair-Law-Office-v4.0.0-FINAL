@@ -1,3 +1,25 @@
+# v5.10.0 — خريطة تحديث واجهة مركز التنفيذ (شرح لكل خانة + مسار مرحلي + مثال قابل للزرع)
+
+**2026-10-03 — تعليمي/تشغيلي بلا تغيير Schema أو مسارات أو خدمات قراءة-كتابة.** المطلوب: أن يفهم المستخدم ماذا يكتب في كل خانة وكيف يُحسب الرصيد، مع مثال عملي وبيانات تجريبية تبقى في التطبيق. `SCHEMA_VERSION=17` و`APP_VERSION=5.10.0` كما هما.
+
+## الطبقات والملفات
+
+`js/modules/execution-center.js` (الدليل والمثال والمسار) ← `js/ui/execution-forms.js` (شرح كل خانة) ← `js/services/execution-demo.js` (بيانات المثال) ← `css/execution.css` (أنماط الشرح والأقسام التعليمية) ← `sw.js` (precache).
+
+| الملف | الدور |
+|---|---|
+| `js/modules/execution-center.js` | `GUIDE_STEPS` و`guideSectionMarkup` (دليل «ابدأ هنا» 6 مراحل: ماذا تسجل/ما الناتج/أي زر)، `EXAMPLE_ROWS` و`exampleSectionMarkup` (مثال 12×3,000 + 6×1,000 − 9,000 = 33,000 بمعادلة ①−②=③)، `pathSectionMarkup` (مسار البطاقة 6 مراحل مع ✓/○ وN من 6 وزر تسجيل مباشر)، أزرار `data-demo-seed-exec`/`data-demo-open` |
+| `js/ui/execution-forms.js` | `field(label, html, hint, key)` تطبع `<small class="exec-hint">` تحت كل خانة — **115 استدعاءً كلها موصوفة**؛ شرح خانات جدول التوزيع داخل `.exec-alloc-row` (تحصيل + إعادة توزيع) وخانات إدراج التوكيل الثلاثة `.exec-include`؛ `showErrors` يعلّم `.has-error` على الخانة |
+| `js/services/execution-demo.js` | `seedFamilyExecutionExample(office,id?)`: نموذج أسرة كامل معلَّم بـ〔تجريبي〕 إضافة-only idempotent (id ثابت `executionFamilyDemo`)، و`backdate()` يضبط `createdAt/updatedAt` تاريخيًا (حالة معرفة حتى 30/06/2025 = رصيد 9,000، توكيل 9,000+24,000=33,000) — نمط `demo-seed.js` نفسه |
+| `js/services/execution-poa.js` | تفسير رفض إعادة التوكيل بلا فترة متبقية (يسمّي تاريخي نهاية التوكيل وبداية الاستحقاق)، وحراسة حفظ `toDate < fromDate` في المسار القديم (كما يرفضه FEAS) |
+| `css/execution.css` | `.exec-steps/.exec-step`، `.exec-example/.exec-big-eq/.exec-eq-box`، `.exec-path/.exec-path-step(is-done)`، `.exec-hint` (بما فيها امتدادها تحت صفوف التوزيع واختيارات التوكيل)، `.exec-form-banner`، `.exec-field.has-error`، استجابة ≤640px |
+| `sw.js` | إضافة `./js/services/execution-demo.js` إلى ASSETS فقط (الاسم `ahmad-khudair-law-office-v5.10.0-feas-offline` ثابت — نمط timeline.js) |
+| `js/tests/execution-tests.js` | +3 اختبارات الزارع (بناء الأرقام الدقيقة، التوكيل عبر `balanceAsOf` وضع المعرفة، عدم التكرار) — الملف الآن **68 اختبارًا** |
+
+## نتائج التحقق
+
+Node **377/377**؛ Chromium تنفيذ **32/32** وFEAS **10/10**؛ `grid-browser` مع `GRID_BASELINE=b418f937` بلا إخفاق جديد (نفس الخمسة القديمة) بما فيها فحص SW/precache الكامل؛ تدقيق Chromium مؤقت على 22 نافذة: كل خانة عليها شرح وصفر خانة يتيمة. **NOT VERIFIED:** اعتماد قانوني، طابعة فعلية، متصفحات غير Chromium.
+
 # v5.10.0 — خريطة محرك الأسرة FEAS · Schema 17
 
 **2026-10-03 — محرك حساب أسري قابل للتدقيق وإعادة البناء، مع الاعتراف الصريح بالفترات.** العقد التفصيلي: [`docs/FEAS-AUDIT-DESIGN-DELTA.md`](docs/FEAS-AUDIT-DESIGN-DELTA.md). `APP_VERSION=5.10.0`, `SCHEMA_VERSION=17`, **56 مخزنًا و308 فهارس**. الترحيل v17 إضافي فقط: مخزنا الالتزام والفترة + فهارس المصدر ومنع الازدواج؛ لا backfill مالي ولا تحويل لسجلات v5.8 القديمة.

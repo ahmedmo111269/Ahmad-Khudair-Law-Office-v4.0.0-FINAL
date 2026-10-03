@@ -15,6 +15,7 @@ import * as POA from '../services/execution-poa.js';
 import * as B from '../services/execution-balance.js';
 import * as PR from '../services/execution-print.js';
 import * as MIG from '../services/execution-migration.js';
+import {seedFamilyExecutionExample, familyExecutionExampleState} from '../services/execution-demo.js';
 import {searchStore} from '../services/search-engine.js';
 import {deepHealth} from '../services/integrity.js';
 import * as E from '../domain/execution.js';
@@ -1095,6 +1096,61 @@ export async function runExecutionTests(test, expect) {
       expect(balance.summary.integrityBlocked).toBe(true);
       expect(balance.summary.finalEntitlementMinor).toBe(null);
       expect(balance.summary.equations.length).toBe(0);
+    } finally { closeEnv(e); }
+  });
+
+  // ===== مثال «تنفيذ الأسرة» التجريبي: نفس أرقام قسم «مثال بالأرقام» =====
+  test('تنفيذ/مثال: الزرع يبني سلسلة كاملة بأرقام المثال 42,000 − 9,000 = 33,000', async () => {
+    const e = await env();
+    try {
+      const out = await seedFamilyExecutionExample(e.office);
+      expect(out.reused).toBe(false);
+      const summary = await EX.summarizeExecution(e.office, out.execution);
+      expect(summary.finalEntitlement).toBe(42000);   // 12×3000 + 6×1000
+      expect(summary.originalEntitlement).toBe(36000);
+      expect(summary.collected).toBe(9000);           // 3 شهور × 3000
+      expect(summary.remaining).toBe(33000);
+      expect(summary.differencePart).toBe(6000);
+      expect(summary.periodCount).toBe(12);
+      // السلسلة: حكمان وشريحتان وطرفان وتحصيل ومصروف وإجراء
+      expect((await EX.executionJudgments(e.office, out.execution.id)).length).toBe(2);
+      expect((await EX.executionSlices(e.office, out.execution.id)).length).toBe(2);
+      expect((await EX.executionPartyRows(e.office, out.execution.id)).length).toBe(2);
+      expect((await EX.executionReceipts(e.office, out.execution.id)).length).toBe(1);
+      expect((await EX.executionActionRows(e.office, out.execution.id)).length).toBe(1);
+      expect(out.execution.executionType).toBe('family');
+      expect(out.execution.accountingModel).toBe('legacy-v1');
+    } finally { closeEnv(e); }
+  });
+  test('تنفيذ/مثال: تسوية الفروق تنتظر قرار المستخدم والتوكيل = رصيد سابق + فترات جديدة', async () => {
+    const e = await env();
+    try {
+      const out = await seedFamilyExecutionExample(e.office);
+      const settlements = await EX.executionSettlements(e.office, out.execution.id);
+      expect(settlements.length).toBe(1);
+      expect(settlements[0].status).toBe('PENDING_REVIEW');
+      expect(settlements[0].affectedPeriods).toBe(6);
+      const differences = await EX.executionDifferences(e.office, out.execution.id);
+      expect(differences.length).toBe(6);
+      expect(Math.round(differences.reduce((sum, row) => sum + Number(row.differenceAmount), 0))).toBe(6000);
+      const poas = await EX.executionPoaRows(e.office, out.execution.id);
+      expect(poas.length).toBe(1);
+      expect(poas[0].total).toBe(33000); // 9,000 رصيد سابق + 24,000 فترات يوليو–ديسمبر
+      expect(poas[0].previousBalance).toBe(9000);
+      expect(poas[0].baseAmount).toBe(24000);
+    } finally { closeEnv(e); }
+  });
+  test('تنفيذ/مثال: تكرار النقر لا يبني مثالًا ثانيًا (idempotent)', async () => {
+    const e = await env();
+    try {
+      const first = await seedFamilyExecutionExample(e.office);
+      const second = await seedFamilyExecutionExample(e.office);
+      expect(second.reused).toBe(true);
+      expect(second.execution.id).toBe(first.execution.id);
+      const state = await familyExecutionExampleState(e.office);
+      expect(state.exists).toBe(true);
+      expect((await EX.executionJudgments(e.office, first.execution.id)).length).toBe(2);
+      expect((await EX.executionReceipts(e.office, first.execution.id)).length).toBe(1);
     } finally { closeEnv(e); }
   });
 }

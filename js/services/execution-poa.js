@@ -126,9 +126,12 @@ export async function buildPoaDraft(office, {executionId, previousPoaId = '', fr
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
   if (execution.accountingModel === FEAS_MODEL) return buildFeasPoaDraft(office, {execution, executionId, previousPoaId, fromDate, toDate, includePreviousBalance, includeExpenses, stampAmount, extraAmount, extraLabel});
   const previousPoa = previousPoaId ? await office.r.executionPOAs.get(previousPoaId) : null;
+  const rangeExplicit = isIsoDate(fromDate) || isIsoDate(toDate);
   const from = isIsoDate(fromDate) ? fromDate : (previousPoa?.toDate ? localDateAfter(previousPoa.toDate) : (execution.openedDate || localDate()));
   const to = isIsoDate(toDate) ? toDate : (execution.entitlementThroughDate || localDate());
-  if (to < from) throw new AppError(ERR.VALIDATION, 'تاريخ نهاية فترة التوكيل قبل بدايتها.', {toDate: 'تاريخ غير صحيح'});
+  if (to < from) throw new AppError(ERR.VALIDATION, !rangeExplicit && previousPoa
+    ? `لا توجد فترة متبقية لغطائها: التوكيل السابق يغطي حتى ${previousPoa.toDate} والاستحقاق مسجَّل حتى ${execution.entitlementThroughDate || '—'} — حدّث تاريخ سريان الاستحقاق إن كان ممدودًا، أو صحّح نطاق التوكيل.`
+    : 'تاريخ نهاية فترة التوكيل قبل بدايتها.', {toDate: 'قبل تاريخ البداية'});
   const [slices, allocations, ledger, differences] = await Promise.all([
     executionSlices(office, executionId), executionAllocations(office, executionId),
     executionLedgerRows(office, executionId), executionDifferences(office, executionId)
@@ -311,6 +314,7 @@ export async function saveExecutionPoa(office, input, id = null) {
   const old = id ? await office.r.executionPOAs.get(id) : null;
   if (id && !old) throw new AppError(ERR.NOT_FOUND, 'التوكيل غير موجود.');
   if (!(num(input.total) > 0)) throw new AppError(ERR.VALIDATION, 'إجمالي التوكيل يجب أن يكون أكبر من صفر (اختر مكونًا واحدًا على الأقل أو أدخل دمغة/مبلغًا فعليًا).', {total: 'مطلوب'});
+  if (isIsoDate(input.fromDate) && isIsoDate(input.toDate) && input.toDate < input.fromDate) throw new AppError(ERR.VALIDATION, 'تاريخ نهاية التوكيل قبل بدايتها — راجع نطاق التوكيل قبل الحفظ.', {toDate: 'قبل تاريخ البداية'});
   const previousPoa = previousPoaId ? await office.r.executionPOAs.get(previousPoaId) : null;
   if (previousPoaId && !previousPoa) throw new AppError(ERR.VALIDATION, 'التوكيل السابق المحدد غير موجود.');
   if (previousPoa && previousPoa.executionId !== executionId) throw new AppError(ERR.VALIDATION, 'التوكيل السابق يتبع تنفيذًا آخر.');
