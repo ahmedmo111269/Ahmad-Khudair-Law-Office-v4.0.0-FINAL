@@ -32,6 +32,7 @@ import {
 } from '../ui/execution-forms.js';
 import {userError} from '../core/errors.js';
 import {rowText, normQ} from '../services/entity-query.js';
+import {seedFamilyExecutionExample, familyExecutionExampleState} from '../services/execution-demo.js';
 
 const KPI_KEY = 'ui:exec-center:kpi';
 const TYPE_KEY = 'ui:exec-center:type';
@@ -53,6 +54,51 @@ const KPIS = [
   {key: 'completed', label: 'مكتمل السداد', hint: 'لا رصيد متبقٍ مع استحقاق مسجل'}
 ];
 const KPI_BY_KEY = new Map(KPIS.map(kpi => [kpi.key, kpi]));
+
+// ===== دليل «ابدأ هنا» — ترتيب العمل على 6 مراحل =====
+// مرتب ليقرأه المبتدئ من الأول للأخير: ماذا أسجل؟ بأي زر؟ وماذا أحصل عليه؟
+const GUIDE_STEPS = Object.freeze([
+  {
+    n: 1, title: 'افتح سجل التنفيذ', button: '+ تنفيذ جديد',
+    register: 'نوع التنفيذ (أسرة / مدني / جزائي)، الملف القانوني المرتبط به، رقم التنفيذ الرسمي، جهة التنفيذ، وتاريخ الفتح.',
+    result: 'رقم داخلي تلقائي (EX-السنة-الرقم) وتفتح أمامك بطاقة التنفيذ.'
+  },
+  {
+    n: 2, title: 'سجّل أطراف التنفيذ', button: '+ طرف تنفيذ',
+    register: 'من يستحق (الموكل) ومن يُنفَّذ ضده (الخصم)، بالصفة كما هي في ملف المكتب.',
+    result: 'يظهر الطرفان في البطاقة وفي كشف الرصيد والتوكيل.'
+  },
+  {
+    n: 3, title: 'سجّل الحكم', button: '+ حكم',
+    register: 'رقم الحكم وتاريخه، نوع الاستحقاق (نفقة شهرية مثلًا)، قيمة الحكم، و«تاريخ سريان القيمة» — وهو ليس تاريخ الحكم.',
+    result: 'سلسلة الأحكام: أصلي ثم استئناف/حكم لاحق، وتصبح القيمة جاهزة للخطوة 4.'
+  },
+  {
+    n: 4, title: 'أنشئ شريحة القيمة', button: 'شريحة قيمة جديدة',
+    register: 'اربط القيمة بحكمها، المبلغ (مثال 3,000)، الدورية (شهرية)، وبداية السريان (مثال 01/01/2025).',
+    result: 'النظام يقسّم القيمة إلى فترات تلقائيًا (12 شهرًا مثلًا) ويحسب «الاستحقاق النهائي» دون أي كتابة منك.'
+  },
+  {
+    n: 5, title: 'سجّل التحصيل', button: '+ تحصيل',
+    register: 'المبلغ المحصل فعليًا وتاريخه، وطريقة التخصيص على الفترات — أو اترك التخصيص فارغًا ليوزّعه على الأقدم أولًا أمامك.',
+    result: 'محضر مُرقَّم RC-السنة-الرقم، ويُخصم المبلغ من المتبقي فورًا في الرصيد.'
+  },
+  {
+    n: 6, title: 'اقرأ الرصيد وأخرج التوكيل', button: 'كشف الرصيد ثم توكيل',
+    register: 'لا تسجّل أي رقم هنا: الرصيد مشتق (الاستحقاق − المحصل)، والتوكيل يجمع فترات جديدة + رصيد سابق + مصروفاتٍ تختار إدراجها.',
+    result: 'كشف رصيد للطباعة وتوكيل مُرقَّم POA-السنة-الرقم، وأرقامه كلها من السجل.'
+  }
+]);
+
+// ===== المثال الرقمي: نفس أرقام المثال التجريبي المحمّل عبر زر واحد =====
+const EXAMPLE_ROWS = Object.freeze([
+  {step: 'المرحلة 1 — الحكم', text: 'حكم بنفقة شهرية 3,000 جنيه ابتداءً من 01/01/2025 وسُجِّل كشريحة قيمة.', calc: ''},
+  {step: 'المرحلة 2 — تقسيم الفترة', text: 'قسّم النظام المبلغ على شهور السنة:', calc: '12 شهرًا × 3,000 = 36,000 استحقاق أصلي'},
+  {step: 'المرحلة 3 — حكم لاحق (استئناف)', text: 'أُسقيت النفقة إلى 4,000 جنيه من 01/07/2025 — الزيادة 1,000 × 6 شهور متأثرة، ويظهر الفرق كـ«فروق تنتظر قرارك» ولا يُرحَّل قبل اعتمادك:', calc: '6 × 1,000 = 6,000 فرق'},
+  {step: 'المرحلة 4 — الإجمالي', text: 'الاستحقاق النهائي:', calc: '36,000 + 6,000 = 42,000'},
+  {step: 'المرحلة 5 — التحصيل', text: 'محضر تحصيل 9,000 جنيه (يناير + فبراير + مارس، كلٌّ 3,000).', calc: ''},
+  {step: 'المرحلة 6 — المصروف', text: 'رسم تنفيذ 600 جنيه — منفصل عن أصل النفقة، لا ينقص الرصيد، ويدخل التوكيل باختيارك.', calc: ''}
+]);
 
 const kpiPredicate = (key, row) => {
   const summary = row.summary || {};
@@ -108,11 +154,58 @@ function actionButtons(execution) {
   </div>`;
 }
 
+// ===== قسم الدليل: مراحل العمل الست =====
+function guideSectionMarkup() {
+  return `<section class="panel" data-section-id="guide" data-collapse-id="exec-guide" data-collapse-default="open">
+    <div class="panel-head"><h3>ابدأ هنا — الطريقة على 6 مراحل</h3><span class="badge">دليل مبسط</span></div>
+    <p class="muted small">اتبع المراحل بالترتيب من 1 إلى 6. داخل كل نافذة تسجيل ستجد تحت <b>كل مربع إدخال سطرًا شرحًا يخبرك ماذا تكتب فيه</b> — اقرأ السطر قبل التعبئة. الأرقام (الرصيد والاستحقاق) لا تُكتب يدويًا أبدًا؛ النظام يحسبها من ما تسجّله.</p>
+    <ol class="exec-steps">
+      ${GUIDE_STEPS.map(step => `<li class="exec-step">
+        <div class="exec-step-head"><span class="exec-step-num">${step.n}</span><b>${esc(step.title)}</b></div>
+        <p><b>ماذا تسجل:</b> ${esc(step.register)}</p>
+        <p><b>ما الناتج:</b> ${esc(step.result)}</p>
+        <span class="exec-step-btn">الزر: <kbd>${esc(step.button)}</kbd></span>
+      </li>`).join('')}
+    </ol>
+    <div class="exec-family-tip"><b>خاص بتنفيذ الأسرة:</b> نوع الاستحقاق النموذجي «نفقة شهرية»، الدورية «شهرية»، وتاريخ السريان يكون عادة أول يوم بعد تاريخ الحكم (مثال: حكم 10/01/2025 ← سريان 01/01/2025 أو 01/02/2025 — كما ينص المنطوق).</div>
+    <div class="exec-guide-actions">
+      <button type="button" class="primary" data-exec-new>+ تنفيذ جديد (المرحلة 1)</button>
+      <button type="button" class="primary" data-demo-seed-exec>📥 حمّل مثال «تنفيذ أسرة» تجريبيًا جاهزًا</button>
+      <button type="button" class="ghost" data-demo-open>📂 فتح المثال التجريبي</button>
+    </div>
+    <p class="muted small">المثال التجريبي يضيف سجلًا كاملًا معلَّمًا بـ〔تجريبي〕 (موكل وخصم وملف وحكمان وتحصيل وتوكيل…) ولا يمسح ولا يعدّل أي بيانات قائم — احذفه بنفسك عندما تنتهي من التجربة.</p>
+  </section>`;
+}
+
+// ===== قسم المثال الرقمي: كيف يُحسب الرصيد؟ =====
+function exampleSectionMarkup() {
+  return `<section class="panel" data-section-id="example" data-collapse-id="exec-example" data-collapse-default="open">
+    <div class="panel-head"><h3>مثال بالأرقام — كيف يُحسب الرصيد؟</h3><span class="badge">نفس أرقام المثال التجريبي</span></div>
+    <p class="muted small">تخيل تنفيذ أسرة بحكم نفقة شهرية. اتبع المراحل الست التالية — هذه بالضبط الأرقام التي سترىها داخل المثال التجريبي المحمّل:</p>
+    <ol class="exec-example">
+      ${EXAMPLE_ROWS.map(row => `<li><span class="exec-example-step">${esc(row.step)}</span><span>${esc(row.text)}</span>${row.calc ? `<code class="exec-example-calc">${esc(row.calc)}</code>` : ''}</li>`).join('')}
+    </ol>
+    <div class="exec-big-eq" role="group" aria-label="معادلة الرصيد المبسطة">
+      <div class="exec-eq-box"><span>① الاستحقاق النهائي</span><b>42,000</b><small>36,000 أصل + 6,000 فرق حكم</small></div>
+      <span class="exec-eq-op" aria-hidden="true">−</span>
+      <div class="exec-eq-box"><span>② المحصل</span><b>9,000</b><small>3 شهور × 3,000</small></div>
+      <span class="exec-eq-op" aria-hidden="true">=</span>
+      <div class="exec-eq-box exec-eq-result"><span>③ المتبقي (الرصيد)</span><b>33,000</b><small>يُحسب تلقائيًا — لا يُكتب يدويًا</small></div>
+    </div>
+    <div class="exec-example-extra">
+      <p><b>والتوكيل في نفس المثال:</b> رصيد سابق حتى 30/06 (18,000 − 9,000 = <b>9,000</b>) + فترات يوليو–ديسمبر (6 × 4,000 = <b>24,000</b>) = <b>33,000</b> — كل مبلغ في التوكيل يحمل مصدره.</p>
+      <p class="muted small"><b>القاعدة الذهبية:</b> أنت تسجّل فقط (حكم + شريحة قيمة + تحصيل)، والباقي حساب: الاستحقاق النهائي − المحصل = المتبقي، ويُعاد الحساب في كل مرة تضيف فيها سجلًا.</p>
+    </div>
+  </section>`;
+}
+
 // ===== صفحة مركز التنفيذ =====
 export function executionCenterPage(app) {
   registerPageLayout({
     pageId: 'executionCenter', title: 'مركز التنفيذ',
     sections: [
+      {id: 'guide', title: 'ابدأ هنا — الطريقة على 6 مراحل'},
+      {id: 'example', title: 'مثال بالأرقام — كيف يُحسب الرصيد؟'},
       {id: 'kpis', title: 'مؤشرات التنفيذ'},
       {id: 'attention', title: 'يحتاج انتباهي'},
       {id: 'filters', title: 'بحث وتصفية'},
@@ -122,12 +215,14 @@ export function executionCenterPage(app) {
   });
   const st = state(app);
   return `<div class="page-head exec-head"><div><h2>مركز التنفيذ</h2>
-  <p class="muted small">التنفيذ المدني والجزائي والأسرة في مكان واحد: سلسلة الأحكام، فترات القيمة، التحصيل والتخصيص، الفروق، التوكيلات، والرصيد المفكَّك. كل رقم يفتح مصدره. المؤشرات والقوائم هنا تنظيمية للمكتب ولا تُعد وصفًا قانونيًا.</p></div>
+  <p class="muted small">مدني وجزائي وأسرة في مكان واحد — وبدون حساب معقّد: اتبع الـ6 مراحل، واقرأ «المثال بالأرقام»، ولا تكتب أي رصيد بيدك. المؤشرات والقوائم هنا تنظيمية للمكتب ولا تُعد وصفًا قانونيًا.</p></div>
   <div class="head-actions">
     <button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها">⚙ تخصيص الصفحة</button>
     <button class="ghost" data-exec-refresh>تحديث</button>
     <button class="primary" data-exec-new>+ تنفيذ جديد</button>
   </div></div>
+  ${guideSectionMarkup()}
+  ${exampleSectionMarkup()}
   <section class="panel exec-kpi-panel" data-section-id="kpis" data-collapse-id="exec-kpis" data-collapse-default="open">
     <div class="panel-head"><h3>مؤشرات التنفيذ</h3><span class="badge" data-kpi-scope>${esc((KPI_BY_KEY.get(st.kpi) || KPIS[0]).label)}</span></div>
     <div class="exec-kpis" data-kpi-list><div class="muted small">جارٍ حساب المؤشرات…</div></div>
@@ -291,9 +386,37 @@ export async function bindExecutionCenter(app) {
   };
   bindCardLinks();
 
-  root.querySelector('[data-exec-new]')?.addEventListener('click', () => executionDialog(app));
+  root.querySelectorAll('[data-exec-new]').forEach(button => button.addEventListener('click', () => executionDialog(app)));
   root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root}));
   root.querySelector('[data-exec-refresh]')?.addEventListener('click', () => app.refresh());
+
+  // ===== المثال التجريبي: زرع بضغطة ثم فتح بطاقته =====
+  root.querySelector('[data-demo-seed-exec]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const label = button.textContent;
+    button.textContent = 'جارٍ بناء المثال…';
+    try {
+      const out = await seedFamilyExecutionExample(app.office);
+      toast(out.reused ? 'المثال التجريبي موجود بالفعل — نفتح بطاقته' : 'تم بناء مثال «تنفيذ الأسرة» كاملًا — نفتح بطاقته للتعلم');
+      await app.go(`exc:${out.execution.id}`);
+    } catch (error) {
+      toast(userError(error), 'error');
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+  root.querySelector('[data-demo-open]')?.addEventListener('click', async () => {
+    try {
+      const stateDemo = await familyExecutionExampleState(app.office);
+      if (stateDemo.exists) return app.go(`exc:${stateDemo.execution.id}`);
+      // لا يوجد مثال بعد؟ نفتح آخر تنفيذ مسجل حتى لا ينتهي الزر بخطأ
+      const page = await app.office.r.execution.page({index: 'openedDate', direction: 'prev', limit: 1});
+      const latest = (page.items || [])[0];
+      if (latest) return app.go(`exc:${latest.id}`);
+      toast('لا توجد تنفيذات بعد — حمّل المثال التجريبي أولًا', 'error');
+    } catch (error) { toast(userError(error), 'error'); }
+  });
 
   root.querySelectorAll('[data-kpi]').forEach(button => button.addEventListener('click', async () => {
     const key = button.dataset.kpi;
@@ -390,6 +513,7 @@ export async function executionDetailPage(app, executionId) {
     pageId: 'execution:card', title: 'بطاقة التنفيذ',
     sections: [
       {id: 'identity', title: 'بيانات التنفيذ'},
+      {id: 'path', title: 'مسار هذا التنفيذ على المراحل'},
       {id: 'feas', title: 'محرك الأسرة FEAS — تعريف واعتراف صريح'},
       {id: 'balance', title: 'الرصيد المفكَّك'},
       {id: 'attention', title: 'يحتاج انتباهي'},
@@ -445,6 +569,7 @@ export async function executionDetailPage(app, executionId) {
       <button class="ghost small" data-refresh-search>تحديث نص البحث لهذا التنفيذ</button>
     </div>
   </section>
+  ${pathSectionMarkup(info)}
   ${feasSectionMarkup(info)}
   ${balanceSectionMarkup(summary, info)}
   <section class="panel" data-section-id="attention" data-collapse-id="exec-attention" data-collapse-default="open">
@@ -455,10 +580,10 @@ export async function executionDetailPage(app, executionId) {
   <section class="panel" data-section-id="actions" data-collapse-id="exec-quick-actions" data-collapse-default="open">
     <div class="panel-head"><h3>إجراءات سريعة</h3><span class="muted small">كل نافذة تستدعي خدمة تطبيقية، ولا تُكتب أي حركة مالية بلا تسجيلها في الدفتر</span></div>
     <div class="exec-quick-actions">
+      <button class="ghost small" data-quick="judgment">تسجيل حكم</button>
+      <button class="ghost small" data-quick="slice">شريحة قيمة جديدة</button>
       <button class="primary small" data-quick="collection">تسجيل تحصيل</button>
       <button class="ghost small" data-quick="expense">تسجيل مصروف</button>
-      <button class="ghost small" data-quick="slice">شريحة قيمة جديدة</button>
-      <button class="ghost small" data-quick="judgment">تسجيل حكم</button>
       <button class="ghost small" data-quick="settlement">إنشاء تسوية فروق</button>
       <button class="ghost small" data-quick="poa">إنشاء توكيل</button>
       <button class="ghost small" data-quick="reissue" ${info.poas.length ? '' : 'disabled'}>إعادة توكيل</button>
@@ -482,6 +607,65 @@ export async function executionDetailPage(app, executionId) {
     <div class="panel-head"><h3>الخط الزمني</h3><span class="badge" data-timeline-count>…</span></div>
     <p class="muted small">يُبنى من سجل النشاط الموجود (Activity Log) نفسه — لا سجل موازٍ.</p>
     <div data-exec-timeline><div class="muted small">جارٍ التحميل…</div></div>
+  </section>`;
+}
+
+// ===== قسم مسار المراحل في البطاقة: ماذا سُجّل وما ينقص =====
+function pathSectionMarkup(info) {
+  const ex = info.execution;
+  const partyLine = info.parties.length
+    ? info.parties.map(party => `${party.side === 'debtor' ? 'منفذ ضده' : 'مستحق'}: ${party.name}`).join(' · ')
+    : 'لم يُسجَّل طرف بعد';
+  const latestJudgment = info.judgments.at(-1) || null;
+  const activeSlices = info.slices.filter(slice => !slice.isDeleted && slice.status !== 'cancelled');
+  const sliceLine = activeSlices.length
+    ? activeSlices.slice(-3).map(slice => `${slice.entitlementType} ${money(slice.amount)} (${slice.periodicity === 'monthly' ? 'شهري' : slice.valueType === 'fixed' ? 'ثابت' : slice.periodicity || '—'})`).join(' · ')
+    : 'لا شريحة قيمة بعد — أضِف الحكم ثم الشريحة';
+  const collectedTotal = round2(info.receipts.reduce((sum, receipt) => sum + num(receipt.amount), 0));
+  const stages = [
+    {
+      n: 1, title: 'فتح التنفيذ', done: true,
+      detail: `${ex.internalNumber || '—'} · ${ex.authority || 'بلا جهة مسجلة'} · ${ex.openedDate || ''}`.trim(),
+      btn: '<button class="ghost small" data-edit-execution>تعديل البيانات</button>'
+    },
+    {
+      n: 2, title: 'الأطراف', done: info.parties.length > 0, detail: partyLine,
+      btn: '<button class="ghost small" data-quick="party">+ طرف تنفيذ</button>'
+    },
+    {
+      n: 3, title: 'الحكم', done: info.judgments.length > 0,
+      detail: latestJudgment
+        ? `${info.judgments.length} حكم · آخرها ${latestJudgment.judgmentNumber || 'بلا رقم'} ${latestJudgment.judgmentDate || ''} (${latestJudgment.entitlementType || ''})`.trim()
+        : 'لا يوجد حكم مسجّل — ابدأ بـ«+ حكم»',
+      btn: '<button class="ghost small" data-quick="judgment">+ حكم</button>'
+    },
+    {
+      n: 4, title: 'شريحة القيمة (الاستحقاق)', done: activeSlices.length > 0, detail: sliceLine,
+      btn: '<button class="ghost small" data-quick="slice">+ شريحة قيمة</button>'
+    },
+    {
+      n: 5, title: 'التحصيل', done: info.receipts.length > 0,
+      detail: info.receipts.length ? `${info.receipts.length} محضر بإجمالي ${money(collectedTotal)}` : 'لا تحصيل بعد — سجّل أول محضر',
+      btn: '<button class="ghost small" data-quick="collection">+ تحصيل</button>'
+    },
+    {
+      n: 6, title: 'الرصيد والتوكيل', done: true,
+      detail: `المتبقي الآن ${money(num(info.summary.remaining))} · توكيلات: ${info.poas.length}`,
+      btn: '<button class="ghost small" data-print-balance>كشف الرصيد</button><button class="ghost small" data-quick="poa">توكيل</button>'
+    }
+  ];
+  const doneCount = stages.filter(stage => stage.done).length;
+  return `<section class="panel" data-section-id="path" data-collapse-id="exec-path" data-collapse-default="open">
+    <div class="panel-head"><h3>مسار هذا التنفيذ على المراحل</h3><span class="badge">${doneCount} من 6 مكتملة</span></div>
+    <p class="muted small">نفس ترتيب دليل «ابدأ هنا» في مركز التنفيذ: علامة <b>✓</b> تعني إن كان السجل مسجّلًا، وعلامة <b>○</b> تعني ما ينقص — واضغط الزر لتسجيله فورًا.</p>
+    <ol class="exec-path">
+      ${stages.map(stage => `<li class="exec-path-step${stage.done ? ' is-done' : ''}">
+        <div class="exec-path-head"><span class="exec-path-num">${stage.n}</span><span class="exec-path-flag">${stage.done ? '✓ مسجّل' : '○ ينقص'}</span></div>
+        <b>${esc(stage.title)}</b>
+        <small class="muted">${esc(stage.detail)}</small>
+        <div class="exec-actions-row">${stage.btn}</div>
+      </li>`).join('')}
+    </ol>
   </section>`;
 }
 
@@ -518,8 +702,17 @@ function balanceSectionMarkup(summary, info) {
     ? `${Number(value).toLocaleString('ar-EG', {minimumFractionDigits: currencyFractionDigits(summary.currency), maximumFractionDigits: currencyFractionDigits(summary.currency)})} ${esc(summary.currency || '')}`.trim()
     : money(value);
   const noRecognized = feas && !blocked && !summary.periodCount;
+  // المعادلة الكبيرة المبسطة: نفس الأرقام الظاهرة في kv أسفلها، لكن بترتيب يفهمه الجميع فورًا.
+  const bigEq = blocked || summary.finalEntitlement === null || summary.finalEntitlement === undefined ? '' : `<div class="exec-big-eq" role="group" aria-label="معادلة الرصيد المبسطة">
+      <div class="exec-eq-box"><span>① الاستحقاق النهائي</span><b>${show(summary.finalEntitlement)}</b><small>مجموع كل الفترات المستحقة</small></div>
+      <span class="exec-eq-op" aria-hidden="true">−</span>
+      <div class="exec-eq-box"><span>② المحصل</span><b>${show(summary.collected)}</b><small>مجموع التحصيلات المخصصة</small></div>
+      <span class="exec-eq-op" aria-hidden="true">=</span>
+      <div class="exec-eq-box exec-eq-result"><span>③ المتبقي (الرصيد)</span><b class="${summary.remaining > 0.005 ? 'exec-amount-due' : ''}">${show(summary.remaining)}</b><small>يُحسب تلقائيًا — لا يُكتب يدويًا</small></div>
+    </div>`;
   return `<section class="panel" data-section-id="balance" data-collapse-id="exec-balance" data-collapse-default="open">
     <div class="panel-head"><h3>الرصيد المفكَّك</h3><span class="badge">${esc(summary.lastPeriod ? `آخر فترة ${summary.lastPeriod.key}` : 'لا فترات محسوبة')}</span></div>
+    ${bigEq}
     ${blocked ? `<p class="exec-alert exec-alert-error">${esc(summary.integrityMessage || 'تعذر عرض الرصيد الكامل.')}</p>` : ''}
     ${noRecognized ? '<p class="exec-alert exec-alert-info">لا توجد فترات معترف بها بعد. الشريحة أو تعريف الالتزام ليسا دينًا؛ يلزم تسجيل اعتراف صريح بعد مراجعة المصدر.</p>' : ''}
     <div class="exec-kv">
@@ -702,14 +895,14 @@ export async function bindExecutionDetail(app, executionId) {
   const openPoa = (previousPoaId = '') => poaDialog(app, executionId, {previousPoaId}).catch(error => toast(userError(error), 'error'));
 
   root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'execution:card', root}));
-  root.querySelector('[data-edit-execution]')?.addEventListener('click', () => executionDialog(app, {execution}));
+  root.querySelectorAll('[data-edit-execution]').forEach(button => button.addEventListener('click', () => executionDialog(app, {execution})));
   root.querySelector('[data-add-feas-obligation]')?.addEventListener('click', () => executionObligationDialog(app, executionId, {parties: info.parties}).catch(error => toast(userError(error), 'error')));
   root.querySelector('[data-recognize-feas]')?.addEventListener('click', () => recognitionDialog(app, executionId, info.obligations || []).catch(error => toast(userError(error), 'error')));
   root.querySelectorAll('[data-close-feas-period]').forEach(button => button.addEventListener('click', () => {
     const period = info.executionPeriods.find(row => row.id === button.dataset.closeFeasPeriod);
     if (period) closeRecognizedPeriod(app, period).catch(error => toast(userError(error), 'error'));
   }));
-  root.querySelector('[data-print-balance]')?.addEventListener('click', () => printBalanceDialog(app, executionId));
+  root.querySelectorAll('[data-print-balance]').forEach(button => button.addEventListener('click', () => printBalanceDialog(app, executionId)));
   root.querySelector('[data-refresh-search]')?.addEventListener('click', async () => {
     const row = await refreshExecutionSearchText(app.office, executionId).catch(error => { toast(userError(error), 'error'); return null; });
     if (row) toast('تم تحديث نص البحث لهذا التنفيذ');
@@ -719,6 +912,13 @@ export async function bindExecutionDetail(app, executionId) {
   root.querySelectorAll('[data-quick]').forEach(button => button.addEventListener('click', () => {
     const kind = button.dataset.quick;
     if (kind === 'collection') return openCollection();
+    if (kind === 'party') return (async () => {
+      const [clients, opponents] = await Promise.all([
+        app.office.r.clients.page({index: 'createdAt', direction: 'prev', limit: 100}).then(page => page.items || []).catch(() => []),
+        app.office.r.opponents.page({index: 'createdAt', direction: 'prev', limit: 100}).then(page => page.items || []).catch(() => [])
+      ]);
+      return partyDialog(app, executionId, {clients, opponents});
+    })().catch(error => toast(userError(error), 'error'));
     if (kind === 'expense') return expenseDialog(app, executionId).catch(error => toast(userError(error), 'error'));
     if (kind === 'slice') return openSlice();
     if (kind === 'judgment') return openJudgment(null);

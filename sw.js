@@ -111,6 +111,7 @@ const ASSETS=[
   "./js/services/execution-ledger.js",
   "./js/services/execution-differences.js",
   "./js/services/execution-poa.js",
+  "./js/services/execution-demo.js",
   "./js/services/execution-balance.js",
   "./js/services/execution-print.js",
   "./js/services/execution-migration.js",

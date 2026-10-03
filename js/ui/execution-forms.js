@@ -20,7 +20,7 @@ import * as PR from '../services/execution-print.js';
 import * as FEAS from '../services/execution-feas.js';
 
 const options = (list, selected = '', emptyLabel = '') => `${emptyLabel ? `<option value="">${esc(emptyLabel)}</option>` : ''}${list.map(([value, label]) => `<option value="${esc(value)}"${String(value) === String(selected) ? ' selected' : ''}>${esc(label)}</option>`).join('')}`;
-const field = (label, html, hint = '') => `<label class="exec-field"><span>${esc(label)}</span>${html}${hint ? `<small class="muted">${esc(hint)}</small>` : ''}</label>`;
+const field = (label, html, hint = '', key = '') => `<label class="exec-field"${key ? ` data-field="${esc(key)}"` : ''}><span>${esc(label)}</span>${html}${hint ? `<small class="exec-hint">${esc(hint)}</small>` : ''}</label>`;
 const run = async (action, success) => {
   try {
     const out = await action();
@@ -29,15 +29,87 @@ const run = async (action, success) => {
   } catch (error) { toast(userError(error), 'error'); return null; }
 };
 
-// ===== تنفيذ: إنشاء/تعديل =====
+// ===== تنفيذ: إنشاء/تعديل — نموذج موجّه: كل خانة تحتها شرح ماذا تكتب =====
 export async function executionDialog(app, {execution = null} = {}) {
-  const {openEntityForm} = await import('./form.js');
-  openEntityForm(app, 'execution', {
-    id: execution?.id || null,
-    preset: execution ? {} : {executionType: 'family', accountingModel: FEAS_MODEL, openedDate: localDate(), status: 'active'},
-    title: execution ? 'تعديل بيانات التنفيذ' : 'فتح تنفيذ جديد',
-    onSaved: () => app.refresh()
-  });
+  const office = app.office;
+  const [filesPage, clientsPage] = await Promise.all([
+    office.r.files.page({index: 'openedAt', direction: 'prev', limit: 100}).catch(() => ({items: []})),
+    office.r.clients.page({index: 'createdAt', direction: 'prev', limit: 100}).catch(() => ({items: []}))
+  ]);
+  const files = (filesPage.items || []).filter(row => !row.isDeleted);
+  const clients = (clientsPage.items || []).filter(row => !row.isDeleted);
+  // ضمان ظهور القيم الحالية في القوائم حتى لو خرجت من آخر 100 سجل
+  if (execution?.fileId && !files.some(row => row.id === execution.fileId)) {
+    const current = await office.r.files.get(execution.fileId).catch(() => null);
+    if (current) files.unshift(current);
+  }
+  if (execution?.clientId && !clients.some(row => row.id === execution.clientId)) {
+    const current = await office.r.clients.get(execution.clientId).catch(() => null);
+    if (current) clients.unshift(current);
+  }
+  const v = execution || {};
+  const fileOptions = files.map(row => `<option value="${esc(row.id)}"${row.id === v.fileId ? ' selected' : ''}>${esc(formatFileNumber(row.fileNumber))} — ${esc(row.title || '')}</option>`).join('');
+  const clientOptions = clients.map(row => `<option value="${esc(row.id)}"${row.id === v.clientId ? ' selected' : ''}>${esc(row.fullName || row.name || '')}</option>`).join('');
+  const value = (key, fallback = '') => esc(v[key] ?? fallback);
+  const card = modal(`<h2 class="modal-title">${execution ? 'تعديل بيانات التنفيذ' : 'فتح تنفيذ جديد'}</h2>
+  <p class="exec-form-banner"><b>اقرأ قبل التعبئة:</b> هذه النافذة تُعرِّف <b>هوية التنفيذ فقط</b> — لا تُدخل فيها أي مبلغ. المبالغ تُسجَّل بعد الحفظ في مرحلتين فقط: «+ حكم» ثم «شريحة قيمة جديدة»، وفق دليل <b>«ابدأ هنا — 6 مراحل»</b> في مركز التنفيذ. كل خانة تحتها سطر يخبرك ماذا تكتب.</p>
+  <form class="exec-form">
+    <h4 class="exec-sub">أولاً — التعريف بالتنفيذ <span class="muted">(الخانات المعلَّمة بـ * مطلوبة)</span></h4>
+    <div class="exec-form-grid">
+      ${field('نوع التنفيذ *', `<select name="executionType" required>${options(EXECUTION_TYPES, v.executionType || 'family')}</select>`, 'اختر حسب نوع القضية أمام قلم التنفيذ: «تنفيذ أحكام الأسرة» للنفقات والمعاشات وأحكام الأحوال، وما عداه مدني أو جزائي.', 'executionType')}
+      ${field('الملف القانوني المرتبط *', `<select name="fileId" required><option value="">— اختر الملف —</option>${fileOptions}</select>`, files.length ? 'الملف الذي تُحفظ أوراق هذا التنفيذ فيه — مطلوب، ولا يُفتح تنفيذ بلا ملف. مثال: ملف «تنفيذ نفقة».' : 'لا توجد ملفات بعد: أنشئ ملفًا من صفحة الملفات أولًا ثم عد لفتح التنفيذ.', 'fileId')}
+      ${field('رقم التنفيذ الرسمي', `<input name="officialNumber" value="${value('officialNumber')}" placeholder="مثال: 1200/2025">`, 'رقم بند التنفيذ كما يظهر بالقلم. اتركه فارغًا إن لم يصدر بعد.', 'officialNumber')}
+      ${field('جهة التنفيذ', `<input name="authority" value="${value('authority')}" placeholder="مثال: قلم تنفيذ الأسرة — المنصورة">`, 'اسم القلم أو المحكمة أو إدارة التنفيذ المختصة.', 'authority')}
+      ${field('تاريخ فتح التنفيذ', `<input name="openedDate" type="date" value="${value('openedDate', localDate())}">`, 'يوم فتح ملف التنفيذ فعليًا — يُستخدم لترقيم السنة في الأرقام الداخلية.', 'openedDate')}
+    </div>
+    <h4 class="exec-sub">ثانيًا — السند والتواريخ المساعدة <span class="muted">(اختياري)</span></h4>
+    <div class="exec-form-grid">
+      ${field('تاريخ الحكم', `<input name="judgmentDate" type="date" value="${value('judgmentDate')}">`, 'تاريخ الحكم المُنفَّذ كما في ورقته. لا يُستخدم في أي حساب مالي — المبلغ يبدأ من «تاريخ السريان» الذي تسجّله مع الحكم.', 'judgmentDate')}
+      ${field('نوع السند التنفيذي', `<input name="bondType" list="exec-bondtypes" value="${value('bondType')}" placeholder="اختر أو اكتب"><datalist id="exec-bondtypes"><option value="حكم نهائي"></option><option value="محرر موثق"></option><option value="ورقة تجارية"></option><option value="أمر أداء"></option></datalist>`, 'الورقة التي يبني عليها التنفيذ: حكم نهائي، محرر موثق، ورقة تجارية…', 'bondType')}
+      ${field('تاريخ الصيغة التنفيذية', `<input name="executoryFormulaDate" type="date" value="${value('executoryFormulaDate')}">`, 'تاريخ اعتماد الصيغة التنفيذية إن وُجدت مستندًا.', 'executoryFormulaDate')}
+      ${field('تاريخ استلام الصيغة', `<input name="formulaReceiptDate" type="date" value="${value('formulaReceiptDate')}">`, 'يوم وصول الصيغة إلى قلم التنفيذ.', 'formulaReceiptDate')}
+      ${field('طريقة التنفيذ', `<select name="executionMethod">${options(EXECUTION_METHODS, v.executionMethod || '', '— غير محدد —')}</select>`, 'كيف يتم التحصيل الفعلي: جهة العمل، بنك ناصر، المحضرون…', 'executionMethod')}
+    </div>
+    <h4 class="exec-sub">ثالثًا — الربط والمتابعة</h4>
+    <div class="exec-form-grid">
+      ${field('الموكل (صاحب الحق)', `<select name="clientId"><option value="">— غير محدد —</option>${clientOptions}</select>`, 'يظهر اسمه في التقارير والبحث وكشف الرصيد. يمكن ربطه لاحقًا من تعديل البيانات.', 'clientId')}
+      ${field('حالة التنفيذ', `<select name="status">${options(EXECUTION_STATUSES, v.status || 'active')}</select>`, 'حالة المتابعة الآن كما هي في الملف: جارٍ، موقوف، تحصيل جزئي، مكتمل… تُغيَّر يدويًا.', 'status')}
+      ${field('موعد المتابعة القادم', `<input name="nextReviewDate" type="date" value="${value('nextReviewDate')}">`, 'موعد تذكيرك الذاتي — يظهر في قسم «يحتاج انتباهي» عند حلوله.', 'nextReviewDate')}
+      ${field('حساب الاستحقاقات حتى تاريخ', `<input name="entitlementThroughDate" type="date" value="${value('entitlementThroughDate')}">`, 'حتى متى تُبنى الفترات (مثال: 2025-12-31). بعدها لا يضيف النظام فترات جديدة.', 'entitlementThroughDate')}
+      ${field('سياسة احتساب الشهر الناقص', `<select name="prorationPolicy">${options([['days', 'بالأيام (دقيق)'], ['periodStart', 'بقيمة بداية الفترة']], v.prorationPolicy || 'days')}</select>`, 'إذا بدأت القيمة في منتصف الشهر: تُقسم بالأيام أم تُحتسب كاملة؟', 'prorationPolicy')}
+    </div>
+    <h4 class="exec-sub">رابعًا — إعداد الحساب <span class="muted">(اتركه كما هو إن كنت لأول مرة)</span></h4>
+    <div class="exec-form-grid">
+      ${field('نموذج الحساب', `<select name="accountingModel">${options([['legacy-v1', 'المسار المبسط (موصى به)'], ['feas-v1', 'FEAS — اعتراف صريح ولقطات']], v.accountingModel || 'legacy-v1')}</select>`, 'المسار المبسط: تسجّل حكمًا وشريحة وتحصيلًا فيحسب الرصيد فورًا. FEAS: نظام لقطات الاعتراف الصريح للمتمرسين — اختره عند الفتح فقط ولا يتغيّر بعد الحفظ.', 'accountingModel')}
+      ${field('ملاحظات', `<textarea name="notes" rows="2">${value('notes')}</textarea>`, 'أي ملاحظة تحرية عن الملف — لا تُستخدم في الحساب.', 'notes')}
+    </div>
+  </form>
+  <div class="form-actions"><button type="button" class="primary" data-save>${execution ? 'حفظ التعديلات' : 'حفظ وفتح بطاقة التنفيذ'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
+  card.querySelector('[data-close]').onclick = closeModal;
+  const showErrors = errors => {
+    card.querySelectorAll('.field-error').forEach(node => node.remove());
+    card.querySelectorAll('.has-error').forEach(node => node.classList.remove('has-error'));
+    for (const [key, message] of Object.entries(errors || {})) {
+      const fd = card.querySelector(`[data-field="${key}"]`);
+      if (!fd) continue;
+      fd.classList.add('has-error');
+      fd.insertAdjacentHTML('beforeend', `<small class="field-error" role="alert">${esc(message)}</small>`);
+    }
+    card.querySelector('.has-error')?.scrollIntoView({behavior: 'smooth', block: 'center'});
+  };
+  card.querySelector('[data-save]').onclick = async () => {
+    const data = formData(card.querySelector('form'));
+    try {
+      const row = await EX.saveExecution(office, data, execution?.id || null, execution?.version ?? null);
+      closeModal();
+      toast(execution ? 'تم حفظ تعديلات التنفيذ' : `تم فتح التنفيذ ${row.internalNumber || ''} — الخطوة التالية: «+ طرف تنفيذ» ثم «+ حكم»`);
+      await app.refresh();
+    } catch (error) {
+      showErrors(error?.details);
+      toast(userError(error), 'error');
+    }
+  };
+  return card;
 }
 
 // ===== إعداد FEAS: التزامات واعتراف صريح =====
@@ -46,17 +118,17 @@ export async function executionObligationDialog(app, executionId, {obligation = 
   const card = modal(`<h2 class="modal-title">${obligation ? 'تعديل تعريف التزام FEAS' : 'تعريف التزام FEAS'}</h2>
   <p class="muted small">أدخل قاعدة المكتب كما هي موثقة. لا تُستنتج قيمة أو دورية أو عملة أو تاريخ، والتعريف وحده لا ينشئ دينًا.</p>
   <form class="exec-form exec-form-grid">
-    ${field('نوع الالتزام كما سجّله المكتب', `<input name="obligationType" value="${esc(obligation?.obligationType || '')}" required>`)}
-    ${field('الوصف', `<input name="description" value="${esc(obligation?.description || '')}">`)}
-    ${field('المستحق (اختياري)', `<select name="beneficiaryPartyId">${options(parties.filter(row => !row.isDeleted && row.isActive !== false && row.side !== 'debtor').map(row => [row.id, `${row.name} — ${row.role || 'مستحق'}`]), obligation?.beneficiaryPartyId || '', '— غير محدد —')}</select>`, 'إن لم يُحدَّد طرف، لا يُخمن النظام مستفيدًا.')}
-    ${field('الدورية (اختيار صريح)', `<select name="frequency">${options(FEAS_FREQUENCIES, obligation?.frequency || '', 'اختر الدورية')}</select>`)}
-    ${field('العملة — رمز ISO ثلاثي الأحرف', `<input name="currency" value="${esc(obligation?.currency || '')}" maxlength="3" pattern="[A-Za-z]{3}" required placeholder="مثال: EGP">`, 'لا يُحوَّل الرمز العربي «جنيه» تلقائيًا.')}
-    ${field('تاريخ بداية الالتزام (إن كان محددًا)', `<input name="startDate" type="date" value="${esc(obligation?.startDate || '')}">`)}
-    ${field('تاريخ نهاية الالتزام (اختياري)', `<input name="endDate" type="date" value="${esc(obligation?.endDate || '')}">`)}
-    ${field('التاريخ المرجعي للدورية الأسبوعية/المخصصة', `<input name="anchorDate" type="date" value="${esc(obligation?.anchorDate || '')}">`, 'مطلوب صراحةً للدورية الأسبوعية أو المخصصة.')}
-    ${field('عدد أيام الدورية المخصصة', `<input name="customDays" type="number" step="1" min="1" max="36500" value="${obligation?.customDays ?? ''}">`, 'يُستخدم فقط عند اختيار الدورية المخصصة.')}
-    ${field('سياسة الجزء من الفترة (اختيار صريح)', `<select name="prorationPolicy">${options(FEAS_PRORATION_POLICIES, obligation?.prorationPolicy || '', 'اختر السياسة')}</select>`)}
-    ${field('ملاحظات تعريفية', `<textarea name="notes" rows="2">${esc(obligation?.notes || '')}</textarea>`)}
+    ${field('نوع الالتزام كما سجّله المكتب', `<input name="obligationType" value="${esc(obligation?.obligationType || '')}" required placeholder="مثال: نفقة شهرية">`, 'اسم الالتزام كما في المنطوق (نفقة شهرية، معاش…). به تُجمَّع الفترات.', 'obligationType')}
+    ${field('الوصف', `<input name="description" value="${esc(obligation?.description || '')}">`, 'تفصيل اختياري لطبيعة الالتزام.', 'description')}
+    ${field('المستحق (اختياري)', `<select name="beneficiaryPartyId">${options(parties.filter(row => !row.isDeleted && row.isActive !== false && row.side !== 'debtor').map(row => [row.id, `${row.name} — ${row.role || 'مستحق'}`]), obligation?.beneficiaryPartyId || '', '— غير محدد —')}</select>`, 'إن لم يُحدَّد طرف، لا يُخمن النظام مستفيدًا.', 'beneficiaryPartyId')}
+    ${field('الدورية (اختيار صريح)', `<select name="frequency">${options(FEAS_FREQUENCIES, obligation?.frequency || '', 'اختر الدورية')}</select>`, 'تكرار الالتزام: شهري، أسبوعي، مخصص… اختر كما في المنطوق.', 'frequency')}
+    ${field('العملة — رمز ISO ثلاثي الأحرف', `<input name="currency" value="${esc(obligation?.currency || '')}" maxlength="3" pattern="[A-Za-z]{3}" required placeholder="مثال: EGP">`, 'ثلاث لاتينية فقط: EGP للجنيه المصري. لا يُحوَّل الرمز العربي «جنيه» تلقائيًا.', 'currency')}
+    ${field('تاريخ بداية الالتزام (إن كان محددًا)', `<input name="startDate" type="date" value="${esc(obligation?.startDate || '')}">`, 'يوم بداية الالتزام الأصلي إن كان محددًا في المستند.', 'startDate')}
+    ${field('تاريخ نهاية الالتزام (اختياري)', `<input name="endDate" type="date" value="${esc(obligation?.endDate || '')}">`, 'يوم انتهاء الالتزام إن كان محددًا.', 'endDate')}
+    ${field('التاريخ المرجعي للدورية الأسبوعية/المخصصة', `<input name="anchorDate" type="date" value="${esc(obligation?.anchorDate || '')}">`, 'نقطة انطلاق الدورة: أسبوع المخصص يحتاج يوم بداية معروف (مثال: السبت).', 'anchorDate')}
+    ${field('عدد أيام الدورية المخصصة', `<input name="customDays" type="number" step="1" min="1" max="36500" value="${obligation?.customDays ?? ''}">`, 'يُستخدم فقط عند اختيار الدورية المخصصة (مثال: 30 يومًا).', 'customDays')}
+    ${field('سياسة الجزء من الفترة (اختيار صريح)', `<select name="prorationPolicy">${options(FEAS_PRORATION_POLICIES, obligation?.prorationPolicy || '', 'اختر السياسة')}</select>`, 'هل يُقسَّم الشهر الناقص بالأيام أم يُحتسب كاملًا عند بدايته.', 'prorationPolicy')}
+    ${field('ملاحظات تعريفية', `<textarea name="notes" rows="2">${esc(obligation?.notes || '')}</textarea>`, 'أي ملاحظة عن التعريف.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>${obligation ? 'حفظ تعريف الالتزام' : 'تعريف الالتزام'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -73,11 +145,11 @@ export async function recognitionDialog(app, executionId, obligations = []) {
   const card = modal(`<h2 class="modal-title">معاينة / اعتراف صريح بفترة</h2>
   <p class="muted small">المعاينة لا تكتب دينًا. لا تُحفظ لقطة إلا بعد قرارك الصريح، ثم لا يُعاد بناؤها تلقائيًا.</p>
   <form class="exec-form exec-form-grid">
-    ${field('الالتزام', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.frequency} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`)}
-    ${field('من تاريخ مدني', `<input name="fromDate" type="date" required>`)}
-    ${field('إلى تاريخ مدني', `<input name="toDate" type="date" required>`)}
-    ${field('حالة الفترة بعد الاعتراف', `<select name="status">${options([['RECOGNIZED', 'معترف بها'], ['CLOSED', 'معترف بها ومغلقة']], 'RECOGNIZED')}</select>`)}
-    ${field('سبب / مرجع الاعتراف', `<textarea name="reason" rows="2" placeholder="اختياري — لا تكتب استنتاجًا قانونيًا آليًا"></textarea>`)}
+    ${field('الالتزام', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.frequency} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`, 'أي التزام تريد الاعتراف بفتراته (نفقة شهرية مثلًا).', 'obligationId')}
+    ${field('من تاريخ', `<input name="fromDate" type="date" required>`, 'بداية الفترة التي تُعترف بها (يوم مدني واضح: 2025-01-01).', 'fromDate')}
+    ${field('إلى تاريخ', `<input name="toDate" type="date" required>`, 'نهاية الفترة — لا يتجاوزها الاعتراف.', 'toDate')}
+    ${field('حالة الفترة بعد الاعتراف', `<select name="status">${options([['RECOGNIZED', 'معترف بها'], ['CLOSED', 'معترف بها ومغلقة']], 'RECOGNIZED')}</select>`, '«مغلقة» إذا انتهت نهائيًا ولا تتغير بعد الاعتراف.', 'status')}
+    ${field('سبب / مرجع الاعتراف', `<textarea name="reason" rows="2" placeholder="اختياري — لا تكتب استنتاجًا قانونيًا آليًا"></textarea>`, 'مرجع قرارك (محضر، خطاب…) — اختياري ويُحفظ في السجل.', 'reason')}
   </form>
   <div class="exec-actions-row"><button type="button" class="ghost" data-preview>معاينة دون كتابة</button><button type="button" class="primary" data-recognize disabled>حفظ لقطة الاعتراف</button><button type="button" class="ghost" data-close>إلغاء</button></div>
   <div class="exec-feas-preview" data-preview-output><p class="muted small">أدخل الالتزام والنطاق ثم اطلب المعاينة.</p></div>`);
@@ -113,13 +185,13 @@ export async function partyDialog(app, executionId, {party = null, clients = [],
   const card = modal(`<h2 class="modal-title">${party ? 'تعديل طرف تنفيذ' : 'إضافة طرف تنفيذ'}</h2>
   <p class="muted small">الصفة (مستحق / منفذ ضده) يسجلها المستخدم كما هي في الملف؛ البرنامج ينظم ولا يفرض وصفًا قانونيًا.</p>
   <form class="exec-form">
-    ${field('الجهة', `<select name="side">${options([['creditor', 'مستحق (دائن)'], ['debtor', 'منفذ ضده (مدين)']], party?.side || 'creditor')}</select>`)}
-    ${field('ربط بموكل مسجل', `<select name="clientId">${options(clients.map(c => [c.id, c.fullName]), party?.clientId || '', '— إدخال يدوي —')}</select>`)}
-    ${field('ربط بخصم مسجل', `<select name="opponentId">${options(opponents.map(o => [o.id, o.name]), party?.opponentId || '', '— بلا —')}</select>`)}
-    ${field('الاسم كما يظهر', `<input name="name" value="${esc(party?.name || '')}" placeholder="يُملأ تلقائيًا من الربط إن وُجد">`)}
-    ${field('الصفة النصية', `<input name="role" value="${esc(party?.role || '')}" placeholder="مثال: مستحق عن نفسه / وصي / منفذ ضده">`)}
-    ${field('النصيب (اختياري)', `<input name="share" type="number" step="0.01" min="0" value="${party?.share ?? ''}">`, 'لا يُوزَّع تلقائيًا على الفترات بلا طلب صريح')}
-    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(party?.notes || '')}</textarea>`)}
+    ${field('جهة الطرف', `<select name="side">${options([['creditor', 'مستحق (دائن)'], ['debtor', 'منفذ ضده (مدين)']], party?.side || 'creditor')}</select>`, '«مستحق» = صاحب الحق (الموكل). «منفذ ضده» = من يُنفَّذ الحكم ضده.', 'side')}
+    ${field('ربط بموكل مسجل', `<select name="clientId">${options(clients.map(c => [c.id, c.fullName]), party?.clientId || '', '— إدخال يدوي للاسم —')}</select>`, 'اختر الموكل من القائمة إن كان مسجلًا، وإلا اتركه واكتب الاسم يدويًا في خانة الاسم.', 'clientId')}
+    ${field('ربط بخصم مسجل', `<select name="opponentId">${options(opponents.map(o => [o.id, o.name]), party?.opponentId || '', '— بلا —')}</select>`, 'اختر الخصم من القائمة إن كان مسجلًا — يفيد التقارير والربط لاحقًا.', 'opponentId')}
+    ${field('الاسم كما يظهر', `<input name="name" value="${esc(party?.name || '')}" placeholder="يُملأ تلقائيًا من الربط إن وُجد">`, 'اتركه فارغًا إن اخترت موكلًا/خصمًا مسجلًا بالأعلى — يُنسخ اسمه تلقائيًا.', 'name')}
+    ${field('الصفة النصية', `<input name="role" value="${esc(party?.role || '')}" placeholder="مثال: مستحق عن نفسه / وصي / منفذ ضده">`, 'الصفة كما ترد في المستندات: زوجة، وصي على قاصر، شركة…', 'role')}
+    ${field('النصيب (اختياري)', `<input name="share" type="number" step="0.01" min="0" value="${party?.share ?? ''}">`, 'نسبة أو مبلغ نصيب الطرف إن كان مجزأًا (مثال: 50). لا يُوزَّع على الفترات إلا بطلبك الصريح.', 'share')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(party?.notes || '')}</textarea>`, 'أي ملاحظة عن الطرف — لا تدخل الحساب.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>${party ? 'حفظ' : 'إضافة'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -136,26 +208,26 @@ export async function judgmentDialog(app, executionId, {judgment = null, previou
   const isFeas = accountingModel === FEAS_MODEL;
   const types = [...new Set([...(slices || []).map(s => s.entitlementType), 'نفقة شهرية', 'نفقة أبناء', 'تعويض'])];
   const card = modal(`<h2 class="modal-title">${judgment ? 'تعديل بيانات حكم' : 'تسجيل حكم في سلسلة التنفيذ'}</h2>
-  <p class="muted small">تاريخ الحكم ≠ تاريخ سريان القيمة: أدخل تاريخ السريان بنفسك، ولا يُستنتج تلقائيًا من تاريخ الحكم.</p>
+  <p class="exec-form-banner"><b>الأسرار الثلاثة قبل التعبئة:</b> ① تاريخ الحكم ≠ تاريخ سريان القيمة — أنت تدخل تاريخ السريان بنفسه. ② «القيمة» وال«الدورية» هما مفتاح الحساب لاحقًا. ③ الأسرع: اضغط <b>«تسجيل الحكم + إنشاء شريحة قيمة»</b> فيُنجز الخطوتين 3 و4 معًا.</p>
   <form class="exec-form exec-form-grid">
-    ${field('نوع الاستحقاق', `<input name="entitlementType" list="exec-types" value="${esc(judgment?.entitlementType || previous?.entitlementType || '')}" required><datalist id="exec-types">${types.map(t => `<option value="${esc(t)}"></option>`).join('')}</datalist>`)}
-    ${accountingModel === FEAS_MODEL ? field('التزام FEAS المرتبط للشريحة', `<select name="obligationId">${options(obligations.filter(row => !row.isDeleted && row.status !== 'inactive').map(row => [row.id, `${row.obligationType} · ${row.currency}`]), '', 'اختر الالتزام عند إنشاء شريحة')}</select>`, 'التزام منفصل عن الحكم، يحدد العملة والدورية والسياسة.') : ''}
-    ${field('نوع الحكم', `<select name="judgmentKind">${options([['original', 'حكم أصلي'], ['later', 'حكم لاحق / استئناف'], ['correction', 'تصحيح'], ['other', 'أخرى']], judgment?.judgmentKind || (previous ? 'later' : 'original'))}</select>`)}
-    ${field('تاريخ الحكم', `<input name="judgmentDate" type="date" value="${esc(judgment?.judgmentDate || localDate())}" required>`)}
-    ${field('رقم الحكم', `<input name="judgmentNumber" value="${esc(judgment?.judgmentNumber || '')}">`)}
-    ${field('رقم الدعوى', `<input name="lawsuitNumber" value="${esc(judgment?.lawsuitNumber || '')}">`)}
-    ${field('رقم الاستئناف', `<input name="appealNumber" value="${esc(judgment?.appealNumber || '')}">`)}
-    ${field('المحكمة', `<input name="court" value="${esc(judgment?.court || '')}">`)}
-    ${field(isFeas ? 'نوع القيمة (اختيار صريح)' : 'نوع القيمة', `<select name="valueType" ${isFeas && !judgment ? 'required' : ''}>${options(VALUE_TYPES, isFeas && !judgment ? '' : (judgment?.valueType || 'periodic'), isFeas && !judgment ? 'اختر نوع القيمة' : '')}</select>`)}
-    ${field('القيمة', `<input name="amount" type="number" step="any" min="0" value="${judgment?.amount ?? ''}" placeholder="مثال: 3000">`)}
-    ${isFeas ? '<p class="muted small">الدورية وسياسة الجزء تؤخذان صراحةً من تعريف التزام FEAS المرتبط.</p>' : field('الدورية', `<select name="periodicity">${options(PERIODICITIES, judgment?.periodicity || 'monthly')}</select>`)}
-    ${field('تاريخ سريان القيمة (إنذار سريان)', `<input name="effectiveFrom" type="date" value="${esc(judgment?.effectiveFrom || '')}">`, 'اتركه فارغًا إن لم يكن محددًا — البرنامج لا يخمّنه')}
-    ${field('تاريخ انتهاء السريان (اختياري)', `<input name="effectiveTo" type="date" value="${esc(judgment?.effectiveTo || '')}">`)}
-    ${field('منطوق الحكم (ملخص)', `<textarea name="operativeSummary" rows="2">${esc(judgment?.operativeSummary || '')}</textarea>`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(judgment?.notes || '')}</textarea>`)}
+    ${field('نوع الاستحقاق', `<input name="entitlementType" list="exec-types" value="${esc(judgment?.entitlementType || previous?.entitlementType || '')}" required><datalist id="exec-types">${types.map(t => `<option value="${esc(t)}"></option>`).join('')}</datalist>`, 'اكتب النوع كما نص عليه المنطوق: نفقة شهرية، نفقة أبناء، معاش، تعويض…', 'entitlementType')}
+    ${accountingModel === FEAS_MODEL ? field('التزام FEAS المرتبط للشريحة', `<select name="obligationId">${options(obligations.filter(row => !row.isDeleted && row.status !== 'inactive').map(row => [row.id, `${row.obligationType} · ${row.currency}`]), '', 'اختر الالتزام عند إنشاء شريحة')}</select>`, 'التزام منفصل عن الحكم، يحدد العملة والدورية والسياسة.', 'obligationId') : ''}
+    ${field('نوع الحكم', `<select name="judgmentKind">${options([['original', 'حكم أصلي'], ['later', 'حكم لاحق / استئناف'], ['correction', 'تصحيح'], ['other', 'أخرى']], judgment?.judgmentKind || (previous ? 'later' : 'original'))}</select>`, 'الأول في السلسلة = «أصلي». أي حكم بعده (استئناف أو تعديل) = «لاحق».', 'judgmentKind')}
+    ${field('تاريخ الحكم', `<input name="judgmentDate" type="date" value="${esc(judgment?.judgmentDate || localDate())}" required>`, 'يوم صدور الحكم كما في ورقته — لا يُستخدم في الحساب المالي.', 'judgmentDate')}
+    ${field('رقم الحكم', `<input name="judgmentNumber" value="${esc(judgment?.judgmentNumber || '')}" placeholder="مثال: 101/2025">`, 'رقم كتاب الحكم/التنفيذ كما هو مكتوب.', 'judgmentNumber')}
+    ${field('رقم الدعوى', `<input name="lawsuitNumber" value="${esc(judgment?.lawsuitNumber || '')}">`, 'رقم الدعوى بالمحكمة (إن وُجد).', 'lawsuitNumber')}
+    ${field('رقم الاستئناف', `<input name="appealNumber" value="${esc(judgment?.appealNumber || '')}">`, 'رقم مستأنف الحكم — اتركه فارغًا إن لم يوجد.', 'appealNumber')}
+    ${field('المحكمة', `<input name="court" value="${esc(judgment?.court || '')}">`, 'اسم المحكمة الصادرة منها (مثال: محكمة الأسرة بالمنصورة).', 'court')}
+    ${field(isFeas ? 'نوع القيمة (اختيار صريح)' : 'نوع القيمة', `<select name="valueType" ${isFeas && !judgment ? 'required' : ''}>${options(VALUE_TYPES, isFeas && !judgment ? '' : (judgment?.valueType || 'periodic'), isFeas && !judgment ? 'اختر نوع القيمة' : '')}</select>`, '«مبلغ دوري» يتكرر كل دورية (النفقة الشهرية). «مبلغ ثابت» يُستحق مرة واحدة (تعويض).', 'valueType')}
+    ${field('قيمة الحكم (بالجنيه)', `<input name="amount" type="number" step="any" min="0" value="${judgment?.amount ?? ''}" placeholder="مثال: 3000">`, 'رقم المبلغ فقط بدون رموز: 3000 يعني 3,000 جنيه. لا يُقاس به وحده إلا بعد تحديد الدورية وتاريخ السريان.', 'amount')}
+    ${isFeas ? '<p class="muted small">الدورية وسياسة الجزء تؤخذان صراحةً من تعريف التزام FEAS المرتبط.</p>' : field('الدورية (تكرار المبلغ)', `<select name="periodicity">${options(PERIODICITIES, judgment?.periodicity || 'monthly')}</select>`, 'معظم أحكام الأسرة «شهرية». اختر حسب المنطوق: يومية، أسبوعية، نصف شهرية، شهرية، سنوية.', 'periodicity')}
+    ${field('تاريخ سريان القيمة', `<input name="effectiveFrom" type="date" value="${esc(judgment?.effectiveFrom || '')}">`, 'أهم خانة: من أي يوم يبدأ المبلغ؟ (مثال: 01/07/2025). ليس تاريخ الحكم! اتركه فارغًا إن لم يحدد المنطوق يومًا.', 'effectiveFrom')}
+    ${field('تاريخ انتهاء السريان (اختياري)', `<input name="effectiveTo" type="date" value="${esc(judgment?.effectiveTo || '')}">`, 'يوم انتهاء المبلغ إن كان محددًا في الحكم — وإلا يُستكمل حتى تاريخ حساب الاستحقاقات.', 'effectiveTo')}
+    ${field('منطوق الحكم (ملخص)', `<textarea name="operativeSummary" rows="2">${esc(judgment?.operativeSummary || '')}</textarea>`, 'سطر أو سطران ملخصًا للمنطوق كما تراه في الورقة — للعرض فقط.', 'operativeSummary')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(judgment?.notes || '')}</textarea>`, 'أي ملاحظة — لا تدخل الحساب.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>${judgment ? 'حفظ البيانات الوصفية' : 'تسجيل الحكم'}</button>
-  ${judgment ? '' : '<button type="button" class="ghost" data-save-slice>تسجيل الحكم + إنشاء شريحة قيمة</button>'}
+  ${judgment ? '' : '<button type="button" class="ghost" data-save-slice>تسجيل الحكم + إنشاء شريحة قيمة (خطوتان في ضغطة)</button>'}
   <button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
   const collect = () => ({...formData(card.querySelector('form')), executionId});
@@ -208,14 +280,14 @@ async function feasValueSliceDialog(app, executionId, {slices = [], judgments = 
   const card = modal(`<h2 class="modal-title">شريحة قيمة FEAS جديدة</h2>
   <p class="muted small">يجب ربط الشريحة بالتزام وحكم مصدر. تاريخ السريان مطلوب كما أدخله المكتب؛ لا يُشتق من تاريخ الحكم. الشريحة وحدها لا تنشئ دينًا.</p>
   <form class="exec-form exec-form-grid">
-    ${field('التزام FEAS', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`)}
-    ${field('الحكم المصدر', `<select name="judgmentId" required>${options(judgments.filter(row => !row.isDeleted).map(row => [row.id, `حكم ${row.judgmentNumber || '—'} ${row.judgmentDate || ''} (${row.entitlementType || ''})`]), '', 'اختر الحكم')}</select>`)}
-    ${field('نوع القيمة (اختيار صريح)', `<select name="valueType" required>${options(VALUE_TYPES, '', 'اختر نوع القيمة')}</select>`)}
-    ${field('قيمة الشريحة', `<input name="amount" type="number" step="any" min="0" required>`,  'تُتحقق دقة العملة دون تقريب صامت.')}
-    ${field('تاريخ بداية السريان', `<input name="startDate" type="date" required>`)}
-    ${field('تاريخ نهاية السريان (اختياري)', `<input name="endDate" type="date">`)}
-    ${field('مرجع المصدر', `<input name="sourceReference" placeholder="مرجع الحكم/المستند كما سجّله المكتب">`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`)}
+    ${field('التزام FEAS', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`, 'الالتزام الذي حدّد العملة والدورية — اختره من القائمة المعرَّفة سابقًا.', 'obligationId')}
+    ${field('الحكم المصدر', `<select name="judgmentId" required>${options(judgments.filter(row => !row.isDeleted).map(row => [row.id, `حكم ${row.judgmentNumber || '—'} ${row.judgmentDate || ''} (${row.entitlementType || ''})`]), '', 'اختر الحكم')}</select>`, 'الحكم الذي استندت إليه القيمة — لا شريحة بلا حكم مصدر.', 'judgmentId')}
+    ${field('نوع القيمة (اختيار صريح)', `<select name="valueType" required>${options(VALUE_TYPES, '', 'اختر نوع القيمة')}</select>`, 'دوري = يتكرر كل دورية. ثابت = مرة واحدة. الاختيار إلزامي ولا يُفترض.', 'valueType')}
+    ${field('قيمة الشريحة', `<input name="amount" type="number" step="any" min="0" required placeholder="مثال: 3000">`, 'المبلغ بوحدة العملة المعرَّفة في الالتزام (مثال: 3000 جنيهه) — تُتحقق الدقة دون تقريب صامت.', 'amount')}
+    ${field('تاريخ بداية السريان', `<input name="startDate" type="date" required>`, 'يوم بداية المبلغ كما في المستند (ليس تاريخ الحكم).', 'startDate')}
+    ${field('تاريخ نهاية السريان (اختياري)', `<input name="endDate" type="date">`, 'يوم الانتهاء إن كان محددًا، وإلا حتى تاريخ حساب الاستحقاقات.', 'endDate')}
+    ${field('مرجع المصدر', `<input name="sourceReference" placeholder="مرجع الحكم/المستند كما سجّله المكتب">`, 'رقم الحكم أو المستند المُستند إليه — للتتبّع.', 'sourceReference')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`, 'أي ملاحظة — لا تدخل الحساب.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>حفظ الشريحة</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -235,19 +307,20 @@ async function feasValueSliceDialog(app, executionId, {slices = [], judgments = 
 export async function sliceDialog(app, executionId, {slices = [], judgments = [], obligations = [], accountingModel = ''} = {}) {
   if (!accountingModel) accountingModel = (await app.office.r.execution.get(executionId))?.accountingModel || '';
   if (accountingModel === FEAS_MODEL) return feasValueSliceDialog(app, executionId, {slices, judgments, obligations});
-  const card = modal(`<h2 class="modal-title">شريحة قيمة جديدة</h2>
-  <p class="muted small">لا تُعدَّل شريحة تاريخية أبدًا: التغيير يُسجَّل كشريحة جديدة، والقديمة تبقى كما هي في السجل.</p>
+  const card = modal(`<h2 class="modal-title">شريحة قيمة جديدة — هنا يدخل المبلغ</h2>
+  <p class="exec-form-banner"><b>ما الشريحة؟</b> هي التي تُحوِّل قيمة الحكم إلى فترات محسوبة (3,000 شهريًا من 01/01/2025 ← 12 فترة تلقائيًا). لا تُعدَّل شريحة تاريخية بعد الحفظ: التغيير شريحة جديدة والقديمة تبقى في السجل.</p>
   <form class="exec-form exec-form-grid">
-    ${field('نوع الاستحقاق', `<input name="entitlementType" value="${esc(slices.at(-1)?.entitlementType || '')}" required list="exec-types-2"><datalist id="exec-types-2">${[...new Set(slices.map(s => s.entitlementType))].map(t => `<option value="${esc(t)}"></option>`).join('')}</datalist>`)}
-    ${field('الحكم المصدر', `<select name="judgmentId" required>${options(judgments.map(j => [j.id, `حكم ${j.judgmentNumber || '—'} ${j.judgmentDate || ''} (${num(j.amount) ? money(j.amount) : 'بلا قيمة'})`]), '', 'اختر الحكم')}</select>`)}
-    ${field('نوع القيمة', `<select name="valueType">${options(VALUE_TYPES, 'periodic')}</select>`)}
-    ${field('القيمة', `<input name="amount" type="number" step="0.01" min="0.01" required>`)}
-    ${field('الدورية', `<select name="periodicity">${options(PERIODICITIES, 'monthly')}</select>`)}
-    ${field('بداية سريان القيمة', `<input name="startDate" type="date" value="${localDate()}" required>`)}
-    ${field('نهاية السريان (اختياري)', `<input name="endDate" type="date">`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`)}
+    ${field('نوع الاستحقاق', `<input name="entitlementType" value="${esc(slices.at(-1)?.entitlementType || '')}" required list="exec-types-2"><datalist id="exec-types-2">${[...new Set(slices.map(s => s.entitlementType))].map(t => `<option value="${esc(t)}"></option>`).join('')}</datalist>`, 'نفس نوع الاستحقاق كما في الحكم (مثال: نفقة شهرية) — به تُجمَّع الفترات.', 'entitlementType')}
+    ${field('الحكم المصدر', `<select name="judgmentId" required>${options(judgments.map(j => [j.id, `حكم ${j.judgmentNumber || '—'} ${j.judgmentDate || ''} (${num(j.amount) ? money(j.amount) : 'بلا قيمة'})`]), '', 'اختر الحكم')}</select>`, 'الحكم الذي استندت إليه هذه القيمة — مطلوب، ولا يمكن شريحة بلا حكم.', 'judgmentId')}
+    ${field('نوع القيمة', `<select name="valueType">${options(VALUE_TYPES, 'periodic')}</select>`, 'دوري = يتكرر (شهريًا…). ثابت = مبلغ يُستحق مرة واحدة ولا يتكرر.', 'valueType')}
+    ${field('قيمة الاستحقاق (بالجنيه)', `<input name="amount" type="number" step="0.01" min="0.01" required placeholder="مثال: 3000">`, 'المبلغ لكل دورية واحدة: 3000 مع «شهرية» = 3,000 جنيه كل شهر.', 'amount')}
+    ${field('الدورية (تكرار المبلغ)', `<select name="periodicity">${options(PERIODICITIES, 'monthly')}</select>`, 'يحدد كم مرة يتكرر المبلغ: شهرية (الأكثر شيوعًا في الأسرة)، نصف شهرية، أسبوعية…', 'periodicity')}
+    ${field('بداية سريان القيمة', `<input name="startDate" type="date" value="${localDate()}" required>`, 'يوم بدء المبلغ فعليًا (مثال: 01/01/2025) — الفترات تُبنى من هنا.', 'startDate')}
+    ${field('نهاية السريان (اختياري)', `<input name="endDate" type="date">`, 'اتركه فارغًا لاستمرار المبلغ حتى تاريخ حساب الاستحقاقات، أو حدّد يوم الانتهاء.', 'endDate')}
+    ${field('مرجع المصدر', `<input name="sourceReference" value="${esc(slices.at(-1)?.sourceReference || '')}" placeholder="مثال: الحكم 101/2025">`, 'رقم المستند أو الحكم الذي بُنيت عليه الشريحة — للتتبّع لاحقًا.', 'sourceReference')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`, 'أي ملاحظة — لا تدخل الحساب.', 'notes')}
   </form>
-  <div class="form-actions"><button type="button" class="primary" data-save>إنشاء الشريحة ومعاينة أثرها</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
+  <div class="form-actions"><button type="button" class="primary" data-save>إنشاء الشريحة (ومنها يُحسب الاستحقاق)</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
   card.querySelector('[data-save]').onclick = async () => {
     const data = formData(card.querySelector('form'));
@@ -261,26 +334,48 @@ export async function sliceDialog(app, executionId, {slices = [], judgments = []
 export async function collectionDialog(app, executionId, {receipt = null, poas = []} = {}) {
   const context = await L.allocationContext(app.office, executionId);
   const periods = context.outstanding.periods.filter(period => period.remaining > 0.001);
+  const totalRemaining = round2(periods.reduce((sum, period) => sum + num(period.remaining), 0));
   const card = modal(`<h2 class="modal-title">${receipt ? 'بيانات محضر تحصيل' : 'تسجيل تحصيل / محضر'}</h2>
-  <p class="muted small">المبلغ يُخصَّص على الفترات باختيارك. لا يفترض البرنامج قاعدة «الأقدم أولًا» إلا إذا اخترتها صراحةً.</p>
+  <p class="exec-form-banner"><b>أبسط طريقة:</b> اكتب «المبلغ» و«التاريخ» فقط ← اضغط <b>«توزيع على الأقدم أولًا»</b> لتملأ الجدول أمامك (تراجع وتعديل) ← ثم «تسجيل التحصيل». الرصيد يُخصم تلقائيًا: المتبقي = الاستحقاق − المحصل.</p>
   <form class="exec-form exec-form-grid">
-    ${field('المبلغ', `<input name="amount" type="number" step="0.01" min="0.01" value="${receipt?.amount ?? ''}" required ${receipt ? 'readonly' : ''}>`)}
-    ${field('التاريخ', `<input name="date" type="date" value="${esc(receipt?.date || localDate())}" required ${receipt ? 'readonly' : ''}>`)}
-    ${field('طريقة التخصيص', `<select name="method">${options(ALLOCATION_METHODS, receipt?.allocationMethod || 'DIRECT')}</select>`)}
-    ${field('المحصّل', `<input name="collectorName" value="${esc(receipt?.collectorName || '')}">`)}
-    ${field('جهة التحصيل', `<input name="collectionSide" value="${esc(receipt?.collectionSide || '')}" placeholder="محكمة / مكتب / جهة">`)}
-    ${field('طريقة الدفع', `<input name="paymentMethod" value="${esc(receipt?.paymentMethod || '')}" placeholder="نقدًا / تحويل / شيك">`)}
-    ${field('مرجع / توكيل', `<select name="poaId">${options(poas.map(p => [p.id, `${p.poaNumber || ''} ${p.total ? money(p.total) : ''}`]), receipt?.poaId || '', '— بلا —')}</select>`)}
-    ${field('مرجع آخر', `<input name="reference" value="${esc(receipt?.reference || '')}">`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(receipt?.notes || '')}</textarea>`)}
+    ${field('المبلغ المحصل (بالجنيه)', `<input name="amount" type="number" step="0.01" min="0.01" value="${receipt?.amount ?? ''}" required ${receipt ? 'readonly' : ''} placeholder="مثال: 9000">`, 'الكمية النقدية الفعلية كما في المحضر/الإيصال (رقم فقط).', 'amount')}
+    ${field('تاريخ التحصيل', `<input name="date" type="date" value="${esc(receipt?.date || localDate())}" required ${receipt ? 'readonly' : ''}>`, 'يوم الاستلام الفعلي للمبلغ — يُرتَّب به في الدفتر.', 'date')}
+    ${field('طريقة التخصيص', `<select name="method">${options(ALLOCATION_METHODS, receipt?.allocationMethod || 'DIRECT')}</select>`, '«مباشر»: بالمبلغ لكل فترة بالأسفل. «الأقدم فالأحدث»: توزيع آلي على أقدم الفترات. «يدوي»: مبلغ محدد لكل فترة بقرارك.', 'method')}
+    ${field('المحصّل', `<input name="collectorName" value="${esc(receipt?.collectorName || '')}" placeholder="اسم من نُقدَّم له">`, 'اسم الشخص أو القائم بالتحصيل كما في المحضر.', 'collectorName')}
+    ${field('جهة التحصيل', `<input name="collectionSide" value="${esc(receipt?.collectionSide || '')}" placeholder="قلم تنفيذ الأسرة — المنصورة">`, 'الجهة التي نُفِّذ التحصيل من خلالها.', 'collectionSide')}
+    ${field('طريقة الدفع', `<input name="paymentMethod" value="${esc(receipt?.paymentMethod || '')}" placeholder="نقدًا / تحويل / شيك">`, 'كيف وصل المبلغ: نقدًا، إنستاباي، شيك…', 'paymentMethod')}
+    ${field('التوكيل المرتبط', `<select name="poaId">${options(poas.map(p => [p.id, `${p.poaNumber || ''} ${p.total ? money(p.total) : ''}`]), receipt?.poaId || '', '— بلا —')}</select>`, 'اختر التوكيل إن نُفِّذ التحصيل بمقتضاه — اختياري.', 'poaId')}
+    ${field('مرجع / رقم مستند', `<input name="reference" value="${esc(receipt?.reference || '')}" placeholder="رقم إيصال / محضر">`, 'رقم المستند المُثبت للتحصيل — للتتبّع.', 'reference')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(receipt?.notes || '')}</textarea>`, 'أي ملاحظة عن المحضر — لا تدخل الحساب.', 'notes')}
   </form>
   <div class="exec-alloc" ${receipt ? 'hidden' : ''}>
-    <div class="exec-alloc-head"><b>تخصيص المبلغ على الفترات</b><span class="muted small">اترك المبالغ فارغة مع «مباشر» ليوزّعها البرنامج على الأقدم مع تسجيل تنبيه صريح، أو أدخل المبالغ يدويًا.</span></div>
-    <div class="exec-alloc-rows">${periods.slice(0, 60).map(period => `<label class="exec-alloc-row"><span>${esc(period.periodKey)}${period.partyId ? ' · طرف مرتبط' : ''}</span><small class="muted">المتبقي ${money(period.remaining)}${period.originalAmount !== period.finalAmount ? ` (أصلي ${money(period.originalOutstanding)} + فرق ${money(period.differencePart)})` : ''}</small><input type="number" step="0.01" min="0" data-period="${esc(period.periodKey)}" placeholder="0"></label>`).join('') || '<p class="muted">لا توجد فترات متبقية — سيُسجَّل المبلغ بلا تخصيص حتى تراجع الفترات.</p>'}</div>
+    <div class="exec-alloc-head"><b>② توزيع المبلغ على الفترات</b>
+      <span class="badge">مجموع المتبقي: ${money(totalRemaining)}</span>
+      <button type="button" class="ghost small" data-fill-oldest title="يملأ خانات التوزيع أمامك من الأقدم — ثم راجعها قبل الحفظ">↕ توزيع على الأقدم أولًا</button>
+      <span class="muted small">اترك الخانات فارغة مع «مباشر» ليوزّعها البرنامج على الأقدم مع تنبيه، أو وزّعها بنفسك.</span>
+    </div>
+    <div class="exec-alloc-rows">${periods.slice(0, 60).map(period => `<label class="exec-alloc-row"><span>${esc(period.periodKey)}${period.partyId ? ' · طرف مرتبط' : ''}</span><small class="muted">المتبقي ${money(period.remaining)}${period.originalAmount !== period.finalAmount ? ` (أصلي ${money(period.originalOutstanding)} + فرق ${money(period.differencePart)})` : ''}</small><input type="number" step="0.01" min="0" data-period="${esc(period.periodKey)}" data-remaining="${num(period.remaining)}" placeholder="0"><small class="exec-hint">اكتب هنا المبلغ المخصّص لهذه الفترة من هذا المحضر (لا يزيد عن المتبقي أعلاه) — واتركه فارغًا إن لم تخصّص شيئًا.</small></label>`).join('') || '<p class="muted">لا توجد فترات متبقية — سيُسجَّل المبلغ بلا تخصيص حتى تراجع الفترات.</p>'}</div>
     ${periods.length > 60 ? '<p class="muted small">يُعرض أول 60 فترة؛ استخدم التخصيص المباشر للتوزيع أو راجع الفترات في البطاقة.</p>' : ''}
   </div>
   <div class="form-actions"><button type="button" class="primary" data-save>${receipt ? 'حفظ البيانات الوصفية' : 'تسجيل التحصيل'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
+  // توزيع أمامي على الأقدم أولًا: يملأ الخانات فقط (لا يكتب شيئًا) فيراجع المستخدم قبل الحفظ
+  card.querySelector('[data-fill-oldest]')?.addEventListener('click', () => {
+    const amountInput = card.querySelector('[name="amount"]');
+    let left = round2(num(amountInput?.value));
+    if (!(left > 0)) { toast('اكتب المبلغ أولًا ثم اضغط التوزيع', 'error'); amountInput?.focus(); return; }
+    const inputs = [...card.querySelectorAll('[data-period]')];
+    inputs.forEach(input => { input.value = ''; });
+    for (const input of inputs) {
+      if (left <= 0.001) break;
+      const room = round2(num(input.dataset.remaining));
+      if (room <= 0.001) continue;
+      const take = Math.min(left, room);
+      input.value = String(take);
+      left = round2(left - take);
+    }
+    toast(left > 0.001 ? `وزُيع ${money(round2(num(amountInput.value) - left))} — المتبقي ${money(left)} لم يكفِ كل الفترات` : 'تم التوزيع على الأقدم أولًا — راجع الخانات ثم سجّل');
+  });
   card.querySelector('[data-save]').onclick = async () => {
     const data = formData(card.querySelector('form'));
     if (receipt) {
@@ -302,14 +397,14 @@ export async function collectionDialog(app, executionId, {receipt = null, poas =
 // ===== مصروف فعلي =====
 export async function expenseDialog(app, executionId) {
   const card = modal(`<h2 class="modal-title">تسجيل مصروف فعلي</h2>
-  <p class="muted small">المصروفات منفصلة عن أصل الاستحقاق. «يدخل في إجمالي التوكيل» قرارك أنت، ويُخزَّن كما اخترته.</p>
+  <p class="muted small">المصروفات منفصلة عن أصل الاستحقاق (لا تزيد الرصيد ولا تنقصه). «يدخل في إجمالي التوكيل» قرارك أنت، ويُخزَّن كما اخترته.</p>
   <form class="exec-form exec-form-grid">
-    ${field('النوع', `<select name="type">${options(EXPENSE_TYPES, 'EXECUTION_FEE')}</select>`)}
-    ${field('المبلغ', `<input name="amount" type="number" step="0.01" min="0.01" required>`)}
-    ${field('التاريخ', `<input name="date" type="date" value="${localDate()}" required>`)}
-    ${field('مرجع', `<input name="documentReferenceId" placeholder="رقم إيصال / مرجع">`)}
-    ${field('يدخل في إجمالي التوكيل', `<select name="includeInPoa">${options([['true', 'نعم — يُدرج عند طلبه'], ['false', 'لا — يبقى موثقًا فقط']], 'false')}</select>`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`)}
+    ${field('نوع المصروف', `<select name="type">${options(EXPENSE_TYPES, 'EXECUTION_FEE')}</select>`, 'اختر الأقرب: رسم تنفيذ، دمغة، مصروف تحصيل، أو مصروف آخر.', 'type')}
+    ${field('المبلغ (بالجنيه)', `<input name="amount" type="number" step="0.01" min="0.01" required placeholder="مثال: 600">`, 'قيمة المصروف الفعلية كما في الإيصال.', 'amount')}
+    ${field('التاريخ', `<input name="date" type="date" value="${localDate()}" required>`, 'يوم دفع المصروف.', 'date')}
+    ${field('رقم الإيصال / المرجع', `<input name="documentReferenceId" placeholder="مثال: إيصال 778">`, 'رقم مستند يثبت المصروف.', 'documentReferenceId')}
+    ${field('يدخل في إجمالي التوكيل', `<select name="includeInPoa">${options([['true', 'نعم — يُدرج عند إنشاء التوكيل'], ['false', 'لا — يبقى موثقًا فقط']], 'false')}</select>`, '«نعم» يجعل مبلغ المصروف يظهر كسطر في التوكيل القادم. اختيارك يُحفظ كما هو.', 'includeInPoa')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`, 'أي تفصيل عن المصروف.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>تسجيل المصروف</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -327,11 +422,11 @@ export async function ledgerCorrectDialog(app, executionId, entry) {
   <p class="muted small">الحركة الأصلية لا تُعدَّل ولا تُحذف: العكس والتصحيح سجلان جديدان مرتبطان بها.</p>
   <div class="exec-kv"><span>المبلغ الأصلي</span><b>${money(entry.amount)}</b><span>الصافي الحالي</span><b>${money(entry.netAmount ?? entry.amount)}</b><span>التاريخ</span><b>${esc(entry.date || '')}</b>${entry.reason ? `<span>السبب المسجل</span><b>${esc(entry.reason)}</b>` : ''}</div>
   <form class="exec-form exec-form-grid">
-    ${field('الإجراء', `<select name="kind">${options([['REVERSAL', 'عكس كامل/جزئي (REVERSAL)'], ['ADJUSTMENT', 'تصحيح بالزيادة أو النقصان (ADJUSTMENT)']])}</select>`)}
-    ${field('المبلغ', `<input name="amount" type="number" step="0.01" min="0.01" value="${entry.netAmount ?? entry.amount}" required>`)}
-    ${field('اتجاه التصحيح', `<select name="direction">${options([['increase', 'زيادة'], ['decrease', 'نقصان']], 'increase')}</select>`, 'يُستخدم مع التصحيح فقط')}
-    ${field('السبب (إلزامي)', `<textarea name="reason" rows="2" required placeholder="مثال: سُجّل مرتين / رسوم فعلية أعلى"></textarea>`)}
-    ${field('تاريخ الإجراء', `<input name="date" type="date" value="${localDate()}">`)}
+    ${field('الإجراء', `<select name="kind">${options([['REVERSAL', 'عكس كامل/جزئي (REVERSAL)'], ['ADJUSTMENT', 'تصحيح بالزيادة أو النقصان (ADJUSTMENT)']])}</select>`, '«عكس» يلغي أثر الحركة كاملة/جزئيًا. «تصحيح» يزيد أو ينقص مبلغها. كلاهما سجل جديد لا يمس الأصل.', 'kind')}
+    ${field('المبلغ', `<input name="amount" type="number" step="0.01" min="0.01" value="${entry.netAmount ?? entry.amount}" required>`, 'قيمة العكس أو التصحيح — لا تتجاوز الأصل.', 'amount')}
+    ${field('اتجاه التصحيح', `<select name="direction">${options([['increase', 'زيادة'], ['decrease', 'نقصان']], 'increase')}</select>`, 'يُستخدم مع التصحيح فقط: هل نزيد المبلغ أم ننقصه؟', 'direction')}
+    ${field('السبب (إلزامي)', `<textarea name="reason" rows="2" required placeholder="مثال: سُجّل مرتين / رسوم فعلية أعلى"></textarea>`, 'اكتب لماذا تُصحَّح الحركة — يُحفظ في السجل ولا يمكن بعده تعديله.', 'reason')}
+    ${field('تاريخ الإجراء', `<input name="date" type="date" value="${localDate()}">`, 'يوم العكس/التصحيح (افتراضيًا اليوم).', 'date')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>تسجيل الإجراء المالي</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -356,9 +451,9 @@ export async function reallocateDialog(app, receipt) {
   const card = modal(`<h2 class="modal-title">إعادة تخصيص المحضر ${esc(receipt.receiptNumber || '')} (${money(receipt.amount)})</h2>
   <p class="muted small">التخصيص السابق يبقى محفوظًا بحالة «غير فعّال» في السجل، ويُكتب التخصيص الجديد.</p>
   <form class="exec-form">
-    ${field('طريقة التخصيص', `<select name="method">${options(ALLOCATION_METHODS, receipt.allocationMethod || 'MANUAL')}</select>`)}
+    ${field('طريقة التخصيص', `<select name="method">${options(ALLOCATION_METHODS, receipt.allocationMethod || 'MANUAL')}</select>`, '«يدوي»: تكتب مبلغ كل فترة بنفسك. «الأقدم فالأحدث»: توزيع آلي على أقدم الفترات. «بالتناسب»: يوزع على كل الفترات بنسب متبقّيها.', 'method')}
   </form>
-  <div class="exec-alloc-rows">${periods.slice(0, 80).map(period => `<label class="exec-alloc-row"><span>${esc(period.periodKey)}</span><small class="muted">المتاح ${money(remainingByKey.get(period.periodKey) ?? period.remaining)}</small><input type="number" step="0.01" min="0" data-period="${esc(period.periodKey)}" value="${currentByKey.get(period.periodKey) ?? ''}"></label>`).join('')}</div>
+  <div class="exec-alloc-rows">${periods.slice(0, 80).map(period => `<label class="exec-alloc-row"><span>${esc(period.periodKey)}</span><small class="muted">المتاح ${money(remainingByKey.get(period.periodKey) ?? period.remaining)}</small><input type="number" step="0.01" min="0" data-period="${esc(period.periodKey)}" value="${currentByKey.get(period.periodKey) ?? ''}"><small class="exec-hint">اكتب هنا المبلغ الجديد المخصّص لهذه الفترة بعد إعادة التوزيع (لا يزيد عن المتاح أعلاه).</small></label>`).join('')}</div>
   <div class="form-actions"><button type="button" class="primary" data-save>حفظ التخصيص الجديد</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
   card.querySelector('[data-save]').onclick = async () => {
@@ -443,19 +538,19 @@ export async function poaDialog(app, executionId, {previousPoaId = ''} = {}) {
     ${previousPoaId ? `<span>الرصيد المشتق قبل الفترة</span><b>${showMoney(totals.derivedPreviousBalance ?? 0)}</b>` : ''}
   </div>
   <form class="exec-form exec-form-grid">
-    ${field('رقم التوكيل / المرجع', `<input name="poaNumber" placeholder="اتركه فارغًا ليُرقَّم داخليًا POA-سنة-رقم">`)}
-    ${field('تاريخ التوكيل', `<input name="date" type="date" value="${isFeas ? '' : localDate()}" ${isFeas ? 'required' : ''}>`)}
-    ${field('من تاريخ', `<input name="fromDate" type="date" value="${esc(draft.fromDate)}" ${isFeas ? 'required readonly' : ''}>`)}
-    ${field('إلى تاريخ', `<input name="toDate" type="date" value="${esc(draft.toDate)}" ${isFeas ? 'required readonly' : ''}>`)}
-    ${field('الدمغة الفعلية (إن وُجدت)', `<input name="stampAmount" type="number" step="${amountStep}" min="0">`, 'قيمة يدوية فقط')}
-    ${field('مبلغ آخر', `<input name="extraAmount" type="number" step="${amountStep}" min="0">`)}
-    ${field('وصف المبلغ الآخر', `<input name="extraLabel" placeholder="مثال: أمانة تسليم">`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`)}
+    ${field('رقم التوكيل / المرجع', `<input name="poaNumber" placeholder="اتركه فارغًا ليُرقَّم داخليًا POA-سنة-رقم">`, 'إن كان للتوكيل رقم خارجي اكتبه، وإلا اتركه فارغًا ليلتقط الرقم الداخلي.', 'poaNumber')}
+    ${field('تاريخ التوكيل', `<input name="date" type="date" value="${isFeas ? '' : localDate()}" ${isFeas ? 'required' : ''}>`, 'يوم إصدار التوكيل فعليًا.', 'date')}
+    ${field('من تاريخ (بداية فترة التوكيل)', `<input name="fromDate" type="date" value="${esc(draft.fromDate)}" ${isFeas ? 'required readonly' : ''}>`, 'الفترة التي يغطيها التوكيل من فيها — «الفترات الجديدة» تُحسب داخلها.', 'fromDate')}
+    ${field('إلى تاريخ (نهاية فترة التوكيل)', `<input name="toDate" type="date" value="${esc(draft.toDate)}" ${isFeas ? 'required readonly' : ''}>`, 'نهاية الفترة المطلوبة في التوكيل.', 'toDate')}
+    ${field('الدمغة الفعلية (إن وُجدت)', `<input name="stampAmount" type="number" step="${amountStep}" min="0">`, 'قيمة دمغة دفعتها فعليًا — رقم يدوي لا يقدّره البرنامج.', 'stampAmount')}
+    ${field('مبلغ آخر (إن وُجد)', `<input name="extraAmount" type="number" step="${amountStep}" min="0">`, 'أي مبلغ إضافي تدفعه برهن التوكيل (أمانة تسليم مثلًا).', 'extraAmount')}
+    ${field('وصف المبلغ الآخر', `<input name="extraLabel" placeholder="مثال: أمانة تسليم">`, 'تسمية المبلغ الإضافي ليظهر بها في التوكيل.', 'extraLabel')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`, 'أي ملاحظة تُطبع مع التوكيل.', 'notes')}
   </form>
   <div class="exec-include">
-    <label><input type="checkbox" data-include="previousBalance" ${previousLine.included !== false ? 'checked' : ''}> إدراج الرصيد السابق (${showMoney(totals.previousBalance)})</label>
-    <label><input type="checkbox" data-include="differences" ${isFeas ? 'disabled' : `${differencesLine.amount ? 'checked' : ''} ${differencesLine.amount ? '' : 'disabled'}`}> ${isFeas ? 'الفروق التفسيرية مدمجة في قيم الفترات — لا تُضاف منفصلة' : `إدراج فروق الأحكام المعتمدة (${showMoney(differencesLine.amount || 0)})`}</label>
-    <label><input type="checkbox" data-include="expenses" ${totals.expenses > 0 && !isFeas ? 'checked' : ''}> إدراج المصروفات المُعلَّمة للدخول (${showMoney(totals.expenses)})</label>
+    <label><input type="checkbox" data-include="previousBalance" ${previousLine.included !== false ? 'checked' : ''}> إدراج الرصيد السابق (${showMoney(totals.previousBalance)})<small class="exec-hint">متبقي من قبل فترة التوكيل الحالية — فعّله ليُدرج في الإجمالي، وألغِه إن كنت تُصدر توكيلًا للفترات الجديدة فقط.</small></label>
+    <label><input type="checkbox" data-include="differences" ${isFeas ? 'disabled' : `${differencesLine.amount ? 'checked' : ''} ${differencesLine.amount ? '' : 'disabled'}`}> ${isFeas ? 'الفروق التفسيرية مدمجة في قيم الفترات — لا تُضاف منفصلة' : `إدراج فروق الأحكام المعتمدة (${showMoney(differencesLine.amount || 0)})`}<small class="exec-hint">${isFeas ? 'في FEAS الفرق جزء من قيمة الفترة نفسها ولا يُدرَج مبلغًا مستقلًا.' : 'زيادة الحكم اللاحق المعتمدة كمبلغ مستقل — ألغِه إن كانت الزيادة مطبّقة أصلًا داخل الفترات.'}</small></label>
+    <label><input type="checkbox" data-include="expenses" ${totals.expenses > 0 && !isFeas ? 'checked' : ''}> إدراج المصروفات المُعلَّمة للدخول (${showMoney(totals.expenses)})<small class="exec-hint">مصروفات وُسمي سابقاً بـ«تدخل التوكيل» فقط؛ المصروفات غير المعلّمة لا تدخل مهما كان مقدارها.</small></label>
     <span class="exec-total">الإجمالي الحالي: <b data-total>${showMoney(totals.total)}</b></span>
   </div>
   <div class="form-actions"><button type="button" class="primary" data-save>حفظ التوكيل</button><button type="button" class="ghost" data-save-print>حفظ وطباعة</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
@@ -528,14 +623,14 @@ export async function actionDialog(app, executionId, {action = null} = {}) {
   const card = modal(`<h2 class="modal-title">${action ? 'تعديل إجراء' : 'تسجيل إجراء تنفيذ'}</h2>
   <p class="muted small">الإجراءات تنظيمية: يسجّلها المكتب بترتيبه الفعلي، ولا يفرض البرنامج سير عمل قانونيًا.</p>
   <form class="exec-form exec-form-grid">
-    ${field('نوع الإجراء', `<select name="kind">${options(ACTION_KINDS, action?.kind || 'seizure')}</select>`)}
-    ${field('التاريخ', `<input name="date" type="date" value="${esc(action?.date || localDate())}" required>`)}
-    ${field('الرقم / المرجع', `<input name="referenceNumber" value="${esc(action?.referenceNumber || '')}">`)}
-    ${field('الجهة', `<input name="authority" value="${esc(action?.authority || '')}">`)}
-    ${field('الرقم القضائي', `<input name="judicialNumber" value="${esc(action?.judicialNumber || '')}">`)}
-    ${field('رقم العرائض', `<input name="petitionNumber" value="${esc(action?.petitionNumber || '')}">`)}
-    ${field('الحالة', `<input name="status" value="${esc(action?.status || 'done')}">`)}
-    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(action?.notes || '')}</textarea>`)}
+    ${field('نوع الإجراء', `<select name="kind">${options(ACTION_KINDS, action?.kind || 'seizure')}</select>`, 'ما الذي جرى فعليًا: حجز، إعلان بيع، جلسة بيع، تبديد، رقم عرائض، رقم قضائي…', 'kind')}
+    ${field('تاريخ الإجراء', `<input name="date" type="date" value="${esc(action?.date || localDate())}" required>`, 'يوم وقوع الإجراء.', 'date')}
+    ${field('الرقم / المرجع', `<input name="referenceNumber" value="${esc(action?.referenceNumber || '')}" placeholder="مثال: ح-22/2025">`, 'رقم المحضر أو المرجع الخاص بالإجراء.', 'referenceNumber')}
+    ${field('الجهة', `<input name="authority" value="${esc(action?.authority || '')}" placeholder="قلم تنفيذ الأسرة — المنصورة">`, 'الجهة التي نفّذت الإجراء.', 'authority')}
+    ${field('الرقم القضائي', `<input name="judicialNumber" value="${esc(action?.judicialNumber || '')}">`, 'الرقم القضائي إن صدر للإجراء.', 'judicialNumber')}
+    ${field('رقم العرائض', `<input name="petitionNumber" value="${esc(action?.petitionNumber || '')}">`, 'رقم العريضة المرتبطة إن وُجد.', 'petitionNumber')}
+    ${field('حالة الإجراء', `<input name="status" value="${esc(action?.status || 'done')}" placeholder="تم / قيد التنفيذ">`, 'نص قصير يوضح هل انتهى الإجراء أم لا.', 'status')}
+    ${field('ملاحظات', `<textarea name="notes" rows="2">${esc(action?.notes || '')}</textarea>`, 'تفاصيل الإجراء كما تسجلها المكتب.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>${action ? 'حفظ' : 'تسجيل الإجراء'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -551,7 +646,7 @@ export async function actionDialog(app, executionId, {action = null} = {}) {
 export async function snapshotDialog(app, executionId) {
   const card = modal(`<h2 class="modal-title">الرصيد في تاريخ</h2>
   <p class="muted small">يُعاد الحساب من الفترات والحركات التي تاريخها حتى ذلك اليوم؛ لا يعتمد على أي رقم مخزَّن.</p>
-  <form class="exec-form"><label class="exec-field"><span>التاريخ</span><input name="date" type="date" value="${localDate()}" required></label></form>
+  <form class="exec-form"><label class="exec-field" data-field="date"><span>حتى تاريخ (متى تريد الرصيد؟)</span><input name="date" type="date" value="${localDate()}" required><small class="exec-hint">يُعاد الحساب من الفترات والحركات التي تاريخها حتى هذا اليوم — مفيد لمعرفة «كم كان المتبقي في تاريخ معيّن».</small></label></form>
   <div data-snapshot class="exec-snapshot"></div>
   <div class="form-actions"><button type="button" class="primary" data-calc>حساب</button><button type="button" class="ghost" data-close>إغلاق</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -585,10 +680,10 @@ export async function simulatorDialog(app, executionId, {slices = []} = {}) {
   const card = modal(`<h2 class="modal-title">محاكاة «ماذا لو» — بلا أي كتابة</h2>
   <p class="muted small">يحسب البرنامج أثر قيمة مقترحة على الفترات فقط. لا يُسجَّل حكم ولا حركة ولا يتغير الرصيد.</p>
   <form class="exec-form exec-form-grid">
-    ${field('نوع الاستحقاق', `<select name="entitlementType">${options(types.map(t => [t, t]))}</select>`)}
-    ${field('القيمة المقترحة', `<input name="amount" type="number" step="0.01" min="0.01" required>`)}
-    ${field('سريان مقترح', `<input name="effectiveFrom" type="date" value="${localDate()}" required>`)}
-    ${field('حتى تاريخ', `<input name="throughDate" type="date" value="${esc(slices.at(-1)?.endDate || '')}">`)}
+    ${field('نوع الاستحقاق', `<select name="entitlementType">${options(types.map(t => [t, t]))}</select>`, 'أي نوع استحقاق تريد تجربة تغييره.', 'entitlementType')}
+    ${field('القيمة المقترحة (بالجنيه)', `<input name="amount" type="number" step="0.01" min="0.01" required placeholder="مثال: 4000">`, 'القيمة الجديدة التي تريد رؤية أثرها — لن تُحفظ.', 'amount')}
+    ${field('سريان مقترح', `<input name="effectiveFrom" type="date" value="${localDate()}" required>`, 'من أي يوم سترتفع/تنخفض القيمة — للتجربة فقط.', 'effectiveFrom')}
+    ${field('حتى تاريخ', `<input name="throughDate" type="date" value="${esc(slices.at(-1)?.endDate || '')}">`, 'نطاق الحساب في المحاكاة — اختياري.', 'throughDate')}
   </form>
   <div data-simulation class="exec-simulation"></div>
   <div class="form-actions"><button type="button" class="primary" data-run>تشغيل المحاكاة</button><button type="button" class="ghost" data-close>إغلاق</button></div>`);
@@ -610,8 +705,8 @@ export async function simulatorDialog(app, executionId, {slices = []} = {}) {
 export async function comparisonDialog(app, executionId, {judgments = []} = {}) {
   const card = modal(`<h2 class="modal-title">مقارنة حكمين</h2>
   <form class="exec-form exec-form-grid">
-    ${field('الحكم الأول', `<select name="first">${options(judgments.map(j => [j.id, `حكم ${j.judgmentNumber || '—'} ${j.judgmentDate || ''}`]))}</select>`)}
-    ${field('الحكم الثاني', `<select name="second">${options(judgments.map(j => [j.id, `حكم ${j.judgmentNumber || '—'} ${j.judgmentDate || ''}`]))}</select>`)}
+    ${field('الحكم الأول (الأقدم)', `<select name="first">${options(judgments.map(j => [j.id, `حكم ${j.judgmentNumber || '—'} ${j.judgmentDate || ''}`]))}</select>`, 'الحكم الذي سُجّل أولًا في السلسلة.', 'first')}
+    ${field('الحكم الثاني (اللاحق)', `<select name="second">${options(judgments.map(j => [j.id, `حكم ${j.judgmentNumber || '—'} ${j.judgmentDate || ''}`]))}</select>`, 'الحكم اللاحق/الاستئناف — تُقارن القيمتان وأثره على الفترات.', 'second')}
   </form>
   <div data-comparison></div>
   <div class="form-actions"><button type="button" class="primary" data-run>مقارنة</button><button type="button" class="ghost" data-close>إغلاق</button></div>`);
@@ -632,7 +727,7 @@ export async function comparisonDialog(app, executionId, {judgments = []} = {}) 
 export async function printBalanceDialog(app, executionId) {
   const card = modal(`<h2 class="modal-title">طباعة كشف الرصيد</h2>
   <p class="muted small">يُبنى الكشف من البيانات المسجلة، ويُعرض أولًا قبل الطباعة.</p>
-  <form class="exec-form"><label class="exec-field"><span>حتى تاريخ (اختياري)</span><input name="asOf" type="date"></label></form>
+  <form class="exec-form"><label class="exec-field" data-field="asOf"><span>حتى تاريخ (اختياري)</span><input name="asOf" type="date"><small class="exec-hint">اتركه فارغًا لحساب الرصيد حتى اليوم، أو حدّد تاريخًا لطباعة رصيد تاريخ معيّن.</small></label></form>
   <div class="form-actions"><button type="button" class="primary" data-print>فتح للمعاينة والطباعة</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
   card.querySelector('[data-print]').onclick = async () => {

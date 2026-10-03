@@ -85,3 +85,64 @@
 @media print {
   .exec-kpis, .exec-quick-actions, .exec-actions-row, .exec-cell-actions, .dg-tools-panel { display: none !important; }
 }
+
+/* =====================================================================
+   التحديث التعليمي — دليل المراحل، المثال الرقمي، مسار البطاقة، معادلة بسيطة
+   ===================================================================== */
+
+/* ===== دليل «ابدأ هنا» ===== */
+.exec-steps { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(255px, 1fr)); counter-reset: none; }
+.exec-step { display: grid; gap: 6px; align-content: start; padding: 12px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 14px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.exec-step-head { display: flex; align-items: center; gap: 8px; }
+.exec-step-num { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; border-radius: 50%; background: var(--primary, #c9a227); color: var(--on-primary, #fff); font-weight: 700; font-size: .85rem; }
+.exec-step p { margin: 0; font-size: .8rem; line-height: 1.65; color: var(--muted, #9aa); }
+.exec-step p b { color: var(--text, inherit); }
+.exec-step-btn { font-size: .76rem; color: var(--muted, #9aa); }
+.exec-step-btn kbd { font-family: inherit; background: var(--surface-3, rgba(255,255,255,.06)); border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 6px; padding: 1px 6px; font-size: .76rem; }
+.exec-family-tip { margin-top: 10px; padding: 8px 12px; border-radius: 10px; border-inline-start: 3px solid var(--info, #7db3f5); background: var(--surface-2, rgba(255,255,255,.04)); font-size: .82rem; line-height: 1.6; }
+.exec-guide-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* ===== المثال الرقمي ===== */
+.exec-example { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; }
+.exec-example li { display: grid; grid-template-columns: 170px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border, rgba(255,255,255,.1)); border-radius: 10px; background: var(--surface-2, rgba(255,255,255,.03)); font-size: .84rem; }
+.exec-example-step { font-weight: 700; color: var(--primary, #c9a227); font-size: .78rem; }
+.exec-example-calc { direction: ltr; text-align: start; unicode-bidi: embed; background: var(--surface-3, rgba(255,255,255,.07)); border: 1px dashed var(--primary, #c9a227); border-radius: 8px; padding: 4px 10px; font-size: .82rem; font-weight: 700; white-space: nowrap; }
+.exec-example-extra { margin-top: 8px; display: grid; gap: 4px; font-size: .85rem; line-height: 1.7; }
+.exec-example-extra p { margin: 0; }
+
+/* ===== المعادلة الكبيرة المبسطة ===== */
+.exec-big-eq { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; justify-content: center; margin: 10px 0; padding: 12px; border: 1px dashed var(--border, rgba(255,255,255,.18)); border-radius: 16px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.exec-eq-box { display: grid; gap: 2px; justify-items: center; min-width: 150px; padding: 8px 16px; border-radius: 12px; background: var(--surface, rgba(0,0,0,.2)); border: 1px solid var(--border, rgba(255,255,255,.1)); text-align: center; }
+.exec-eq-box span { font-size: .74rem; color: var(--muted, #9aa); }
+.exec-eq-box b { font-size: 1.45rem; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.exec-eq-box small { font-size: .68rem; color: var(--muted, #9aa); }
+.exec-eq-op { align-self: center; font-size: 1.5rem; font-weight: 700; color: var(--muted, #9aa); }
+.exec-eq-result { border-color: var(--primary, #c9a227); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); }
+.exec-eq-result b { color: var(--primary, #c9a227); }
+
+/* ===== مسار المراحل داخل بطاقة التنفيذ ===== */
+.exec-path { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); }
+.exec-path-step { display: grid; gap: 5px; align-content: start; padding: 10px 12px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 14px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.exec-path-step.is-done { border-color: color-mix(in srgb, var(--success, #4cc38a) 45%, transparent); background: color-mix(in srgb, var(--success, #4cc38a) 6%, transparent); }
+.exec-path-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.exec-path-num { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3, rgba(255,255,255,.08)); font-weight: 700; font-size: .8rem; }
+.exec-path-flag { font-size: .72rem; font-weight: 700; color: var(--warn, #e7b65c); }
+.exec-path-step.is-done .exec-path-flag { color: var(--success, #4cc38a); }
+.exec-path-step > b { font-size: .9rem; }
+.exec-path-step > small { font-size: .75rem; line-height: 1.55; }
+
+/* ===== تلميحات النماذج وحالات الخطأ ===== */
+.exec-hint { font-size: .73rem; line-height: 1.5; color: var(--muted, #9aa); }
+/* شرح أسفل خانة كل فترة في جدول التوزيع (تحصيل/إعادة توزيع) */
+.exec-alloc-row .exec-hint { grid-column: 1 / -1; margin-top: -4px; }
+/* شرح أسفل كل خيار إدراج في التوكيل */
+.exec-include label { flex-wrap: wrap; }
+.exec-include label .exec-hint { flex-basis: 100%; }
+.exec-form-banner { margin: 6px 0 10px; padding: 8px 12px; border-radius: 10px; border-inline-start: 3px solid var(--primary, #c9a227); background: color-mix(in srgb, var(--primary, #c9a227) 8%, transparent); font-size: .82rem; line-height: 1.7; }
+.exec-field.has-error input, .exec-field.has-error select, .exec-field.has-error textarea { border-color: var(--danger, #f26d6d); box-shadow: 0 0 0 3px var(--danger-soft, rgba(242,109,109,.15)); }
+
+@media (max-width: 640px) {
+  .exec-example li { grid-template-columns: 1fr; }
+  .exec-big-eq { flex-direction: column; align-items: stretch; }
+  .exec-eq-op { text-align: center; }
+}
