@@ -41,6 +41,8 @@ export async function saveEntity(office,store,data,id=null,expectedVersion=null)
   case 'executionReceipts':row=id?await updateReceiptDetails(office,id,data):await recordCollection(office,data);break;
   case 'executionPOAs':row=await saveExecutionPoa(office,data,id);break;
   case 'executionActions':row=await saveExecutionAction(office,data,id);break;
+  case 'executionObligations':throw new AppError(ERR.VALIDATION,'تعريفات FEAS تُدار من بطاقة التنفيذ لتسجيل السياسة والمراجعة صراحةً.');
+  case 'executionPeriods':throw new AppError(ERR.VALIDATION,'لقطات فترة FEAS غير قابلة للتحرير؛ سجّل فترة اعتراف جديدة من بطاقة التنفيذ.');
   case 'executionLedger':row=await recordExpense(office,data);break;
   case 'differenceRecords':case 'executionSettlements':case 'executionAdjustments':case 'executionAllocations':case 'executionTemplates':
    throw new AppError(ERR.VALIDATION,'هذا السجل المالي يُدار من شاشات التنفيذ (التسويات/الحركات/التخصيصات/الطباعة) ولا يُحرَّر مباشرةً: كل تعديل يحتاج مسارًا موثقًا.');
@@ -68,6 +70,7 @@ async function refreshPersonFiles(office,key,personId){
 
 // حذف منطقي عبر خدمة Office (يحترم قاعدة منع حذف ملف له قضايا).
 export async function deleteEntity(office,store,id){
+ if(['executionValuePeriods','executionObligations','executionPeriods','executionLedger','executionAllocations','executionReceipts','differenceRecords','executionSettlements','executionPOAs'].includes(store))throw new AppError(ERR.CONFLICT,'لا تُحذف السجلات المالية أو لقطات FEAS؛ استخدم إجراء إلغاء/عكس موثقًا من بطاقة التنفيذ.');
  if(store==='fileParties')return removeParty(office,id);
  const row=await office.r[store].get(id);
  const out=await office.softDelete(store,id,row?.version??null);

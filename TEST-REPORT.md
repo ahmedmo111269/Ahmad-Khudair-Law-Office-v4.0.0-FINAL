@@ -1,4 +1,35 @@
-# تقرير التحقق — المزامنة الآمنة وHybrid Offline-First — v5.9.0 / Schema 16 — 2026-10-03
+# تقرير التحقق الحالي — FEAS · v5.10.0 / Schema 17 — 2026-10-03
+
+**النطاق:** إضافة محرك حساب FEAS صريح وقابل لإعادة البناء للتنفيذ الأسري، مع إبقاء مسار البيانات القديمة، الدفتر، Backup/Restore وSync كما هي. جميع بيانات الفحوص اصطناعية. لا يُسجَّل PASS لما لم يُنفَّذ، ولا يعني أي اختبار صحة إجراء قانونيًا.
+
+## النتائج المنفذة في هذه الجولة
+
+| الفحص | الأمر / الطريقة | النتيجة الفعلية |
+|---|---|---|
+| فحص صياغة المشروع | `find js -name '*.js' ... node --input-type=module --check`، وملفات JS/MJS في `tools/node-tests`، من جذر المستودع | **PASS**؛ جميع الملفات فُحصت بعد التعديلات |
+| Golden/Integrity كامل | `cd tools/node-tests && npm test` | **374/374 PASS**، 0 فشل؛ يشمل Migration/Backup/Restore/Offline/Sync وقواعد FEAS |
+| اختبارات التنفيذ مستقلة | `runExecutionTests` مباشرةً عبر harness Node | **65/65 PASS**، 0 فشل |
+| واجهة التنفيذ القائمة | `GRID_BASE_URL=http://127.0.0.1:8000 npm run test:execution-browser` | **32/32 PASS**؛ طباعة المستند/DOM فقط، لا Print Preview أو طابعة فعلية |
+| مسار FEAS في Chromium | `GRID_BASE_URL=http://127.0.0.1:8000 npm run test:execution-feas-browser` | **10/10 PASS**؛ لقطة الاعتراف والرصيد/التحصيل، نموذج الحكم بلا دورية مضللة، اختيار نوع القيمة صريح، منع حفظ المدخل الناقص، شريحة لاحقة لا تنشئ دينًا قبل الاعتراف، وإعادة تحميل بطاقة FEAS Offline |
+| Offline/Backup/Restore/Sync في Chromium | `npm run test:offline-sync-browser` | **14/14 PASS**؛ Service Worker، إقلاع وحفظ/بحث Offline، Backup وRestore إلى قاعدة جديدة، لا Sync تلقائيًا عند العودة، تأكيد/إلغاء، Backup قبل baseline، حزمة مشفرة؛ 0 أخطاء Console غير متوقعة |
+| Grid / Print / Service Worker / Offline | `GRID_BASELINE=c1f775a7b4ba5ca05d88406d4d7dff8bbd7e7a82 GRID_BASE_URL=http://127.0.0.1:8000 npm run test:grid-browser` | **PASS مقابل commit الأساس**؛ لم تظهر إخفاقات جديدة، وفُحصت بنية الـruntime graph/Offline وPDF متعدد الصفحات. Native Print Preview لا يزال غير مختبر |
+| Work Center performance | `WC_BROWSER_SCENARIO=perf WC_PERF_SCALE=1 ... work-center-browser-tests.mjs` | **8/8 PASS** على **305,000 سجل اصطناعي**؛ بذر 283.5s، الملخص 1.196s، فتح «اليوم» 2.184s، `getAll=0`، صفحة 1/20: 39/37ms. هذا قياس طبقة Work Center المشتركة لا أداء إنتاجيًا |
+| FEAS bounded synthetic microbenchmark | 2000 لقطة اعتراف + `executionBundle(checkIntegrity:true)` في fake-indexeddb/Node | **556.4ms**، 2000 فترة، 0 مشكلات Integrity، الرصيد غير محجوب. ليس جهازًا/قاعدة إنتاجية ولا ضمان زمن |
+| بوابة الإصدار | `node tools/release-audit.mjs` | **PASS** — الإصدار 5.10.0؛ 233 ملفًا / 172 JavaScript؛ صفر إخفاقات وصفر تحذيرات |
+| سلامة patch | `git diff --check` | **PASS** |
+
+**ملاحظة عن مقياس الأداء:** محاولتا `WC_PERF_SCALE=0.1` و`0.2` لم تحققا كثافة عناصر اليوم/النافذة الأمامية التي يتطلبها اختبار الأداء الثابت، لذلك لا تُحتسبان PASS. تشغيل المقياس الكامل `1` (305 آلاف سجل) اجتاز **8/8**. هذا لا يثبت الأداء على عتاد إنتاجي.
+
+## NOT VERIFIED والقيود الحالية
+
+- قواعد/مدد/رسوم أو صحة قانونية، إدخال واقعي من المكتب، متصفحات غير Chromium وأجهزة المستخدم الفعلية: **NOT VERIFIED**.
+- معاينة الطباعة الأصلية أو طابعة فعلية: **NOT VERIFIED**؛ فُحصت مستندات/DOM وPDF متصفح فقط.
+- قاعدة إنتاجية/ملايين السجلات على أجهزة فعلية، أداء Sync بين أجهزة فعلية وخدمات نقل سحابية: **NOT VERIFIED / غير موجودة**.
+- Backup النظام القائم JSON غير مشفّر كما يوضحه تحذير التطبيق؛ تشفير الملف المطبق هنا خاص بحزمة Sync.
+
+---
+
+# تقرير التحقق التاريخي — المزامنة الآمنة وHybrid Offline-First — v5.9.0 / Schema 16 — 2026-10-03
 
 **النطاق:** سجل تغييرات تفاضلي ومزامنة يدوية بين أجهزة عبر ملفات مشفرة، مع IndexedDB واحدة لكل قاعدة مكتب، Tombstones، متجهات سببية، تعارضات يراجعها المستخدم، شبكة/PWA غير إلزامية. الفحوص على بيانات اختبار اصطناعية وقاعدة Chromium معزولة؛ لا بيانات إنتاجية. **لا يُسجَّل PASS لما لم يُنفَّذ.**
 

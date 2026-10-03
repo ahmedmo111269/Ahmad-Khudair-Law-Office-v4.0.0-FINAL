@@ -12,6 +12,7 @@ import {AppError, ERR} from '../core/errors.js';
 import {num, round2, isIsoDate, todayIso, DEFAULT_PRORATION, IN_REVIEW_DIFFERENCE_STATUSES, LEDGER_TYPE_LABELS, EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import {balanceAsOf, balanceTrace, buildEntitlementPeriods, analyzeSliceImpact, executionAlerts, slicesOfEntitlement, eligibleSlices} from '../domain/entitlement-engine.js';
 import {executionBundle, executionSlices, executionAllocations, executionLedgerRows, executionDifferences, summarizeExecution} from './execution.js';
+import {FEAS_MODEL, previewExecutionDifference} from './execution-feas.js';
 
 const TIMELINE_KINDS = {
   [STORE.execution]: {label: 'التنفيذ', route: id => `exc:${id}`},
@@ -29,7 +30,7 @@ const TIMELINE_KINDS = {
 
 /** الرصيد + شجرة التفكيك (حتى الوصول إلى الحكم/الفترة/المحضر/التخصيص/الحركة). */
 export async function executionBalance(office, executionId, {asOf = ''} = {}) {
-  const info = await executionBundle(office, executionId, {asOf});
+  const info = await executionBundle(office, executionId, {asOf, checkIntegrity: true});
   if (!info) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
   const trace = balanceTrace({
     summary: info.summary, periods: info.periods, allocations: info.allocations, receipts: info.receipts,
@@ -43,6 +44,17 @@ export async function balanceSnapshot(office, executionId, date) {
   if (!isIsoDate(date)) throw new AppError(ERR.VALIDATION, 'تاريخ اللقطة غير صحيح.', {date: 'تاريخ غير صحيح'});
   const execution = await office.r.execution.get(executionId);
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+  if (execution.accountingModel === FEAS_MODEL) {
+    const info = await executionBundle(office, executionId, {asOf: date, checkIntegrity: true});
+    return {
+      date, summary: info.summary, periods: info.periods,
+      ledgerAtDate: info.ledger.filter(row => !row.date || row.date <= date),
+      receiptsAtDateKnown: info.receipts.filter(row => (!row.createdAt || String(row.createdAt) <= `${date}T23:59:59.999Z`) && (!row.date || row.date <= date)),
+      note: `الرصيد في ${date} من لقطات الاعتراف التي سُجلت حتى نهاية اليوم ومن الحركات ذات التاريخ المدني حتى ذلك اليوم؛ الاعترافات والفروق المعتمدة بعد التاريخ لا تُضم إلى هذه اللقطة. لا يعاد إنشاء فترة تاريخية تلقائيًا.`,
+
+      equations: info.summary.equations
+    };
+  }
   const [slices, allocations, ledger, differences] = await Promise.all([
     executionSlices(office, executionId), executionAllocations(office, executionId),
     executionLedgerRows(office, executionId), executionDifferences(office, executionId)
@@ -72,7 +84,10 @@ export async function compareJudgments(office, executionId, firstId, secondId) {
   const allocations = await executionAllocations(office, executionId);
   const secondSlice = slicesOfEntitlement(slices, entitlementType).find(slice => slice.judgmentId === secondId) || null;
   const throughDate = execution?.entitlementThroughDate || '';
-  const impact = secondSlice ? analyzeSliceImpact({slices, newSlice: secondSlice, allocations, throughDate, policy: execution?.prorationPolicy}) : {rows: [], totals: {difference: 0}};
+  let impact = {rows: [], totals: {difference: 0}};
+  if (execution?.accountingModel === FEAS_MODEL) {
+    if (secondSlice) impact = (await previewExecutionDifference(office, {executionId, sliceId: secondSlice.id})).impact;
+  } else if (secondSlice) impact = analyzeSliceImpact({slices, newSlice: secondSlice, allocations, throughDate, policy: execution?.prorationPolicy});
   return {
     entitlementType,
     first, second,
@@ -97,6 +112,7 @@ export async function compareJudgments(office, executionId, firstId, secondId) {
 export async function simulateValueChange(office, {executionId, entitlementType, amount, effectiveFrom, periodicity = 'monthly', valueType = 'periodic', endDate = '', throughDate = ''} = {}) {
   const execution = await office.r.execution.get(executionId);
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+  if (execution.accountingModel === FEAS_MODEL) throw new AppError(ERR.CONFLICT, 'محاكاة FEAS تتطلب التزامًا وفترة ومبلغًا بوحدات العملة الصغرى؛ استخدم معاينة الاعتراف/التسوية الصريحة.');
   if (!(num(amount) > 0)) throw new AppError(ERR.VALIDATION, 'أدخل قيمة مقترحة أكبر من صفر للمحاكاة.', {amount: 'مطلوب'});
   if (!isIsoDate(effectiveFrom)) throw new AppError(ERR.VALIDATION, 'تاريخ سريان مقترح صحيح مطلوب للمحاكاة.', {effectiveFrom: 'مطلوب'});
   const slices = await executionSlices(office, executionId);

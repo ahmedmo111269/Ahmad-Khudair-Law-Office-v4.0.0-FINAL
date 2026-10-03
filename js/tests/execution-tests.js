@@ -20,6 +20,9 @@ import {deepHealth} from '../services/integrity.js';
 import * as E from '../domain/execution.js';
 import * as EN from '../domain/entitlement-engine.js';
 import {Clock} from '../core/clock.js';
+import * as FEAS from '../domain/execution-feas.js';
+import * as FEASApp from '../services/execution-feas.js';
+import {toMinorUnits} from '../domain/execution-money.js';
 
 const rejects = async fn => { try { await fn(); } catch (error) { return error; } throw Error('Expected promise to reject'); };
 const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -33,14 +36,14 @@ async function openDb(name) {
   });
 }
 
-async function env({executionType = 'family', through = '2025-12-31', openedDate = '2025-01-05'} = {}) {
+async function env({executionType = 'family', through = '2025-12-31', openedDate = '2025-01-05', accountingModel = 'legacy-v1'} = {}) {
   const name = `AhmadKhudairLawOfficeDB__test__execution__${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const db = await openDb(name);
   const office = new Office({db, assert() {}, token: 'exec-test', profile: {id: 'tester'}});
   const client = await office.saveClient({fullName: 'موكل التنفيذ التجريبي'});
   const file = await createLegalFile(office, {clientId: client.id, title: 'ملف تنفيذ تجريبي', fileType: 'أسرة'});
   const execution = await EX.createExecution(office, {
-    executionType, clientId: client.id, fileId: file.id, openedDate,
+    executionType, accountingModel, clientId: client.id, fileId: file.id, openedDate,
     judgmentDate: '2025-01-10', authority: 'محكمة الأسرة', officialNumber: '1201/2025',
     status: 'active', entitlementThroughDate: through
   });
@@ -73,6 +76,29 @@ async function familyFixture() {
     valueType: 'periodic', periodicity: 'monthly', amount: 4000, startDate: '2025-07-01'
   });
   return {...env0, j1, s1, j2, s2};
+}
+
+async function feasFixture({fromDate = '2025-01-01', toDate = '2025-03-31'} = {}) {
+  const env0 = await env({accountingModel: FEAS.FEAS_MODEL});
+  const {office, execution} = env0;
+  const obligation = await FEASApp.saveExecutionObligation(office, {
+    executionId: execution.id, obligationType: 'نفقة كما وردت بالمصدر', frequency: 'monthly',
+    prorationPolicy: 'days', currency: 'EGP', startDate: '2025-01-01'
+  });
+  const judgment = await EX.addExecutionJudgment(office, {
+    executionId: execution.id, entitlementType: obligation.obligationType, judgmentKind: 'original',
+    judgmentDate: '2025-01-10', judgmentNumber: 'FEAS-1', valueType: 'periodic', periodicity: 'monthly',
+    amount: 3000, effectiveFrom: '2025-01-01'
+  });
+  const slice = await EX.saveValueSlice(office, {
+    executionId: execution.id, obligationId: obligation.id, judgmentId: judgment.id,
+    valueType: 'periodic', amount: '3000.00', startDate: '2025-01-01'
+  });
+  const preview = await FEASApp.projectExecutionPeriod(office, {executionId: execution.id, obligationId: obligation.id, fromDate, toDate});
+  const recognition = await FEASApp.recognizeExecutionPeriod(office, {
+    executionId: execution.id, obligationId: obligation.id, fromDate, toDate, expectedFingerprint: preview.fingerprint
+  });
+  return {...env0, obligation, judgment, slice, preview, period: recognition.row};
 }
 
 export async function runExecutionTests(test, expect) {
@@ -816,8 +842,9 @@ export async function runExecutionTests(test, expect) {
     } finally { closeEnv(e); }
   });
   test('تنفيذ/مخطط: v15 إضافي غير مدمر + النسخ الاحتياطي يشمل المخازن الجديدة', async () => {
-    expect(SCHEMA_VERSION).toBe(16);
+    expect(SCHEMA_VERSION).toBe(17);
     expect(SCHEMA_MIGRATIONS.some(m => m.version === 15 && m.addsStores.includes('executionLedger'))).toBe(true);
+    expect(SCHEMA_MIGRATIONS.some(m => m.version === 17 && m.addsStores.includes('executionPeriods') && !m.destructive && !m.backfill)).toBe(true);
     const plan = migrationPlan(14, 15);
     expect(plan.destructive).toBe(false);
     expect(plan.addsStores.includes('differenceRecords')).toBe(true);
@@ -847,7 +874,8 @@ export async function runExecutionTests(test, expect) {
       const balance = await B.executionBalance(e.office, e.execution.id);
       expect(balance.summary.periods.length).toBe(12);
       expect(await e.office.r.executionValuePeriods.count()).toBe(2);
-      expect(Object.values(STORE).includes('executionPeriods')).toBe(false);
+      expect(Object.values(STORE).includes('executionPeriods')).toBe(true);
+      expect(await e.office.r.executionPeriods.count()).toBe(0);
     } finally { closeEnv(e); }
   });
   test('تنفيذ/رسائل: كل رفض يعيد رسالة عربية واضحة بلا نص إنجليزي مكشوف', async () => {
@@ -951,6 +979,122 @@ export async function runExecutionTests(test, expect) {
       expect(created.file.fileNumber !== e.file.fileNumber).toBe(true);
       const relations = await e.office.r.fileRelations.byIndexAll('fileId', e.file.id).catch(() => []);
       expect(relations.some(row => row.relatedFileId === created.file.id) || created.relation).toBeTruthy();
+    } finally { closeEnv(e); }
+  });
+
+  // ===== FEAS: Golden Scenarios — explicit snapshots, minor units, audited deltas =====
+  test('FEAS/Golden: minor units reject silent rounding; civil-period snapshot is explicit', () => {
+    expect(toMinorUnits('120.50', 'EGP')).toBe(12050);
+    expect(toMinorUnits('12.345', 'BHD')).toBe(12345);
+    expect(() => toMinorUnits('1.001', 'EGP')).toThrow();
+    expect(() => toMinorUnits('1.00', 'XYZ')).toThrow();
+    const obligation = {id: 'ob-1', obligationType: 'نفقة كما وردت', currency: 'EGP', frequency: 'monthly', prorationPolicy: 'days', startDate: '2025-01-01'};
+    const source = {id: 'slice-1', obligationId: 'ob-1', judgmentId: 'j-1', valueType: 'periodic', amountMinor: 300000, currency: 'EGP', startDate: '2025-01-01', status: 'active'};
+    const result = FEAS.resolveExecutionClaim({obligation, valuePeriods: [source], fromDate: '2025-01-01', toDate: '2025-03-31'});
+    expect(result.recognizedAmountMinor).toBe(900000);
+    expect(result.segments.length).toBe(3);
+    expect(result.segments[2].unitEnd).toBe('2025-03-31');
+  });
+  test('FEAS/Golden: لقطات اعتراف ثابتة، فرق الحكم يُعتمد مرة واحدة ولا ينشئ حركة أصل', async () => {
+    const e = await feasFixture();
+    try {
+      const initial = await B.executionBalance(e.office, e.execution.id);
+      expect(initial.summary.accountingModel).toBe(FEAS.FEAS_MODEL);
+      expect(initial.summary.finalEntitlementMinor).toBe(900000);
+      expect(initial.summary.periodCount).toBe(1);
+      const repeated = await FEASApp.recognizeExecutionPeriod(e.office, {executionId: e.execution.id, obligationId: e.obligation.id, fromDate: '2025-01-01', toDate: '2025-03-31'});
+      expect(repeated.row.id).toBe(e.period.id);
+      expect((await FEASApp.executionRecognizedPeriods(e.office, e.execution.id)).length).toBe(1);
+      const preRecognition = await B.balanceSnapshot(e.office, e.execution.id, '2000-01-01');
+      expect(preRecognition.summary.finalEntitlementMinor).toBe(0);
+
+      const laterJudgment = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: e.obligation.obligationType,
+        judgmentKind: 'later', judgmentDate: '2025-02-10', judgmentNumber: 'FEAS-2', amount: 4000, valueType: 'periodic', effectiveFrom: '2025-02-01'});
+      const candidate = await EX.saveValueSlice(e.office, {executionId: e.execution.id, obligationId: e.obligation.id, judgmentId: laterJudgment.id,
+        valueType: 'periodic', amount: '4000.00', startDate: '2025-02-01'});
+      expect(candidate.status).toBe('needs_review');
+      expect(candidate.__impact.totalsMinor.difference).toBe(200000);
+      const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: candidate.id});
+      expect(created.impact.rows.length).toBe(1);
+      await DF.settlementReview(e.office, created.settlement.id);
+      await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'اختبار ذهبي'});
+      const approved = await B.executionBalance(e.office, e.execution.id);
+      expect(approved.summary.finalEntitlementMinor).toBe(1100000);
+      expect(approved.summary.approvedDifferencesMinor).toBe(200000);
+      await DF.postSettlement(e.office, created.settlement.id);
+      const posted = await B.executionBalance(e.office, e.execution.id);
+      expect(posted.summary.finalEntitlementMinor).toBe(1100000);
+      expect((await EX.executionLedgerRows(e.office, e.execution.id)).length).toBe(0);
+
+      const thirdJudgment = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: e.obligation.obligationType,
+        judgmentKind: 'later', judgmentDate: '2025-03-10', judgmentNumber: 'FEAS-3', amount: 5000, valueType: 'periodic', effectiveFrom: '2025-03-01'});
+      const rejectedCandidate = await EX.saveValueSlice(e.office, {executionId: e.execution.id, obligationId: e.obligation.id, judgmentId: thirdJudgment.id,
+        valueType: 'periodic', amount: '5000.00', startDate: '2025-03-01'});
+      expect(rejectedCandidate.status).toBe('needs_review');
+      const rejected = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: rejectedCandidate.id});
+      await DF.settlementReview(e.office, rejected.settlement.id);
+      await DF.decideSettlement(e.office, rejected.settlement.id, {decision: 'reject', reason: 'اختبار رفض'});
+      expect((await e.office.r.executionValuePeriods.get(rejectedCandidate.id)).status).toBe('cancelled');
+      expect((await B.executionBalance(e.office, e.execution.id)).summary.finalEntitlementMinor).toBe(1100000);
+    } finally { closeEnv(e); }
+  });
+  test('FEAS/Golden: تخصيص مستقل، لقطة تاريخية، idempotency للتحصيل، والتوكيل Snapshot بلا دين', async () => {
+    const e = await feasFixture();
+    try {
+      const receiptInput = {executionId: e.execution.id, amount: '1000.00', date: '2025-03-01', idempotencyKey: 'golden-feas-receipt-1',
+        allocation: {method: 'MANUAL', targets: [{periodKey: e.period.periodKey, amountMinor: 100000}]}};
+      const firstReceipt = await L.recordCollection(e.office, receiptInput);
+      const retryReceipt = await L.recordCollection(e.office, receiptInput);
+      expect(firstReceipt.receipt.id).toBe(retryReceipt.receipt.id);
+      expect(retryReceipt.reused).toBe(true);
+      expect((await EX.executionReceipts(e.office, e.execution.id)).length).toBe(1);
+      expect((await EX.executionLedgerRows(e.office, e.execution.id)).length).toBe(1);
+
+      const beforeReceipt = await B.balanceSnapshot(e.office, e.execution.id, '2025-02-28');
+      expect(beforeReceipt.summary.collectedMinor).toBe(0);
+      const current = await B.balanceSnapshot(e.office, e.execution.id, '2099-12-31');
+      expect(current.summary.collectedMinor).toBe(100000);
+      expect(current.summary.allocatedMinor).toBe(100000);
+      expect(current.summary.remainingMinor).toBe(800000);
+
+      const draft = await POA.buildPoaDraft(e.office, {executionId: e.execution.id});
+      expect(draft.accountingModel).toBe(FEAS.FEAS_MODEL);
+      expect(draft.periodRows.length).toBe(1);
+      expect(draft.totals.periodsMinor).toBe(900000);
+      const lines = draft.lines.filter(line => line.included && line.amountMinor > 0);
+      const poaInput = {executionId: e.execution.id, accountingModel: FEAS.FEAS_MODEL, currency: draft.currency,
+        idempotencyKey: draft.idempotencyKey, sourceFingerprint: draft.sourceFingerprint, date: Clock.today(),
+        fromDate: draft.fromDate, toDate: draft.toDate, lines, totalMinor: draft.totals.totalMinor,
+        total: draft.totals.total, judgmentIds: [e.judgment.id]};
+      const poa = await POA.saveExecutionPoa(e.office, poaInput);
+      const duplicatePoa = await POA.saveExecutionPoa(e.office, poaInput);
+      expect(poa.id).toBe(duplicatePoa.id);
+      expect(poa.totalMinor).toBe(900000);
+      expect((await B.executionBalance(e.office, e.execution.id)).summary.remainingMinor).toBe(800000);
+      const report = await FEASApp.executionIntegrityReport(e.office, e.execution.id);
+      expect(report.issues.some(issue => issue.severity === 'error')).toBe(false);
+    } finally { closeEnv(e); }
+  });
+  test('FEAS/Integrity: duplicate settlement-period delta blocks the full balance, not a partial total', async () => {
+    const e = await feasFixture();
+    try {
+      const later = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: e.obligation.obligationType,
+        judgmentKind: 'later', judgmentDate: '2025-02-10', judgmentNumber: 'FEAS-DUP', amount: 4000, valueType: 'periodic', effectiveFrom: '2025-02-01'});
+      const candidate = await EX.saveValueSlice(e.office, {executionId: e.execution.id, obligationId: e.obligation.id, judgmentId: later.id,
+        valueType: 'periodic', amount: '4000.00', startDate: '2025-02-01'});
+      const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: candidate.id});
+      await DF.settlementReview(e.office, created.settlement.id);
+      await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'اختبار سلامة'});
+      const differences = await e.office.r.differenceRecords.byIndex('executionId', e.execution.id, 50);
+      const approved = differences.find(row => row.settlementId === created.settlement.id && ['APPROVED', 'POSTED'].includes(row.status));
+      expect(Boolean(approved)).toBe(true);
+      await e.office.r.differenceRecords.add({...approved, id: 'duplicate-feas-period-delta', createdAt: Clock.now()});
+      const report = await FEASApp.executionIntegrityReport(e.office, e.execution.id);
+      expect(report.issues.some(issue => issue.code === 'duplicate-settlement-period-delta' && issue.severity === 'error')).toBe(true);
+      const balance = await B.executionBalance(e.office, e.execution.id);
+      expect(balance.summary.integrityBlocked).toBe(true);
+      expect(balance.summary.finalEntitlementMinor).toBe(null);
+      expect(balance.summary.equations.length).toBe(0);
     } finally { closeEnv(e); }
   });
 }

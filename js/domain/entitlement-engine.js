@@ -752,9 +752,10 @@ export function executionAlerts({execution = null, slices = [], judgments = [], 
   }
   const pendingDifferences = differences.filter(row => IN_REVIEW_DIFFERENCE_STATUSES.includes(row.status));
   if (pendingDifferences.length) push('differences_awaiting_review', 'warn', `${pendingDifferences.length} فرق استحقاق ينتظر المراجعة والاعتماد.`, {count: pendingDifferences.length});
-  const approvedNotPosted = differences.filter(row => row.status === 'APPROVED');
+  const approvedNotPosted = differences.filter(row => row.accountingModel !== 'feas-v1' && row.status === 'APPROVED');
   if (approvedNotPosted.length) push('differences_approved_not_posted', 'info', `${approvedNotPosted.length} فرق معتمد لم يُرحَّل بعد إلى الحركات المالية.`, {count: approvedNotPosted.length});
-  if (summary) {
+  if (summary?.integrityBlocked) push('balance_read_limit', 'error', summary.integrityMessage || 'تعذر إظهار رصيد كامل بسبب حد القراءة الآمن.');
+  if (summary && !summary.integrityBlocked) {
     if (summary.remaining > 0.005) push('balance_due', 'info', `رصيد غير مسدد بمقدار ${round2(summary.remaining)}.`, {amount: round2(summary.remaining)});
     if (summary.remaining < -0.005) push('negative_balance', 'warn', `رصيد سالب (تحصيل يزيد على الاستحقاق المسجل) بمقدار ${round2(-summary.remaining)} — راجع التحصيلات والتخصيص.`, {amount: round2(-summary.remaining)});
     if (summary.collected > 0 && summary.remaining > 0.005) push('partial_collection', 'info', 'تحصيل جزئي: يوجد محصل مع رصيد متبقٍ.', {collected: summary.collected, remaining: round2(summary.remaining)});

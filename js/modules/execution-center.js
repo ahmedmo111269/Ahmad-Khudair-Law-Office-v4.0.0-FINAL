@@ -15,6 +15,8 @@ import {prefs} from '../core/preferences.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {localDate} from '../core/clock.js';
 import {executionTypeLabel, executionStatusLabel, money, num, round2, EXECUTION_TYPE_LABELS, EXECUTION_STATUSES, EXECUTION_STATUS_LABELS, LEDGER_TYPE_LABELS, POA_STATUS_LABELS, DIFFERENCE_STATUS_LABELS, ACTION_KIND_LABELS, ALLOCATION_METHOD_LABELS, PRORATION_LABELS, valueTypeLabel, periodicityLabel} from '../domain/execution.js';
+import {FEAS_MODEL} from '../domain/execution-feas.js';
+import {currencyFractionDigits, fromMinorUnits} from '../domain/execution-money.js';
 import {executionCenterStats, executionBundle, executionActionRows, executionPoaRows, executionJudgments, executionSlices, createResultFile, listExecutionRows, refreshExecutionSearchText} from '../services/execution.js';
 import * as L from '../services/execution-ledger.js';
 import * as DF from '../services/execution-differences.js';
@@ -23,7 +25,8 @@ import * as B from '../services/execution-balance.js';
 import * as PR from '../services/execution-print.js';
 import * as EX from '../services/execution.js';
 import {
-  executionDialog, partyDialog, judgmentDialog, sliceDialog, collectionDialog, expenseDialog,
+  executionDialog, executionObligationDialog, recognitionDialog, closeRecognizedPeriod,
+  partyDialog, judgmentDialog, sliceDialog, collectionDialog, expenseDialog,
   ledgerCorrectDialog, reallocateDialog, settlementReviewDialog, poaDialog, actionDialog,
   snapshotDialog, simulatorDialog, comparisonDialog, printBalanceDialog
 } from '../ui/execution-forms.js';
@@ -387,6 +390,7 @@ export async function executionDetailPage(app, executionId) {
     pageId: 'execution:card', title: 'بطاقة التنفيذ',
     sections: [
       {id: 'identity', title: 'بيانات التنفيذ'},
+      {id: 'feas', title: 'محرك الأسرة FEAS — تعريف واعتراف صريح'},
       {id: 'balance', title: 'الرصيد المفكَّك'},
       {id: 'attention', title: 'يحتاج انتباهي'},
       {id: 'actions', title: 'إجراءات سريعة'},
@@ -401,7 +405,7 @@ export async function executionDetailPage(app, executionId) {
       {id: 'timeline', title: 'الخط الزمني'}
     ]
   });
-  const info = await EX.executionBundle(app.office, executionId).catch(() => null);
+  const info = await EX.executionBundle(app.office, executionId, {checkIntegrity: true}).catch(() => null);
   if (!info) return `<div class="error-box" role="alert"><h2>سجل التنفيذ غير موجود</h2><button class="primary" data-route="executionCenter">رجوع إلى مركز التنفيذ</button></div>`;
   execState(app)[executionId] = info;
   const {execution, summary, alerts} = info;
@@ -426,6 +430,7 @@ export async function executionDetailPage(app, executionId) {
     <div class="exec-kv">
       <span>الموكل</span><b>${esc(client?.fullName || client?.name || (execution.clientId ? 'مرتبط بموكل مسجل' : 'غير محدد'))}</b>
       <span>الملف</span><b>${file ? esc(`${formatFileNumber(file.fileNumber)} — ${file.title || ''}`) : (execution.fileId ? 'مرتبط بملف مسجل' : 'غير مرتبط')}</b>
+      <span>نموذج الحساب</span><b>${esc(execution.accountingModel === FEAS_MODEL ? 'FEAS — اعتراف صريح' : 'المسار الحالي')}</b>
       <span>الجهة / المحكمة</span><b>${esc(execution.authority || execution.executionOffice || '—')}</b>
       <span>تاريخ الفتح</span><b>${esc(execution.openedDate || '—')}</b>
       <span>حتى تاريخ الاستحقاق</span><b>${esc(execution.entitlementThroughDate || 'غير محدد')}</b>
@@ -440,6 +445,7 @@ export async function executionDetailPage(app, executionId) {
       <button class="ghost small" data-refresh-search>تحديث نص البحث لهذا التنفيذ</button>
     </div>
   </section>
+  ${feasSectionMarkup(info)}
   ${balanceSectionMarkup(summary, info)}
   <section class="panel" data-section-id="attention" data-collapse-id="exec-attention" data-collapse-default="open">
     <div class="panel-head"><h3>يحتاج انتباهي</h3><span class="badge">${alerts.length} تنبيه</span></div>
@@ -458,7 +464,7 @@ export async function executionDetailPage(app, executionId) {
       <button class="ghost small" data-quick="reissue" ${info.poas.length ? '' : 'disabled'}>إعادة توكيل</button>
       <button class="ghost small" data-quick="execAction">إجراء تنفيذ</button>
       <button class="ghost small" data-quick="snapshot">الرصيد في تاريخ</button>
-      <button class="ghost small" data-quick="simulate">محاكاة «ماذا لو»</button>
+      ${execution.accountingModel === FEAS_MODEL ? '' : '<button class="ghost small" data-quick="simulate">محاكاة «ماذا لو»</button>'}
       <button class="ghost small" data-quick="compare">مقارنة حكمين</button>
       <button class="ghost small" data-quick="print-balance">طباعة كشف الرصيد</button>
       <button class="ghost small" data-quick="print-poa" ${info.poas.length ? '' : 'disabled'}>طباعة آخر توكيل</button>
@@ -479,27 +485,60 @@ export async function executionDetailPage(app, executionId) {
   </section>`;
 }
 
+function feasSectionMarkup(info) {
+  if (info.execution.accountingModel !== FEAS_MODEL) return '';
+  const obligations = info.obligations || [];
+  const periods = (info.executionPeriods || []).filter(row => !row.isDeleted && ['RECOGNIZED', 'CLOSED'].includes(row.status));
+  const pendingSlices = info.slices.filter(row => row.status === 'needs_review');
+  return `<section class="panel" data-section-id="feas" data-collapse-id="exec-feas" data-collapse-default="open">
+    <div class="panel-head"><h3>محرك الأسرة FEAS</h3><span class="badge">${obligations.length} التزام · ${periods.length} لقطة معترف بها</span></div>
+    <p class="muted small">تعريف الالتزام أو إضافة شريحة قيمة لا ينشئ دينًا. الرصيد يُبنى فقط من لقطات الفترات التي اعتُرف بها صراحةً؛ اللقطة لا تتغير تلقائيًا بعد الحفظ. العملة، الدورية، الجزء النسبي، والفترة مدخلات المكتب وليست قواعد قانونية مفترضة.</p>
+    ${pendingSlices.length ? `<p class="exec-alert exec-alert-warn">${pendingSlices.length} شريحة قيمة تنتظر المراجعة؛ لا تدخل الرصيد قبل تسوية موثقة.</p>` : ''}
+    <h4 class="exec-sub">تعريفات الالتزام</h4>
+    <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>النوع كما أدخله المكتب</th><th>الدورية</th><th>العملة</th><th>النطاق المُعرّف</th><th>المستفيد</th><th>الحالة</th></tr></thead><tbody>
+      ${obligations.map(row => `<tr><td>${esc(row.obligationType)}</td><td>${esc(row.frequency)}</td><td>${esc(row.currency)}</td><td>${esc(`${row.startDate || 'غير محدد'}${row.endDate ? ` → ${row.endDate}` : ''}`)}</td><td>${esc(info.parties.find(party => party.id === row.beneficiaryPartyId)?.name || 'غير محدد')}</td><td>${esc(row.status || 'active')}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">لا توجد التزامات معرفة. لا يوجد رصيد FEAS حتى تسجيل المصادر والاعتراف.</td></tr>'}
+    </tbody></table></div>
+    <h4 class="exec-sub">لقطات الفترات المعترف بها</h4>
+    <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>مفتاح الفترة</th><th>النطاق</th><th>نوع الالتزام</th><th>قيمة اللقطة</th><th>المصادر</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${periods.slice(-250).map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(`${row.fromDate} → ${row.toDate}`)}</td><td>${esc(row.obligationTypeSnapshot || '')}</td><td>${money(fromMinorUnits(row.recognizedAmountMinor, row.currency))} ${esc(row.currency)}</td><td class="muted small">${esc((row.sourceValuePeriodIds || []).join('، '))}</td><td>${esc(row.status)}</td><td>${row.status === 'RECOGNIZED' ? `<button type="button" class="ghost small" data-close-feas-period="${esc(row.id)}">إغلاق الحالة</button>` : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">لا توجد لقطات اعتراف محفوظة بعد.</td></tr>'}
+    </tbody></table></div>
+    ${periods.length > 250 ? '<p class="muted small">يُعرض آخر 250 لقطة هنا؛ الرصيد يستخدم حد القراءة الآمن ويوقف العرض الكامل إذا تجاوزه.</p>' : ''}
+    <div class="exec-actions-row">
+      <button class="ghost small" data-add-feas-obligation>+ تعريف التزام</button>
+      <button class="primary small" data-recognize-feas ${obligations.some(row => !row.isDeleted && row.status !== 'inactive') ? '' : 'disabled'}>معاينة ثم اعتراف صريح بفترة</button>
+    </div>
+  </section>`;
+}
+
 function balanceSectionMarkup(summary, info) {
-  const eq = summary.equations || [];
+  const blocked = Boolean(summary.integrityBlocked);
+  const eq = blocked ? [] : (summary.equations || []);
+  const feas = summary.accountingModel === FEAS_MODEL;
+  const show = value => blocked || value === null || value === undefined ? '—' : feas
+    ? `${Number(value).toLocaleString('ar-EG', {minimumFractionDigits: currencyFractionDigits(summary.currency), maximumFractionDigits: currencyFractionDigits(summary.currency)})} ${esc(summary.currency || '')}`.trim()
+    : money(value);
+  const noRecognized = feas && !blocked && !summary.periodCount;
   return `<section class="panel" data-section-id="balance" data-collapse-id="exec-balance" data-collapse-default="open">
     <div class="panel-head"><h3>الرصيد المفكَّك</h3><span class="badge">${esc(summary.lastPeriod ? `آخر فترة ${summary.lastPeriod.key}` : 'لا فترات محسوبة')}</span></div>
+    ${blocked ? `<p class="exec-alert exec-alert-error">${esc(summary.integrityMessage || 'تعذر عرض الرصيد الكامل.')}</p>` : ''}
+    ${noRecognized ? '<p class="exec-alert exec-alert-info">لا توجد فترات معترف بها بعد. الشريحة أو تعريف الالتزام ليسا دينًا؛ يلزم تسجيل اعتراف صريح بعد مراجعة المصدر.</p>' : ''}
     <div class="exec-kv">
-      <span>الاستحقاق النهائي</span><b>${money(summary.finalEntitlement)}</b>
-      <span>المحصل</span><b>${money(summary.collected)}</b>
-      <span>المتبقي</span><b class="${summary.remaining > 0.005 ? 'exec-amount-due' : ''}">${money(summary.remaining)}</b>
-      <span>مكوّن الرصيد الأصلي</span><b>${money(summary.originalOutstanding)}</b>
-      <span>مكوّن فروق الأحكام</span><b>${money(summary.differencePart)}</b>
-      <span>الاستحقاق الأصلي</span><b>${money(summary.originalEntitlement)}</b>
-      <span>مصروفات مسجلة</span><b>${money(summary.expenses)} (منها في توكيل: ${money(summary.expensesInPoa)})</b>
-      <span>فروق معتمدة / تنتظر المراجعة</span><b>${money(summary.differences?.approved || 0)} / ${money(summary.differences?.pending || 0)}</b>
-      <span>محصل بلا تخصيص</span><b>${money(summary.unallocated)}</b>
-      <span>عدد الفترات</span><b>${summary.periodCount}</b>
+      <span>الاستحقاق النهائي</span><b>${show(summary.finalEntitlement)}</b>
+      <span>المحصل</span><b>${show(summary.collected)}</b>
+      <span>المتبقي</span><b class="${!blocked && summary.remaining > 0.005 ? 'exec-amount-due' : ''}">${show(summary.remaining)}</b>
+      <span>مكوّن الرصيد الأصلي</span><b>${show(summary.originalOutstanding)}</b>
+      <span>مكوّن فروق الأحكام</span><b>${show(summary.differencePart)}</b>
+      <span>الاستحقاق الأصلي</span><b>${show(summary.originalEntitlement)}</b>
+      <span>مصروفات مسجلة</span><b>${show(summary.expenses)} (منها في توكيل: ${show(summary.expensesInPoa)})</b>
+      <span>فروق معتمدة / تنتظر المراجعة</span><b>${show(summary.differences?.approved)} / ${show(summary.differences?.pending)}</b>
+      <span>محصل بلا تخصيص</span><b>${show(summary.unallocated)}</b>
+      <span>عدد الفترات</span><b>${blocked ? '—' : (summary.periodCount ?? 0)}</b>
     </div>
-    <ul class="exec-equations">${eq.map(line => `<li>${esc(line)}</li>`).join('')}</ul>
-    ${summary.truncated ? '<p class="muted small">تم بلوغ حد الفترات المعروض — ضيّق النطاق أو راجع الشرائح.</p>' : ''}
+    ${eq.length ? `<ul class="exec-equations">${eq.map(line => `<li>${esc(line)}</li>`).join('')}</ul>` : ''}
+    ${summary.truncated && !blocked ? '<p class="muted small">تم بلوغ حد القراءة/الفترات المعروض؛ راجع نطاقًا أصغر.</p>' : ''}
     <div class="exec-actions-row">
       <button class="ghost small" data-quick="snapshot">الرصيد في تاريخ (لقطة)</button>
-      <button class="ghost small" data-quick="simulate">محاكاة تغيير قيمة (بلا كتابة)</button>
+      ${feas ? '' : '<button class="ghost small" data-quick="simulate">محاكاة تغيير قيمة (بلا كتابة)</button>'}
       <button class="ghost small" data-print-balance>طباعة الكشف</button>
       <button class="ghost small" data-recompute-search>تحديث المؤشرات</button>
     </div>
@@ -517,7 +556,7 @@ function judgmentsSectionMarkup(info) {
     <div class="exec-actions-row">
       <button class="ghost small" data-quick="judgment">+ تسجيل حكم</button>
       <button class="ghost small" data-quick="judgment-later">+ حكم لاحق / استئناف</button>
-      <button class="ghost small" data-quick="compare" ${rows.length >= 2 ? '' : 'disabled'}>مقارنة حكمين</button>
+      ${info.execution.accountingModel === FEAS_MODEL ? '' : `<button class="ghost small" data-quick="compare" ${rows.length >= 2 ? '' : 'disabled'}>مقارنة حكمين</button>`}
     </div>
   </section>`;
 }
@@ -658,12 +697,18 @@ export async function bindExecutionDetail(app, executionId) {
   const hasPoas = info.poas.length > 0;
 
   const openCollection = () => collectionDialog(app, executionId).catch(error => toast(userError(error), 'error'));
-  const openSlice = () => sliceDialog(app, executionId, {slices: info.slices, judgments: info.judgments}).catch(error => toast(userError(error), 'error'));
-  const openJudgment = previous => judgmentDialog(app, executionId, {previous, slices: info.slices}).catch(error => toast(userError(error), 'error'));
+  const openSlice = () => sliceDialog(app, executionId, {slices: info.slices, judgments: info.judgments, obligations: info.obligations || [], accountingModel: execution.accountingModel}).catch(error => toast(userError(error), 'error'));
+  const openJudgment = previous => judgmentDialog(app, executionId, {previous, slices: info.slices, obligations: info.obligations || [], accountingModel: execution.accountingModel}).catch(error => toast(userError(error), 'error'));
   const openPoa = (previousPoaId = '') => poaDialog(app, executionId, {previousPoaId}).catch(error => toast(userError(error), 'error'));
 
   root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'execution:card', root}));
   root.querySelector('[data-edit-execution]')?.addEventListener('click', () => executionDialog(app, {execution}));
+  root.querySelector('[data-add-feas-obligation]')?.addEventListener('click', () => executionObligationDialog(app, executionId, {parties: info.parties}).catch(error => toast(userError(error), 'error')));
+  root.querySelector('[data-recognize-feas]')?.addEventListener('click', () => recognitionDialog(app, executionId, info.obligations || []).catch(error => toast(userError(error), 'error')));
+  root.querySelectorAll('[data-close-feas-period]').forEach(button => button.addEventListener('click', () => {
+    const period = info.executionPeriods.find(row => row.id === button.dataset.closeFeasPeriod);
+    if (period) closeRecognizedPeriod(app, period).catch(error => toast(userError(error), 'error'));
+  }));
   root.querySelector('[data-print-balance]')?.addEventListener('click', () => printBalanceDialog(app, executionId));
   root.querySelector('[data-refresh-search]')?.addEventListener('click', async () => {
     const row = await refreshExecutionSearchText(app.office, executionId).catch(error => { toast(userError(error), 'error'); return null; });
@@ -692,7 +737,7 @@ export async function bindExecutionDetail(app, executionId) {
 
   root.querySelectorAll('[data-edit-judgment]').forEach(button => button.addEventListener('click', () => {
     const judgment = info.judgments.find(row => row.id === button.dataset.editJudgment);
-    judgmentDialog(app, executionId, {judgment}).catch(error => toast(userError(error), 'error'));
+    judgmentDialog(app, executionId, {judgment, slices: info.slices, obligations: info.obligations || [], accountingModel: execution.accountingModel}).catch(error => toast(userError(error), 'error'));
   }));
   root.querySelectorAll('[data-edit-action]').forEach(button => button.addEventListener('click', () => {
     const action = info.actions.find(row => row.id === button.dataset.editAction);
@@ -749,8 +794,11 @@ export async function bindExecutionDetail(app, executionId) {
 }
 
 async function createSettlementFlow(app, executionId, info) {
-  const candidates = info.slices.filter(slice => slice.valueType === 'periodic').slice(-6).reverse();
-  if (!candidates.length) return toast('أضف شريحة قيمة أولًا', 'error');
+  const feas = info.execution.accountingModel === FEAS_MODEL;
+  const candidates = (feas
+    ? info.slices.filter(slice => slice.status === 'needs_review')
+    : info.slices.filter(slice => slice.valueType === 'periodic')).slice(-6).reverse();
+  if (!candidates.length) return toast(feas ? 'لا توجد شريحة FEAS تنتظر تسوية مراجعة' : 'أضف شريحة قيمة أولًا', 'error');
   const choice = candidates[0];
   const out = await DF.createSettlement(app.office, {executionId, sliceId: choice.id, note: 'تسوية من بطاقة التنفيذ'}).catch(error => { toast(userError(error), 'error'); return null; });
   if (out) await settlementReviewDialog(app, out.settlement.id);

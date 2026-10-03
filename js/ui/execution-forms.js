@@ -9,12 +9,15 @@ import {userError} from '../core/errors.js';
 import {localDate, Clock} from '../core/clock.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {money, round2, num, ALLOCATION_METHODS, ALLOCATION_METHOD_LABELS, EXPENSE_TYPES, LEDGER_TYPE_LABELS, LEDGER_TYPES, POA_STATUS_LABELS, DIFFERENCE_STATUS_LABELS, ACTION_KINDS, ACTION_KIND_LABELS, PERIODICITIES, PERIODICITY_LABELS, VALUE_TYPES, VALUE_TYPE_LABELS, EXECUTION_METHODS, EXECUTION_METHOD_LABELS, EXECUTION_STATUSES, EXECUTION_STATUS_LABELS, EXECUTION_TYPES, EXECUTION_TYPE_LABELS} from '../domain/execution.js';
+import {FEAS_MODEL, FEAS_FREQUENCIES, FEAS_PRORATION_POLICIES} from '../domain/execution-feas.js';
+import {currencyFractionDigits, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
 import * as EX from '../services/execution.js';
 import * as L from '../services/execution-ledger.js';
 import * as DF from '../services/execution-differences.js';
 import * as POA from '../services/execution-poa.js';
 import * as B from '../services/execution-balance.js';
 import * as PR from '../services/execution-print.js';
+import * as FEAS from '../services/execution-feas.js';
 
 const options = (list, selected = '', emptyLabel = '') => `${emptyLabel ? `<option value="">${esc(emptyLabel)}</option>` : ''}${list.map(([value, label]) => `<option value="${esc(value)}"${String(value) === String(selected) ? ' selected' : ''}>${esc(label)}</option>`).join('')}`;
 const field = (label, html, hint = '') => `<label class="exec-field"><span>${esc(label)}</span>${html}${hint ? `<small class="muted">${esc(hint)}</small>` : ''}</label>`;
@@ -31,10 +34,78 @@ export async function executionDialog(app, {execution = null} = {}) {
   const {openEntityForm} = await import('./form.js');
   openEntityForm(app, 'execution', {
     id: execution?.id || null,
-    preset: execution ? {} : {executionType: 'family', openedDate: localDate(), status: 'active'},
+    preset: execution ? {} : {executionType: 'family', accountingModel: FEAS_MODEL, openedDate: localDate(), status: 'active'},
     title: execution ? 'تعديل بيانات التنفيذ' : 'فتح تنفيذ جديد',
     onSaved: () => app.refresh()
   });
+}
+
+// ===== إعداد FEAS: التزامات واعتراف صريح =====
+export async function executionObligationDialog(app, executionId, {obligation = null, parties = []} = {}) {
+  if (!parties.length) parties = await EX.executionPartyRows(app.office, executionId).catch(() => []);
+  const card = modal(`<h2 class="modal-title">${obligation ? 'تعديل تعريف التزام FEAS' : 'تعريف التزام FEAS'}</h2>
+  <p class="muted small">أدخل قاعدة المكتب كما هي موثقة. لا تُستنتج قيمة أو دورية أو عملة أو تاريخ، والتعريف وحده لا ينشئ دينًا.</p>
+  <form class="exec-form exec-form-grid">
+    ${field('نوع الالتزام كما سجّله المكتب', `<input name="obligationType" value="${esc(obligation?.obligationType || '')}" required>`)}
+    ${field('الوصف', `<input name="description" value="${esc(obligation?.description || '')}">`)}
+    ${field('المستحق (اختياري)', `<select name="beneficiaryPartyId">${options(parties.filter(row => !row.isDeleted && row.isActive !== false && row.side !== 'debtor').map(row => [row.id, `${row.name} — ${row.role || 'مستحق'}`]), obligation?.beneficiaryPartyId || '', '— غير محدد —')}</select>`, 'إن لم يُحدَّد طرف، لا يُخمن النظام مستفيدًا.')}
+    ${field('الدورية (اختيار صريح)', `<select name="frequency">${options(FEAS_FREQUENCIES, obligation?.frequency || '', 'اختر الدورية')}</select>`)}
+    ${field('العملة — رمز ISO ثلاثي الأحرف', `<input name="currency" value="${esc(obligation?.currency || '')}" maxlength="3" pattern="[A-Za-z]{3}" required placeholder="مثال: EGP">`, 'لا يُحوَّل الرمز العربي «جنيه» تلقائيًا.')}
+    ${field('تاريخ بداية الالتزام (إن كان محددًا)', `<input name="startDate" type="date" value="${esc(obligation?.startDate || '')}">`)}
+    ${field('تاريخ نهاية الالتزام (اختياري)', `<input name="endDate" type="date" value="${esc(obligation?.endDate || '')}">`)}
+    ${field('التاريخ المرجعي للدورية الأسبوعية/المخصصة', `<input name="anchorDate" type="date" value="${esc(obligation?.anchorDate || '')}">`, 'مطلوب صراحةً للدورية الأسبوعية أو المخصصة.')}
+    ${field('عدد أيام الدورية المخصصة', `<input name="customDays" type="number" step="1" min="1" max="36500" value="${obligation?.customDays ?? ''}">`, 'يُستخدم فقط عند اختيار الدورية المخصصة.')}
+    ${field('سياسة الجزء من الفترة (اختيار صريح)', `<select name="prorationPolicy">${options(FEAS_PRORATION_POLICIES, obligation?.prorationPolicy || '', 'اختر السياسة')}</select>`)}
+    ${field('ملاحظات تعريفية', `<textarea name="notes" rows="2">${esc(obligation?.notes || '')}</textarea>`)}
+  </form>
+  <div class="form-actions"><button type="button" class="primary" data-save>${obligation ? 'حفظ تعريف الالتزام' : 'تعريف الالتزام'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
+  card.querySelector('[data-close]').onclick = closeModal;
+  card.querySelector('[data-save]').onclick = async () => {
+    const data = formData(card.querySelector('form'));
+    const out = await run(() => FEAS.saveExecutionObligation(app.office, {...data, executionId}, obligation?.id || null, obligation?.version ?? null), obligation ? 'تم حفظ تعريف الالتزام' : 'تم تعريف الالتزام — لا ينشأ دين حتى الاعتراف بفترة');
+    if (out) { closeModal(); await app.refresh(); }
+  };
+  return card;
+}
+
+export async function recognitionDialog(app, executionId, obligations = []) {
+  const active = obligations.filter(row => !row.isDeleted && row.status !== 'inactive');
+  const card = modal(`<h2 class="modal-title">معاينة / اعتراف صريح بفترة</h2>
+  <p class="muted small">المعاينة لا تكتب دينًا. لا تُحفظ لقطة إلا بعد قرارك الصريح، ثم لا يُعاد بناؤها تلقائيًا.</p>
+  <form class="exec-form exec-form-grid">
+    ${field('الالتزام', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.frequency} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`)}
+    ${field('من تاريخ مدني', `<input name="fromDate" type="date" required>`)}
+    ${field('إلى تاريخ مدني', `<input name="toDate" type="date" required>`)}
+    ${field('حالة الفترة بعد الاعتراف', `<select name="status">${options([['RECOGNIZED', 'معترف بها'], ['CLOSED', 'معترف بها ومغلقة']], 'RECOGNIZED')}</select>`)}
+    ${field('سبب / مرجع الاعتراف', `<textarea name="reason" rows="2" placeholder="اختياري — لا تكتب استنتاجًا قانونيًا آليًا"></textarea>`)}
+  </form>
+  <div class="exec-actions-row"><button type="button" class="ghost" data-preview>معاينة دون كتابة</button><button type="button" class="primary" data-recognize disabled>حفظ لقطة الاعتراف</button><button type="button" class="ghost" data-close>إلغاء</button></div>
+  <div class="exec-feas-preview" data-preview-output><p class="muted small">أدخل الالتزام والنطاق ثم اطلب المعاينة.</p></div>`);
+  let preview = null;
+  card.querySelector('[data-close]').onclick = closeModal;
+  card.querySelector('[data-preview]').onclick = async () => {
+    const data = formData(card.querySelector('form'));
+    const out = await run(() => FEAS.projectExecutionPeriod(app.office, {executionId, obligationId: data.obligationId, fromDate: data.fromDate, toDate: data.toDate}));
+    preview = out;
+    const output = card.querySelector('[data-preview-output]');
+    if (!out) { card.querySelector('[data-recognize]').disabled = true; return; }
+    output.innerHTML = `<div class="exec-kv"><span>الفترة الصريحة</span><b>${esc(out.fromDate)} → ${esc(out.toDate)}</b><span>العملة</span><b>${esc(out.currency)}</b><span>قيمة المعاينة</span><b>${money(fromMinorUnits(out.recognizedAmountMinor, out.currency))}</b><span>الوحدات الصغرى</span><b>${esc(String(out.recognizedAmountMinor))}</b><span>عدد المقاطع</span><b>${out.segments.length}</b></div><p class="muted small">${esc(out.equation || '')}</p><div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الوحدة</th><th>مصدر القيمة</th><th>الحكم</th><th>المبلغ بوحدات صغرى</th><th>المعادلة</th></tr></thead><tbody>${out.segments.map(row => `<tr><td>${esc(row.unitStart)} → ${esc(row.unitEnd)}</td><td>${esc(row.valuePeriodId)}</td><td>${esc(row.judgmentId || '—')}</td><td>${esc(String(row.amountMinor))}</td><td>${esc(row.equation)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">لا توجد مصادر تغطي النطاق.</td></tr>'}</tbody></table></div>`;
+    card.querySelector('[data-recognize]').disabled = !out.segments.length || !out.fingerprint;
+  };
+  card.querySelector('[data-recognize]').onclick = async () => {
+    if (!preview?.fingerprint) return toast('أعد المعاينة قبل الاعتراف', 'error');
+    const data = formData(card.querySelector('form'));
+    const out = await run(() => FEAS.recognizeExecutionPeriod(app.office, {executionId, obligationId: data.obligationId, fromDate: data.fromDate, toDate: data.toDate, status: data.status, reason: data.reason, expectedFingerprint: preview.fingerprint}), result => result.reused ? 'الفترة معترف بها مسبقًا؛ أُعيدت اللقطة نفسها دون تكرار' : 'حُفظت لقطة الاعتراف الصريحة');
+    if (out) { closeModal(); await app.refresh(); }
+  };
+  return card;
+}
+
+export async function closeRecognizedPeriod(app, period) {
+  const answer = await confirmBox(`إغلاق فترة الاعتراف ${period.fromDate} → ${period.toDate}؟ لن تتغير لقطة المبلغ أو مصادرها.`, {okText: 'إغلاق', input: true, label: 'سبب الإغلاق (اختياري)'});
+  if (!answer || answer.ok !== true) return;
+  const out = await run(() => FEAS.closeExecutionPeriod(app.office, period.id, String(answer.value || '')), 'تم إغلاق الفترة دون تغيير مبلغ اللقطة');
+  if (out) await app.refresh();
 }
 
 // ===== طرف تنفيذ =====
@@ -61,21 +132,23 @@ export async function partyDialog(app, executionId, {party = null, clients = [],
 }
 
 // ===== حكم جديد + شريحة قيمة =====
-export async function judgmentDialog(app, executionId, {judgment = null, previous = null, slices = []} = {}) {
+export async function judgmentDialog(app, executionId, {judgment = null, previous = null, slices = [], obligations = [], accountingModel = ''} = {}) {
+  const isFeas = accountingModel === FEAS_MODEL;
   const types = [...new Set([...(slices || []).map(s => s.entitlementType), 'نفقة شهرية', 'نفقة أبناء', 'تعويض'])];
   const card = modal(`<h2 class="modal-title">${judgment ? 'تعديل بيانات حكم' : 'تسجيل حكم في سلسلة التنفيذ'}</h2>
   <p class="muted small">تاريخ الحكم ≠ تاريخ سريان القيمة: أدخل تاريخ السريان بنفسك، ولا يُستنتج تلقائيًا من تاريخ الحكم.</p>
   <form class="exec-form exec-form-grid">
     ${field('نوع الاستحقاق', `<input name="entitlementType" list="exec-types" value="${esc(judgment?.entitlementType || previous?.entitlementType || '')}" required><datalist id="exec-types">${types.map(t => `<option value="${esc(t)}"></option>`).join('')}</datalist>`)}
+    ${accountingModel === FEAS_MODEL ? field('التزام FEAS المرتبط للشريحة', `<select name="obligationId">${options(obligations.filter(row => !row.isDeleted && row.status !== 'inactive').map(row => [row.id, `${row.obligationType} · ${row.currency}`]), '', 'اختر الالتزام عند إنشاء شريحة')}</select>`, 'التزام منفصل عن الحكم، يحدد العملة والدورية والسياسة.') : ''}
     ${field('نوع الحكم', `<select name="judgmentKind">${options([['original', 'حكم أصلي'], ['later', 'حكم لاحق / استئناف'], ['correction', 'تصحيح'], ['other', 'أخرى']], judgment?.judgmentKind || (previous ? 'later' : 'original'))}</select>`)}
     ${field('تاريخ الحكم', `<input name="judgmentDate" type="date" value="${esc(judgment?.judgmentDate || localDate())}" required>`)}
     ${field('رقم الحكم', `<input name="judgmentNumber" value="${esc(judgment?.judgmentNumber || '')}">`)}
     ${field('رقم الدعوى', `<input name="lawsuitNumber" value="${esc(judgment?.lawsuitNumber || '')}">`)}
     ${field('رقم الاستئناف', `<input name="appealNumber" value="${esc(judgment?.appealNumber || '')}">`)}
     ${field('المحكمة', `<input name="court" value="${esc(judgment?.court || '')}">`)}
-    ${field('نوع القيمة', `<select name="valueType">${options(VALUE_TYPES, judgment?.valueType || 'periodic')}</select>`)}
-    ${field('القيمة', `<input name="amount" type="number" step="0.01" min="0" value="${judgment?.amount ?? ''}" placeholder="مثال: 3000">`)}
-    ${field('الدورية', `<select name="periodicity">${options(PERIODICITIES, judgment?.periodicity || 'monthly')}</select>`)}
+    ${field(isFeas ? 'نوع القيمة (اختيار صريح)' : 'نوع القيمة', `<select name="valueType" ${isFeas && !judgment ? 'required' : ''}>${options(VALUE_TYPES, isFeas && !judgment ? '' : (judgment?.valueType || 'periodic'), isFeas && !judgment ? 'اختر نوع القيمة' : '')}</select>`)}
+    ${field('القيمة', `<input name="amount" type="number" step="any" min="0" value="${judgment?.amount ?? ''}" placeholder="مثال: 3000">`)}
+    ${isFeas ? '<p class="muted small">الدورية وسياسة الجزء تؤخذان صراحةً من تعريف التزام FEAS المرتبط.</p>' : field('الدورية', `<select name="periodicity">${options(PERIODICITIES, judgment?.periodicity || 'monthly')}</select>`)}
     ${field('تاريخ سريان القيمة (إنذار سريان)', `<input name="effectiveFrom" type="date" value="${esc(judgment?.effectiveFrom || '')}">`, 'اتركه فارغًا إن لم يكن محددًا — البرنامج لا يخمّنه')}
     ${field('تاريخ انتهاء السريان (اختياري)', `<input name="effectiveTo" type="date" value="${esc(judgment?.effectiveTo || '')}">`)}
     ${field('منطوق الحكم (ملخص)', `<textarea name="operativeSummary" rows="2">${esc(judgment?.operativeSummary || '')}</textarea>`)}
@@ -87,18 +160,23 @@ export async function judgmentDialog(app, executionId, {judgment = null, previou
   card.querySelector('[data-close]').onclick = closeModal;
   const collect = () => ({...formData(card.querySelector('form')), executionId});
   const saveJudgment = async () => {
-    if (judgment) return run(() => EX.updateExecutionJudgment(app.office, judgment.id, collect()), 'تم حفظ بيانات الحكم');
-    return run(() => EX.addExecutionJudgment(app.office, {...collect(), previousJudgmentId: previous?.id || ''}), 'تم تسجيل الحكم في السلسلة');
+    const data = collect();
+    if (isFeas && !data.valueType) return toast('اختر نوع القيمة صراحةً قبل تسجيل الحكم في مسار FEAS.', 'error');
+    if (judgment) return run(() => EX.updateExecutionJudgment(app.office, judgment.id, data), 'تم حفظ بيانات الحكم');
+    return run(() => EX.addExecutionJudgment(app.office, {...data, previousJudgmentId: previous?.id || ''}), 'تم تسجيل الحكم في السلسلة');
   };
   card.querySelector('[data-save]').onclick = async () => { const out = await saveJudgment(); if (out) { closeModal(); await app.refresh(); } };
   card.querySelector('[data-save-slice]')?.addEventListener('click', async () => {
     const data = collect();
+    if (!data.amount || num(data.amount) <= 0) return toast('أدخل قيمة الحكم لإنشاء شريحة قيمة.', 'error');
+    if (!data.effectiveFrom) return toast('أدخل تاريخ سريان القيمة صراحةً؛ لا يُستخدم تاريخ الحكم بديلًا.', 'error');
+    if (isFeas && !data.obligationId) return toast('اختر التزام FEAS المرتبط قبل إنشاء شريحة القيمة.', 'error');
+    if (isFeas && !['fixed', 'periodic'].includes(data.valueType)) return toast('اختر نوع القيمة صراحةً قبل إنشاء شريحة FEAS.', 'error');
     const created = await run(async () => {
       const row = await EX.addExecutionJudgment(app.office, {...data, previousJudgmentId: previous?.id || ''});
-      if (!data.amount || num(data.amount) <= 0) throw new Error('أدخل قيمة الحكم لإنشاء شريحة قيمة.');
       const slice = await EX.saveValueSlice(app.office, {
-        executionId, judgmentId: row.id, entitlementType: data.entitlementType, valueType: data.valueType,
-        periodicity: data.periodicity, amount: data.amount, startDate: data.effectiveFrom || data.judgmentDate,
+        executionId, judgmentId: row.id, entitlementType: data.entitlementType, obligationId: data.obligationId || '', valueType: data.valueType,
+        periodicity: data.periodicity, amount: data.amount, startDate: data.effectiveFrom,
         endDate: data.effectiveTo || ''
       });
       return {row, slice};
@@ -125,7 +203,38 @@ export async function judgmentDialog(app, executionId, {judgment = null, previou
 }
 
 // ===== شريحة قيمة مستقلة =====
-export async function sliceDialog(app, executionId, {slices = [], judgments = []} = {}) {
+async function feasValueSliceDialog(app, executionId, {slices = [], judgments = [], obligations = []} = {}) {
+  const active = obligations.filter(row => !row.isDeleted && row.status !== 'inactive');
+  const card = modal(`<h2 class="modal-title">شريحة قيمة FEAS جديدة</h2>
+  <p class="muted small">يجب ربط الشريحة بالتزام وحكم مصدر. تاريخ السريان مطلوب كما أدخله المكتب؛ لا يُشتق من تاريخ الحكم. الشريحة وحدها لا تنشئ دينًا.</p>
+  <form class="exec-form exec-form-grid">
+    ${field('التزام FEAS', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`)}
+    ${field('الحكم المصدر', `<select name="judgmentId" required>${options(judgments.filter(row => !row.isDeleted).map(row => [row.id, `حكم ${row.judgmentNumber || '—'} ${row.judgmentDate || ''} (${row.entitlementType || ''})`]), '', 'اختر الحكم')}</select>`)}
+    ${field('نوع القيمة (اختيار صريح)', `<select name="valueType" required>${options(VALUE_TYPES, '', 'اختر نوع القيمة')}</select>`)}
+    ${field('قيمة الشريحة', `<input name="amount" type="number" step="any" min="0" required>`,  'تُتحقق دقة العملة دون تقريب صامت.')}
+    ${field('تاريخ بداية السريان', `<input name="startDate" type="date" required>`)}
+    ${field('تاريخ نهاية السريان (اختياري)', `<input name="endDate" type="date">`)}
+    ${field('مرجع المصدر', `<input name="sourceReference" placeholder="مرجع الحكم/المستند كما سجّله المكتب">`)}
+    ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`)}
+  </form>
+  <div class="form-actions"><button type="button" class="primary" data-save>حفظ الشريحة</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
+  card.querySelector('[data-close]').onclick = closeModal;
+  card.querySelector('[data-save]').onclick = async () => {
+    const data = formData(card.querySelector('form'));
+    const out = await run(() => EX.saveValueSlice(app.office, {...data, executionId}), row => row?.__impact?.rows?.length ? `تنتظر المراجعة: ${row.__impact.rows.length} فترة معترف بها متأثرة` : row?.status === 'needs_review' ? 'شريحة تنتظر مراجعة الفرق' : 'تم حفظ شريحة المصدر؛ لا ينشأ دين بها وحدها');
+    if (!out) return;
+    closeModal(); await app.refresh();
+    if (out.__impact?.rows?.length) {
+      const result = await run(() => DF.createSettlement(app.office, {executionId, sliceId: out.id, note: 'شريحة FEAS جديدة'}), 'أُنشئت تسوية تفسيرية للمراجعة');
+      if (result?.settlement) await settlementReviewDialog(app, result.settlement.id);
+    }
+  };
+  return card;
+}
+
+export async function sliceDialog(app, executionId, {slices = [], judgments = [], obligations = [], accountingModel = ''} = {}) {
+  if (!accountingModel) accountingModel = (await app.office.r.execution.get(executionId))?.accountingModel || '';
+  if (accountingModel === FEAS_MODEL) return feasValueSliceDialog(app, executionId, {slices, judgments, obligations});
   const card = modal(`<h2 class="modal-title">شريحة قيمة جديدة</h2>
   <p class="muted small">لا تُعدَّل شريحة تاريخية أبدًا: التغيير يُسجَّل كشريحة جديدة، والقديمة تبقى كما هي في السجل.</p>
   <form class="exec-form exec-form-grid">
@@ -266,9 +375,10 @@ export async function settlementReviewDialog(app, settlementId) {
   const review = await DF.settlementReview(app.office, settlementId);
   const {settlement, rows} = review;
   const statusLabel = DIFFERENCE_STATUS_LABELS[settlement.status] || settlement.status;
+  const isFeas = settlement.accountingModel === FEAS_MODEL;
   const total = round2(rows.reduce((sum, row) => sum + num(row.differenceAmount), 0));
   const card = modal(`<h2 class="modal-title">اعتماد تسوية فروق — ${esc(settlement.entitlementType || '')}</h2>
-  <p class="muted small">لا تُسجَّل أي حركة مالية قبل قرارك. كل صف يوضح القيمة القديمة والجديدة والمحصل سابقًا والرصيد الناتج.</p>
+  <p class="muted small">${isFeas ? 'الفروق تفسيرية لقيمة اللقطة المعترف بها؛ الاعتماد والتثبيت لا ينشئان حركة دين ثانية. تُراجع بصمة المقارنة قبل القرار.' : 'لا تُسجَّل أي حركة مالية قبل قرارك. كل صف يوضح القيمة القديمة والجديدة والمحصل سابقًا والرصيد الناتج.'}</p>
   <div class="exec-kv"><span>الحالة</span><b>${esc(statusLabel)}</b><span>عدد الفترات</span><b>${rows.length}</b><span>إجمالي الفرق</span><b>${money(total)}</b>${settlement.note ? `<span>ملاحظة</span><b>${esc(settlement.note)}</b>` : ''}</div>
   <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الفترة</th><th>قديم</th><th>جديد</th><th>محصل سابقًا</th><th>الفرق</th><th>الرصيد بعد الفرق</th><th>المعادلة</th></tr></thead>
   <tbody>${rows.map(row => `<tr class="${row.coverageRemoved ? 'exec-row-warn' : ''}"><td>${esc(row.periodKey)}</td><td>${money(row.oldValue)}</td><td>${money(row.newValue)}</td><td>${money(row.currentCollected ?? row.previouslyCollected)}</td><td>${money(row.differenceAmount)}</td><td>${money(row.currentRemaining ?? row.remainingAfter)}</td><td class="muted small">${esc(row.equation || '')}</td></tr>`).join('')}</tbody></table></div>
@@ -276,7 +386,7 @@ export async function settlementReviewDialog(app, settlementId) {
     <button type="button" class="primary" data-approve>اعتماد التسوية</button>
     <button type="button" class="ghost" data-reject>رفض التسوية</button>
     <button type="button" class="ghost" data-recompute>إعادة حساب</button>
-    <button type="button" class="primary" data-post${settlement.status === 'APPROVED' ? '' : ' disabled'}>ترحيل الفروق المعتمدة إلى الحركات</button>
+    <button type="button" class="primary" data-post${settlement.status === 'APPROVED' ? '' : ' disabled'}>${isFeas ? 'تثبيت حالة التسوية (بلا حركة دين)' : 'ترحيل الفروق المعتمدة إلى الحركات'}</button>
     <button type="button" class="ghost" data-close>إغلاق</button>
   </div>`);
   card.querySelector('[data-close]').onclick = closeModal;
@@ -287,7 +397,7 @@ export async function settlementReviewDialog(app, settlementId) {
     return String(answer.value || '');
   };
   card.querySelector('[data-approve]').onclick = async () => {
-    const reason = await askedReason('اعتماد فروق هذه التسوية؟ سيصبح الفرق قابلاً للترحيل إلى الحركات المالية.', 'اعتماد', 'سبب الاعتماد (اختياري)');
+    const reason = await askedReason(isFeas ? 'اعتماد الفروق التفسيرية لهذه التسوية؟ سيؤثر القرار في الرصيد المشتق مرة واحدة، بلا حركة دين إضافية.' : 'اعتماد فروق هذه التسوية؟ سيصبح الفرق قابلاً للترحيل إلى الحركات المالية.', 'اعتماد', 'سبب الاعتماد (اختياري)');
     if (reason === null) return;
     const out = await run(() => DF.decideSettlement(app.office, settlementId, {decision: 'approve', reason}), 'تم اعتماد التسوية');
     if (out) await refreshDialog();
@@ -303,7 +413,7 @@ export async function settlementReviewDialog(app, settlementId) {
     if (out) await refreshDialog();
   };
   card.querySelector('[data-post]').onclick = async () => {
-    const out = await run(() => DF.postSettlement(app.office, settlementId), (result) => `تم ترحيل ${result.posted.length} التزامًا معتمدًا إلى الحركات`);
+    const out = await run(() => DF.postSettlement(app.office, settlementId), result => isFeas ? `ثُبّتت حالة ${result.posted.length} فرقًا تفسيريًا دون إنشاء حركة دين` : `تم ترحيل ${result.posted.length} التزامًا معتمدًا إلى الحركات`);
     if (out) { closeModal(); await app.refresh(); }
   };
   return card;
@@ -313,40 +423,58 @@ export async function settlementReviewDialog(app, settlementId) {
 export async function poaDialog(app, executionId, {previousPoaId = ''} = {}) {
   const draft = await POA.buildPoaDraft(app.office, {executionId, previousPoaId, includeDifferences: true});
   const totals = draft.totals;
+  const isFeas = draft.accountingModel === FEAS_MODEL;
+  const currency = draft.currency || '';
+  const fractionDigits = isFeas ? currencyFractionDigits(currency) : 2;
+  const amountStep = isFeas ? String(10 ** -fractionDigits) : '0.01';
+  const showMoney = value => isFeas ? `${Number(value || 0).toLocaleString('ar-EG', {minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits})} ${currency}` : money(value);
   const anyLine = (key) => draft.lines.find(line => line.key === key) || {};
   const differencesLine = anyLine('differences');
   const expensesLine = anyLine('expenses');
   const previousLine = anyLine('previousBalance');
   const card = modal(`<h2 class="modal-title">${previousPoaId ? 'إعادة توكيل تنفيذ' : 'إنشاء توكيل تنفيذ'}</h2>
-  <p class="muted small">كل مبلغ في المسودة يحمل مصدره. الإجمالي يتغيّر بحسب ما تختار إدراجه، ولا يقدّر البرنامج أي رسم أو دمغة.</p>
+  <p class="muted small">كل مبلغ في المسودة يحمل مصدره. ${isFeas ? 'هذا مستند لقطة لا ينشئ دينًا ولا يغيّر الرصيد؛ فروق الاعتراف مدمجة في كل فترة ولا تُجمع مرة ثانية.' : 'الإجمالي يتغيّر بحسب ما تختار إدراجه.'} لا يقدّر البرنامج أي رسم أو دمغة.</p>
   <div class="exec-kv">
     <span>فترة التوكيل</span><b>${esc(draft.fromDate)} → ${esc(draft.toDate)} (${draft.periodRows.length} فترة)</b>
-    <span>قيمة الفترات الجديدة</span><b>${money(totals.newPeriodValue)}</b>
-    <span>الرصيد السابق الخارج عن الفترة</span><b>${money(totals.previousBalance)}</b>
-    <span>فروق أحكام معتمدة متاحة</span><b>${money(totals.differences)}</b>
-    <span>مصروفات مُعلَّمة للدخول</span><b>${money(totals.expenses)}</b>
-    ${previousPoaId ? `<span>الرصيد المشتق قبل الفترة</span><b>${money(totals.derivedPreviousBalance ?? 0)}</b>` : ''}
+    <span>قيمة الفترات الجديدة</span><b>${showMoney(totals.newPeriodValue)}</b>
+    <span>الرصيد السابق الخارج عن الفترة</span><b>${showMoney(totals.previousBalance)}</b>
+    <span>فروق أحكام معتمدة متاحة</span><b>${showMoney(totals.differences)}</b>
+    <span>مصروفات مُعلَّمة للدخول</span><b>${showMoney(totals.expenses)}</b>
+    ${previousPoaId ? `<span>الرصيد المشتق قبل الفترة</span><b>${showMoney(totals.derivedPreviousBalance ?? 0)}</b>` : ''}
   </div>
   <form class="exec-form exec-form-grid">
     ${field('رقم التوكيل / المرجع', `<input name="poaNumber" placeholder="اتركه فارغًا ليُرقَّم داخليًا POA-سنة-رقم">`)}
-    ${field('تاريخ التوكيل', `<input name="date" type="date" value="${localDate()}">`)}
-    ${field('من تاريخ', `<input name="fromDate" type="date" value="${esc(draft.fromDate)}">`)}
-    ${field('إلى تاريخ', `<input name="toDate" type="date" value="${esc(draft.toDate)}">`)}
-    ${field('الدمغة الفعلية (إن وُجدت)', `<input name="stampAmount" type="number" step="0.01" min="0">`, 'قيمة يدوية فقط')}
-    ${field('مبلغ آخر', `<input name="extraAmount" type="number" step="0.01" min="0">`)}
+    ${field('تاريخ التوكيل', `<input name="date" type="date" value="${isFeas ? '' : localDate()}" ${isFeas ? 'required' : ''}>`)}
+    ${field('من تاريخ', `<input name="fromDate" type="date" value="${esc(draft.fromDate)}" ${isFeas ? 'required readonly' : ''}>`)}
+    ${field('إلى تاريخ', `<input name="toDate" type="date" value="${esc(draft.toDate)}" ${isFeas ? 'required readonly' : ''}>`)}
+    ${field('الدمغة الفعلية (إن وُجدت)', `<input name="stampAmount" type="number" step="${amountStep}" min="0">`, 'قيمة يدوية فقط')}
+    ${field('مبلغ آخر', `<input name="extraAmount" type="number" step="${amountStep}" min="0">`)}
     ${field('وصف المبلغ الآخر', `<input name="extraLabel" placeholder="مثال: أمانة تسليم">`)}
     ${field('ملاحظات', `<textarea name="notes" rows="2"></textarea>`)}
   </form>
   <div class="exec-include">
-    <label><input type="checkbox" data-include="previousBalance" ${previousLine.included !== false ? 'checked' : ''}> إدراج الرصيد السابق (${money(totals.previousBalance)})</label>
-    <label><input type="checkbox" data-include="differences" ${differencesLine.amount ? 'checked' : ''} ${differencesLine.amount ? '' : 'disabled'}> إدراج فروق الأحكام المعتمدة (${money(differencesLine.amount || 0)})</label>
-    <label><input type="checkbox" data-include="expenses"> إدراج المصروفات المُعلَّمة للدخول (${money(totals.expenses)})</label>
-    <span class="exec-total">الإجمالي الحالي: <b data-total>${money(totals.total)}</b></span>
+    <label><input type="checkbox" data-include="previousBalance" ${previousLine.included !== false ? 'checked' : ''}> إدراج الرصيد السابق (${showMoney(totals.previousBalance)})</label>
+    <label><input type="checkbox" data-include="differences" ${isFeas ? 'disabled' : `${differencesLine.amount ? 'checked' : ''} ${differencesLine.amount ? '' : 'disabled'}`}> ${isFeas ? 'الفروق التفسيرية مدمجة في قيم الفترات — لا تُضاف منفصلة' : `إدراج فروق الأحكام المعتمدة (${showMoney(differencesLine.amount || 0)})`}</label>
+    <label><input type="checkbox" data-include="expenses" ${totals.expenses > 0 && !isFeas ? 'checked' : ''}> إدراج المصروفات المُعلَّمة للدخول (${showMoney(totals.expenses)})</label>
+    <span class="exec-total">الإجمالي الحالي: <b data-total>${showMoney(totals.total)}</b></span>
   </div>
   <div class="form-actions"><button type="button" class="primary" data-save>حفظ التوكيل</button><button type="button" class="ghost" data-save-print>حفظ وطباعة</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   card.querySelector('[data-close]').onclick = closeModal;
   const recalcTotal = () => {
     const include = key => card.querySelector(`[data-include="${key}"]`)?.checked;
+    if (isFeas) {
+      try {
+        let minor = totals.newPeriodValueMinor + (include('previousBalance') ? totals.previousBalanceMinor : 0)
+          + (include('expenses') ? totals.expensesMinor : 0)
+          + toMinorUnits(card.querySelector('[name="stampAmount"]').value || '0', currency)
+          + toMinorUnits(card.querySelector('[name="extraAmount"]').value || '0', currency);
+        card.querySelector('[data-total]').textContent = showMoney(fromMinorUnits(minor, currency));
+        return minor;
+      } catch (error) {
+        card.querySelector('[data-total]').textContent = 'راجع دقة العملة';
+        return null;
+      }
+    }
     let total = totals.newPeriodValue + round2(num(card.querySelector('[name="stampAmount"]').value)) + round2(num(card.querySelector('[name="extraAmount"]').value));
     if (include('previousBalance')) total += num(totals.previousBalance);
     if (include('differences')) total += num(totals.differences);
@@ -360,20 +488,31 @@ export async function poaDialog(app, executionId, {previousPoaId = ''} = {}) {
     const include = {previousBalance: card.querySelector('[data-include="previousBalance"]')?.checked, differences: card.querySelector('[data-include="differences"]')?.checked, expenses: card.querySelector('[data-include="expenses"]')?.checked};
     const lines = draft.lines.map(line => ({...line, included: line.key === 'previousBalance' ? Boolean(include.previousBalance) : line.key === 'differences' ? Boolean(include.differences) : line.key === 'expenses' ? Boolean(include.expenses) : line.included})).filter(line => line.included && num(line.amount) > 0);
     const extraLines = [];
-    const stamp = round2(num(data.stampAmount));
-    const extra = round2(num(data.extraAmount));
-    if (stamp > 0) extraLines.push({key: 'stamp', label: 'دمغة (قيمة فعلية)', amount: stamp, included: true, sourceType: 'manual', sourceIds: [], detail: 'قيمة يدوية أدخلها المستخدم'});
-    if (extra > 0) extraLines.push({key: 'extra', label: data.extraLabel || 'مبلغ آخر', amount: extra, included: true, sourceType: 'manual', sourceIds: [], detail: 'قيمة يدوية أدخلها المستخدم'});
+    let stamp = round2(num(data.stampAmount));
+    let extra = round2(num(data.extraAmount));
+    let stampMinor = null, extraMinor = null;
+    if (isFeas) {
+      try {
+        stampMinor = toMinorUnits(data.stampAmount || '0', currency);
+        extraMinor = toMinorUnits(data.extraAmount || '0', currency);
+        stamp = fromMinorUnits(stampMinor, currency);
+        extra = fromMinorUnits(extraMinor, currency);
+      } catch (error) { toast(userError(error), 'error'); return null; }
+    }
+    if (stamp > 0) extraLines.push({key: 'stamp', label: 'دمغة (قيمة فعلية)', amount: stamp, ...(isFeas ? {amountMinor: stampMinor} : {}), included: true, sourceType: 'manual', sourceIds: [], detail: 'قيمة يدوية أدخلها المستخدم'});
+    if (extra > 0) extraLines.push({key: 'extra', label: data.extraLabel || 'مبلغ آخر', amount: extra, ...(isFeas ? {amountMinor: extraMinor} : {}), included: true, sourceType: 'manual', sourceIds: [], detail: 'قيمة يدوية أدخلها المستخدم'});
     const allLines = [...lines, ...extraLines];
     const total = round2(allLines.reduce((sum, line) => sum + num(line.amount), 0));
+    const totalMinor = isFeas ? sumMinor(allLines, line => line.amountMinor) : null;
     return run(() => POA.saveExecutionPoa(app.office, {
-      executionId, previousPoaId: draft.previousPoaId, poaNumber: data.poaNumber, date: data.date, fromDate: data.fromDate, toDate: data.toDate,
-      baseAmount: data.fromDate !== draft.fromDate || data.toDate !== draft.toDate ? undefined : totals.newPeriodValue,
+      executionId, previousPoaId: draft.previousPoaId, poaNumber: data.poaNumber, date: data.date, fromDate: data.fromDate, toDate: data.toDate, currency,
+      ...(isFeas ? {accountingModel: FEAS_MODEL, totalMinor, sourceFingerprint: draft.sourceFingerprint, idempotencyKey: draft.idempotencyKey} : {}),
+      baseAmount: isFeas ? fromMinorUnits(totals.newPeriodValueMinor, currency) : data.fromDate !== draft.fromDate || data.toDate !== draft.toDate ? undefined : totals.newPeriodValue,
       previousBalance: include.previousBalance ? totals.previousBalance : 0,
       differencesAmount: include.differences ? totals.differences : 0,
       expensesAmount: include.expenses ? totals.expenses : 0,
-      stampAmount: stamp, total: total || recalcTotal(), lines: allLines, notes: data.notes,
-      judgmentIds: draft.periodRows.map(row => row.judgmentId).filter(Boolean)
+      stampAmount: stamp, total: isFeas ? fromMinorUnits(totalMinor, currency) : (total || recalcTotal()), lines: allLines, notes: data.notes,
+      judgmentIds: [...new Set(draft.periodRows.flatMap(row => row.sourceJudgmentIds || (row.judgmentId ? [row.judgmentId] : []))) ]
     }), (row) => `تم حفظ التوكيل ${row.poaNumber}`);
   };
   card.querySelector('[data-save]').onclick = async () => { const out = await save(); if (out) { closeModal(); await app.refresh(); } };
@@ -422,10 +561,14 @@ export async function snapshotDialog(app, executionId) {
     if (!out) return;
     const s = out.summary;
     const laterSlices = s.recordedLaterSlices || [];
+    const snapshotMoney = value => value === null || value === undefined ? '—' : s.accountingModel === FEAS_MODEL
+      ? `${Number(value).toLocaleString('ar-EG', {minimumFractionDigits: currencyFractionDigits(s.currency), maximumFractionDigits: currencyFractionDigits(s.currency)})} ${esc(s.currency || '')}`.trim()
+      : money(value);
     card.querySelector('[data-snapshot]').innerHTML = `
-      <div class="exec-kv"><span>التاريخ</span><b>${esc(out.date)}</b><span>الاستحقاق النهائي</span><b>${money(s.finalEntitlement)}</b>
-      <span>المحصل</span><b>${money(s.collected)}</b><span>الرصيد</span><b>${money(s.remaining)}</b>
-      <span>رصيد أصلي</span><b>${money(s.originalOutstanding)}</b><span>فروق أحكام</span><b>${money(s.differencePart)}</b>
+      ${s.integrityBlocked ? `<p class="exec-alert exec-alert-error">${esc(s.integrityMessage || 'تعذر التحقق من سلامة الرصيد؛ لم تُعرض أرقام جزئية.')}</p>` : ''}
+      <div class="exec-kv"><span>التاريخ</span><b>${esc(out.date)}</b><span>الاستحقاق النهائي</span><b>${snapshotMoney(s.finalEntitlement)}</b>
+      <span>المحصل</span><b>${snapshotMoney(s.collected)}</b><span>الرصيد</span><b>${snapshotMoney(s.remaining)}</b>
+      <span>رصيد أصلي</span><b>${snapshotMoney(s.originalOutstanding)}</b><span>فروق أحكام</span><b>${snapshotMoney(s.differencePart)}</b>
       <span>عدد الفترات</span><b>${s.periodCount}</b></div>
       <ul class="exec-equations">${(s.equations || []).map(line => `<li>${esc(line)}</li>`).join('')}</ul>
       <p class="muted small">${esc(out.note)}</p>

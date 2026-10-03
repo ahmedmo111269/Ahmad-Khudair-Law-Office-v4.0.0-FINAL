@@ -39,7 +39,7 @@ export async function runSyncTests(test, expect) {
   const legacyName = `AhmadKhudairLawOfficeDB__test__syncLegacy__${Date.now()}`;
   let legacyDb = null;
   try {
-    out.schema = {version: SCHEMA_VERSION, stores: STORES.length, syncable: SYNCABLE_STORES.length, migration: migrationPlan(15, 16)};
+    out.schema = {version: SCHEMA_VERSION, stores: STORES.length, syncable: SYNCABLE_STORES.length, migration: migrationPlan(16, 17)};
 
     // IndexedDB middleware logs create/update/delete in the same transaction as the business write.
     let row = await a.office.saveClient({fullName: 'سجل محلي للمزامنة'});
@@ -237,10 +237,12 @@ export async function runSyncTests(test, expect) {
     legacyDb?.close(); try { indexedDB.deleteDatabase(legacyName); } catch {}
   }
 
-  test('Sync schema v16: additive stores, primary sequence and unique Change ID/source sequence indexes', () => {
-    expect(out.schema.version).toBe(16);
+  test('Schema v17: FEAS addition remains additive while v16 sync stores stay enabled', () => {
+    expect(out.schema.version).toBe(17);
     expect(SCHEMA_MIGRATIONS.some(step => step.version === 16 && step.destructive === false && step.backfill === false)).toBe(true);
-    expect(out.schema.migration.addsStores.join()).toBe('syncChanges,syncState,syncConflicts,syncPeers');
+    expect(SCHEMA_MIGRATIONS.some(step => step.version === 17 && step.destructive === false && step.backfill === false)).toBe(true);
+    expect(SCHEMA_MIGRATIONS.find(step => step.version === 17).addsStores.join()).toBe('executionObligations,executionPeriods');
+    expect(out.schema.migration.addsStores.join()).toBe('executionObligations,executionPeriods');
     expect(out.schema.syncable > 0).toBe(true);
   });
   test('Change Log records create/update/delete payloads atomically with unique IDs and sequences', () => {
