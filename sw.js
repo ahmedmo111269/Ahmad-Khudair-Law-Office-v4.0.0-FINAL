@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.8.0-execution';
+const CACHE='ahmad-khudair-law-office-v5.9.0-sync-secure';
 const ASSETS=[
   "./",
   "./index.html",
@@ -21,7 +21,9 @@ const ASSETS=[
   "./css/component-style.css",
   "./css/work-center.css",
   "./css/execution.css",
+  "./css/sync.css",
   "./css/topnav.css",
+  "./icons/app-icon.svg",
   "./css/themes.css",
   "./css/ui.css",
   "./js/app.js",
@@ -36,6 +38,9 @@ const ASSETS=[
   "./js/core/grid-query.js",
   "./js/core/grid-print-context.js",
   "./js/core/id.js",
+  "./js/core/device-id.js",
+  "./js/core/network-status.js",
+  "./js/core/online-capabilities.js",
   "./js/core/preferences.js",
   "./js/core/search-normalizer.js",
   "./js/core/store.js",
@@ -63,6 +68,7 @@ const ASSETS=[
   "./js/modules/appearance.js",
   "./js/modules/client-file.js",
   "./js/modules/databases.js",
+  "./js/modules/sync.js",
   "./js/modules/file-page.js",
   "./js/modules/home.js",
   "./js/modules/integrity.js",
@@ -108,6 +114,10 @@ const ASSETS=[
   "./js/services/maintenance.js",
   "./js/services/office.js",
   "./js/services/operations.js",
+  "./js/services/pwa-updates.js",
+  "./js/services/sync-engine.js",
+  "./js/services/sync-transport.js",
+  "./js/services/sync-crypto.js",
   "./js/services/recents.js",
   "./js/services/repair.js",
   "./js/services/search.js",
@@ -157,21 +167,32 @@ self.addEventListener('install',e=>{
 self.addEventListener('activate',e=>{
   e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
 });
+const NETWORK_TIMEOUT_MS=2500;
+function isApplicationAsset(url){
+  if(url.pathname.endsWith('/api')||url.pathname.includes('/api/'))return false;
+  if(url.search)return false;
+  return url.pathname==='/'||url.pathname.endsWith('/index.html')||/\.(?:html|js|mjs|css|svg|png|webmanifest)$/.test(url.pathname);
+}
 self.addEventListener('fetch',e=>{
   const req=e.request;
   if(req.method!=='GET')return;
   const url=new URL(req.url);
-  if(url.origin!==self.location.origin)return;
+  if(url.origin!==self.location.origin||!isApplicationAsset(url))return;
   e.respondWith((async()=>{
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),NETWORK_TIMEOUT_MS);
     try{
-      const res=await fetch(req);
+      const res=await fetch(req,{signal:controller.signal});
       if(res&&res.ok&&res.type==='basic'){
         const cache=await caches.open(CACHE);
         await cache.put(req,res.clone());
       }
       return res;
     }catch{
-      return (await caches.match(req))||(req.mode==='navigate'?await caches.match('./index.html'):Response.error());
-    }
+      const cached=await caches.match(req,{ignoreSearch:true});
+      if(cached)return cached;
+      if(req.mode==='navigate')return (await caches.match('./index.html'))||Response.error();
+      return Response.error();
+    }finally{clearTimeout(timeout)}
   })());
 });

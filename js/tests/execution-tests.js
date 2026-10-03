@@ -816,7 +816,7 @@ export async function runExecutionTests(test, expect) {
     } finally { closeEnv(e); }
   });
   test('تنفيذ/مخطط: v15 إضافي غير مدمر + النسخ الاحتياطي يشمل المخازن الجديدة', async () => {
-    expect(SCHEMA_VERSION).toBe(15);
+    expect(SCHEMA_VERSION).toBe(16);
     expect(SCHEMA_MIGRATIONS.some(m => m.version === 15 && m.addsStores.includes('executionLedger'))).toBe(true);
     const plan = migrationPlan(14, 15);
     expect(plan.destructive).toBe(false);

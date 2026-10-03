@@ -81,7 +81,9 @@ export async function importDatabase(ctx,payload,{mode='replace'}={}){
   ctx.assert();
   await inspectBackup(payload);
   if(mode!=='replace')throw new AppError(ERR.VALIDATION,'وضع الاستعادة المدعوم حاليًا هو الاستبدال الكامل فقط.');
-  const tx=ctx.db.transaction(STORES,'readwrite');
+  // الاستعادة الصريحة تستبدل الحالة كاملة؛ لا تُسجَّل مئات آلاف عمليات clear/put كأنها تغييرات مستخدم.
+  // سجل المزامنة الموجود في النسخة نفسها يُستعاد كما هو، ثم يمكن إعادة خط الأساس صراحةً من شاشة المزامنة.
+  const tx=ctx.db.transaction(STORES,'readwrite',{captureChanges:false});
   try{for(const s of STORES){const st=tx.objectStore(s);st.clear();for(const row of (payload.stores[s]||[]))st.put(row)}}
   catch(err){try{tx.abort()}catch{};throw new AppError(ERR.TX,'تعذر تجهيز عملية الاستعادة. لم يتم اعتماد التغيير.',err)}
   await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('فشلت الاستعادة'));tx.onabort=()=>reject(tx.error||new Error('تم إلغاء الاستعادة'))});

@@ -1,3 +1,43 @@
+# v5.9.0 — خريطة المزامنة الآمنة والعمل Offline-First · Schema 16
+
+**2026-10-03 — مزامنة يدوية مشفّرة فوق قاعدة المكتب الحالية.** العقد وخطوات الاستخدام والقيود: [`docs/SYNC-OFFLINE-FIRST.md`](docs/SYNC-OFFLINE-FIRST.md)؛ اختبارات التنفيذ وما لم يُتحقق منه: [`TEST-REPORT.md`](TEST-REPORT.md). `APP_VERSION=5.9.0`, `SCHEMA_VERSION=16`, **54 مخزنًا و284 فهرسًا**.
+
+**المبدأ:** التطبيق يعمل محليًا بـIndexedDB؛ الاتصال اختياري. لا تبدأ المزامنة إلا بتأكيد المستخدم بعد مراجعة الملخص والتعارضات وBackup سابق للتطبيق. لا قاعدة/محرك/Activity Log ثانٍ، ولا Last Write Wins.
+
+## الطبقات والملفات
+
+`js/modules/sync.js` (المراجعة والتأكيد) ← `js/services/sync-engine.js` (دفعات وتعارضات وقراءة/كتابة) ← `SyncTransportAdapter` / `js/services/sync-transport.js` (ملف يدوي) ← `js/db/database-context.js` + Storage Adapter/Repository ← مخازن IndexedDB الحالية.
+
+| الملف | الدور |
+|---|---|
+| `js/core/device-id.js` | Device ID ثابت محليًا |
+| `js/core/network-status.js` | حالة الاتصال فقط؛ لا تطلق عملية مزامنة |
+| `js/core/online-capabilities.js` | تعريف القدرات المحلية ومزايا الإنترنت الاختيارية |
+| `js/db/database-context.js` | إضافة Change ID/تسلسل إلى عمليات الكتابة في المعاملة نفسها؛ tombstone للحذف |
+| `js/services/sync-engine.js` | خط أساس تاريخي عند الموافقة، تغيير صادر/وارد، batching، vectors، preview، تعارض وحسم وتاريخ |
+| `js/services/sync-crypto.js` | حزمة نقل `AES-256-GCM`، اشتقاق `PBKDF2-HMAC-SHA-256` ×310,000، ملح/IV عشوائيان؛ لا تخزين لكلمة المرور |
+| `js/services/sync-transport.js` | واجهة `SyncTransportAdapter` الحالية لملفات JSON مشفّرة؛ رفض sync plaintext، وتصدير/استيراد يدوي |
+| `js/modules/sync.js` + `css/sync.css` | واجهة حالة الاتصال/المزامنة، مراجعة الملخص والتعارض، كلمة المرور، الموافقة/الإلغاء والسجل |
+| `js/tests/sync-tests.js` · `tools/node-tests/offline-sync-browser-tests.mjs` | تغطية Node/`tests.html` وتدفق Chromium فعلي Offline/Sync/Encryption |
+| `docs/SYNC-OFFLINE-FIRST.md` | دليل النقل اليدوي والتحذيرات والحدود |
+
+## المخازن والترقية (v16)
+
+- أربع مخازن في قاعدة المكتب نفسها: `syncChanges` سجل append-only للتغييرات/التجميع (8 فهارس)، `syncState` لحالة الجهاز/الخط الأساس، `syncConflicts` للاحتفاظ بالقيمتين وقرار المستخدم (7 فهارس)، `syncPeers` لحالة النظير (فهرسان). **17 فهرسًا جديدًا**؛ لا قاعدة بيانات جديدة.
+- `SCHEMA_MIGRATIONS` v16 إضافية غير هدامة من v15؛ يبقى ترحيل v15 ومخازن البيانات كما هي. لا تنشأ baseline أو تغييرات تاريخية قبل التأكيد؛ المعالجة على دفعات ومؤشرات قابلة للاستئناف.
+- `DatabaseContext` يعيد استخدام Activity Log وStorage Adapter الموجودين. `applied` يميز رؤوس الحالة المطبقة لمنع تعارض وارد غير معتمد من استبدال أحدث قيمة محلية. السجلات/التعارضات المحسومة تبقى للتدقيق.
+
+## نقاط التكامل والحدود
+
+- `js/app.js`, `js/ui/nav-model.js`, `index.html`: صفحة «المزامنة» وشارة الشبكة؛ `js/services/backup.js` ينشئ Backup الحالي قبل تطبيق الدفعة. لا حدث `online` يبدأ النقل.
+- `sw.js`: الكاش `ahmad-khudair-law-office-v5.9.0-sync-secure` يحوي Application Shell و131 وحدة JS/19 CSS وأصول التطبيق الثابتة، لا بيانات IndexedDB؛ يضيف وحدة التشفير ضمن الأصول.
+- الملف الوارد محدود بـ12 MiB؛ الدفعات بحد أقصى 500 تغيير أو 6 MiB تقريبًا وواجهة `hasMore` لمتابعتها. لا خادم أو Google Drive أو نقل حي في الإصدار الحالي.
+- النقل AES-256-GCM؛ نسخة Backup الحالية JSON غير مشفّرة، وتعرض الواجهة هذا القيد. لا يُخزن التطبيق كلمة المرور.
+
+## نتائج التحقق
+
+Node **370/370**؛ اختبار Offline/Sync Chromium **PASS** (إقلاع Offline، البحث، Backup/Restore، عدم التلقائية، موافقة/إلغاء، Backup قبل baseline، حزمة مشفرة من 500 تغيير ودفعة تالية)؛ `grid-browser` لا إخفاقات جديدة مقارنة بالأساس `2e167cce` مع خمسة إخفاقات أقدم معلومة؛ `execution-browser` **32/32**. اختبار التثبيت على جهاز فعلي والطباعة الورقية ومتصفح غير Chromium **NOT VERIFIED**. التفاصيل: [`TEST-REPORT.md`](TEST-REPORT.md).
+
 # v5.8.0 — خريطة قسم التنفيذ (Execution) · Schema 15
 
 **2026-10-01 — قسم تنفيذ فوق بيانات المكتب القائمة (التنفيذ المدني والجزائي والأسرة).** العقد والتفصيل والقرارات وما لم يُتحقق منه: [`docs/EXECUTION.md`](docs/EXECUTION.md). `APP_VERSION=5.8.0`, `SCHEMA_VERSION=15`, **50 مخزنًا و267 فهرسًا**.
