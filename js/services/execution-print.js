@@ -186,7 +186,7 @@ export async function buildPoaDocument(office, poaId) {
 
 /** كشف الرصيد: الحكم، الفترات، الاستحقاقات، التحصيلات، الفروق، التخصيص، الرصيد. */
 export async function buildBalanceDocument(office, executionId, {asOf = ''} = {}) {
-  const info = await executionBundle(office, executionId, {asOf});
+  const info = await executionBundle(office, executionId, {asOf, checkIntegrity: true});
   if (!info) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
   const execution = info.execution;
   const [client, file] = await Promise.all([
@@ -197,6 +197,8 @@ export async function buildBalanceDocument(office, executionId, {asOf = ''} = {}
   const template = templates.find(row => row.kind === 'balance') || DEFAULT_TEMPLATES.balance;
   const originals = info.judgments.filter(row => row.judgmentKind === 'original');
   const later = info.judgments.filter(row => row.judgmentKind !== 'original');
+  const balanceBlocked = Boolean(info.summary.integrityBlocked);
+  const printBalanceMoney = value => balanceBlocked ? 'غير متاح — أوقف فحص السلامة عرض الحساب' : money(value);
   const allocationByPeriod = new Map();
   for (const allocation of info.allocations) {
     if (allocation.isDeleted || allocation.isActive === false) continue;
@@ -228,14 +230,14 @@ export async function buildBalanceDocument(office, executionId, {asOf = ''} = {}
       later: later.map(row => `${row.judgmentNumber || ''} ${row.judgmentDate || ''} (${row.amount ?? ''} من ${row.effectiveFrom || '—'})`.trim()).join(' · ') || '—'
     },
     totals: {
-      finalEntitlement: money(info.summary.finalEntitlement), collected: money(info.summary.collected), remaining: money(info.summary.remaining),
-      originalOutstanding: money(info.summary.originalOutstanding), differencePart: money(info.summary.differencePart),
-      approvedDifferences: money(info.summary.differences.approved), pendingDifferences: money(info.summary.differences.pending),
-      expenses: money(info.summary.expenses)
+      finalEntitlement: printBalanceMoney(info.summary.finalEntitlement), collected: printBalanceMoney(info.summary.collected), remaining: printBalanceMoney(info.summary.remaining),
+      originalOutstanding: printBalanceMoney(info.summary.originalOutstanding), differencePart: printBalanceMoney(info.summary.differencePart),
+      approvedDifferences: printBalanceMoney(info.summary.differences.approved), pendingDifferences: printBalanceMoney(info.summary.differences.pending),
+      expenses: printBalanceMoney(info.summary.expenses)
     },
-    periods: `الفترة | النوع | الاستحقاق النهائي | المحصل | المتبقي | فرق الحكم | المعادلة\n${periodText || 'لا توجد فترات محسوبة'}`,
+    periods: balanceBlocked ? `فشل فحص السلامة: ${info.summary.integrityMessage}` : `الفترة | النوع | الاستحقاق النهائي | المحصل | المتبقي | فرق الحكم | المعادلة\n${periodText || 'لا توجد فترات محسوبة'}`,
     receipts: `المحضر | التاريخ | المبلغ | التخصيص\n${receiptText || 'لا توجد محاضر تحصيل مسجلة'}`,
-    equations: (info.summary.equations || []).join('\n')
+    equations: balanceBlocked ? `لم يُعرض حساب رصيد جزئي. ${info.summary.integrityMessage}` : (info.summary.equations || []).join('\n')
   };
   const rendered = renderTemplate(template, data);
   const html = documentHtml({title: rendered.title, body: rendered.body}).replace('</pre>', `</pre>

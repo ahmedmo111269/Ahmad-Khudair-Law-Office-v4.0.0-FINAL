@@ -1,3 +1,44 @@
+# v5.10.0 — خريطة محرك الأسرة FEAS · Schema 17
+
+**2026-10-03 — محرك حساب أسري قابل للتدقيق وإعادة البناء، مع الاعتراف الصريح بالفترات.** العقد التفصيلي: [`docs/FEAS-AUDIT-DESIGN-DELTA.md`](docs/FEAS-AUDIT-DESIGN-DELTA.md). `APP_VERSION=5.10.0`, `SCHEMA_VERSION=17`, **56 مخزنًا و308 فهارس**. الترحيل v17 إضافي فقط: مخزنا الالتزام والفترة + فهارس المصدر ومنع الازدواج؛ لا backfill مالي ولا تحويل لسجلات v5.8 القديمة.
+
+**القاعدة:** تظل التنفيذات القديمة على مسارها حتى يختار المكتب FEAS صراحةً. لا تاريخ افتراضي، ولا رسم/مدة/قاعدة قانونية مخمّنة. تعريف التزام أو شريحة قيمة أو توكيل لا ينشئ دينًا؛ الرصيد مشتق من لقطات الاعتراف التي حفظها المستخدم، وليس من حقل رصيد مخزّن.
+
+## الطبقات والملفات
+
+`js/modules/execution-center.js` (بطاقة FEAS) ← `js/ui/execution-forms.js` ← `js/services/execution-feas.js` + خدمات التنفيذ/الدفتر/التخصيص/الفروق/التوكيل الحالية ← `js/domain/execution-feas.js`, `execution-money.js`, `execution-calendar.js` ← Repository / Unit of Work ← مخازن IndexedDB الحالية.
+
+| الملف | الدور |
+|---|---|
+| `js/domain/execution-calendar.js` | تواريخ مدنية، وحدات دورية وحدّها؛ بلا اعتماد على UTC/المنطقة كقاعدة استحقاق |
+| `js/domain/execution-money.js` | تحويل عملات مسموح بها إلى وحدات صغرى، جمع آمن، رفض التقريب الصامت، وتناسب مضبوط |
+| `js/domain/execution-feas.js` | حل شرائح المصدر، مفاتيح الاعتراف، حساب الرصيد من snapshots/deltas/التخصيصات، بصمة المراجعة، ورفض التكرار أو اختلاف العملة |
+| `js/services/execution-feas.js` | تعريف الالتزامات، المعاينة، الاعتراف/الإغلاق، تسوية فروق مراجَعة، Snapshot POA، وفحص سلامة المصادر |
+| `js/services/execution.js` | ربط FEAS بسلسلة الأحكام والشرائح الحالية، `executionBundle`, وإيقاف عرض الإجمالي عند تجاوز سقف القراءة أو خلل الحساب/فحص السلامة |
+| `js/services/execution-ledger.js` | أحداث append-only، التحصيل والتخصيص، idempotency، غير المخصص/الائتمان والتصحيح الموثق، مع حد قراءة محافظ |
+| `js/services/execution-differences.js` | فرق تفسيري بموافقة موثقة وبصمة أساس؛ فرق الحكم لا يُجمع فوق القيمة المعترف بها الجديدة ولا يتحول إلى أصل ثانٍ |
+| `js/services/execution-poa.js` | إصدار POA Snapshot مستقلة، مصادر/مبالغ minor units، idempotency، ومنع تعديل لقطة FEAS بعد الإصدار |
+| `js/services/execution-balance.js` | كشف الرصيد واللقطة التاريخية والتتبع؛ مسارات FEAS تستدعي فحص السلامة قبل إخراج الرصيد |
+| `js/modules/execution-center.js` و`js/ui/execution-forms.js` | اختيار نموذج الحساب الصريح، التزام/اعتراف، حقل نوع قيمة بلا اختيار افتراضي في حكم FEAS، والتحقق قبل حفظ الشريحة؛ لا دورية واجهة مضللة |
+| `js/db/schema.js`, `js/core/constants.js` | ترقية v17 والإصدار 5.10.0؛ 56 مخزنًا/308 فهارس، لا حذف أو إعادة كتابة للسجلات القائمة |
+| `js/tests/execution-tests.js` · `tools/node-tests/execution-feas-browser-tests.mjs` | Golden/سلامة/ازدواج بوحدات Node، ومسار واجهة FEAS في Chromium |
+
+## قواعد الرصيد والتكامل
+
+- `execution.accountingModel === 'feas-v1'` فقط يفعّل FEAS؛ لا ترحيل تلقائي ولا خلط مع `legacy-v1`.
+- فترة FEAS لا تدخل الرصيد إلا كسجل اعتراف محفوظ في `executionPeriods` بحالة `RECOGNIZED`/`CLOSED`، وبمبلغ minor units، نطاق مدني، عملة، بصمة، ومعرّفات شرائح وأحكام المصدر. المعاينة لا تحفظ دينًا، والاعتراف لا يعاد توليده تلقائيًا.
+- الفرق المعتمد تفسير للتغير: يُحتسب على الفترة المعترف بها مرة واحدة، ولا يضاف فوق أصل جديد. تكرار دلتا لنفس فترة التسوية أو فساد المصدر يمنع عرض الأرقام الجزئية، ويظهر تنبيه.
+- التحصيل والإيصال والتخصيص والدفتر كيانات منفصلة. تظهر المبالغ غير المخصصة والائتمان؛ المصروفات خارج أصل الاستحقاق. idempotency مفهرس على `executionLedger.idempotencyKey` و`executionReceipts.idempotencyKey`.
+- إنشاء POA لا يكتب دفترًا أو التزامًا. Snapshot الإصدار تحفظ خطوطها ومصادرها؛ الحالة `CARRIED` لا تدخل الرصيد ولا تسمح بتعديل لقطة FEAS.
+- تُعاد الاستفادة من Universal DataGrid وGlobal Search وWork Center وActivity Log وPrintContext وBackup/Restore وSync وOffline الموجودة؛ لا محرك/مخزن بديل ولا `getAll` عام، وكل قراءات دفتر FEAS محدودة بـ2000 صف لكل مجموعة ثم ترفض الحساب الجزئي.
+- `sw.js` precache يشمل وحدات FEAS الجديدة في `ahmad-khudair-law-office-v5.10.0-feas-offline` حتى يظل مسار التنفيذ متاحًا بعد إعادة تحميل Offline.
+
+## نتائج التحقق الفعلية وحدودها
+
+Node **374/374 PASS**؛ FEAS Golden/Integrity ضمنها؛ فحص صياغة جميع ملفات JS/MJS ناجح؛ Chromium التنفيذ القديم **32/32** وFEAS **10/10** (بما فيه إقلاع بطاقة FEAS بعد إعادة تحميل Offline)؛ Offline/Backup/Restore/Sync Chromium **14/14**؛ اختبار Work Center على **305,000 سجل اصطناعي 8/8** و`getAll=0`؛ قياس FEAS اصطناعي عند حد **2000 لقطة** وفحص سلامة بلا أخطاء: **556.4ms** في fake-indexeddb/Node. التفاصيل والقيود في [`TEST-REPORT.md`](TEST-REPORT.md).
+
+**NOT VERIFIED:** اعتماد قانوني أو قاعدة رسم/مدة، جهاز/متصفح فعلي غير Chromium، ومعاينة Print Preview/طابعة فعلية، بيانات مكتب إنتاجية، ملايين السجلات على أجهزة حقيقية. القياس المخبري اصطناعي وليس ضمانًا للأجهزة.
+
 # v5.9.0 — خريطة المزامنة الآمنة والعمل Offline-First · Schema 16
 
 **2026-10-03 — مزامنة يدوية مشفّرة فوق قاعدة المكتب الحالية.** العقد وخطوات الاستخدام والقيود: [`docs/SYNC-OFFLINE-FIRST.md`](docs/SYNC-OFFLINE-FIRST.md)؛ اختبارات التنفيذ وما لم يُتحقق منه: [`TEST-REPORT.md`](TEST-REPORT.md). `APP_VERSION=5.9.0`, `SCHEMA_VERSION=16`, **54 مخزنًا و284 فهرسًا**.

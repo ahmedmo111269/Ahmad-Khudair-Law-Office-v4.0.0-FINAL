@@ -307,6 +307,7 @@ export const ENTITIES={
   {k:'clientId',l:'الموكل',t:'ref',ref:'clients',grid:true,g:'الربط'},
   {k:'internalNumber',l:'رقم التنفيذ الداخلي',t:'readonly',grid:true,g:'بيانات التنفيذ'},
   {k:'executionType',l:'نوع التنفيذ',t:'select',opts:[['civil','التنفيذ المدني'],['criminal','التنفيذ الجنائي'],['family','تنفيذ أحكام الأسرة']],grid:true,g:'بيانات التنفيذ'},
+  {k:'accountingModel',l:'نموذج الحساب',t:'select',opts:[['legacy-v1','المسار الحالي'],['feas-v1','FEAS — اعتراف صريح ولقطات ثابتة']],g:'بيانات الحساب'},
   {k:'officialNumber',l:'الرقم الرسمي للتنفيذ',t:'text',grid:true,g:'بيانات التنفيذ'},
   {k:'authority',l:'جهة التنفيذ',t:'text',grid:true,g:'بيانات التنفيذ'},
   {k:'executionMethod',l:'طريقة التنفيذ',t:'lookup',lk:'executionMethod',grid:true,g:'بيانات التنفيذ'},
@@ -383,6 +384,23 @@ export const ENTITIES={
   {k:'recurInterval',l:'كل كم مرة (1 = كل مرة)',t:'number',newOnly:true,g:'التكرار (اختياري)'},
   {k:'recurUntil',l:'ينتهي في (اختياري)',t:'date',newOnly:true,g:'التكرار (اختياري)'}]},
  // ===== v15 — قسم التنفيذ: كيانات فرعية تعمل مع صفحة السجل العامة والجداول والبحث =====
+ executionObligations:{label:'التزام FEAS',plural:'التزامات FEAS',title:r=>r.obligationType||'التزام تنفيذ',route:'exc',dateField:'createdAt',dateIndex:'createdAt',fields:[
+  {k:'obligationType',l:'نوع الالتزام كما أدخله المكتب',t:'readonly',grid:true,g:'التعريف'},
+  {k:'description',l:'الوصف',t:'readonly',grid:true,g:'التعريف'},
+  {k:'frequency',l:'الدورية',t:'readonly',grid:true,g:'الفترة'},
+  {k:'currency',l:'العملة',t:'readonly',grid:true,g:'الحساب'},
+  {k:'startDate',l:'تاريخ البداية',t:'readonly',grid:true,g:'الفترة'},
+  {k:'endDate',l:'تاريخ النهاية',t:'readonly',grid:true,g:'الفترة'},
+  {k:'status',l:'الحالة',t:'readonly',grid:true,g:'الحالة'}]},
+ executionPeriods:{label:'لقطة فترة معترف بها',plural:'فترات FEAS المعترف بها',title:r=>r.periodKey||'فترة FEAS',route:'exc',dateField:'recognizedAt',dateIndex:'recognizedAt',fields:[
+  {k:'periodKey',l:'مفتاح الفترة',t:'readonly',grid:true,g:'لقطة الاعتراف'},
+  {k:'obligationTypeSnapshot',l:'نوع الالتزام',t:'readonly',grid:true,g:'لقطة الاعتراف'},
+  {k:'fromDate',l:'من تاريخ',t:'readonly',grid:true,g:'الفترة'},
+  {k:'toDate',l:'إلى تاريخ',t:'readonly',grid:true,g:'الفترة'},
+  {k:'recognizedAmountMinor',l:'المبلغ بوحدات صغرى',t:'readonly',grid:true,g:'القيمة'},
+  {k:'currency',l:'العملة',t:'readonly',grid:true,g:'القيمة'},
+  {k:'status',l:'الحالة',t:'readonly',grid:true,g:'الحالة'},
+  {k:'recognizedAt',l:'تاريخ الاعتراف',t:'readonly',grid:true,g:'التدقيق'}]},
  executionParties:{label:'طرف تنفيذ',plural:'أطراف التنفيذ',title:r=>r.name||'طرف تنفيذ',route:'rec:executionParties',dateField:'createdAt',fields:[
   {k:'executionId',l:'التنفيذ',t:'ref',ref:'execution',req:true,grid:true,g:'الربط'},
   {k:'name',l:'الاسم',t:'text',grid:true,g:'الطرف'},

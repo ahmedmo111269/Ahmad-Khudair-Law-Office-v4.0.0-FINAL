@@ -53,6 +53,9 @@ export const STORE = Object.freeze({
   executionSettlements: 'executionSettlements',
   executionAdjustments: 'executionAdjustments',
   executionTemplates: 'executionTemplates',
+  // v17 — تعريفات التزامات FEAS ولقطات الفترات المعترف بها. لا يُملأ أي صف اعتراف تلقائيًا.
+  executionObligations: 'executionObligations',
+  executionPeriods: 'executionPeriods',
   // v16 — سجل تغييرات مزامنة تفاضلي، حالة/أجهزة/تعارضات داخل قاعدة IndexedDB نفسها.
   syncChanges: 'syncChanges',
   syncState: 'syncState',
@@ -126,18 +129,26 @@ const IDX = {
   // v15 — التنفيذ: كل فهرس هنا مبني على استعلام فعلي، وأي فهرس زائد يُحذف.
   executionParties: { executionId: 'executionId', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'sequence'] },
   executionValuePeriods: {
-    executionId: 'executionId', entitlementType: 'entitlementType', linkedJudgmentId: 'linkedJudgmentId', startDate: 'startDate',
-    fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'startDate'], b: ['executionId', 'endDate']
+    executionId: 'executionId', entitlementType: 'entitlementType', linkedJudgmentId: 'linkedJudgmentId', startDate: 'startDate', obligationId: 'obligationId',
+    fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'startDate'], b: ['executionId', 'endDate'], c: ['executionId', 'obligationId', 'startDate']
+  },
+  executionObligations: {
+    executionId: 'executionId', obligationType: 'obligationType', status: 'status', beneficiaryPartyId: 'beneficiaryPartyId', fileId: 'fileId', clientId: 'clientId',
+    a: ['executionId', 'status'], b: ['executionId', 'obligationType']
+  },
+  executionPeriods: {
+    executionId: 'executionId', obligationId: 'obligationId', periodKey: 'periodKey', status: 'status', recognizedAt: 'recognizedAt', fromDate: 'fromDate', toDate: 'toDate', fileId: 'fileId', clientId: 'clientId',
+    a: ['executionId', 'status'], b: ['executionId', 'obligationId', 'fromDate'], c: ['executionId', 'obligationId', 'periodKey']
   },
   executionLedger: {
-    executionId: 'executionId', type: 'type', date: 'date', receiptId: 'receiptId', differenceRecordId: 'differenceRecordId', poaId: 'poaId',
+    executionId: 'executionId', type: 'type', date: 'date', receiptId: 'receiptId', idempotencyKey: 'idempotencyKey', differenceRecordId: 'differenceRecordId', poaId: 'poaId',
     fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'], b: ['executionId', 'type'], c: ['sourceType', 'sourceId']
   },
   executionAllocations: {
     ledgerId: 'ledgerId', executionId: 'executionId', periodKey: 'periodKey', receiptId: 'receiptId', differenceRecordId: 'differenceRecordId',
     a: ['executionId', 'periodKey'], b: ['ledgerId', 'periodKey']
   },
-  executionReceipts: { executionId: 'executionId', ledgerId: 'ledgerId', receiptNumber: 'receiptNumber', date: 'date', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'] },
+  executionReceipts: { executionId: 'executionId', ledgerId: 'ledgerId', receiptNumber: 'receiptNumber', date: 'date', idempotencyKey: 'idempotencyKey', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'] },
   executionActions: { executionId: 'executionId', kind: 'kind', date: 'date', fileId: 'fileId', clientId: 'clientId', resultFileId: 'resultFileId', a: ['executionId', 'date'] },
   executionPOAs: { executionId: 'executionId', poaNumber: 'poaNumber', date: 'date', fileId: 'fileId', clientId: 'clientId', a: ['executionId', 'date'] },
   differenceRecords: {
@@ -158,7 +169,10 @@ const IDX = {
 };
 
 const UNIQUE_INDEXES = Object.freeze({
-  syncChanges: Object.freeze(['changeId', 'originDeviceId_originSequence'])
+  syncChanges: Object.freeze(['changeId', 'originDeviceId_originSequence']),
+  executionLedger: Object.freeze(['idempotencyKey']),
+  executionReceipts: Object.freeze(['idempotencyKey']),
+  executionPeriods: Object.freeze(['executionId_obligationId_periodKey'])
 });
 
 export const SCHEMA = {};
@@ -187,6 +201,15 @@ export const SYNCABLE_STORES = Object.freeze(STORES.filter(name => ![
 // Official, additive migration registry. Each entry is the complete description of what an upgrade to `version`
 // does to an existing database. Upgrades never rewrite, move or delete rows (see ADR in PROJECT_MAP).
 export const SCHEMA_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    version: 17,
+    title: 'FEAS: تعريف الالتزامات وفترات الاعتراف الصريحة + مفاتيح منع التكرار',
+    addsStores: Object.freeze(['executionObligations', 'executionPeriods']),
+    addsIndexes: Object.freeze(['executionValuePeriods.obligationId', 'executionLedger.idempotencyKey', 'executionReceipts.idempotencyKey']),
+    // إضافة فقط: لا ترحيل مالي آلي، ولا إنشاء فترات/ديون، ولا تحويل للمبالغ القديمة.
+    destructive: false,
+    backfill: false
+  }),
   Object.freeze({
     version: 16,
     title: 'المزامنة ثنائية الاتجاه: سجل تغييرات تفاضلي، حالة الأجهزة، والتعارضات مع Tombstones',

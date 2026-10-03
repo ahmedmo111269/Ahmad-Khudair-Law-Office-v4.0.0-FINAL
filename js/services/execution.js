@@ -20,8 +20,25 @@ import {
   validateExecution, validateValueSlice, EXECUTION_TYPE_LABELS, EXECUTION_STATUS_LABELS, PERIODICITY_LABELS
 } from '../domain/execution.js';
 import {buildEntitlementPeriods, analyzeSliceImpact, balanceSummary, executionAlerts, eligibleSlices} from '../domain/entitlement-engine.js';
+import {FEAS_MODEL, analyzeFeasValueChange, calculateFeasBalance} from '../domain/execution-feas.js';
+import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
+import {executionIntegrityReport} from './execution-feas.js';
 
 const MAX_CHILD_ROWS = 2000;
+const FEAS_BLOCKED_FIELDS = [
+  'recognizedPrincipal', 'approvedDifferences', 'finalEntitlement', 'collected', 'allocated', 'unallocated', 'overAllocated', 'remaining', 'credit', 'expenses', 'expensesInPoa', 'originalOutstanding', 'differencePart',
+  'recognizedPrincipalMinor', 'approvedDifferencesMinor', 'finalEntitlementMinor', 'collectedMinor', 'allocatedMinor', 'unallocatedMinor', 'overAllocatedMinor', 'remainingMinor', 'creditMinor', 'expensesMinor', 'expensesInPoaMinor', 'originalOutstandingMinor', 'differencePartMinor', 'pendingDifferencesMinor'
+];
+function blockFeasSummary(summary, message) {
+  summary.integrityBlocked = true;
+  summary.integrityMessage = message;
+  for (const key of FEAS_BLOCKED_FIELDS) summary[key] = null;
+  summary.differences = {pending: null, approved: null, posted: null};
+  summary.periods = [];
+  summary.equations = [];
+  summary.netLedger = [];
+  summary.periodCount = null;
+}
 const logRow = (office, entityType, entityId, action, summary, {fileId = null, metadata = {}} = {}) => {
   const row = {id: uid(), entityType, entityId, action, timestamp: Clock.now(), summary, metadata};
   if (fileId) row.fileId = fileId;
@@ -44,11 +61,15 @@ export async function saveExecution(office, input, id = null, expectedVersion = 
   if (old) assertExpectedVersion(old, expectedVersion, 'التنفيذ');
   const errors = validateExecution(input);
   if (Object.keys(errors).length) throw new AppError(ERR.VALIDATION, 'راجع بيانات التنفيذ.', errors);
+  const requestedModel = input.accountingModel || old?.accountingModel || 'legacy-v1';
+  if (!['legacy-v1', FEAS_MODEL].includes(requestedModel)) throw new AppError(ERR.VALIDATION, 'نموذج الحساب غير معروف.');
+  if (old && requestedModel !== (old.accountingModel || 'legacy-v1')) throw new AppError(ERR.CONFLICT, 'تغيير نموذج حساب سجل قائم يتطلب مراجعة/ترحيلًا صريحًا؛ لم تتغير طريقة احتساب هذا التنفيذ.');
   const now = Clock.now();
   const row = {
     ...(old || {}), ...input,
     id: id || uid(),
-    executionType: input.executionType,
+    executionType: input.executionType || old?.executionType,
+    accountingModel: old?.accountingModel || (requestedModel === FEAS_MODEL ? FEAS_MODEL : 'legacy-v1'),
     executionMethod: input.executionMethod || old?.executionMethod || '',
     status: input.status || old?.status || 'active',
     prorationPolicy: input.prorationPolicy || old?.prorationPolicy || DEFAULT_PRORATION,
@@ -134,8 +155,8 @@ export async function saveExecutionParty(office, input, id = null) {
 
 // ===== سلسلة الأحكام =====
 export async function executionJudgments(office, executionId, limit = 500) {
-  const rows = await office.r.judgments.byIndexAll('executionId', executionId);
-  return rows.slice(0, limit).sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  const rows = await office.r.judgments.byIndex('executionId', executionId, Math.min(limit, MAX_CHILD_ROWS + 1));
+  return rows.sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 }
 
 /**
@@ -224,8 +245,8 @@ export async function updateExecutionJudgment(office, id, input) {
 }
 
 // ===== شرائح القيمة (Value Periods) =====
-export async function executionSlices(office, executionId, {asOf = ''} = {}) {
-  const rows = await office.r.executionValuePeriods.byIndexAll('executionId', executionId);
+export async function executionSlices(office, executionId, {asOf = '', limit = MAX_CHILD_ROWS} = {}) {
+  const rows = await office.r.executionValuePeriods.byIndex('executionId', executionId, Math.min(limit, MAX_CHILD_ROWS + 1));
   const list = rows.filter(row => !row.isDeleted);
   return asOf ? eligibleSlices(list, asOf) : list;
 }
@@ -237,66 +258,105 @@ export async function executionSlices(office, executionId, {asOf = ''} = {}) {
 export async function saveValueSlice(office, input) {
   const execution = await office.r.execution.get(input.executionId);
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
-  const judgment = input.judgmentId ? await office.r.judgments.get(input.judgmentId) : null;
+  const feas = execution.accountingModel === FEAS_MODEL;
+  let obligation = null;
+  const normalized = {...input};
+  if (feas) {
+    if (!['fixed', 'periodic'].includes(input.valueType)) throw new AppError(ERR.VALIDATION, 'اختر نوع القيمة صراحةً قبل إنشاء شريحة FEAS.', {valueType: 'مطلوب'});
+    obligation = input.obligationId ? await office.r.executionObligations.get(input.obligationId) : null;
+    if (!obligation || obligation.isDeleted || obligation.executionId !== input.executionId || obligation.status === 'inactive') throw new AppError(ERR.VALIDATION, 'اختر التزامًا معرفًا لهذا التنفيذ قبل إضافة شريحة القيمة.', {obligationId: 'مطلوب'});
+    normalized.entitlementType = obligation.obligationType;
+    normalized.currency = obligation.currency;
+    normalized.periodicity = obligation.frequency;
+    normalized.customDays = obligation.frequency === 'custom' ? obligation.customDays : null;
+    try {
+      normalized.amountMinor = Number.isSafeInteger(input.amountMinor) ? input.amountMinor : toMinorUnits(input.amount, obligation.currency);
+      normalized.amount = fromMinorUnits(normalized.amountMinor, obligation.currency);
+    } catch (error) {
+      throw new AppError(ERR.VALIDATION, error.message || 'قيمة الشريحة لا تطابق دقة العملة.', {amount: error.message || 'قيمة غير صحيحة'});
+    }
+  }
+  const judgment = normalized.judgmentId ? await office.r.judgments.get(normalized.judgmentId) : null;
   if (!judgment || judgment.isDeleted) throw new AppError(ERR.VALIDATION, 'الحكم المصدر مطلوب لكل شريحة قيمة.', {judgmentId: 'حكم غير موجود'});
-  if (judgment.executionId && judgment.executionId !== input.executionId) throw new AppError(ERR.VALIDATION, 'الحكم المختار يتبع تنفيذًا آخر.', {judgmentId: 'حكم غير مطابق'});
-  const existing = (await executionSlices(office, input.executionId)).filter(slice => slice.id !== input.id);
-  if (input.partyId) {
-    const party = await office.r.executionParties.get(input.partyId);
-    if (!party || party.isDeleted || party.executionId !== input.executionId) throw new AppError(ERR.VALIDATION, 'المستحق المختار لهذه الشريحة لا يتبع هذا التنفيذ.', {partyId: 'طرف غير موجود'});
+  if (judgment.executionId && judgment.executionId !== normalized.executionId) throw new AppError(ERR.VALIDATION, 'الحكم المختار يتبع تنفيذًا آخر.', {judgmentId: 'حكم غير مطابق'});
+  const existingRows = await executionSlices(office, normalized.executionId, {limit: MAX_CHILD_ROWS + 1});
+  if (existingRows.length > MAX_CHILD_ROWS) throw new AppError(ERR.CONFLICT, 'تجاوزت شرائح التنفيذ حد القراءة الآمن؛ لم تُنشأ شريحة على بيانات جزئية.');
+  const existing = existingRows.filter(slice => slice.id !== normalized.id);
+  const obligationSlices = feas ? existing.filter(slice => slice.obligationId === obligation.id) : existing;
+  if (feas && obligationSlices.some(slice => slice.status === 'needs_review')) throw new AppError(ERR.CONFLICT, 'توجد شريحة قيمة أخرى تنتظر قرار مراجعة؛ احسمها قبل إنشاء شريحة جديدة.');
+  const recognizedForObligation = feas ? await office.r.executionPeriods.byIndex('executionId', normalized.executionId, MAX_CHILD_ROWS + 1) : [];
+  const hasRecognizedForObligation = feas && recognizedForObligation.some(period => !period.isDeleted && period.obligationId === obligation.id && ['RECOGNIZED', 'CLOSED'].includes(period.status));
+  if (feas && judgment.entitlementType && String(judgment.entitlementType).trim() !== String(obligation.obligationType).trim()) throw new AppError(ERR.VALIDATION, 'نوع الحكم المصدر لا يطابق نوع الالتزام المرتبط بالشريحة.', {judgmentId: 'حكم غير مطابق للالتزام'});
+  if (normalized.partyId) {
+    const party = await office.r.executionParties.get(normalized.partyId);
+    if (!party || party.isDeleted || party.executionId !== normalized.executionId) throw new AppError(ERR.VALIDATION, 'المستحق المختار لهذه الشريحة لا يتبع هذا التنفيذ.', {partyId: 'طرف غير موجود'});
   }
-  const errors = validateValueSlice(input, {existing});
-  // التداخل مع شريحة مفتوحة لنفس النوع: يُشتق حدّ الشريحة السابقة من الشريحة الجديدة بلا تعديلها،
-  // لذلك نسمح بالتداخل فقط عندما تكون الشريحة الجديدة أحدث (تُسجَّل لاحقًا) وتكون بدايتها بعد بداية السابقة.
-  if (errors.startDate && existing.some(slice => String(slice.entitlementType) === String(input.entitlementType) && slice.startDate <= input.startDate && !slice.endDate)) {
-    delete errors.startDate;
-  }
+  const validationSlices = feas ? obligationSlices.map(slice => ({...slice, entitlementType: obligation.obligationType})) : existing;
+  const errors = validateValueSlice(normalized, {existing: validationSlices});
+  // التداخل مع شريحة مفتوحة: نهايتها تُشتق عند الحل من الشريحة اللاحقة، دون تعديل الصف القديم.
+  if (errors.startDate && validationSlices.some(slice => String(slice.entitlementType) === String(normalized.entitlementType) && slice.startDate <= normalized.startDate && !slice.endDate)) delete errors.startDate;
   if (Object.keys(errors).length) throw new AppError(ERR.VALIDATION, 'راجع بيانات شريحة القيمة.', errors);
+  if (feas && recognizedForObligation.length > MAX_CHILD_ROWS) throw new AppError(ERR.CONFLICT, 'تجاوزت فترات FEAS حد القراءة الآمن؛ لم تُنشأ شريحة على أساس جزئي.');
   const now = Clock.now();
-  const row = {
-    id: uid(),
-    executionId: input.executionId,
-    fileId: execution.fileId || '',
-    clientId: execution.clientId || '',
-    // رقم تسلسل لكل شريحة: يجعل ترتيب «الأحدث» حتميًا بلا الاعتماد على وقت التسجيل وحده
+  let row = {
+    id: uid(), executionId: normalized.executionId,
+    ...(feas ? {accountingModel: FEAS_MODEL, obligationId: obligation.id} : {}),
+    fileId: execution.fileId || '', clientId: execution.clientId || '',
     sequence: existing.reduce((max, slice) => Math.max(max, Number(slice.sequence || 0)), 0) + 1,
-    entitlementType: String(input.entitlementType).trim(),
-    partyId: input.partyId || '',
-    judgmentId: input.judgmentId,
-    linkedJudgmentId: input.judgmentId,
-    valueType: input.valueType === 'fixed' ? 'fixed' : 'periodic',
-    amount: round2(num(input.amount)),
-    currency: input.currency || 'جنيه',
-    periodicity: input.valueType === 'fixed' ? 'fixed' : (input.periodicity || 'monthly'),
-    customDays: input.periodicity === 'custom' ? Math.max(1, Math.floor(num(input.customDays) || 1)) : null,
-    anchor: input.anchor || input.startDate || '',
-    startDate: input.startDate,
-    endDate: isIsoDate(input.endDate) ? input.endDate : '',
-    proration: input.proration || execution.prorationPolicy || DEFAULT_PRORATION,
-    status: input.status || 'active',
-    sourceReference: String(input.sourceReference || '').trim(),
-    notes: String(input.notes || '').trim(),
-    needsReview: Boolean(input.needsReview),
-    createdAt: now,
-    createdBy: office.ctx?.profile?.id || 'user',
-    updatedAt: now,
-    version: 1,
-    isDeleted: false
+    entitlementType: String(normalized.entitlementType).trim(), partyId: normalized.partyId || '',
+    judgmentId: normalized.judgmentId, linkedJudgmentId: normalized.judgmentId,
+    valueType: normalized.valueType === 'fixed' ? 'fixed' : 'periodic',
+    amount: round2(num(normalized.amount)),
+    ...(feas ? {amountMinor: normalized.amountMinor} : {}),
+    currency: normalized.currency || 'جنيه',
+    periodicity: normalized.valueType === 'fixed' ? 'fixed' : (normalized.periodicity || (feas ? obligation.frequency : 'monthly')),
+    customDays: normalized.periodicity === 'custom' ? Math.max(1, Math.floor(num(normalized.customDays) || 1)) : null,
+    anchor: normalized.anchor || normalized.startDate || '', startDate: normalized.startDate,
+    endDate: isIsoDate(normalized.endDate) ? normalized.endDate : '',
+    proration: feas ? obligation.prorationPolicy : (normalized.proration || execution.prorationPolicy || DEFAULT_PRORATION),
+    status: feas ? (hasRecognizedForObligation ? 'needs_review' : 'active') : (normalized.status || 'active'),
+    sourceReference: String(normalized.sourceReference || '').trim(), notes: String(normalized.notes || '').trim(),
+    needsReview: Boolean(normalized.needsReview || (feas && hasRecognizedForObligation)),
+    createdAt: now, createdBy: office.ctx?.profile?.id || 'user', updatedAt: now, version: 1, isDeleted: false
   };
   await transaction(office.ctx, [STORE.executionValuePeriods, STORE.activityLog], async tx => {
-    await request(tx.objectStore(STORE.executionValuePeriods).put(row));
-    await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.executionValuePeriods, row.id, 'create', `شريحة قيمة: ${row.entitlementType} ${row.amount} من ${row.startDate}${row.valueType === 'fixed' ? ' (مبلغ ثابت)' : ` (${PERIODICITY_LABELS[row.periodicity] || ''})`}`, {fileId: row.fileId})));
+    await request(tx.objectStore(STORE.executionValuePeriods).add(row));
+    await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.executionValuePeriods, row.id, 'create', `شريحة قيمة: ${row.entitlementType} ${row.amount} من ${row.startDate}${row.valueType === 'fixed' ? ' (مبلغ ثابت)' : ` (${PERIODICITY_LABELS[row.periodicity] || ''})`}${row.status === 'needs_review' ? ' — تنتظر المراجعة' : ''}`, {fileId: row.fileId})));
   });
+  let impact = await previewSliceImpact(office, normalized.executionId, row);
+  if (feas && hasRecognizedForObligation && !impact.rows.length) {
+    const promoted = {...row, status: 'active', needsReview: false, reviewResolvedAt: Clock.now(), updatedAt: Clock.now(), version: (row.version || 0) + 1};
+    await transaction(office.ctx, [STORE.executionValuePeriods, STORE.activityLog], async tx => {
+      const store = tx.objectStore(STORE.executionValuePeriods);
+      const current = await request(store.get(row.id));
+      if (!current || current.status !== 'needs_review') throw new AppError(ERR.CONFLICT, 'تغيرت حالة الشريحة بعد الحفظ؛ راجعها قبل المتابعة.');
+      await request(store.put(promoted));
+      await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.executionValuePeriods, row.id, 'review-no-impact', 'تمت معاينة الشريحة مقابل لقطات الاعتراف؛ لا يوجد فرق سابق، أصبحت الشريحة سارية دون تسوية', {fileId: row.fileId})));
+    });
+    row = promoted;
+  }
   events.emit('entity:changed', {entityType: STORE.executionValuePeriods, id: row.id});
-  const impact = await previewSliceImpact(office, input.executionId, row);
   return {...row, __impact: impact};
 }
 
 /** معاينة أثر شريحة على الفترات (قراءة فقط، لا تكتب شيئًا). */
 export async function previewSliceImpact(office, executionId, slice) {
   const execution = await office.r.execution.get(executionId);
-  const slices = await executionSlices(office, executionId);
-  const allocations = await executionAllocations(office, executionId);
+  const [slices, allocations] = await Promise.all([
+    executionSlices(office, executionId, {limit: MAX_CHILD_ROWS + 1}),
+    executionAllocations(office, executionId, MAX_CHILD_ROWS + 1)
+  ]);
+  if (execution?.accountingModel === FEAS_MODEL) {
+    const obligation = await office.r.executionObligations.get(slice.obligationId);
+    if (!obligation) throw new AppError(ERR.NOT_FOUND, 'الالتزام المرتبط بالشريحة غير موجود.');
+    const [periods, differences] = await Promise.all([
+      office.r.executionPeriods.byIndex('executionId', executionId, MAX_CHILD_ROWS + 1),
+      office.r.differenceRecords.byIndex('executionId', executionId, MAX_CHILD_ROWS + 1)
+    ]);
+    if ([slices, allocations, periods, differences].some(rows => rows.length > MAX_CHILD_ROWS)) throw new AppError(ERR.CONFLICT, 'تجاوزت بيانات FEAS حد القراءة الآمن؛ لم تُحسب تسوية جزئية.');
+    const impact = analyzeFeasValueChange({obligation, valuePeriods: slices, executionPeriods: periods, allocations, differences, candidateValuePeriodId: slice.id});
+    return {rows: impact.rows, totals: impact.totals, totalsMinor: impact.totalsMinor, range: impact.range};
+  }
   const through = execution?.entitlementThroughDate || '';
   return analyzeSliceImpact({slices, newSlice: slice, allocations, throughDate: through, policy: execution?.prorationPolicy || DEFAULT_PRORATION});
 }
@@ -410,12 +470,76 @@ export async function executionActionRows(office, executionId) {
   return rows.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || Number(a.sequence || 0) - Number(b.sequence || 0));
 }
 export async function executionPartyRows(office, executionId) {
-  const rows = await office.r.executionParties.byIndexAll('executionId', executionId);
+  const rows = await office.r.executionParties.byIndex('executionId', executionId, MAX_CHILD_ROWS + 1);
   return rows.sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0) || String(a.name || '').localeCompare(String(b.name || '')));
 }
 export async function executionAdjustmentRows(office, executionId) {
   const rows = await office.r.executionAdjustments.byIndexAll('executionId', executionId);
   return rows.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+}
+
+async function executionAccountingView(office, execution, {asOf = '', throughDate = '', slices = [], allocations = [], ledger = [], differences = []} = {}) {
+  const cutoff = asOf ? `${asOf}T23:59:59.999Z` : '';
+  const scoped = execution.accountingModel === FEAS_MODEL
+    ? {allocations, ledger, differences}
+    : {
+        allocations: asOf ? allocations.filter(row => !row.createdAt || String(row.createdAt) <= cutoff) : allocations,
+        ledger: asOf ? ledger.filter(row => !row.date || String(row.date) <= asOf) : ledger,
+        differences: asOf ? differences.filter(row => !row.createdAt || String(row.createdAt) <= cutoff) : differences
+      };
+  if (execution.accountingModel === FEAS_MODEL) {
+    const [storedPeriods, obligations] = await Promise.all([
+      office.r.executionPeriods.byIndex('executionId', execution.id, MAX_CHILD_ROWS + 1),
+      office.r.executionObligations.byIndex('executionId', execution.id, MAX_CHILD_ROWS + 1)
+    ]);
+    const clipped = storedPeriods.length > MAX_CHILD_ROWS || obligations.length > MAX_CHILD_ROWS
+      || slices.length > MAX_CHILD_ROWS || allocations.length > MAX_CHILD_ROWS || ledger.length > MAX_CHILD_ROWS || differences.length > MAX_CHILD_ROWS;
+    let summary, calculationError = null;
+    try {
+      summary = calculateFeasBalance({
+        executionPeriods: storedPeriods.slice(0, MAX_CHILD_ROWS),
+        allocations: scoped.allocations.slice(0, MAX_CHILD_ROWS),
+        ledger: scoped.ledger.slice(0, MAX_CHILD_ROWS),
+        differences: scoped.differences.slice(0, MAX_CHILD_ROWS), asOf
+      });
+    } catch (error) {
+      calculationError = error;
+      summary = {accountingModel: FEAS_MODEL, currency: '', periods: [], equations: [], netLedger: [], differences: {pending: null, approved: null, posted: null}};
+    }
+    const entitlementKeys = [...new Set(obligations.filter(row => !row.isDeleted && row.status !== 'inactive').map(row => row.obligationType))];
+    summary.originalEntitlement = summary.recognizedPrincipal ?? null;
+    summary.differencesPostedInLedger = 0;
+    summary.entitlementKeys = entitlementKeys;
+    summary.truncated = clipped;
+    if (clipped || calculationError) {
+      blockFeasSummary(summary, clipped
+        ? `تجاوزت بيانات التنفيذ حد القراءة الآمن (${MAX_CHILD_ROWS} صف لكل مجموعة)؛ لم يُعرض رصيد جزئي على أنه نهائي.`
+        : `تعذر اعتماد ملخص الرصيد بسبب خلل سلامة: ${calculationError?.message || 'بيانات مالية غير متسقة'}`);
+    }
+    const periods = summary.periods;
+    const current = slices.filter(row => row.status === 'active').slice().sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || Number(a.sequence || 0) - Number(b.sequence || 0)).at(-1) || null;
+    const ledgerKnownAtDate = asOf ? scoped.ledger.filter(row => !row.date || row.date <= asOf) : scoped.ledger;
+    const latestLedger = ledgerKnownAtDate.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
+    return {
+      summary, periods, truncated: clipped, entitlementKeys,
+      currentValue: current ? {amount: current.amount, entitlementType: current.entitlementType, startDate: current.startDate, judgmentId: current.judgmentId, obligationId: current.obligationId} : null,
+      lastPeriod: periods.at(-1) || null,
+      lastLedger: latestLedger ? {date: latestLedger.date, type: latestLedger.type, amount: latestLedger.netAmount ?? latestLedger.amount} : null,
+      obligations: obligations.slice(0, MAX_CHILD_ROWS), executionPeriods: storedPeriods.slice(0, MAX_CHILD_ROWS)
+    };
+  }
+  const through = throughDate || execution.entitlementThroughDate || '';
+  const build = buildEntitlementPeriods({slices, asOf, to: through, maxPeriods: 1200, policy: execution.prorationPolicy || DEFAULT_PRORATION});
+  const summary = balanceSummary({periods: build.periods, allocations: scoped.allocations, ledger: scoped.ledger, differences: scoped.differences, asOf});
+  const current = slices.slice().sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || ''))).at(-1) || null;
+  const latestLedger = scoped.ledger.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
+  return {
+    summary, periods: build.periods, truncated: build.truncated, entitlementKeys: build.entitlementKeys,
+    currentValue: current ? {amount: current.amount, entitlementType: current.entitlementType, startDate: current.startDate, judgmentId: current.judgmentId} : null,
+    lastPeriod: build.periods.at(-1) || null,
+    lastLedger: latestLedger ? {date: latestLedger.date, type: latestLedger.type, amount: latestLedger.netAmount ?? latestLedger.amount} : null,
+    obligations: [], executionPeriods: []
+  };
 }
 
 /**
@@ -424,74 +548,67 @@ export async function executionAdjustmentRows(office, executionId) {
  */
 export async function summarizeExecution(office, execution, {asOf = '', throughDate = ''} = {}) {
   if (!execution) return null;
-  const through = throughDate || execution.entitlementThroughDate || '';
+  const readLimit = MAX_CHILD_ROWS + 1;
   const [slices, allocations, ledger, differences] = await Promise.all([
-    executionSlices(office, execution.id, {asOf}),
-    executionAllocations(office, execution.id),
-    executionLedgerRows(office, execution.id),
-    executionDifferences(office, execution.id)
+    executionSlices(office, execution.id, {asOf, limit: readLimit}),
+    executionAllocations(office, execution.id, readLimit),
+    executionLedgerRows(office, execution.id, readLimit),
+    executionDifferences(office, execution.id, readLimit)
   ]);
-  const build = buildEntitlementPeriods({slices, asOf, to: through, maxPeriods: 1200, policy: execution.prorationPolicy || DEFAULT_PRORATION});
-  const scopedAllocations = asOf ? allocations.filter(row => !row.createdAt || String(row.createdAt) <= `${asOf}T23:59:59.999Z`) : allocations;
-  const scopedLedger = asOf ? ledger.filter(row => !row.date || String(row.date) <= asOf) : ledger;
-  const scopedDifferences = asOf ? differences.filter(row => !row.createdAt || String(row.createdAt) <= `${asOf}T23:59:59.999Z`) : differences;
-  const summary = balanceSummary({periods: build.periods, allocations: scopedAllocations, ledger: scopedLedger, differences: scopedDifferences, asOf});
-  const current = slices.slice().sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || ''))).at(-1) || null;
-  const latestLedger = scopedLedger.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
-  return {
-    ...summary,
-    truncated: build.truncated,
-    entitlementKeys: build.entitlementKeys,
-    currentValue: current ? {amount: current.amount, entitlementType: current.entitlementType, startDate: current.startDate, judgmentId: current.judgmentId} : null,
-    lastPeriod: build.periods.at(-1) || null,
-    lastLedger: latestLedger ? {date: latestLedger.date, type: latestLedger.type, amount: latestLedger.netAmount ?? latestLedger.amount} : null
-  };
+  const view = await executionAccountingView(office, execution, {asOf, throughDate, slices, allocations, ledger, differences});
+  return {...view.summary, truncated: view.truncated, entitlementKeys: view.entitlementKeys, currentValue: view.currentValue, lastPeriod: view.lastPeriod, lastLedger: view.lastLedger};
 }
 
 /** حزمة قراءة واحدة لبطاقة التنفيذ (كل الأقسام) — قراءات مفهرسة ومحدودة. */
-export async function executionBundle(office, executionId, {asOf = '', throughDate = ''} = {}) {
+export async function executionBundle(office, executionId, {asOf = '', throughDate = '', checkIntegrity = false} = {}) {
   const execution = await office.r.execution.get(executionId);
   if (!execution || execution.isDeleted) return null;
+  const readLimit = MAX_CHILD_ROWS + 1;
   const [parties, judgments, slices, allocations, ledger, receipts, differences, settlements, poas, actions, adjustments] = await Promise.all([
     executionPartyRows(office, executionId),
     executionJudgments(office, executionId),
-    executionSlices(office, executionId, {asOf}),
-    executionAllocations(office, executionId),
-    executionLedgerRows(office, executionId),
-    executionReceipts(office, executionId),
-    executionDifferences(office, executionId),
+    executionSlices(office, executionId, {asOf, limit: readLimit}),
+    executionAllocations(office, executionId, readLimit),
+    executionLedgerRows(office, executionId, readLimit),
+    executionReceipts(office, executionId, readLimit),
+    executionDifferences(office, executionId, readLimit),
     executionSettlements(office, executionId),
     executionPoaRows(office, executionId),
     executionActionRows(office, executionId),
     executionAdjustmentRows(office, executionId)
   ]);
-  const through = throughDate || execution.entitlementThroughDate || '';
-  const build = buildEntitlementPeriods({slices, asOf, to: through, maxPeriods: 1200, policy: execution.prorationPolicy || DEFAULT_PRORATION});
-  const scoped = {
-    allocations: asOf ? allocations.filter(row => !row.createdAt || String(row.createdAt) <= `${asOf}T23:59:59.999Z`) : allocations,
-    ledger: asOf ? ledger.filter(row => !row.date || String(row.date) <= asOf) : ledger,
-    differences: asOf ? differences.filter(row => !row.createdAt || String(row.createdAt) <= `${asOf}T23:59:59.999Z`) : differences
-  };
-  const summary = balanceSummary({periods: build.periods, allocations: scoped.allocations, ledger: scoped.ledger, differences: scoped.differences, asOf});
-  const alerts = executionAlerts({execution, slices, judgments, periods: build.periods, ledger: scoped.ledger, receipts, allocations: scoped.allocations, differences: scoped.differences, poas, actions, summary});
-  const current = slices.slice().sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || ''))).at(-1) || null;
-  const latestLedger = scoped.ledger.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
+  const view = await executionAccountingView(office, execution, {asOf, throughDate, slices, allocations, ledger, differences});
+  const summary = view.summary;
+  let integrityReport = null;
+  if (checkIntegrity && execution.accountingModel === FEAS_MODEL) {
+    try {
+      integrityReport = await executionIntegrityReport(office, executionId);
+    } catch (error) {
+      integrityReport = {executionId, accountingModel: FEAS_MODEL, scanned: {}, issues: [{code: 'integrity-check-failed', severity: 'error', reason: error?.message || 'فشل فحص السلامة.'}]};
+    }
+    const errors = integrityReport.issues.filter(issue => issue.severity === 'error');
+    if (errors.length) {
+      blockFeasSummary(summary, `فحص السلامة وجد ${errors.length} خللًا مانعًا (${errors[0].code}): ${errors[0].reason} لم يُعرض رصيد جزئي.`);
+      view.periods = [];
+      view.lastPeriod = null;
+      view.currentValue = null;
+      view.lastLedger = null;
+    }
+  }
+  const alerts = executionAlerts({execution, slices, judgments, periods: view.periods, ledger, receipts, allocations, differences, poas, actions, summary});
   const lastReceipt = receipts[0] || null;
   const lastPoa = poas.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
   const lastAction = actions.at(-1) || null;
   return {
     execution, parties, judgments, slices, allocations, ledger, receipts, differences, settlements, poas, actions, adjustments,
-    periods: build.periods,
-    truncated: build.truncated,
+    obligations: view.obligations, executionPeriods: view.executionPeriods,
+    periods: view.periods, truncated: view.truncated,
     summary: {
-      ...summary,
-      truncated: build.truncated,
-      entitlementKeys: build.entitlementKeys,
-      currentValue: current ? {amount: current.amount, entitlementType: current.entitlementType, startDate: current.startDate, judgmentId: current.judgmentId} : null,
-      lastPeriod: build.periods.at(-1) || null,
-      lastLedger: latestLedger ? {date: latestLedger.date, type: latestLedger.type, amount: latestLedger.netAmount ?? latestLedger.amount} : null,
+      ...summary, truncated: view.truncated, entitlementKeys: view.entitlementKeys,
+      currentValue: view.currentValue, lastPeriod: view.lastPeriod, lastLedger: view.lastLedger,
       lastReceipt, lastPoa, lastAction
     },
+    integrityReport,
     alerts
   };
 }

@@ -19,6 +19,8 @@ import {events} from '../core/events.js';
 import {num, round2, IN_REVIEW_DIFFERENCE_STATUSES, ACTIVE_DIFFERENCE_STATUSES, differenceStatusLabel, money} from '../domain/execution.js';
 import {analyzeSliceImpact, netLedger} from '../domain/entitlement-engine.js';
 import {executionSlices, executionAllocations, executionLedgerRows, executionDifferences, executionJudgments} from './execution.js';
+import {FEAS_MODEL} from '../domain/execution-feas.js';
+import {createExecutionSettlement, previewExecutionDifference, readExecutionSettlement, reviewExecutionSettlement, decideExecutionSettlement, postExecutionSettlement, recomputeExecutionSettlement} from './execution-feas.js';
 
 const logRow = (office, entityType, entityId, action, summary, {fileId = null, metadata = {}} = {}) => {
   const row = {id: uid(), entityType, entityId, action, timestamp: Clock.now(), summary, metadata};
@@ -37,6 +39,10 @@ function resolveSlice({slices, sliceId, judgmentId}) {
 export async function previewImpact(office, {executionId, sliceId = '', judgmentId = '', throughDate = ''} = {}) {
   const execution = await office.r.execution.get(executionId);
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+  if (execution.accountingModel === FEAS_MODEL) {
+    const preview = await previewExecutionDifference(office, {executionId, sliceId: sliceId || (judgmentId ? (await office.r.executionValuePeriods.byIndex('linkedJudgmentId', judgmentId, 1))[0]?.id : '')});
+    return {slice: preview.slice, impact: preview.impact};
+  }
   const [slices, allocations] = await Promise.all([executionSlices(office, executionId), executionAllocations(office, executionId)]);
   const slice = resolveSlice({slices, sliceId, judgmentId});
   if (!slice) throw new AppError(ERR.VALIDATION, 'لا توجد شريحة قيمة مرتبطة بهذا الحكم.');
@@ -55,6 +61,10 @@ export async function previewImpact(office, {executionId, sliceId = '', judgment
 export async function createSettlement(office, {executionId, sliceId = '', judgmentId = '', note = ''} = {}) {
   const execution = await office.r.execution.get(executionId);
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+  if (execution.accountingModel === FEAS_MODEL) {
+    const id = sliceId || (judgmentId ? (await office.r.executionValuePeriods.byIndex('linkedJudgmentId', judgmentId, 1))[0]?.id : '');
+    return createExecutionSettlement(office, {executionId, sliceId: id, note});
+  }
   const {slice, impact} = await previewImpact(office, {executionId, sliceId, judgmentId});
   if (!impact.rows.length) throw new AppError(ERR.VALIDATION, 'لا يوجد أثر مالي على فترات سابقة لهذه الشريحة: القيم متطابقة أو لا توجد فترات متأثرة.');
   const existing = (await office.r.executionSettlements.byIndexAll('executionId', executionId))
@@ -130,7 +140,8 @@ export async function createSettlement(office, {executionId, sliceId = '', judgm
 export async function settlementReview(office, settlementId) {
   const settlement = await office.r.executionSettlements.get(settlementId);
   if (!settlement || settlement.isDeleted) throw new AppError(ERR.NOT_FOUND, 'التسوية غير موجودة.');
-  const differences = await office.r.differenceRecords.byIndexAll('settlementId', settlementId);
+  if (settlement.accountingModel === FEAS_MODEL) return ['PENDING_REVIEW', 'REVIEWED'].includes(settlement.status) ? reviewExecutionSettlement(office, settlementId) : readExecutionSettlement(office, settlementId);
+  const differences = await office.r.differenceRecords.byIndex('settlementId', settlementId, 5000);
   const allocations = await executionAllocations(office, settlement.executionId);
   const collectedByPeriod = new Map();
   for (const allocation of allocations) {
@@ -155,9 +166,13 @@ export async function settlementReview(office, settlementId) {
 export async function decideSettlement(office, settlementId, {decision, reason = '', rowIds = null} = {}) {
   const settlement = await office.r.executionSettlements.get(settlementId);
   if (!settlement || settlement.isDeleted) throw new AppError(ERR.NOT_FOUND, 'التسوية غير موجودة.');
-  if (settlement.status === 'POSTED') throw new AppError(ERR.CONFLICT, 'هذه التسوية مُرحَّلة بالفعل ولا يمكن تغيير قرارها. استخدم تصحيحًا أو عكسًا.');
+  if (settlement.status === 'POSTED') throw new AppError(ERR.CONFLICT, 'هذه التسوية مُرحَّلة بالفعل ولا يمكن تغيير قرارها. استخدم إجراءً موثقًا.');
   if (!['approve', 'reject'].includes(decision)) throw new AppError(ERR.VALIDATION, 'قرار التسوية غير معروف.');
-  const all = await office.r.differenceRecords.byIndexAll('settlementId', settlementId);
+  if (settlement.accountingModel === FEAS_MODEL) {
+    if (rowIds?.length) throw new AppError(ERR.VALIDATION, 'تسوية FEAS تُعتمد على أساسها الكامل بعد المراجعة؛ لا يُدعم اعتماد صفوف جزئية.');
+    return decideExecutionSettlement(office, settlementId, {decision, reason});
+  }
+  const all = await office.r.differenceRecords.byIndex('settlementId', settlementId, 5000);
   const selected = rowIds ? all.filter(row => rowIds.includes(row.id)) : all;
   if (!selected.length) throw new AppError(ERR.VALIDATION, 'لا توجد صفوف لتطبيق القرار عليها.');
   const now = Clock.now();
@@ -187,8 +202,12 @@ export async function decideSettlement(office, settlementId, {decision, reason =
 export async function postSettlement(office, settlementId) {
   const settlement = await office.r.executionSettlements.get(settlementId);
   if (!settlement || settlement.isDeleted) throw new AppError(ERR.NOT_FOUND, 'التسوية غير موجودة.');
+  if (settlement.accountingModel === FEAS_MODEL) {
+    const result = await postExecutionSettlement(office, settlementId);
+    return {posted: result.rows, rows: await settlementReview(office, settlementId)};
+  }
   if (settlement.status !== 'APPROVED') throw new AppError(ERR.CONFLICT, 'لا يمكن ترحيل تسوية قبل اعتمادها من المستخدم.');
-  const rows = (await office.r.differenceRecords.byIndexAll('settlementId', settlementId)).filter(row => row.status === 'APPROVED');
+  const rows = (await office.r.differenceRecords.byIndex('settlementId', settlementId, 5000)).filter(row => row.status === 'APPROVED');
   if (!rows.length) throw new AppError(ERR.VALIDATION, 'لا توجد فروق معتمدة قابلة للترحيل.');
   const now = Clock.now();
   const posted = [];
@@ -225,6 +244,7 @@ export async function postSettlement(office, settlementId) {
 export async function recomputeSettlement(office, settlementId) {
   const settlement = await office.r.executionSettlements.get(settlementId);
   if (!settlement || settlement.isDeleted) throw new AppError(ERR.NOT_FOUND, 'التسوية غير موجودة.');
+  if (settlement.accountingModel === FEAS_MODEL) return recomputeExecutionSettlement(office, settlementId);
   if (!IN_REVIEW_DIFFERENCE_STATUSES.includes(settlement.status)) throw new AppError(ERR.CONFLICT, 'لا يمكن إعادة حساب تسوية بعد اعتمادها أو رفضها.');
   const {slice, impact} = await previewImpact(office, {executionId: settlement.executionId, sliceId: settlement.sliceId});
   const previous = await office.r.differenceRecords.byIndexAll('settlementId', settlementId);

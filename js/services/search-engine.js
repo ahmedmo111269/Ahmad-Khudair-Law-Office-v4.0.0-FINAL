@@ -70,7 +70,9 @@ export const SEARCH_SOURCES=[
  {store:'executionActions',icon:'hammer',weight:31,title:r=>`${r.kindLabel||r.kind||'إجراء تنفيذ'} ${r.referenceNumber||''}`.trim(),sub:r=>[fdate(r.date),r.authority,r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'إجراءات التنفيذ'},
  {store:'executionParties',icon:'users',weight:30,title:r=>r.name||'طرف تنفيذ',sub:r=>[r.side==='debtor'?'منفذ ضده':'مستحق',r.role].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'أطراف التنفيذ'},
  {store:'executionValuePeriods',icon:'chart',weight:29,title:r=>`شريحة قيمة: ${r.amount||''} ${r.entitlementType||''}`.trim(),sub:r=>[r.valueType==='fixed'?'ثابت':'دوري',r.periodicity,r.startDate&&fdate(r.startDate)].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'شرائح القيمة'},
- {store:'differenceRecords',icon:'scale',weight:28,title:r=>`فرق استحقاق ${r.periodKey||''}`.trim(),sub:r=>[r.oldValue&&('قديم '+r.oldValue),r.newValue&&('جديد '+r.newValue),r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'فروق الاستحقاق'}
+ {store:'executionObligations',icon:'chart',weight:28,title:r=>`التزام FEAS: ${r.obligationType||''}`.trim(),sub:r=>[r.frequency,r.currency,r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'التزامات FEAS'},
+ {store:'executionPeriods',icon:'calendar',weight:27,title:r=>`فترة معترف بها ${r.periodKey||''}`.trim(),sub:r=>[r.obligationTypeSnapshot,r.fromDate&&fdate(r.fromDate),r.toDate&&fdate(r.toDate),r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'فترات FEAS المعترف بها'},
+ {store:'differenceRecords',icon:'scale',weight:26,title:r=>`فرق استحقاق ${r.periodKey||''}`.trim(),sub:r=>[r.oldValue&&('قديم '+r.oldValue),r.newValue&&('جديد '+r.newValue),r.status].filter(Boolean).join(' · '),routeOf:r=>r.executionId?`exc:${r.executionId}`:'',note:'فروق الاستحقاق'}
 ];
 export const PRIMARY_STORES=['clients','files','cases','opponents','hearings','procedures'];
 export const allSearchStores=()=>SEARCH_SOURCES.map(s=>s.store);
@@ -85,10 +87,12 @@ const FAST_INDEXES={
  serviceRecords:[['internalNumber','digits']],
  powersOfAttorney:[['poaNumber','digits']],
  execution:[['searchTextNormalized','text']],
+ executionObligations:[['obligationType','text']],
+ executionPeriods:[['periodKey','text']],
  executionReceipts:[['receiptNumber','digits']],
  executionPOAs:[['poaNumber','digits']]
 };
-const numberishFields={clients:['nationalId','phone','clientCode'],files:['fileNumber'],cases:['caseNumber','caseYear'],opponents:['nationalId'],serviceRecords:['internalNumber','noticeNumber'],powersOfAttorney:['poaNumber'],judgments:['judgmentNumber','lawsuitNumber','appealNumber'],execution:['executionNumber','officialNumber','internalNumber'],feePayments:['receiptNumber'],documentReferences:['referenceNumber'],executionReceipts:['receiptNumber'],executionPOAs:['poaNumber'],executionActions:['referenceNumber','judicialNumber','petitionNumber'],differenceRecords:['periodKey']};
+const numberishFields={clients:['nationalId','phone','clientCode'],files:['fileNumber'],cases:['caseNumber','caseYear'],opponents:['nationalId'],serviceRecords:['internalNumber','noticeNumber'],powersOfAttorney:['poaNumber'],judgments:['judgmentNumber','lawsuitNumber','appealNumber'],execution:['executionNumber','officialNumber','internalNumber'],feePayments:['receiptNumber'],documentReferences:['referenceNumber'],executionReceipts:['receiptNumber'],executionPOAs:['poaNumber'],executionActions:['referenceNumber','judicialNumber','petitionNumber'],differenceRecords:['periodKey'],executionObligations:['obligationType','description'],executionPeriods:['periodKey','obligationTypeSnapshot','fromDate','toDate']};
 
 function rowMatches(src,r,tokens,code,numDigits){
  if(src.extra&&!src.extra(r))return false;

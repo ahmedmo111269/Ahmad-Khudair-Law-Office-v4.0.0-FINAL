@@ -1072,7 +1072,7 @@ async function offline() {
   await pollUntil(page, async () => { const regs = await navigator.serviceWorker.getRegistrations(); return regs.some(r => r.active); }, 30000);
   await pollUntil(page, async () => { const keys = await caches.keys(); if (!keys.length) return false; const c = await caches.open(keys.find(k => k.includes('work-center')) || keys[0]); return (await c.keys()).length > 100; }, 60000);
   await verify('دون اتصال: ملفات مركز العمل الجديدة كلها محفوظة في ذاكرة التطبيق (precache) وإصدار الذاكرة جديد', async () => {
-    const out = await page.evaluate(async () => { const keys = await caches.keys(); const name = keys.find(k => k.includes('v5.7.0-work-center')); const c = name ? await caches.open(name) : null; const urls = c ? (await c.keys()).map(r => new URL(r.url).pathname) : []; return {name, urls}; });
+    const out = await page.evaluate(async () => { const keys = await caches.keys(); const name = keys.find(k => k.includes('v5.10.0-feas-offline')); const c = name ? await caches.open(name) : null; const urls = c ? (await c.keys()).map(r => new URL(r.url).pathname) : []; return {name, urls}; });
     assert.ok(out.name, 'اسم الذاكرة الجديد غير موجود');
     for (const f of ['css/work-center.css', 'js/modules/work-center.js', 'js/services/work-query.js', 'js/services/work-items.js', 'js/services/work-insights.js', 'js/services/work-config.js', 'js/domain/work-items.js', 'js/domain/work-sources.js', 'js/ui/work-card.js', 'js/ui/work-actions.js', 'js/ui/work-drawer.js', 'js/ui/work-views.js', 'js/ui/work-grid.js', 'js/ui/work-panels.js', 'js/ui/work-links.js']) assert.ok(out.urls.includes(`/${f}`), `غير مخزّن: ${f}`);
   });
