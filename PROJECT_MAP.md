@@ -1,3 +1,18 @@
+# v5.11.0 — خريطة الملاحظات السريعة والحذف الآمن لمجمع التنفيذ
+
+**2026-10-04 — إضافة تشغيلية فوق البنية القائمة، بلا نظام Notes/Tasks/References/Search/Sync موازٍ.** `caseNotes` هو المخزن canonical للملاحظات، و`quickNoteLinks` للروابط المعتمدة و`caseNoteDrafts` للمسودات المحلية. الترحيل v18 additive فقط؛ لا backfill ولا حذف أو تغيير للمعرفات القائمة.
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/quick-notes.js` | خدمة الملاحظة: تطبيع عربي/أرقام، lifecycle والحالة الفعالة، Archive/Trash/Restore/Snooze/Reminder، روابط ذرية، cursor pagination، أجندة/Needs Action، تحويل idempotent إلى Work Center وترتيب يدوي متوافق مع الصفوف التاريخية |
+| `js/modules/quick-notes.js`, `css/quick-notes.css` | شاشة RTL/Mobile-First، Quick Capture، الاقتراحات التي تحتاج اعتمادًا، عرض آمن عبر `textContent`، Inbox/Triage/Agenda وFAB |
+| `js/db/schema.js` | توسيع `caseNotes` وفهارس الحالة/الأولوية/الموعد/التذكير، وإضافة مخزني الروابط والمسودات في v18 |
+| `js/services/execution.js`, `js/modules/execution-center.js` | حذف منطقي ذري لمجمع التنفيذ والتوابع القابلة للحذف، حواجز الأثر المالي وسلة/استعادة انتقائية، أزرار التعديل والحذف |
+| `js/services/search-engine.js`, `js/services/work-items.js`, `js/modules/file-page.js`, `js/modules/record-page.js` | استخدام البحث/مركز العمل/الملفات/السجلات القائمة، مع روابط سياقية approved only؛ لا نسخ لمحتوى الملاحظة إلى سجل آخر |
+| `tools/node-tests/quick-notes-browser-tests.mjs` | فحص Chromium للالتقاط الآمن، الدورة، الترقيم، السحب، Command Center، السياق، RTL والموبايل |
+
+**NOT VERIFIED:** Archive/Reminder/Agenda/Needs Action dedicated browser flows، الطباعة الفعلية، المتصفحات/الأجهزة غير Chromium، وبيانات الإنتاج. النقر على FAB الهاتف مغطى ضمن فحص Chromium العام. نتائج التشغيل التفصيلية في `TEST-REPORT.md`.
+
 # v5.10.0 — خريطة تحديث واجهة مركز التنفيذ (شرح لكل خانة + مسار مرحلي + مثال قابل للزرع)
 
 **2026-10-03 — تعليمي/تشغيلي بلا تغيير Schema أو مسارات أو خدمات قراءة-كتابة.** المطلوب: أن يفهم المستخدم ماذا يكتب في كل خانة وكيف يُحسب الرصيد، مع مثال عملي وبيانات تجريبية تبقى في التطبيق. `SCHEMA_VERSION=17` و`APP_VERSION=5.10.0` كما هما.

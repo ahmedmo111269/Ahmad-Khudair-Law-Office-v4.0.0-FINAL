@@ -50,7 +50,7 @@ export function staticCommands(app){
  nav('bailiffs','دليل المحضرين','scale','محضرين');
  nav('appointments','المواعيد',ROUTE_ICONS.appointments,'مواعيد');
  nav('communications','الاتصالات',ROUTE_ICONS.communications,'هاتف اتصال');
- nav('caseNotes','الملاحظات',ROUTE_ICONS.caseNotes,'ملاحظات');
+  nav('quickNotes','الملاحظات السريعة',ROUTE_ICONS.caseNotes,'ملاحظات سريعة التقاط inbox');
  nav('judgments','الأحكام',ROUTE_ICONS.judgments,'أحكام');
  nav('expertReports','الخبراء',ROUTE_ICONS.expertReports,'خبراء تقارير');
  nav('execution','التنفيذ',ROUTE_ICONS.execution,'تنفيذ');
@@ -78,7 +78,7 @@ export function staticCommands(app){
  quick('مهمة (مركز العمل)','workItems','clipboard','مهمة جديدة تذكير متابعة task');
  quick('مواعيد','appointments','clock','موعد جديد');
  quick('اتصال','communications','phone','اتصال جديد');
- quick('ملاحظة','caseNotes','note','ملاحظة جديدة');
+  cmds.push({id:'qa:quick-note',label:'ملاحظة سريعة (Ctrl+Shift+N)',icon:'note',group:'إجراءات سريعة',keywords:'ملاحظة التقاط quick note inbox',kbd:'Ctrl⇧N',run:async()=>{const {openQuickNoteCapture}=await import('../modules/quick-notes.js');return openQuickNoteCapture(app)}});
  quick('أتعاب','fees','wallet','اتعاب جديدة');
  // مركز العمل: تنقل مباشر + أوامر تعدّل بيانات تطلب تأكيدًا قبل التنفيذ
  const wc=(id,label,route,keywords='')=>cmds.push({id:'wc:'+id,label,icon:ROUTE_ICONS.actionCenter,group:'مركز العمل',keywords:'مركز العمل '+keywords,run:()=>app.go(route)});

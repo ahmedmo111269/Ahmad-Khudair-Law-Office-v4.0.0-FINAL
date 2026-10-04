@@ -843,7 +843,7 @@ export async function runExecutionTests(test, expect) {
     } finally { closeEnv(e); }
   });
   test('تنفيذ/مخطط: v15 إضافي غير مدمر + النسخ الاحتياطي يشمل المخازن الجديدة', async () => {
-    expect(SCHEMA_VERSION).toBe(17);
+    expect(SCHEMA_VERSION).toBe(18);
     expect(SCHEMA_MIGRATIONS.some(m => m.version === 15 && m.addsStores.includes('executionLedger'))).toBe(true);
     expect(SCHEMA_MIGRATIONS.some(m => m.version === 17 && m.addsStores.includes('executionPeriods') && !m.destructive && !m.backfill)).toBe(true);
     const plan = migrationPlan(14, 15);
@@ -980,6 +980,53 @@ export async function runExecutionTests(test, expect) {
       expect(created.file.fileNumber !== e.file.fileNumber).toBe(true);
       const relations = await e.office.r.fileRelations.byIndexAll('fileId', e.file.id).catch(() => []);
       expect(relations.some(row => row.relatedFileId === created.file.id) || created.relation).toBeTruthy();
+    } finally { closeEnv(e); }
+  });
+
+  // ===== الحذف المنطقي والاستعادة الانتقائية =====
+  test('تنفيذ/حذف: الحذف المجمع يوسم الجذر وكل التوابع داخل معاملة، والاستعادة لا تعيد طفلًا حُذف سابقًا', async () => {
+    const e = await familyFixture();
+    try {
+      const party = await EX.saveExecutionParty(e.office, {executionId: e.execution.id, clientId: e.client.id, side: 'creditor'});
+      const action = await EX.saveExecutionAction(e.office, {executionId: e.execution.id, kind: 'seizure', date: '2025-04-01'});
+      await EX.deleteExecutionAction(e.office, action.id, {reason: 'حذف مستقل قبل الحذف المجمع'});
+      await L.recordCollection(e.office, {executionId: e.execution.id, amount: 500, date: '2025-04-02', allocation: {method: 'MANUAL', targets: []}});
+      const deleted = await EX.deleteExecution(e.office, e.execution.id, e.execution.version, 'اختبار حذف مجمع');
+      expect(deleted.isDeleted).toBe(true);
+      expect((await e.office.r.execution.get(e.execution.id)).isDeleted).toBe(true);
+      expect((await e.office.r.executionParties.get(party.id)).deletionAggregateId).toBe(e.execution.id);
+      expect((await e.office.r.executionActions.get(action.id)).deletionAggregateId).toBe(undefined);
+      expect(await EX.executionBundle(e.office, e.execution.id)).toBe(null);
+      const trash = await EX.listDeletedExecutions(e.office, {limit: 10});
+      expect(trash.rows.some(row => row.id === e.execution.id)).toBe(true);
+      await EX.restoreExecution(e.office, e.execution.id, deleted.version);
+      expect((await e.office.r.execution.get(e.execution.id)).isDeleted).toBe(false);
+      expect((await e.office.r.executionParties.get(party.id)).isDeleted).toBe(false);
+      expect((await e.office.r.executionActions.get(action.id)).isDeleted).toBe(true);
+      const activity = (await e.office.r.activityLog.all(5000)).filter(row => row.entityId === e.execution.id).map(row => row.action);
+      expect(activity.includes('delete')).toBe(true); expect(activity.includes('restore')).toBe(true);
+    } finally { closeEnv(e); }
+  });
+  test('تنفيذ/حذف: لا تُحذف شريحة دخلت في تخصيص مالي، وحذف الحكم المرتبط بشريحة مرفوض', async () => {
+    const e = await familyFixture();
+    try {
+      await L.recordCollection(e.office, {executionId: e.execution.id, amount: 300, date: '2025-03-03', allocation: {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-01-01', amount: 300}]}});
+      const sliceError = await rejects(() => EX.deleteExecutionValueSlice(e.office, e.s1.id));
+      expect(sliceError.code).toBe(ERR.CONFLICT);
+      const judgmentError = await rejects(() => EX.deleteExecutionJudgment(e.office, e.j1.id));
+      expect(judgmentError.code).toBe(ERR.CONFLICT);
+    } finally { closeEnv(e); }
+  });
+
+  test('تنفيذ/حذف: تخصيص مستقبلي يُكتشف حتى عند غياب entitlementThroughDate ولا يسمح بحذف الشريحة', async () => {
+    const e = await env({through: ''});
+    try {
+      const judgment = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: 'نفقة شهرية', judgmentKind: 'original', judgmentDate: '2025-01-10', valueType: 'periodic', periodicity: 'monthly', amount: 3000, effectiveFrom: '2025-01-01'});
+      const slice = await EX.saveValueSlice(e.office, {executionId: e.execution.id, judgmentId: judgment.id, entitlementType: 'نفقة شهرية', valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2025-01-01'});
+      // This simulates a previously persisted future allocation from an older horizon.
+      await e.office.r.executionAllocations.put({id: 'future-allocation', executionId: e.execution.id, periodKey: 'نفقة شهرية::2099-01-01', amount: 300, isActive: true, isDeleted: false, createdAt: '2026-01-01'});
+      const error = await rejects(() => EX.deleteExecutionValueSlice(e.office, slice.id));
+      expect(error.code).toBe(ERR.CONFLICT);
     } finally { closeEnv(e); }
   });
 

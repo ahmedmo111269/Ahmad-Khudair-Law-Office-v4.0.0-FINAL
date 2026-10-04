@@ -174,8 +174,12 @@ export async function saveWorkItem(office, input, id = null, expectedVersion = n
   if (Object.keys(errors).length) throw new AppError(ERR.VALIDATION, 'راجع بيانات المهمة.', errors);
   const linked = await resolveLinks(office, data);
   const at = nowIso(), rowId = id || uid();
+  // Quick Notes تتحول إلى Work Item موجود في مركز العمل نفسه؛ لا ننشئ نظام مهام آخر.
+  // المصدر مميز كي تكون العملية idempotent ويمكن الرجوع للملاحظة الأصلية.
+  const sourceType = old?.sourceType || (input.sourceType === 'QUICK_NOTE' ? 'QUICK_NOTE' : TASK_SOURCE);
+  const sourceId = old?.sourceId || input.sourceId || rowId;
   const row = {
-    ...(old || {}), ...linked, id: rowId, kind: WORK_KIND.native, sourceType: TASK_SOURCE, sourceId: rowId,
+    ...(old || {}), ...linked, id: rowId, kind: WORK_KIND.native, sourceType, sourceId,
     createdAt: old?.createdAt || at, updatedAt: at, version: (old?.version || 0) + 1,
     isArchived: old?.isArchived || false, isDeleted: false, deletedAt: null,
     postponeCount: old?.postponeCount || 0, commentCount: old?.commentCount || 0, originalDueDate: old?.originalDueDate || '',
@@ -397,6 +401,34 @@ export async function setItemQuadrant(office, refInput, quadrant) {
   }
   const ctx = await loadProjected(office, ref);
   return commitProjected(office, ctx, ref, {action: 'quadrant', summary: 'تغيير تصنيف المصفوفة', metadata: {to: value || 'auto'}, mutate: o => { o.quadrant = value; }});
+}
+
+/** تحويل ملاحظة سريعة إلى مهمة أصلية في مركز العمل، مع منع الإنشاء المكرر عند إعادة المحاولة. */
+export async function saveWorkItemFromQuickNote(office, note, {force = false} = {}) {
+  if (!note?.id) throw new AppError(ERR.VALIDATION, 'الملاحظة غير محددة.');
+  const existing = await office.r.workItems.byIndex('sourceId', note.id, 100)
+    .then(rows => rows.find(row => row.kind === WORK_KIND.native && row.sourceType === 'QUICK_NOTE' && !row.isDeleted))
+    .catch(() => null);
+  if (existing && !force) return {row: existing, reused: true};
+  // Capture links are intentionally stored in quickNoteLinks as well as the
+  // canonical direct fields. Resolve them here so conversion to the existing
+  // Work Center preserves approved context without copying note content into
+  // another store as a second Notes/Tasks system.
+  const links = office.r.quickNoteLinks ? await office.r.quickNoteLinks.byIndex('noteId', note.id, 100).catch(() => []) : [];
+  const firstLink = type => links.find(link => link.entityType === type)?.entityId || '';
+  const row = await saveWorkItem(office, {
+    title: String(note.title || note.content || 'ملاحظة سريعة').trim().slice(0, 500),
+    description: String(note.content || '').trim().slice(0, 5000),
+    dueDate: String(note.dueAt || '').slice(0, 10),
+    priority: note.priority === 'URGENT' ? 'urgent' : note.priority === 'HIGH' ? 'high' : note.priority === 'LOW' ? 'low' : 'medium',
+    status: 'notStarted',
+    tags: Array.isArray(note.tagIds) ? note.tagIds.join(', ') : String(note.tags || ''),
+    fileId: note.fileId || firstLink('LEGAL_FILE'),
+    caseId: note.caseId || firstLink('CASE'),
+    clientId: note.clientId || firstLink('CLIENT'),
+    sourceType: 'QUICK_NOTE', sourceId: note.id
+  });
+  return {row, reused: false};
 }
 
 // ---------- الأرشفة والحذف ----------

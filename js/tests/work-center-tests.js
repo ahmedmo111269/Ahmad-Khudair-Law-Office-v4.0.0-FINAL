@@ -303,7 +303,7 @@ export async function runWorkCenterTests(test, expect) {
 
   // ===== 2) الترحيل v13 → v14 =====
   test('مركز العمل/ترحيل: سجل الترحيلات الرسمي يصف v14 إضافيًا غير مدمر', () => {
-    expect(SCHEMA_VERSION).toBe(17); expect(SCHEMA_MIGRATIONS.at(-1).version).toBe(14); expect(SCHEMA_MIGRATIONS.some(m => m.version === 15)).toBe(true); expect(SCHEMA_MIGRATIONS.some(m => m.version === 16 && m.addsStores.includes('syncChanges'))).toBe(true); expect(SCHEMA_MIGRATIONS.some(m => m.version === 17 && m.addsStores.includes('executionPeriods') && !m.destructive && !m.backfill)).toBe(true);
+    expect(SCHEMA_VERSION).toBe(18); expect(SCHEMA_MIGRATIONS.at(-1).version).toBe(14); expect(SCHEMA_MIGRATIONS.some(m => m.version === 15)).toBe(true); expect(SCHEMA_MIGRATIONS.some(m => m.version === 16 && m.addsStores.includes('syncChanges'))).toBe(true); expect(SCHEMA_MIGRATIONS.some(m => m.version === 17 && m.addsStores.includes('executionPeriods') && !m.destructive && !m.backfill)).toBe(true);
     const plan = migrationPlan(13, 14);
     expect(plan.addsStores.join()).toBe('workItems,workItemComments,workItemRecurrences'); expect(plan.destructive).toBe(false); expect(migrationPlan(14, 14).steps.length).toBe(0);
     const execPlan = migrationPlan(14, 15);
@@ -334,7 +334,7 @@ export async function runWorkCenterTests(test, expect) {
   test('مركز العمل/ترحيل: نسخة احتياطية v13 قديمة (بلا المخازن الجديدة) تُقبل وتُستعاد والمخازن الجديدة فارغة', async () => {
     const {db, office} = await env();
     const payload = await exportDatabase(office.ctx);
-    expect(payload.schemaVersion).toBe(17); expect(Array.isArray(payload.stores.workItems)).toBe(true); expect(Array.isArray(payload.stores.executionLedger)).toBe(true); expect(Array.isArray(payload.stores.executionPeriods)).toBe(true);
+    expect(payload.schemaVersion).toBe(18); expect(Array.isArray(payload.stores.workItems)).toBe(true); expect(Array.isArray(payload.stores.executionLedger)).toBe(true); expect(Array.isArray(payload.stores.executionPeriods)).toBe(true);
     const legacy = JSON.parse(JSON.stringify(payload));
     legacy.schemaVersion = 13; for (const s of ['workItems', 'workItemComments', 'workItemRecurrences']) delete legacy.stores[s];
     legacy.manifest.storeNames = legacy.manifest.storeNames.filter(s => !['workItems', 'workItemComments', 'workItemRecurrences'].includes(s));

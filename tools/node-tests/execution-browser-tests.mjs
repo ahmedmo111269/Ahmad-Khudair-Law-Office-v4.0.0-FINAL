@@ -79,7 +79,8 @@ const center = await page.evaluate(() => ({
   kpis: [...document.querySelectorAll('[data-kpi]')].map(b => `${b.dataset.kpi}=${b.querySelector('b').textContent}`),
   headers: [...document.querySelectorAll('#exec-grid thead th')].map(th => th.textContent.replace(/[↕▾⌄›]/g, '').trim()).filter(Boolean),
   rows: document.querySelectorAll('#exec-grid tbody tr').length,
-  sections: [...document.querySelectorAll('[data-section-id]')].map(node => node.dataset.sectionId)
+  sections: [...document.querySelectorAll('[data-section-id]')].map(node => node.dataset.sectionId),
+  hasTrash: Boolean(document.querySelector('[data-exec-trash]'))
 }));
 report.center = center;
 check('مركز التنفيذ يُفتح من مسار التنقل', center.title === 'مركز التنفيذ', center.title);
@@ -88,6 +89,7 @@ for (const header of ['رقم التنفيذ', 'الموكل', 'رقم المل�
 }
 check('المؤشرات معروضة', center.kpis.length >= 10, center.kpis.join(' ، '));
 check('أقسام الصفحة مطوية/مرتبة عبر نظام الأقسام', ['kpis', 'attention', 'filters', 'grid', 'settlements'].every(id => center.sections.includes(id)), center.sections.join('، '));
+check('مركز التنفيذ يعرض مدخل سلة الحذف المنطقي', center.hasTrash, String(center.hasTrash));
 await page.screenshot({path: path.join(artifactDir, 'execution-center.png'), fullPage: true});
 
 // ===== بطاقة التنفيذ =====
@@ -109,7 +111,14 @@ const card = await page.evaluate(() => {
     poas: document.querySelectorAll('[data-section-id="poas"] .exec-table tbody tr').length,
     traceNodes: document.querySelectorAll('.exec-trace-node').length,
     quickActions: document.querySelectorAll('[data-quick]').length,
-    alerts: [...document.querySelectorAll('.exec-alert-body')].map(node => node.textContent.trim())
+    alerts: [...document.querySelectorAll('.exec-alert-body')].map(node => node.textContent.trim()),
+    deletionControls: {
+      editExecution: document.querySelectorAll('[data-edit-execution]').length,
+      deleteExecution: document.querySelectorAll('[data-delete-execution]').length,
+      deleteJudgment: document.querySelectorAll('[data-delete-judgment]').length,
+      deleteSlice: document.querySelectorAll('[data-delete-slice]').length,
+      deletePoa: document.querySelectorAll('[data-delete-poa]').length
+    }
   };
 });
 report.card = card;
@@ -120,6 +129,7 @@ check('12 فترة محسوبة كسولًا', card.periods === 12, String(card.
 check('«تطور قيمة الاستحقاق» قابل للفتح ومطوي افتراضيًا', card.evolution.length === 1, card.evolution.join(' ، '));
 check('شجرة تتبع الرصيد مبنية حتى المصدر', card.traceNodes > 10, String(card.traceNodes));
 check('إجراءات سريعة معروضة', card.quickActions >= 10, String(card.quickActions));
+check('أزرار تعديل التنفيذ وحذف الحكم/الشريحة/التوكيل ظاهرة', card.deletionControls.editExecution >= 1 && card.deletionControls.deleteExecution === 1 && card.deletionControls.deleteJudgment >= 2 && card.deletionControls.deleteSlice >= 2 && card.deletionControls.deletePoa >= 1, JSON.stringify(card.deletionControls));
 check('المحاضر والدفتر والفروق والتوكيلات معروضة', card.receipts >= 1 && card.ledger >= 1 && card.differences >= 1 && card.poas >= 1, JSON.stringify({receipts: card.receipts, ledger: card.ledger, differences: card.differences, poas: card.poas}));
 await page.screenshot({path: path.join(artifactDir, 'execution-card.png'), fullPage: true});
 

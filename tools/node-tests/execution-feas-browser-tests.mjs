@@ -50,7 +50,7 @@ await page.waitForFunction(async () => {
 }, null, {timeout: 90000});
 const serviceWorker = await page.evaluate(async () => {
   const keys = await caches.keys();
-  const cacheName = keys.find(key => key.includes('v5.10.0-feas-offline')) || '';
+  const cacheName = keys.find(key => key.includes('ahmad-khudair-law-office-v') && key.endsWith('-feas-offline')) || '';
   const cache = cacheName ? await caches.open(cacheName) : null;
   const paths = cache ? (await cache.keys()).map(request => new URL(request.url).pathname) : [];
   return {controlled: Boolean(navigator.serviceWorker.controller), cacheName, paths};

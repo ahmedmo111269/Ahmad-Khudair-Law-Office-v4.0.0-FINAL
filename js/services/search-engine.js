@@ -16,6 +16,7 @@ import {ENTITIES} from '../domain/entities.js';
 import {rowText} from './entity-query.js';
 import {prefs} from '../core/preferences.js';
 import {formatFileNumber as fileNumber} from '../core/file-number.js';
+import {parseQuickNoteQuery, matchesQuickNoteQuery} from './quick-notes.js';
 
 // ===== 1) منطق صافٍ قابل للاختبار =====
 export function tokenizeQuery(q){
@@ -58,7 +59,7 @@ export const SEARCH_SOURCES=[
  {store:'feePayments',icon:'wallet',weight:50,title:r=>`دفعة ${r.amount??''}`,sub:r=>[r.method,r.date&&fdate(r.date)].filter(Boolean).join(' · ')},
  {store:'appointments',icon:'clock',weight:48,title:r=>r.title||'موعد',sub:r=>[fdate(r.date),r.time,r.location].filter(Boolean).join(' · ')},
  {store:'communications',icon:'phone',weight:46,title:r=>r.subject||'اتصال',sub:r=>[fdate(r.date),r.channel,r.contactName].filter(Boolean).join(' · ')},
- {store:'caseNotes',icon:'note',weight:44,title:r=>String(r.content||'ملاحظة').slice(0,60),sub:r=>[r.category,r.createdAt&&fdate(r.createdAt)].filter(Boolean).join(' · ')},
+ {store:'caseNotes',icon:'note',weight:82,label:'الملاحظات السريعة',title:r=>r.title||String(r.content||'ملاحظة').slice(0,60),sub:r=>[r.noteType||r.category,r.priority,r.dueAt&&('استحقاق '+fdate(r.dueAt)),r.createdAt&&fdate(r.createdAt)].filter(Boolean).join(' · '),routeOf:r=>`quickNotes?note=${encodeURIComponent(r.id)}`,note:'الملاحظات السريعة'},
  {store:'expertReports',icon:'microscope',weight:42,title:r=>r.expertName||'تقرير خبير',sub:r=>[fdate(r.reportDate),r.expertOffice].filter(Boolean).join(' · ')},
  {store:'execution',icon:'hammer',weight:40,title:r=>`تنفيذ ${r.executionNumber||''}`.trim()||'تنفيذ',sub:r=>[r.status,fdate(r.openedDate)].filter(Boolean).join(' · ')},
  {store:'powersOfAttorney',icon:'stamp',weight:38,title:r=>`توكيل ${r.poaNumber||''}`.trim()||'توكيل',sub:r=>[r.status,fdate(r.issuedDate)].filter(Boolean).join(' · ')},
@@ -124,7 +125,7 @@ async function prefixFast(office,store,tokens,code,numDigits,limit){
 }
 
 /** مسح محدود بتوقف مبكر: يكفي أن تكتمل النتائج ليتوقف المؤشر */
-function boundedScan(office,store,{tokens,code,numDigits,limit}){
+function boundedScan(office,store,{tokens,code,numDigits,limit,predicate=null}){
  const src=SRC[store];
  const tx=office.ctx.db.transaction(store,'readonly');
  const os=tx.objectStore(store);
@@ -136,7 +137,7 @@ function boundedScan(office,store,{tokens,code,numDigits,limit}){
    const cur=c.result;
    if(!cur||hits.length>=limit){if(cur)stopped=true;resolve({hits,stopped});return}
    const r=cur.value;
-   if(rowMatches(src,r,tokens,code,numDigits))hits.push(r);
+   if((predicate ? predicate(r) : rowMatches(src,r,tokens,code,numDigits)))hits.push(r);
    cur.continue();
   };
  });
@@ -148,14 +149,15 @@ function boundedScan(office,store,{tokens,code,numDigits,limit}){
  */
 export async function searchStore(office,store,raw,{limit=8}={}){
  const src=SRC[store];if(!src||!office?.r?.[store])return {items:[],more:false};
- const tokens=tokenizeQuery(raw);
+ const parsedNotes = store === 'caseNotes' ? parseQuickNoteQuery(raw) : null;
+ const tokens=parsedNotes ? tokenizeQuery(parsedNotes.text.join(' ')) : tokenizeQuery(raw);
  const code=tokens.map(t=>looksLikeCode(t)?t:'').filter(Boolean)[0]||'';
  const numDigits=digitsOf(tokens.find(t=>looksLikeNumber(t))||'');
- if(!tokens.length&&!code&&!numDigits)return {items:[],more:false};
+ if(!tokens.length&&!code&&!numDigits&&!(parsedNotes&&(parsedNotes.states.size||parsedNotes.tag||parsedNotes.file||parsedNotes.client||parsedNotes.priority||parsedNotes.color||parsedNotes.type)))return {items:[],more:false};
  const ent=ENTITIES[store]||{};
  let prefixMap=new Map(),scanHits=[],stopped=false,scanError=false;
- try{prefixMap=await prefixFast(office,store,tokens,code,numDigits,limit)}catch{}
- try{const r=await boundedScan(office,store,{tokens,code,numDigits,limit});scanHits=r.hits;stopped=r.stopped}catch{scanError=true}
+ try{prefixMap=await prefixFast(office,store,tokens,code,numDigits,limit);if(parsedNotes)prefixMap=new Map([...prefixMap].filter(([,row])=>matchesQuickNoteQuery(row,parsedNotes)))}catch{}
+ try{const r=await boundedScan(office,store,{tokens,code,numDigits,limit,predicate:parsedNotes?row=>matchesQuickNoteQuery(row,parsedNotes):null});scanHits=r.hits;stopped=r.stopped}catch{scanError=true}
  // دمج: نتائج الفهارس أولًا (أعلى ترتيبًا) ثم المسح، مع إزالة التكرار
  const merged=[...new Map([...prefixMap,...scanHits.map(r=>[r.id,r])]).values()].slice(0,limit);
  const items=merged.map(r=>{
@@ -178,7 +180,7 @@ export async function searchAll(office,raw,{stores=allSearchStores(),perStore=8}
   catch{return {store,items:[],more:false,partial:true}}
  }));
  const groups=results.filter(r=>r.items.length)
-  .map(r=>{const src=SRC[r.store];return {store:r.store,label:ENTITIES[r.store]?.plural||r.store,icon:src.icon,note:src.note||'',items:r.items,more:r.more,partial:r.partial}})
+  .map(r=>{const src=SRC[r.store];return {store:r.store,label:SRC[r.store].label||ENTITIES[r.store]?.plural||r.store,icon:src.icon,note:src.note||'',items:r.items,more:r.more,partial:r.partial}})
   .sort((a,b)=>(SRC[b.store].weight-SRC[a.store].weight)||(b.items.length-a.items.length));
  const t1=(typeof performance!=='undefined'&&performance.now?performance.now():Date.now());
  return {groups,total:groups.reduce((n,g)=>n+g.items.length,0),tookMs:Math.round(t1-t0),partial:groups.some(g=>g.partial)};

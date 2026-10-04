@@ -110,6 +110,172 @@ export async function saveExecution(office, input, id = null, expectedVersion = 
 
 export const createExecution = (office, input) => saveExecution(office, input, null, null);
 
+// ---------- الحذف المنطقي الآمن لمجمع التنفيذ ----------
+// الحذف لا يمس الملف/القضية الأصلية ولا يزيل صفًا فعليًا. يسجل Tombstone لكل صف تابع
+// داخل معاملة واحدة، حتى لا يبقى تنفيذ ظاهرًا بلا حكم/تحصيل أو العكس.
+const EXECUTION_CHILD_RELATIONS = Object.freeze([
+  ['executionParties', 'executionId'], ['judgments', 'executionId'], ['executionValuePeriods', 'executionId'],
+  ['executionObligations', 'executionId'], ['executionPeriods', 'executionId'], ['executionLedger', 'executionId'],
+  ['executionAllocations', 'executionId'], ['executionReceipts', 'executionId'], ['executionActions', 'executionId'],
+  ['executionPOAs', 'executionId'], ['differenceRecords', 'executionId'], ['executionSettlements', 'executionId'],
+  ['executionAdjustments', 'executionId']
+]);
+function deletedRow(row, now, reason = '', aggregateId = '') {
+  return {...row, isDeleted: true, deletedAt: row.deletedAt || now, deletedBy: row.deletedBy || 'user', deletionReason: reason || row.deletionReason || '', ...(aggregateId ? {deletionAggregateId: aggregateId} : {}), updatedAt: now, version: Number(row.version || 0) + 1};
+}
+async function indexedRowsInTx(tx, storeName, indexName, key) {
+  const store = tx.objectStore(storeName);
+  if (!store.indexNames.contains(indexName)) return [];
+  return request(store.index(indexName).getAll(globalThis.IDBKeyRange.only(key)));
+}
+
+export async function deleteExecution(office, executionId, expectedVersion = null, reason = '') {
+  const current = await office.r.execution.get(executionId);
+  if (!current) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+  if (current.isDeleted) return current;
+  if (expectedVersion != null) assertExpectedVersion(current, expectedVersion, 'التنفيذ');
+  const now = Clock.now();
+  const stores = [STORE.execution, STORE.activityLog, ...EXECUTION_CHILD_RELATIONS.map(([store]) => STORE[store])];
+  const result = await transaction(office.ctx, stores, async tx => {
+    const root = await request(tx.objectStore(STORE.execution).get(executionId));
+    if (!root) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+    if (root.isDeleted) return root;
+    for (const [storeName, index] of EXECUTION_CHILD_RELATIONS) {
+      const rows = await indexedRowsInTx(tx, STORE[storeName], index, executionId);
+      for (const row of rows) if (!row.isDeleted) await request(tx.objectStore(STORE[storeName]).put(deletedRow(row, now, reason || 'حذف مجمع التنفيذ', executionId)));
+    }
+    const row = deletedRow(root, now, reason || 'حذف مجمع التنفيذ', executionId);
+    await request(tx.objectStore(STORE.execution).put(row));
+    await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.execution, executionId, 'delete', `حذف منطقي لمجمع التنفيذ ${root.internalNumber || ''} — كل الصفوف التابعة محفوظة في السجل`, {fileId: root.fileId, metadata: {aggregate: true, reason: reason || ''}})));
+    return row;
+  });
+  events.emit('entity:changed', {entityType: STORE.execution, id: executionId});
+  return result;
+}
+
+export async function listDeletedExecutions(office, {limit = 100, cursor = null} = {}) {
+  const page = await office.r.execution.page({
+    index: 'openedDate', direction: 'prev', cursor, limit: Math.min(Math.max(1, limit), 100),
+    includeDeleted: true, filter: row => Boolean(row.isDeleted)
+  });
+  return {...page, rows: page.items};
+}
+
+export async function restoreExecution(office, executionId, expectedVersion = null) {
+  const current = await office.r.execution.get(executionId);
+  if (!current) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+  if (!current.isDeleted) return current;
+  if (expectedVersion != null) assertExpectedVersion(current, expectedVersion, 'التنفيذ');
+  const now = Clock.now();
+  const stores = [STORE.execution, STORE.activityLog, ...EXECUTION_CHILD_RELATIONS.map(([store]) => STORE[store])];
+  const result = await transaction(office.ctx, stores, async tx => {
+    const rootStore = tx.objectStore(STORE.execution), root = await request(rootStore.get(executionId));
+    if (!root) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
+    const restored = {...root, isDeleted: false, deletedAt: null, deletedBy: null, deletionReason: null, deletionAggregateId: null, updatedAt: now, version: Number(root.version || 0) + 1};
+    await request(rootStore.put(restored));
+    for (const [storeName, index] of EXECUTION_CHILD_RELATIONS) {
+      const rows = await indexedRowsInTx(tx, STORE[storeName], index, executionId);
+      for (const row of rows) if (row.isDeleted && row.deletionAggregateId === executionId) await request(tx.objectStore(STORE[storeName]).put({...row, isDeleted: false, deletedAt: null, deletedBy: null, deletionReason: null, deletionAggregateId: null, updatedAt: now, version: Number(row.version || 0) + 1}));
+    }
+    await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.execution, executionId, 'restore', 'استعادة مجمع التنفيذ من الحذف المنطقي', {fileId: root.fileId, metadata: {aggregate: true}})));
+    return restored;
+  });
+  events.emit('entity:changed', {entityType: STORE.execution, id: executionId});
+  return result;
+}
+
+async function softDeleteExecutionChild(office, storeName, id, {expectedVersion = null, reason = 'حذف منطقي'} = {}) {
+  const row = await office.r[storeName].get(id);
+  if (!row) throw new AppError(ERR.NOT_FOUND, 'العنصر غير موجود.');
+  if (row.isDeleted) return row;
+  if (expectedVersion != null) assertExpectedVersion(row, expectedVersion, 'العنصر');
+  const now = Clock.now(), next = deletedRow(row, now, reason);
+  await transaction(office.ctx, [STORE[storeName], STORE.activityLog], async tx => {
+    await request(tx.objectStore(STORE[storeName]).put(next));
+    await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE[storeName], id, 'delete', `حذف منطقي: ${storeName}`, {fileId: row.fileId})));
+  });
+  events.emit('entity:changed', {entityType: STORE[storeName], id});
+  return next;
+}
+
+export async function deleteExecutionJudgment(office, id, {expectedVersion = null, reason = ''} = {}) {
+  const row = await office.r.judgments.get(id);
+  if (!row) throw new AppError(ERR.NOT_FOUND, 'الحكم غير موجود.');
+  if (row.isDeleted) return row;
+  const slices = await office.r.executionValuePeriods.byIndex('linkedJudgmentId', id, MAX_CHILD_ROWS + 1);
+  if (slices.some(slice => !slice.isDeleted)) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف حكم مرتبط بشريحة قيمة. ألغِ الشريحة أو سجّل حكمًا لاحقًا أولًا.');
+  const chain = await office.r.judgments.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1);
+  if (chain.some(item => !item.isDeleted && item.previousJudgmentId === id)) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف حكم له حكم لاحق مرتبط به؛ احفظ السلسلة التاريخية.');
+  return softDeleteExecutionChild(office, 'judgments', id, {expectedVersion, reason: reason || 'حذف حكم من سلسلة التنفيذ'});
+}
+
+export async function deleteExecutionValueSlice(office, id, {expectedVersion = null, reason = ''} = {}) {
+  const row = await office.r.executionValuePeriods.get(id);
+  if (!row) throw new AppError(ERR.NOT_FOUND, 'شريحة القيمة غير موجودة.');
+  if (row.isDeleted) return row;
+  const execution = await office.r.execution.get(row.executionId);
+  const [allocations, differences, periods, allSlices] = await Promise.all([
+    office.r.executionAllocations.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1),
+    office.r.differenceRecords.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1),
+    office.r.executionPeriods.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1),
+    executionSlices(office, row.executionId, {limit: MAX_CHILD_ROWS + 1})
+  ]);
+  if ([allocations, differences, periods, allSlices].some(rows => rows.length > MAX_CHILD_ROWS)) throw new AppError(ERR.CONFLICT, 'تجاوزت بيانات التنفيذ حد القراءة الآمن؛ لم يُنفّذ حذف على بيانات جزئية.');
+  // Legacy periods are identified by their deterministic period key, not by a field
+  // on the value-slice row. Build the affected key set before checking allocations.
+  // If the execution has no explicit horizon, a previous implementation stopped at
+  // today and could miss an already-persisted future allocation. Extend the read-only
+  // calculation to every dated child reference before deciding whether deletion is safe.
+  const childDates = [
+    ...allocations.map(item => String(item.periodKey || '').split('::').at(-1)),
+    ...differences.map(item => String(item.periodKey || '').split('::').at(-1)),
+    ...periods.flatMap(item => [item.fromDate, item.toDate])
+  ].filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value));
+  const referencedThrough = [todayIso(), ...childDates].sort().at(-1);
+  const generatedBuild = buildEntitlementPeriods({slices: allSlices, to: referencedThrough || execution?.entitlementThroughDate || ''});
+  if (generatedBuild.truncated) throw new AppError(ERR.CONFLICT, 'تعذر التحقق من جميع الفترات المولدة؛ لم يُنفّذ حذف على نطاق جزئي.');
+  const generated = generatedBuild.periods;
+  const periodKeys = new Set(generated.filter(period => period.sliceId === id).map(period => period.key));
+  const referenced = item => !item.isDeleted && (
+    item.sliceId === id || item.valuePeriodId === id || item.sourceValuePeriodId === id || item.previousSliceId === id || item.newSliceId === id ||
+    (Array.isArray(item.sourceValuePeriodIds) && item.sourceValuePeriodIds.includes(id)) || periodKeys.has(item.periodKey)
+  );
+  if (allocations.some(item => item.isActive !== false && periodKeys.has(item.periodKey))) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف شريحة لها تخصيصات مالية نشطة؛ استخدم عكسًا/تصحيحًا موثقًا.');
+  if (differences.some(referenced)) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف شريحة لها فرق حكم محفوظ.');
+  if (periods.some(referenced)) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف شريحة دخلت في لقطة اعتراف FEAS؛ أغلق/راجع اللقطة بدل حذف المصدر.');
+  return softDeleteExecutionChild(office, 'executionValuePeriods', id, {expectedVersion, reason: reason || 'حذف منطقي لشريحة القيمة'});
+}
+
+export async function deleteExecutionPeriod(office, id, {expectedVersion = null, reason = ''} = {}) {
+  const row = await office.r.executionPeriods.get(id);
+  if (!row) throw new AppError(ERR.NOT_FOUND, 'فترة الاعتراف غير موجودة.');
+  if (row.isDeleted) return row;
+  const allocations = await office.r.executionAllocations.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1);
+  const differences = await office.r.differenceRecords.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1);
+  if (allocations.some(item => !item.isDeleted && item.executionId === row.executionId && item.periodKey === row.periodKey && item.isActive !== false) || differences.some(item => !item.isDeleted && item.periodKey === row.periodKey)) {
+    throw new AppError(ERR.CONFLICT, 'لا يمكن حذف فترة اعتراف لها تخصيص أو فرق محفوظ؛ استخدم الإغلاق أو قرار التسوية.');
+  }
+  return softDeleteExecutionChild(office, 'executionPeriods', id, {expectedVersion, reason: reason || 'حذف منطقي لفترة اعتراف'});
+}
+
+export async function deleteExecutionParty(office, id, options = {}) {
+  const row = await office.r.executionParties.get(id);
+  if (!row) throw new AppError(ERR.NOT_FOUND, 'طرف التنفيذ غير موجود.');
+  const allocations = await office.r.executionAllocations.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1);
+  if (allocations.some(item => !item.isDeleted && item.executionPartyId === id && item.isActive !== false)) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف طرف له تخصيصات مالية نشطة.');
+  return softDeleteExecutionChild(office, 'executionParties', id, options);
+}
+
+export const deleteExecutionAction = (office, id, options = {}) => softDeleteExecutionChild(office, 'executionActions', id, options);
+
+export async function deleteExecutionPoa(office, id, options = {}) {
+  const row = await office.r.executionPOAs.get(id);
+  if (!row) throw new AppError(ERR.NOT_FOUND, 'التوكيل غير موجود.');
+  const ledger = await office.r.executionLedger.byIndex('executionId', row.executionId, MAX_CHILD_ROWS + 1);
+  if (ledger.some(item => !item.isDeleted && item.poaId === id)) throw new AppError(ERR.CONFLICT, 'لا يمكن حذف توكيل استُخدم كمصدر لحركة مالية؛ احفظ الأثر التاريخي.');
+  return softDeleteExecutionChild(office, 'executionPOAs', id, options);
+}
+
 /** أطراف التنفيذ: من يستحق (الدائن/المستحق) ومن يُنفَّذ ضده (المدين)، بصفات يسجلها المستخدم. */
 export async function saveExecutionParty(office, input, id = null) {
   const old = id ? await office.r.executionParties.get(id) : null;

@@ -14,6 +14,9 @@ export const STORE = Object.freeze({
   appointments: 'appointments',
   communications: 'communications',
   caseNotes: 'caseNotes',
+  // v18 — الملاحظات السريعة: نوسّع مخزن ملاحظات القضايا القائم بدل إنشاء Notes store موازٍ.
+  quickNoteLinks: 'quickNoteLinks',
+  caseNoteDrafts: 'caseNoteDrafts',
   witnesses: 'witnesses', // Kept for historical records; its UI is retired without deleting user data.
   expertReports: 'expertReports',
   judgments: 'judgments',
@@ -80,7 +83,15 @@ const IDX = {
   procedures: { fileId: 'fileId', caseId: 'caseId', status: 'status', internalDueDate: 'internalDueDate', a: ['status', 'internalDueDate'] },
   appointments: { date: 'date', clientId: 'clientId', fileId: 'fileId' },
   communications: { clientId: 'clientId', fileId: 'fileId', date: 'date', followUpDate: 'followUpDate', a: ['fileId', 'date'] },
-  caseNotes: { fileId: 'fileId', caseId: 'caseId', createdAt: 'createdAt' },
+  caseNotes: {
+    fileId: 'fileId', caseId: 'caseId', createdAt: 'createdAt', updatedAt: 'updatedAt',
+    lifecycle: 'lifecycle', priority: 'priority', archivedAt: 'archivedAt', deletedAt: 'deletedAt', snoozedUntil: 'snoozedUntil',
+    dueAt: 'dueAt', remindAt: 'remindAt', sortKey: 'sortKey', isPinned: 'isPinned', isStarred: 'isStarred', triagedAt: 'triagedAt',
+    sourceType: 'sourceType', sourceId: 'sourceId', searchTextNormalized: 'searchTextNormalized',
+    a: ['lifecycle', 'updatedAt'], b: ['dueAt', 'updatedAt'], c: ['deletedAt', 'updatedAt'], d: ['snoozedUntil', 'updatedAt']
+  },
+  quickNoteLinks: { noteId: 'noteId', entityType: 'entityType', entityId: 'entityId', relationType: 'relationType', createdAt: 'createdAt', a: ['entityType', 'entityId'], b: ['noteId', 'createdAt'] },
+  caseNoteDrafts: { noteId: 'noteId', ownerId: 'ownerId', contextKey: 'contextKey', updatedAt: 'updatedAt', a: ['ownerId', 'updatedAt'], b: ['contextKey', 'updatedAt'] },
   witnesses: { caseId: 'caseId' },
   expertReports: { caseId: 'caseId', reportDate: 'reportDate', a: ['caseId', 'reportDate'] },
   // v15: سلسلة الأحكام في التنفيذ تُشتق من الحكم نفسه (executionId + previousJudgmentId) بلا مخزن مكرر.
@@ -201,6 +212,18 @@ export const SYNCABLE_STORES = Object.freeze(STORES.filter(name => ![
 // Official, additive migration registry. Each entry is the complete description of what an upgrade to `version`
 // does to an existing database. Upgrades never rewrite, move or delete rows (see ADR in PROJECT_MAP).
 export const SCHEMA_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    version: 18,
+    title: 'الملاحظات السريعة: توسيع caseNotes وإضافة روابط ومسودات محلية',
+    addsStores: Object.freeze(['quickNoteLinks', 'caseNoteDrafts']),
+    addsIndexes: Object.freeze([
+      'caseNotes.lifecycle', 'caseNotes.priority', 'caseNotes.dueAt', 'caseNotes.remindAt', 'caseNotes.snoozedUntil', 'caseNotes.sortKey', 'caseNotes.searchTextNormalized',
+      'quickNoteLinks.entityType_entityId', 'quickNoteLinks.noteId_createdAt',
+      'caseNoteDrafts.ownerId_updatedAt', 'caseNoteDrafts.contextKey_updatedAt'
+    ]),
+    destructive: false,
+    backfill: false
+  }),
   Object.freeze({
     version: 17,
     title: 'FEAS: تعريف الالتزامات وفترات الاعتراف الصريحة + مفاتيح منع التكرار',

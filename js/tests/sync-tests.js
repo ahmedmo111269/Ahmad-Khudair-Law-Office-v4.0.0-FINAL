@@ -238,7 +238,7 @@ export async function runSyncTests(test, expect) {
   }
 
   test('Schema v17: FEAS addition remains additive while v16 sync stores stay enabled', () => {
-    expect(out.schema.version).toBe(17);
+    expect(out.schema.version).toBe(18);
     expect(SCHEMA_MIGRATIONS.some(step => step.version === 16 && step.destructive === false && step.backfill === false)).toBe(true);
     expect(SCHEMA_MIGRATIONS.some(step => step.version === 17 && step.destructive === false && step.backfill === false)).toBe(true);
     expect(SCHEMA_MIGRATIONS.find(step => step.version === 17).addsStores.join()).toBe('executionObligations,executionPeriods');

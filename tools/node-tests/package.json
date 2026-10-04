@@ -8,7 +8,8 @@
     "test:grid-browser": "node grid-browser-tests.mjs",
     "test:execution-browser": "node execution-browser-tests.mjs",
     "test:execution-feas-browser": "node execution-feas-browser-tests.mjs",
-    "test:offline-sync-browser": "node offline-sync-browser-tests.mjs"
+    "test:offline-sync-browser": "node offline-sync-browser-tests.mjs",
+    "test:quick-notes-browser": "node quick-notes-browser-tests.mjs"
   },
   "keywords": [],
   "author": "",

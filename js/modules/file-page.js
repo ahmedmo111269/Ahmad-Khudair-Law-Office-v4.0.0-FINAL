@@ -31,6 +31,8 @@ import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,hiddenSectionIds,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
+import {notesForEntity,completeQuickNote,deleteQuickNote} from '../services/quick-notes.js';
+import {openQuickNoteCapture,openQuickNoteEditor} from './quick-notes.js';
 
 const TABS=[['summary','ملخص','◈'],['timeline','الخط الزمني','⏳'],['parties','الأطراف','⚖'],['judicial','البيانات القضائية','▣'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷'],['judgments','الأحكام','⚖'],['notes','الملاحظات','▤'],['relations','العلاقات','↔'],['serviceRecords','المحضرين والإعلانات','📬'],['typeData','بيانات نوع العمل','▧'],['assets','العقارات والمركبات','⌂'],['extra','بيانات إضافية (قديمة)','▤'],['money','الأتعاب والمستندات','＄'],['activity','سجل النشاط','≋']];
 const BASE_KEYS=['fileNumber','title','fileType','mainCategory','subCategory','status','priority','openedAt','responsibleLawyer','coLawyers','staff','nextStep','nextStepDate','closedAt','closeReason','notes','lastActivityAt'];
@@ -212,10 +214,12 @@ async function renderTabContent(app){
   return;
  }
  if(tab==='notes'){
-  const rows=(await office.r.caseNotes.byIndex('fileId',id,2000)).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
-  el.innerHTML=`<div class="sec-actions"><button class="primary" data-add>+ ملاحظة</button></div><div data-grid></div>`;
-  el.querySelector('[data-add]').onclick=()=>openEntityForm(app,'caseNotes',{preset:{fileId:id},stageOptions:stageOptions(stages),onSaved:()=>reload(app)});
-  await sectionGrid(app,el.querySelector('[data-grid]'),'caseNotes',rows,{storageKey:'file:notes'});
+  // caseNotes remains the canonical store: historical rows and new Quick Notes are
+  // rendered together through the same operational panel, not as a second Notes UI.
+  const rows=(await notesForEntity(office,'LEGAL_FILE',id,{limit:100})).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  el.innerHTML=`<section class="panel file-quick-notes" data-collapse-default="open"><div class="panel-head"><h3>📝 الملاحظات السريعة المرتبطة</h3><div class="sec-actions"><button class="primary" data-quick-file-add>+ ملاحظة سريعة</button></div></div><p class="muted small">ملاحظات تشغيلية مستقلة عن الحكم أو الإجراء. السجلات التاريخية محفوظة في caseNotes وتظهر هنا دون نسخ أو حذف.</p><div data-quick-file-list></div></section>`;
+  renderFileQuickNotes(el.querySelector('[data-quick-file-list]'),rows,app,id);
+  el.querySelector('[data-quick-file-add]').onclick=()=>openQuickNoteCapture(app,{context:[{entityType:'LEGAL_FILE',entityId:id}],onSaved:()=>reload(app)});
   return;
  }
  if(tab==='serviceRecords'){
@@ -311,4 +315,16 @@ function linkAssetDialog(app,fileId){
  const run=async()=>{const rows=await findAssets(app.office,q.value);r.innerHTML=rows.map(a=>`<button class="cf-line" data-id="${esc(a.id)}"><span class="cf-line-icon">${esc(ASSET_KINDS[a.kind]?.icon||'')}</span><span class="cf-line-main"><b>${esc(a.name)}</b><small>${esc(assetDetails(a))}</small></span></button>`).join('')||'<p class="muted small">لا نتائج.</p>'};
  q.oninput=()=>{clearTimeout(t);t=setTimeout(run,250)};run();
  r.onclick=async e=>{const b=e.target.closest('[data-id]');if(!b)return;try{await linkAsset(app.office,fileId,b.dataset.id);closeModal();toast('تم الربط');app.refresh()}catch(err){toast(userError(err),'error')}};
+}
+
+
+function renderFileQuickNotes(host, rows, app, fileId) {
+  host.replaceChildren();
+  if (!rows.length) { const empty=document.createElement('p'); empty.className='muted'; empty.textContent='لا توجد ملاحظات سريعة مرتبطة بهذا الملف.'; host.append(empty); return; }
+  rows.forEach(note => {
+    const article=document.createElement('article'); article.className='qn-card'; article.dataset.noteId=note.id;
+    const head=document.createElement('div'); head.className='qn-card-head'; const title=document.createElement('button'); title.type='button'; title.className='qn-title'; title.textContent=note.title||'ملاحظة بلا عنوان'; head.append(title); const meta=document.createElement('span'); meta.className='qn-meta'; meta.textContent=`${note.lifecycle==='DONE'?'منجزة':'مفتوحة'} · ${note.priority||'NORMAL'}`; head.append(meta); article.append(head);
+    const body=document.createElement('p'); body.className='qn-body'; body.textContent=note.content||'—'; article.append(body);
+    const actions=document.createElement('div'); actions.className='qn-actions'; const edit=document.createElement('button'); edit.type='button'; edit.className='ghost qn-action'; edit.textContent='تعديل'; edit.onclick=()=>openQuickNoteEditor(app,note.id,{onSaved:()=>reload(app)}); const done=document.createElement('button'); done.type='button'; done.className='ghost qn-action'; done.textContent=note.lifecycle==='DONE'?'إعادة فتح':'إنجاز'; done.onclick=async()=>{try{if(note.lifecycle==='DONE'){const {reopenQuickNote}=await import('../services/quick-notes.js');await reopenQuickNote(app.office,note.id)}else await completeQuickNote(app.office,note.id);reload(app)}catch(error){toast(userError(error),'error')}}; const del=document.createElement('button'); del.type='button'; del.className='danger qn-action'; del.textContent='سلة'; del.onclick=async()=>{if(await confirmBox('نقل الملاحظة إلى السلة؟')){try{await deleteQuickNote(app.office,note.id);reload(app)}catch(error){toast(userError(error),'error')}}}; actions.append(edit,done,del); article.append(actions); host.append(article);
+  });
 }
