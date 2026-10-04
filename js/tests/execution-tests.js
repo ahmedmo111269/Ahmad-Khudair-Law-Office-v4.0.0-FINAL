@@ -23,6 +23,7 @@ import * as EN from '../domain/entitlement-engine.js';
 import {Clock} from '../core/clock.js';
 import * as FEAS from '../domain/execution-feas.js';
 import * as FEASApp from '../services/execution-feas.js';
+import * as SIMPLE from '../services/execution-simple.js';
 import {toMinorUnits} from '../domain/execution-money.js';
 
 const rejects = async fn => { try { await fn(); } catch (error) { return error; } throw Error('Expected promise to reject'); };
@@ -1143,6 +1144,61 @@ export async function runExecutionTests(test, expect) {
       expect(balance.summary.integrityBlocked).toBe(true);
       expect(balance.summary.finalEntitlementMinor).toBe(null);
       expect(balance.summary.equations.length).toBe(0);
+    } finally { closeEnv(e); }
+  });
+
+  test('FEAS/دورة مبسطة: لا دَين بلا اعتراف صريح — جدول البطاقة صفر قبل الاعتراف', async () => {
+    const e = await env({accountingModel: FEAS.FEAS_MODEL});
+    try {
+      const obligation = await FEASApp.saveExecutionObligation(e.office, {
+        executionId: e.execution.id, obligationType: 'نفقة كما وردت بالمصدر', frequency: 'monthly',
+        prorationPolicy: 'days', currency: 'EGP', startDate: '2025-01-01'
+      });
+      const judgment = await EX.addExecutionJudgment(e.office, {
+        executionId: e.execution.id, entitlementType: obligation.obligationType, judgmentKind: 'original',
+        judgmentDate: '2025-01-10', judgmentNumber: 'FEAS-NO-REC', valueType: 'periodic', periodicity: 'monthly',
+        amount: 2000, effectiveFrom: '2025-01-01'
+      });
+      await EX.saveValueSlice(e.office, {
+        executionId: e.execution.id, obligationId: obligation.id, judgmentId: judgment.id,
+        valueType: 'periodic', amount: '2000.00', startDate: '2025-01-01'
+      });
+      const slices = await e.office.r.executionValuePeriods.byIndex('executionId', e.execution.id, 20);
+      const periods = await e.office.r.executionPeriods.byIndex('executionId', e.execution.id, 20);
+      // القيمة وحدها لا تُنشئ دَينًا على FEAS: لا فترات في الجدول التلقائي حتى يُعترف بفترة.
+      expect(SIMPLE.feasScheduleSlices(e.execution, slices, periods).length).toBe(0);
+      const schedule = (await SIMPLE.simpleSchedule(e.office, e.execution.id)).schedule;
+      expect(schedule.totals.dueMinor).toBe(0);
+      expect(schedule.totals.remainingMinor).toBe(0);
+      // والمسار غير FEAS لم يتغيّر: القصّ عند «تاريخ الاستحقاق حتى» فقط (12 شهرًا في 2025).
+      expect(SIMPLE.feasScheduleSlices({accountingModel: 'legacy-v1', entitlementThroughDate: '2025-12-31'}, slices, periods).length).toBe(1);
+      expect(SIMPLE.capSlicesAtHorizon({entitlementThroughDate: '2025-06-30'}, [{id: 'x', startDate: '2025-01-01', endDate: ''}]).length).toBe(1);
+    } finally { closeEnv(e); }
+  });
+
+  test('FEAS/دورة مبسطة: تحصيل من الخدمة المبسّطة يُخصَّص على الفترة المعترف بها ويطابق محرك FEAS', async () => {
+    const e = await feasFixture();
+    try {
+      const before = await FEASApp.executionFeasBalanceData(e.office, e.execution.id);
+      expect(before.summary.finalEntitlementMinor).toBe(900000);       // 3 × 3,000
+      expect(before.summary.allocatedMinor).toBe(0);
+      await SIMPLE.recordSimpleCollection(e.office, {executionId: e.execution.id, amount: 2000, date: '2025-02-10', paymentMethod: 'cash'});
+      const allocations = await e.office.r.executionAllocations.byIndex('executionId', e.execution.id, 20);
+      const feasAllocation = allocations.filter(row => String(row.periodKey).startsWith('feas::'));
+      expect(feasAllocation.length).toBe(1);
+      expect(feasAllocation[0].amountMinor).toBe(200000);
+      expect(feasAllocation[0].periodKey).toBe(e.period.periodKey);
+      const after = await FEASApp.executionFeasBalanceData(e.office, e.execution.id);
+      expect(after.summary.collectedMinor).toBe(200000);
+      expect(after.summary.allocatedMinor).toBe(200000);
+      expect(after.summary.remainingMinor).toBe(700000);
+      // ولا رقم ثانٍ في البطاقة: جدول الخدمة المبسّطة يقرأ نفس التخصيص الصريح.
+      const schedule = (await SIMPLE.simpleSchedule(e.office, e.execution.id)).schedule;
+      expect(schedule.totals.paidMinor).toBe(200000);
+      // رقم واحد لا رقمان: جدول البطاقة = محرك FEAS بالقرش (والوحدات الصغرى في الاثنين واحدة).
+      expect(schedule.totals.dueMinor).toBe(after.summary.finalEntitlementMinor);
+      expect(schedule.totals.allocatedMinor).toBe(after.summary.allocatedMinor);
+      expect(schedule.totals.remainingMinor).toBe(after.summary.remainingMinor);
     } finally { closeEnv(e); }
   });
 

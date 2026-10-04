@@ -57,7 +57,15 @@ try {
   const swInstalled = await page.evaluate(async () => {
     const registrations = await navigator.serviceWorker?.getRegistrations?.() || [];
     const keys = await caches.keys();
-    return {active:registrations.some(registration => registration.active?.state === 'activated'), cache:keys.some(key => key.includes('v5.11.0-feas-offline'))};
+    // اسم الكاش يحمل رقم الإصدار ويتغيّر مع كل إصدار (sw.js). نتحقق من وجود كاش
+    // التطبيق الحالي فعلاً وباحتوائه على غلاف التطبيق، لا من لاحقة إصدار محددة.
+    const appCaches=[];
+    for (const key of keys.filter(item => item.startsWith('ahmad-khudair-law-office-v'))) {
+      const cache=await caches.open(key);
+      const urls=(await cache.keys()).map(request => new URL(request.url).pathname);
+      if (urls.includes('/index.html') && urls.includes('/js/app.js')) appCaches.push(key);
+    }
+    return {active:registrations.some(registration => registration.active?.state === 'activated'), cache:appCaches.length>0, cacheName:appCaches[0]||''};
   });
   check('PWA service worker installs and application-shell cache is present', swInstalled.active && swInstalled.cache, JSON.stringify(swInstalled));
   await page.evaluate(() => window.__LAW_OFFICE_APP__.go('dashboard'));

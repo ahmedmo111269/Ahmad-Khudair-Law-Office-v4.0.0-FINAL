@@ -246,6 +246,27 @@ async function verifyOffline(){
   assert.ok(oldMaintenance&&newMaintenance);
   if(oldMaintenance.lastRunAt!==newMaintenance.lastRunAt)bootChanges.push({store:'meta',id:'maintenance',field:'lastRunAt',before:oldMaintenance.lastRunAt,after:newMaintenance.lastRunAt});
   delete oldMaintenance.lastRunAt;delete newMaintenance.lastRunAt;
+  // The execution-section migration is a one-time, additive, idempotent boot step:
+  // on the FIRST boot of a database it writes one meta row plus one activity entry
+  // (withIssues/scanned counters and a per-execution before/after report), and on
+  // every later boot it must write nothing at all. Allow exactly that row and its
+  // own log entry here, and prove idempotency with a second reload below.
+  const priorMigration=prior.meta.find(row=>row.id==='executionSimpleMigration');
+  const newMigration=normalized.meta.find(row=>row.id==='executionSimpleMigration');
+  if(!priorMigration&&newMigration){
+   assert.equal(newMigration.version,1,'executionSimpleMigration version');
+   assert.equal(newMigration.hasMore,false,'first migration run must finish within its page cap for this fixture');
+   assert.ok(newMigration.completedAt,'first migration run must stamp completedAt');
+   bootChanges.push({store:'meta',id:'executionSimpleMigration',field:'(one-time additive row)',before:null,after:{scanned:newMigration.scanned,withIssues:newMigration.withIssues}});
+   normalized.meta=normalized.meta.filter(row=>row.id!=='executionSimpleMigration');
+  }
+  const isMigrationLog=row=>row.entityType==='meta'&&row.entityId==='executionSimpleMigration'&&row.action==='execution_simple_migration';
+  const priorLog=(prior.activityLog||[]).filter(isMigrationLog);
+  const newLog=(normalized.activityLog||[]).filter(isMigrationLog);
+  assert.equal(priorLog.length,0,'fixture must start without an execution migration log entry');
+  assert.ok(newLog.length<=1,`one-time migration must log at most once, got ${newLog.length}`);
+  if(newLog.length)bootChanges.push({store:'activityLog',action:'execution_simple_migration',field:'(one-time additive entry)',before:0,after:newLog.length});
+  normalized.activityLog=(normalized.activityLog||[]).filter(row=>!isMigrationLog(row));
   await verify(`Offline reload: app boots from the controlled cache with the same office/Schema ${SCHEMA_VERSION} and only the existing maintenance timestamp update`,async()=>{
    assert.equal(navigation.fromServiceWorker(),true);assert.equal(await page.evaluate(()=>navigator.onLine),false);
    assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.profile.id),profile.id);
@@ -253,6 +274,26 @@ async function verifyOffline(){
    assert.deepEqual(normalized,prior);assert.ok((await page.locator('#network-badge').textContent()).includes('عدم الاتصال'));
    for(const module of modules)assert.ok(responses.some(response=>response.path.endsWith('/'+module)&&response.serviceWorker&&response.status===200),`Module not served offline by SW: ${module}`);
   },'VERIFIED — Offline browser/cache output');
+  const stripVolatileBoot=snapshot=>{
+   const copy=structuredClone(snapshot);
+   const maintenance=copy.meta?.find(row=>row.id==='maintenance');
+   if(maintenance)delete maintenance.lastRunAt;
+   return copy;
+  };
+  const firstBootSnapshot=await snapshotOffice(page);
+  await page.reload({waitUntil:'domcontentloaded'});await waitForApp(page);
+  const secondBootSnapshot=await snapshotOffice(page);
+  const firstStable=stripVolatileBoot(firstBootSnapshot),secondStable=stripVolatileBoot(secondBootSnapshot);
+  const secondChanges=[];
+  for(const store of Object.keys(secondStable)){
+   if(JSON.stringify(firstStable[store])!==JSON.stringify(secondStable[store]))secondChanges.push(store);
+  }
+  await verify('Second offline boot re-runs the one-time execution migration as a strict no-op (idempotent, nothing rewritten)',async()=>{
+   assert.deepEqual(secondChanges,[]);
+   const migration=secondBootSnapshot.meta.find(row=>row.id==='executionSimpleMigration');
+   assert.equal(migration.completedAt,firstBootSnapshot.meta.find(row=>row.id==='executionSimpleMigration')?.completedAt);
+  },'VERIFIED — Offline browser/cache output');
+  report.bootChanges=bootChanges;
   const go=route=>page.evaluate(route=>window.__LAW_OFFICE_APP__.go(route),route);
   await go('cfile:c1?cat=civil');let output=await printPopup(page.locator('.lf-grid'));
   assert.equal(output.fields['الموكل'],'فاطمة محمد إبراهيم محمد');assert.ok(!output.columns.includes('clientId'));
@@ -261,7 +302,9 @@ async function verifyOffline(){
    assert.equal(output.fields['الموكل'],'فاطمة محمد إبراهيم محمد');assert.equal(output.fields['رقم الملف / نوع الملف'],'2/2026 — دعوى');assert.equal(output.fields['رقم الدعوى / القضية'],'4661/2026');assert.equal(output.rows.length,1);
   },'VERIFIED — Offline DOM/popup output');
   await verify('Offline table navigation and popup printing preserve every raw office store after boot',async()=>{
-   assert.deepEqual(await snapshotOffice(page),after);assert.deepEqual(report.errors,[]);
+   // Reference is the snapshot taken right after the most recent boot; no reload happens
+   // between the two reads, so nothing at all may differ (not even the migration row).
+   assert.deepEqual(await snapshotOffice(page),secondBootSnapshot);assert.deepEqual(report.errors,[]);
   },'VERIFIED — Offline data integrity output');
   report.offline={cache:cacheName,precachedAssets:assets.length,runtimeModules:runtimeFiles.length,verifiedModules:modules,oldCachesRemoved:oldCaches,bootChanges,responses,profileId:profile.id,schema:SCHEMA_VERSION};
  }catch(error){
@@ -358,7 +401,10 @@ async function verifyFullSuite(){
   assert.ok(await page.locator('#list-grid th[data-key="clientId"]').count());
   assert.deepEqual(await page.locator('#list-grid thead th[data-key]').evaluateAll(nodes=>nodes.slice(0,3).map(node=>node.dataset.key)),['fileId','clientId','opponentId']);
  });
- const otherLists=['opponents','cases','procedures','judgments','communications','powersOfAttorney','serviceRecords','appointments','fees','feePayments','caseNotes','execution','expertReports','documentReferences'];
+ // caseNotes is intentionally excluded: since v5.11.0 the legacy route is an alias to the
+ // single Quick Notes surface (PAGES.caseNotes=PAGES.quickNotes), which mounts #quick-notes-root
+ // instead of the shared DataGrid. Its own browser suite (quick-notes-browser) covers it.
+ const otherLists=['opponents','cases','procedures','judgments','communications','powersOfAttorney','serviceRecords','appointments','fees','feePayments','execution','expertReports','documentReferences'];
  await verify('Every other file-associated list mounts with three real shared columns and an independent stable grid ID',async()=>{
   for(const store of otherLists){
    await go(store);await page.waitForSelector('#list-grid th[data-key]',{state:'attached'});await page.locator('#list-grid .dg-state.is-loading').waitFor({state:'hidden'});
@@ -366,6 +412,11 @@ async function verifyFullSuite(){
    const labels=await page.locator('#list-grid th[data-key]').evaluateAll(nodes=>nodes.slice(0,3).map(node=>node.querySelector('.dg-coltitle').textContent));
    assert.deepEqual(labels,['رقم الملف / نوع الملف','الموكل','الخصم'],store);
   }
+ });
+ await verify('Legacy caseNotes route opens the single Quick Notes surface, not a second notes list',async()=>{
+  await go('caseNotes');
+  await page.waitForSelector('#quick-notes-root');
+  assert.equal(await page.locator('#list-grid').count(),0);
  });
  await go('search?q=4661&scope=cases');await page.waitForSelector('[data-group="cases"] .dg tbody tr[data-i]',{state:'attached'});
  await verify('File-associated search results use the existing DataGrid and real shared columns',async()=>{assert.equal(await page.locator('[data-group="cases"] .dg').getAttribute('data-grid-id'),'grid:search:cases')});

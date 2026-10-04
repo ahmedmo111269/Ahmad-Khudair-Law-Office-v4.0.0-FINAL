@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.11.0-feas-offline';
+const CACHE='ahmad-khudair-law-office-v5.12.0-simple-execution-2';
 const ASSETS=[
   "./",
   "./index.html",
@@ -59,6 +59,7 @@ const ASSETS=[
   "./js/domain/execution-calendar.js",
   "./js/domain/execution-money.js",
   "./js/domain/execution-feas.js",
+  "./js/domain/execution-schedule.js",
   "./js/domain/entitlement-engine.js",
   "./js/domain/work-items.js",
   "./js/domain/work-sources.js",
@@ -117,6 +118,9 @@ const ASSETS=[
   "./js/services/execution-balance.js",
   "./js/services/execution-print.js",
   "./js/services/execution-migration.js",
+  "./js/services/execution-simple.js",
+  "./js/services/execution-settings.js",
+  "./js/services/print-paginate.js",
   "./js/services/lookups.js",
   "./js/services/maintenance.js",
   "./js/services/office.js",
@@ -159,6 +163,7 @@ const ASSETS=[
   "./js/ui/dom.js",
   "./js/ui/form.js",
   "./js/ui/execution-forms.js",
+  "./js/ui/execution-simple-forms.js",
   "./js/ui/icons.js",
   "./js/ui/lookup.js",
   "./js/ui/modal.js",

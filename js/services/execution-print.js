@@ -15,6 +15,7 @@ import {esc} from '../ui/dom.js';
 import {num, round2, money, isIsoDate, poaStatusLabel, executionTypeLabel, ledgerTypeLabel, differenceStatusLabel, valueTypeLabel} from '../domain/execution.js';
 import {executionBundle, executionPoaRows} from './execution.js';
 import {poaDetail} from './execution-poa.js';
+import {wrapForPrint} from './print-paginate.js';
 
 const OFFICE_NAME = APP_NAME.replace(/^⚖️\s*/, '');
 
@@ -265,7 +266,7 @@ export function openDocumentForPrint(html) {
   try {
     w.opener = null;
     w.document.open();
-    w.document.write(html.replace('</body>', '<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script></body>'));
+    w.document.write(wrapForPrint(html).replace('</body>', '<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script></body>'));
     w.document.close();
   } catch (error) {
     try { w.close(); } catch {}
@@ -284,7 +285,7 @@ export async function printPoa(office, poaId) {
     if (w.closed) return null;
     w.opener = null;
     w.document.open();
-    w.document.write(html.replace('</body>', '<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script></body>'));
+    w.document.write(wrapForPrint(html).replace('</body>', '<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script></body>'));
     w.document.close();
     return w;
   } catch (error) {
@@ -302,7 +303,7 @@ export async function printBalanceStatement(office, executionId, {asOf = ''} = {
     if (w.closed) return null;
     w.opener = null;
     w.document.open();
-    w.document.write(html.replace('</body>', '<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script></body>'));
+    w.document.write(wrapForPrint(html).replace('</body>', '<script>window.addEventListener("load",()=>{window.focus();window.print()},{once:true});</script></body>'));
     w.document.close();
     return w;
   } catch (error) {

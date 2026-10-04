@@ -26,6 +26,8 @@ const {runComponentStyleTests}=await import(`${R}/tests/component-style-tests.js
 const {runGridContextTests}=await import(`${R}/tests/grid-context-tests.js`);
 const {runWorkCenterTests}=await import(`${R}/tests/work-center-tests.js`);
 const {runExecutionTests}=await import(`${R}/tests/execution-tests.js`);
+const {runExecutionSimpleTests,runExecutionCardTests,runExecutionPrintDocumentTests,runExecutionSupersedeTests}=await import(`${R}/tests/execution-simple-tests.js`);
+const {runExecutionUiTests}=await import(`${R}/tests/execution-ui-tests.js`);
 const {runSyncTests}=await import(`${R}/tests/sync-tests.js`);
 const {runQuickNotesTests}=await import(`${R}/tests/quick-notes-tests.js`);
 
@@ -62,6 +64,11 @@ runComponentStyleTests(test,expect);
 runGridContextTests(test,expect);
 await runWorkCenterTests(test,expect);
 await runExecutionTests(test,expect);
+await runExecutionSimpleTests(test,expect);
+await runExecutionCardTests(test,expect);
+await runExecutionPrintDocumentTests(test,expect);
+await runExecutionSupersedeTests(test,expect);
+await runExecutionUiTests(test,expect);
 await runSyncTests(test,expect);
 await runQuickNotesTests(test,expect);
 
