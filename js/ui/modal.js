@@ -58,10 +58,13 @@ export function closeAllModals(){
 }
 export function closeModal(){
  const root=document.querySelector('#modal-root');
- // نافذة مكدَّسة فوق أخرى؟ الإغلاق يعود للنافذة السفلية بدل مسح كل شيء.
- const topCard=root.querySelectorAll('.modal-card');
- if(topCard.length>1){
-  topCard[topCard.length-1].closest('.modal-backdrop')?.remove();
+ // سلوك قديم كما هو: الإغلاق يمسح النافذة الحالية وكل طبقاتها غير المكدَّسة.
+ // الطبقة المكدَّسة صراحةً (ورقة التسجيل ← نموذج فوقها) وحدها تُقلَّم وحدها،
+ // فلا تتغير دلالات closeModal لأي مسار قديم (نحو 52 موضع نداء).
+ const cards=root.querySelectorAll('.modal-card');
+ const topBackdrop=cards.length?cards[cards.length-1].closest('.modal-backdrop'):null;
+ if(cards.length>1&&topBackdrop?.classList.contains('is-stacked')){
+  topBackdrop.remove();
   try{document.dispatchEvent(new CustomEvent('modal:closed'))}catch{}
   return;
  }
@@ -72,9 +75,10 @@ export function closeModal(){
  try{document.dispatchEvent(new CustomEvent('modal:closed'))}catch{}
 }
 export function confirmBox(message,{okText='تأكيد',input=false,placeholder='',label='السبب / ملاحظة',value=''}={}){
- const nested=Boolean(document.querySelector('#modal-root .modal-card'));
+ // تأكيد عادي بسلوكه القديم: يحلّ محل النافذة المفتوحة، وإغلاقه ينظّف الجذر —
+ // لأن مسارات قائمة تعتمد على أن النافذة السابقة اختفت بعده (فتح المسار التالي مباشرة).
  return new Promise(resolve=>{
-  const card=modal(`<h2 class="modal-title">تأكيد</h2><p>${message}</p>${input?`<label>${label}<textarea class="confirm-input" rows="2" placeholder="${placeholder}">${String(value).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"})[c])}</textarea></label>`:''}<div class="form-actions"><button class="primary" type="button" data-ok>${okText}</button><button class="ghost" type="button" data-cancel>إلغاء</button></div>`,{stacked:nested});
+  const card=modal(`<h2 class="modal-title">تأكيد</h2><p>${message}</p>${input?`<label>${label}<textarea class="confirm-input" rows="2" placeholder="${placeholder}">${String(value).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"})[c])}</textarea></label>`:''}<div class="form-actions"><button class="primary" type="button" data-ok>${okText}</button><button class="ghost" type="button" data-cancel>إلغاء</button></div>`);
   const done=v=>{closeModal();resolve(v)};
   card.querySelector('[data-ok]').onclick=()=>done(input?{ok:true,value:card.querySelector('.confirm-input').value}:true);
   card.querySelector('[data-cancel]').onclick=()=>done(input?{ok:false}:false);

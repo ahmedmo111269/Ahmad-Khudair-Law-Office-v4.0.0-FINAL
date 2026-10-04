@@ -12,7 +12,7 @@ import {prefs} from '../core/preferences.js';
 import * as S from '../services/execution-simple.js';
 import * as CENTER from '../modules/execution-center.js';
 import * as FORMS from '../ui/execution-simple-forms.js';
-import {modal, modalOpensOnTop, closeModal} from '../ui/modal.js';
+import {modal, modalOpensOnTop, closeModal, closeAllModals, stackedModal, confirmBox} from '../ui/modal.js';
 
 const nativeFormDataWorks = () => {
   try {
@@ -426,9 +426,58 @@ export async function runExecutionUiTests(test, expect) {
     } finally { cleanup(); closeEnv(e); }
   });
 
+  // عقد السلامة مع بقية التطبيق: confirmBox بسلوكه القديم يحلّ محل النافذة المفتوحة
+  // وينظّف الجذر بالكامل بعده. كسره سابقًا جعل نافذة الإعدادات تبقى مفتوحة فتحجب
+  // النقر في مركز العمل — لذلك يُثبَّت هنا صراحةً.
+  test('confirmBox فوق نافذة مفتوحة: يحلّ محلها وينظّف الجذر (لا طبقة عالقة تحجب النقر)', async () => {
+    ensureModalRoot();
+    try {
+      const settings = modal('<h2 class="modal-title">إعدادات تجريبية</h2><button type="button" data-close>إغلاق</button>');
+      expect(Boolean(settings)).toBe(true);
+      expect(document.querySelectorAll('#modal-root .modal-backdrop').length).toBe(1);
+      const answer = confirmBox('تأكيد فوق نافذة؟', {okText: 'نعم'});
+      await wait(60);
+      expect(document.querySelectorAll('#modal-root .modal-backdrop').length).toBe(1); // حلّ محلها ولا طبقتين
+      const ok = document.querySelector('#modal-root [data-ok]');
+      expect(Boolean(ok)).toBe(true);
+      ok.click();
+      expect(await answer).toBe(true);
+      await wait(60);
+      expect(document.querySelectorAll('#modal-root .modal-backdrop').length).toBe(0); // لا شيء يبقى ليحجب النقر
+      expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(0);
+    } finally { closeAllModals(); }
+  });
+
+  test('النوافذ المكدَّسة تُقلَّم طبقةً طبقة، و«إغلاق» على نافذة غير مكدَّسة يمسح كل شيء كما كان', async () => {
+    ensureModalRoot();
+    try {
+      const sheet = modal('<h2 class="modal-title">الورقة</h2>');
+      expect(Boolean(sheet)).toBe(true);
+      const form = stackedModal('<h2 class="modal-title">النموذج</h2>');
+      expect(Boolean(form)).toBe(true);
+      expect(document.querySelectorAll('#modal-root .modal-backdrop').length).toBe(2);
+      closeModal();
+      expect(document.querySelectorAll('#modal-root .modal-backdrop').length).toBe(1);
+      expect(document.querySelector('#modal-root .modal-card .modal-title').textContent.trim()).toBe('الورقة');
+      closeModal();
+      expect(document.querySelectorAll('#modal-root .modal-backdrop').length).toBe(0);
+    } finally { closeAllModals(); }
+  });
+
   void shimmed;
   if (main()) main().innerHTML = backup.main;
   if (modalRoot()) modalRoot().innerHTML = backup.modal;
+}
+
+// جذر النوافذ موجود في التطبيق وtests.html؛ نُنشئه للفحوص التي تعمل في Node فقط.
+function ensureModalRoot() {
+  let root = document.querySelector('#modal-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'modal-root';
+    document.body.append(root);
+  }
+  return root;
 }
 
 // تاريخ اليوم بالتنسيق المدني نفسه المستخدم في التطبيق (بلا منطقة زمنية).
