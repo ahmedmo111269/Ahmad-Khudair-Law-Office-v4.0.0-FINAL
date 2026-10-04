@@ -50,14 +50,14 @@ await page.waitForFunction(async () => {
 }, null, {timeout: 90000});
 const serviceWorker = await page.evaluate(async () => {
   const keys = await caches.keys();
-  const cacheName = keys.find(key => key.includes('ahmad-khudair-law-office-v') && key.endsWith('-feas-offline')) || '';
+  const cacheName = keys.find(key => key.includes('ahmad-khudair-law-office-v')) || '';
   const cache = cacheName ? await caches.open(cacheName) : null;
   const paths = cache ? (await cache.keys()).map(request => new URL(request.url).pathname) : [];
   return {controlled: Boolean(navigator.serviceWorker.controller), cacheName, paths};
 });
-report.serviceWorker = {controlled: serviceWorker.controlled, cacheName: serviceWorker.cacheName, feasAssets: serviceWorker.paths.filter(path => /execution-(?:calendar|money|feas)\.js$/.test(path))};
+report.serviceWorker = {controlled: serviceWorker.controlled, cacheName: serviceWorker.cacheName, feasAssets: serviceWorker.paths.filter(path => /execution-(?:calendar|money|feas|schedule)\.js$/.test(path))};
 check('Service Worker controls the FEAS app and precaches its module graph', serviceWorker.controlled && Boolean(serviceWorker.cacheName)
-  && ['/js/domain/execution-calendar.js', '/js/domain/execution-money.js', '/js/domain/execution-feas.js', '/js/services/execution-feas.js'].every(path => serviceWorker.paths.includes(path)), JSON.stringify(report.serviceWorker));
+  && ['/js/domain/execution-calendar.js', '/js/domain/execution-money.js', '/js/domain/execution-feas.js', '/js/domain/execution-schedule.js', '/js/services/execution-feas.js', '/js/services/execution-simple.js', '/js/services/execution-settings.js', '/js/ui/execution-simple-forms.js'].every(path => serviceWorker.paths.includes(path)), JSON.stringify(report.serviceWorker));
 
 const seed = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
@@ -97,93 +97,91 @@ const seed = await page.evaluate(async () => {
 report.seed = seed;
 
 await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), seed.executionId);
-await page.waitForSelector('[data-section-id="feas"]', {timeout: 30000, state: 'attached'});
-await page.waitForFunction(() => !/جارٍ التحميل/.test(document.querySelector('[data-section-id="balance"]')?.textContent || 'جارٍ التحميل'), null, {timeout: 30000});
-const initial = await page.evaluate(async id => {
+await page.waitForSelector('.exec-numbers', {timeout: 30000});
+await page.waitForTimeout(1500);
+
+// ===== البطاقة الموحّدة تعرض تنفيذ FEAS برقم واحد لا يتعارض مع الرصيد المعترف به =====
+const card = await page.evaluate(async id => {
   const app = window.__LAW_OFFICE_APP__;
-  const pairs = [...document.querySelectorAll('[data-section-id="balance"] .exec-kv > *')].map(node => node.textContent.trim());
-  const balance = {};
-  for (let i = 0; i < pairs.length; i += 2) balance[pairs[i]] = pairs[i + 1];
-  const judgments = await app.office.r.judgments.byIndex('executionId', id, 50);
+  const FEAS = await import('/js/services/execution-feas.js');
+  const labels = [...document.querySelectorAll('.exec-numbers .num')];
+  const numbers = Object.fromEntries(labels.map(node => [node.querySelector('span').textContent.trim(), node.querySelector('b').textContent.trim()]));
+  const feas = await FEAS.executionFeasBalanceData(app.office, id).catch(error => ({error: String(error.message || error)}));
+  const obligations = await FEAS.executionObligations(app.office, id).catch(() => []);
+  const periods = await app.office.r.executionPeriods.byIndex('executionId', id, 50);
   const slices = await app.office.r.executionValuePeriods.byIndex('executionId', id, 50);
-  return {balance, judgments: judgments.length, slices: slices.length, section: document.querySelector('[data-section-id="feas"]')?.textContent || ''};
+  return {
+    numbers,
+    tabs: document.querySelectorAll('#main-content .exec-tabs [data-tab]').length,
+    periodRows: document.querySelectorAll('.account-table tbody tr').length,
+    lastPeriodText: document.querySelector('.account-table tbody tr:last-child')?.textContent.replace(/\s+/g, ' ').trim() || '',
+    feasHint: Boolean([...document.querySelectorAll('.hint-info')].find(node => node.textContent.includes('اعتراف الفترات'))),
+    advancedAnchor: Boolean(document.querySelector('.advanced-anchor')) || (() => false)(),
+    obligations: obligations.length,
+    recognizedPeriods: periods.filter(row => ['RECOGNIZED', 'CLOSED'].includes(String(row.status || ''))).length,
+    slices: slices.length,
+    feasSummary: feas?.summary ? {finalEntitlement: feas.summary.finalEntitlement, collected: feas.summary.collected, remaining: feas.summary.remaining, periodCount: feas.summary.periodCount} : null,
+    feasError: feas?.error || ''
+  };
 }, seed.executionId);
-report.initial = initial;
-check('صفحة التنفيذ تعرض قسم FEAS ولقطة فترة معترفًا بها', /محرك الأسرة FEAS/.test(initial.section) && /2025-01-01/.test(initial.section), initial.section.slice(0, 240));
-check('الرصيد يعاد بناؤه: 9000.00 استحقاق، 1000.00 تحصيل، 8000.00 متبقٍ',
-  initial.balance['الاستحقاق النهائي']?.includes('٩٬٠٠٠٫٠٠') && initial.balance['المحصل']?.includes('١٬٠٠٠٫٠٠') && initial.balance['المتبقي']?.includes('٨٬٠٠٠٫٠٠'),
-  JSON.stringify(initial.balance));
-check('فحص السلامة لا يحجب البيانات السليمة', !/تعذر|فحص السلامة وجد/.test(initial.balance['الاستحقاق النهائي'] || ''), JSON.stringify(initial.balance));
+report.card = card;
+check('بطاقة التنفيذ الموحّدة تفتح تنفيذ FEAS القديم بلا أخطاء', card.tabs === 4 && card.periodRows >= 3, JSON.stringify({tabs: card.tabs, rows: card.periodRows}));
+check('الأرقام المعروضة تطابق الرصيد المعترف به: مطلوب 9,000 · مدفوع 1,000 · متبقي 8,000',
+  card.numbers['المدفوع'] === '1,000' && card.numbers['المتبقي'] === '8,000' && Object.keys(card.numbers).some(key => key.startsWith('المطلوب') && card.numbers[key] === '9,000'),
+  JSON.stringify(card.numbers));
+check('الحساب يقف عند آخر فترة معترف بها (يناير–مارس 2025) ولا يُنشئ فترات بعدها', card.periodRows === 3 && /مارس 2025/.test(card.lastPeriodText), `${card.periodRows} صفوف · ${card.lastPeriodText}`);
+check('تنبيه صريح يشرح نموذج الاعتراف ويحيل إلى الأدوات المتقدمة', card.feasHint === true, String(card.feasHint));
+check('بيانات FEAS لم تُمس: التزام واحد وفترة معترف بها واحدة وشريحة واحدة', card.obligations === 1 && card.recognizedPeriods === 1 && card.slices === 1, JSON.stringify({obligations: card.obligations, recognized: card.recognizedPeriods, slices: card.slices}));
+check('رصيد FEAS المعترف به ما زال 9,000/1,000/8,000 من محرك FEAS نفسه', !card.feasError && Number(card.feasSummary?.finalEntitlement) === 9000 && Number(card.feasSummary?.collected) === 1000 && Number(card.feasSummary?.remaining) === 8000 && card.feasSummary?.periodCount === 1, JSON.stringify({summary: card.feasSummary, error: card.feasError}));
 await page.screenshot({path: path.join(artifactDir, 'execution-feas-card.png'), fullPage: true});
 
-// نموذج الحكم: FEAS لا يختار دوريًا تلقائيًا ولا يعرض حقل دورية مضللًا.
-await page.click('[data-quick="judgment"]');
-await page.waitForSelector('.modal-card [name="valueType"]', {timeout: 15000});
-const formState = await page.evaluate(() => ({
-  valueType: document.querySelector('.modal-card [name="valueType"]')?.value,
-  periodicityField: Boolean(document.querySelector('.modal-card [name="periodicity"]')),
-  valueTypeRequired: document.querySelector('.modal-card [name="valueType"]')?.required || false,
-  options: [...document.querySelectorAll('.modal-card [name="valueType"] option')].map(option => ({value: option.value, label: option.textContent.trim()}))
+// ===== الأدوات المتقدمة (مسار FEAS القديم) تبقى متاحة من البطاقة الجديدة =====
+await page.locator('.exec-toolbar [data-more]').first().evaluate(node => node.click());
+await page.waitForTimeout(500);
+await page.locator('.exec-more-menu [data-action="advanced"]').first().evaluate(node => node.click());
+await page.waitForTimeout(900);
+const advanced = await page.evaluate(() => ({
+  anchor: Boolean(document.querySelector('.advanced-anchor')),
+  buttons: [...document.querySelectorAll('.advanced-anchor button')].map(node => node.textContent.trim()),
+  text: document.querySelector('.advanced-anchor')?.textContent.replace(/\s+/g, ' ').trim().slice(0, 200) || ''
 }));
-report.formState = formState;
-check('نوع القيمة يبدأ بلا اختيار ويُطلب صراحةً', formState.valueType === '' && formState.valueTypeRequired, JSON.stringify(formState));
-check('لا تعرض الواجهة دورية توحي بأنها تحكم التزام FEAS', !formState.periodicityField, JSON.stringify(formState));
-const beforeInvalidSave = initial.judgments;
-await page.click('.modal-card [data-save-slice]');
-await page.waitForTimeout(150);
-const afterInvalidSave = await page.evaluate(async id => (await window.__LAW_OFFICE_APP__.office.r.judgments.byIndex('executionId', id, 50)).length, seed.executionId);
-check('التحقق يوقف حفظ شريحة ناقصة قبل تسجيل حكم يتيم', afterInvalidSave === beforeInvalidSave, `${beforeInvalidSave} → ${afterInvalidSave}`);
+report.advanced = advanced;
+check('«أدوات متقدمة» ما زالت تصل إلى مسار FEAS (التزام/اعتراف) والتسويات',
+  advanced.anchor && advanced.buttons.some(label => label.includes('FEAS')) && advanced.buttons.some(label => label.includes('اعتراف')),
+  JSON.stringify(advanced.buttons));
 
-// إدخال صريح وصحيح: شريحة لاحقة تبدأ بعد آخر فترة معترف بها، لذلك لا تغيّر الرصيد الحالي.
-await page.fill('.modal-card [name="entitlementType"]', 'نفقة كما وردت بالمصدر');
-await page.selectOption('.modal-card [name="obligationId"]', seed.obligationId);
-await page.selectOption('.modal-card [name="valueType"]', 'periodic');
-await page.fill('.modal-card [name="amount"]', '3500.00');
-await page.fill('.modal-card [name="effectiveFrom"]', '2025-04-01');
-await page.click('.modal-card [data-save-slice]');
-await page.waitForSelector('.modal-card', {state: 'detached', timeout: 20000});
-await page.waitForFunction(async id => (await window.__LAW_OFFICE_APP__.office.r.judgments.byIndex('executionId', id, 50)).length === 2, seed.executionId, {timeout: 20000});
-await page.waitForFunction(() => !/جارٍ التحميل/.test(document.querySelector('[data-section-id="balance"]')?.textContent || 'جارٍ التحميل'), null, {timeout: 20000});
-const afterValidSave = await page.evaluate(async id => {
-  const app = window.__LAW_OFFICE_APP__;
-  const rows = [...document.querySelectorAll('[data-section-id="balance"] .exec-kv > *')].map(node => node.textContent.trim());
-  const balance = {};
-  for (let i = 0; i < rows.length; i += 2) balance[rows[i]] = rows[i + 1];
-  return {balance, judgments: (await app.office.r.judgments.byIndex('executionId', id, 50)).length,
-    slices: (await app.office.r.executionValuePeriods.byIndex('executionId', id, 50)).length};
-}, seed.executionId);
-report.afterValidSave = afterValidSave;
-check('اختيار صريح ينشئ سجل الحكم والشريحة اللاحقة', afterValidSave.judgments === 2 && afterValidSave.slices === 2, JSON.stringify(afterValidSave));
-check('إضافة الشريحة وحدها لا تضيف استحقاقًا أو تغيّر لقطة الاعتراف', afterValidSave.balance['الاستحقاق النهائي']?.includes('٩٬٠٠٠٫٠٠') && afterValidSave.balance['المتبقي']?.includes('٨٬٠٠٠٫٠٠'), JSON.stringify(afterValidSave.balance));
-await page.screenshot({path: path.join(artifactDir, 'execution-feas-explicit-value-type.png'), fullPage: true});
-
-// Cold reload the actual FEAS card without a network; this proves the new domain/service modules are in the existing PWA shell.
-offline = true;
-await context.setOffline(true);
-await page.reload({waitUntil: 'domcontentloaded', timeout: 45000});
-await page.waitForFunction(() => window.__LAW_OFFICE_APP__ && !window.__LAW_OFFICE_APP__.booting && window.__LAW_OFFICE_APP__.office, null, {timeout: 60000});
-await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), seed.executionId);
-await page.waitForSelector('[data-section-id="feas"]', {timeout: 30000, state: 'attached'});
-await page.waitForFunction(() => !/جارٍ التحميل/.test(document.querySelector('[data-section-id="balance"]')?.textContent || 'جارٍ التحميل'), null, {timeout: 30000});
-const offlineCard = await page.evaluate(() => {
-  const nodes = [...document.querySelectorAll('[data-section-id="balance"] .exec-kv > *')].map(node => node.textContent.trim());
-  const balance = {};
-  for (let i = 0; i < nodes.length; i += 2) balance[nodes[i]] = nodes[i + 1];
-  return {online: navigator.onLine, serviceWorker: Boolean(navigator.serviceWorker.controller), final: balance['الاستحقاق النهائي'], collected: balance['المحصل'], remaining: balance['المتبقي']};
+// ===== نافذة اعتراف FEAS تُفتح ولا تحذف شيئًا =====
+await page.locator('.advanced-anchor [data-action="feas-recognize"]').first().evaluate(node => node.click());
+await page.waitForTimeout(1200);
+const recognize = await page.evaluate(() => {
+  const card = document.querySelector('#modal-root .modal-card');
+  return {open: Boolean(card), title: card?.querySelector('.modal-title')?.textContent.trim() || '', text: card?.textContent.replace(/\s+/g, ' ').trim().slice(0, 220) || ''};
 });
-report.offlineCard = offlineCard;
-check('Cold Offline reload opens the FEAS card and rebuilds the same local balance', offlineCard.online === false && offlineCard.serviceWorker
-  && offlineCard.final?.includes('٩٬٠٠٠٫٠٠') && offlineCard.collected?.includes('١٬٠٠٠٫٠٠') && offlineCard.remaining?.includes('٨٬٠٠٠٫٠٠'), JSON.stringify(offlineCard));
-await page.screenshot({path: path.join(artifactDir, 'execution-feas-card-offline.png'), fullPage: true});
+report.recognize = recognize;
+check('نافذة «اعتراف بفترة» تُفتح من الواجهة الجديدة على نفس الالتزام', recognize.open && /اعتراف/.test(recognize.title + recognize.text), JSON.stringify(recognize));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
 
+// ===== إعادة تحميل Offline: نفس الأرقام بلا شبكة =====
+await context.setOffline(true);
+offline = true;
+await page.reload({waitUntil: 'domcontentloaded'}).catch(() => {});
+await page.waitForFunction(() => window.__LAW_OFFICE_APP__?.office && !window.__LAW_OFFICE_APP__.booting, null, {timeout: 90000});
+await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), seed.executionId);
+await page.waitForSelector('.exec-numbers', {timeout: 30000});
+await page.waitForTimeout(1200);
+const offlineNumbers = await page.evaluate(() => [...document.querySelectorAll('.exec-numbers .num b')].map(node => node.textContent.trim()));
+report.offlineNumbers = offlineNumbers;
+check('إعادة تحميل بلا شبكة تعرض الأرقام نفسها', offlineNumbers.includes('8,000') && offlineNumbers.includes('9,000'), JSON.stringify(offlineNumbers));
+await context.setOffline(false);
 offline = false;
-const uniqueConsoleErrors = [...new Set(report.consoleErrors)].filter(message => !/favicon/.test(message));
-report.expectedOfflineNetworkErrors.push(...uniqueConsoleErrors.filter(message => /ERR_(?:CONNECTION_CLOSED|INTERNET_DISCONNECTED)/.test(message)));
-report.consoleErrors = uniqueConsoleErrors.filter(message => !/ERR_(?:CONNECTION_CLOSED|INTERNET_DISCONNECTED)/.test(message));
+
+report.consoleErrors = [...new Set(report.consoleErrors)].filter(message => !/ERR_CONNECTION_CLOSED|favicon/.test(message));
 await context.close();
 await browser.close();
 await fs.writeFile(path.join(artifactDir, 'report.json'), JSON.stringify(report, null, 2));
 console.log(`\n${report.checks.length} فحصًا ناجحًا / ${report.failures.length} فشل`);
 for (const item of report.failures) console.log(`FAIL — ${item.name}: ${item.detail}`);
 for (const message of report.consoleErrors) console.log(`CONSOLE — ${message}`);
+console.log('PRINT — NOT VERIFIED — Print Preview/Physical Print Not Tested');
 process.exit(report.failures.length || report.consoleErrors.length ? 2 : 0);

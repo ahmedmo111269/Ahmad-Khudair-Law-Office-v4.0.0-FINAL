@@ -146,3 +146,156 @@
   .exec-big-eq { flex-direction: column; align-items: stretch; }
   .exec-eq-op { text-align: center; }
 }
+
+/* =====================================================================
+   الواجهة المبسّطة — مركز التنفيذ والبطاقة (أربعة تبويبات وأزرار ثابتة)
+   ===================================================================== */
+
+/* ---------- مركز التنفيذ: العدّادات والبحث ---------- */
+.exec-counters { display: grid; gap: 8px; }
+.counter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.counter { display: grid; gap: 2px; align-content: start; min-height: 84px; padding: 10px 12px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 14px; background: var(--surface-2, rgba(255,255,255,.03)); color: inherit; text-align: right; cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.counter:hover { border-color: var(--primary, #c9a227); transform: translateY(-1px); }
+.counter.is-active { border-color: var(--primary, #c9a227); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); background: var(--surface-3, rgba(255,255,255,.06)); }
+.counter b { font-size: 1.6rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.counter span { font-weight: 700; font-size: .9rem; }
+.counter small { font-size: .72rem; }
+.exec-search .exec-controls input[type='search'] { min-height: 42px; }
+
+/* ---------- شريط الأزرار الثابت ---------- */
+.exec-toolbar { padding: 10px 12px; position: sticky; top: 0; z-index: 6; background: var(--surface, inherit); backdrop-filter: blur(6px); }
+.exec-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.exec-actions button { min-height: 42px; font-size: .95rem; }
+/* النافذة المكدَّسة (نموذج التسجيل فوق ورقة التسجيل) تعلو الورقة فتبقى خلفها. */
+.modal-backdrop.is-stacked { z-index: 110; background: rgba(0,0,0,.45); }
+.modal-backdrop.is-stacked .modal-card { max-height: 88vh; }
+
+.exec-more-menu { display: grid; gap: 2px; margin-top: 8px; padding: 8px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 12px; background: var(--surface-2, rgba(255,255,255,.04)); max-width: 340px; }
+.exec-more-menu[hidden] { display: none; }
+.exec-more-menu button { text-align: right; justify-content: flex-start; min-height: 38px; }
+
+/* ---------- الأرقام الثلاثة ---------- */
+.exec-summary { display: grid; gap: 10px; }
+.exec-summary .asof-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: .85rem; }
+.exec-summary .asof-row input { min-height: 38px; }
+.exec-numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.exec-numbers .num { display: grid; gap: 2px; padding: 14px 16px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 16px; background: var(--surface-2, rgba(255,255,255,.03)); color: inherit; text-align: right; cursor: pointer; transition: border-color .15s, transform .15s; }
+.exec-numbers .num:hover { border-color: var(--primary, #c9a227); transform: translateY(-1px); }
+.exec-numbers .num span { font-size: .82rem; color: var(--muted, #9aa); }
+.exec-numbers .num b { font-size: 1.9rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.exec-numbers .num small { font-size: .72rem; color: var(--muted, #9aa); }
+.exec-numbers .num-primary { border-color: var(--primary, #c9a227); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); }
+.exec-numbers.small .num b { font-size: 1.25rem; }
+.progress { position: relative; height: 12px; border-radius: 999px; background: var(--surface-3, rgba(255,255,255,.08)); overflow: hidden; }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--primary, #c9a227), #4caf50); transition: width .3s ease; }
+.exec-lines { font-size: .84rem; margin: 0; }
+.exec-status { display: inline-block; margin-inline-start: 6px; padding: 2px 10px; border-radius: 999px; font-size: .74rem; border: 1px solid var(--border, rgba(255,255,255,.16)); background: var(--surface-3, rgba(255,255,255,.06)); }
+.exec-status-overdue { border-color: #d98b2b; color: #d98b2b; }
+.exec-status-completed { border-color: #4caf50; color: #4caf50; }
+.exec-status-suspended, .exec-status-closed { border-color: var(--muted, #9aa); color: var(--muted, #9aa); }
+.completion-bar { display: grid; gap: 6px; }
+.hint { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border, rgba(255,255,255,.12)); background: var(--surface-2, rgba(255,255,255,.03)); font-size: .83rem; }
+.hint-info { border-inline-start: 3px solid #4c8bf5; }
+.hint-warn { border-inline-start: 3px solid #d98b2b; }
+.hint-muted { border-inline-start: 3px solid var(--muted, #9aa); }
+
+/* ---------- التبويبات ---------- */
+.exec-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 14px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.exec-tab { min-height: 44px; padding: 8px 14px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: inherit; font-size: .92rem; font-weight: 600; cursor: pointer; }
+.exec-tab:hover { background: var(--surface-3, rgba(255,255,255,.06)); }
+.exec-tab.is-active { border-color: var(--primary, #c9a227); background: var(--surface, transparent); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); }
+.exec-tab-panel { display: grid; gap: 12px; }
+
+/* ---------- جدول الحساب الشهري ---------- */
+.year-group { border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 12px; margin-top: 10px; background: var(--surface-2, rgba(255,255,255,.02)); }
+.year-group > summary { cursor: pointer; padding: 10px 12px; font-weight: 700; font-size: .9rem; }
+.account-table td { vertical-align: middle; }
+.account-table tr.is-paid td { background: rgba(76,175,80,.07); }
+.account-table tr.is-partial td { background: rgba(217,139,43,.09); }
+.account-table tr.is-unpaid td { background: rgba(217,139,43,.05); }
+.account-table tfoot td { font-weight: 700; background: var(--surface-3, rgba(255,255,255,.06)); }
+.pstatus { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .76rem; border: 1px solid var(--border, rgba(255,255,255,.16)); white-space: nowrap; }
+.pstatus-paid { border-color: #4caf50; color: #4caf50; }
+.pstatus-partial { border-color: #d98b2b; color: #d98b2b; }
+.pstatus-unpaid { border-color: #d9534f; color: #d9534f; }
+.pstatus-nothing_due { color: var(--muted, #9aa); }
+.info-dot { margin-inline-start: 6px; padding: 0 6px; border: 0; background: transparent; color: var(--primary, #c9a227); cursor: pointer; font-size: .95rem; }
+.quick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip.is-active { border-color: var(--primary, #c9a227); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); }
+
+/* ---------- السجل الموحد ---------- */
+.exec-log { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.log-item { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 12px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.log-item.is-voided { opacity: .62; }
+.log-icon { font-size: 1.25rem; line-height: 1.4; text-align: center; }
+.log-body { display: grid; gap: 2px; min-width: 0; }
+.log-body b { font-size: .92rem; }
+.log-body small { font-size: .78rem; line-height: 1.7; }
+.log-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.log-actions button { min-height: 34px; }
+
+/* ---------- نوافذ التسجيل المبسّطة ---------- */
+.simple-form { display: grid; gap: 12px; }
+.simple-form fieldset { border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 12px; padding: 10px 12px; }
+.simple-form legend { padding: 0 6px; font-weight: 700; font-size: .86rem; }
+.simple-form .field { display: flex; flex-direction: column; gap: 4px; font-size: .86rem; }
+.simple-form .field input, .simple-form .field select, .simple-form .field textarea { min-height: 40px; }
+.simple-form .span2 { grid-column: 1 / -1; }
+.record-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+.record-tile { display: grid; gap: 4px; place-items: center; padding: 16px 10px; min-height: 108px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 16px; background: var(--surface-2, rgba(255,255,255,.03)); color: inherit; cursor: pointer; text-align: center; transition: border-color .15s, transform .15s; }
+.record-tile:hover { border-color: var(--primary, #c9a227); transform: translateY(-2px); }
+.record-tile > span { font-size: 1.8rem; }
+.record-tile b { font-size: 1rem; }
+.record-tile small { font-size: .74rem; color: var(--muted, #9aa); }
+.alloc-preview { display: grid; gap: 6px; padding: 10px 12px; border: 1px dashed var(--border, rgba(255,255,255,.18)); border-radius: 12px; background: var(--surface-2, rgba(255,255,255,.03)); font-size: .85rem; line-height: 1.8; }
+.preview-result { font-weight: 700; }
+.result-numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.result-numbers > div { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 10px; background: var(--surface, transparent); text-align: center; }
+.result-numbers > div span { font-size: .74rem; color: var(--muted, #9aa); }
+.result-numbers > div b { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.result-numbers > div.total { border-color: var(--primary, #c9a227); box-shadow: inset 0 0 0 1px var(--primary, #c9a227); }
+.mini-table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: 6px; }
+.mini-table th, .mini-table td { padding: 5px 6px; border-bottom: 1px solid var(--border, rgba(255,255,255,.1)); text-align: center; }
+.mini-table thead th { background: var(--surface-3, rgba(255,255,255,.06)); }
+.mini-table tfoot td { font-weight: 700; }
+.pos { color: #4caf50; }
+.neg { color: #d9534f; }
+.check-line { display: flex; gap: 8px; align-items: flex-start; font-size: .86rem; line-height: 1.7; }
+.check-line input { margin-top: 4px; }
+.plain-list { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 5px; }
+.plain-list li { padding: 6px 8px; border-radius: 8px; background: var(--surface-2, rgba(255,255,255,.03)); font-size: .85rem; line-height: 1.7; }
+.warn-line { padding: 8px 10px; border-inline-start: 3px solid #d98b2b; border-radius: 8px; background: rgba(217,139,43,.08); font-size: .84rem; }
+.trash-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 10px; margin-top: 6px; }
+.trash-row b { font-size: .9rem; }
+.trash-row small { grid-column: 1; }
+.trash-row button { grid-row: 1 / span 2; grid-column: 2; }
+.help-body { display: grid; gap: 8px; font-size: .88rem; line-height: 1.85; }
+.help-body code { background: var(--surface-3, rgba(255,255,255,.08)); border-radius: 6px; padding: 1px 6px; }
+
+/* ---------- الجوال: نفس الشريط مثبّتًا أسفل ---------- */
+@media (max-width: 720px) {
+  .exec-toolbar { padding: 8px; }
+  .exec-actions { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .exec-actions button { width: 100%; }
+  .exec-actions [data-more] { grid-column: span 3; }
+  /* الشريط الثابت على الجوال: صف أزرار بارتفاع مضمون أسفل الشاشة (لا يتمدد ليغطيها). */
+  .exec-toolbar.is-pinned-bottom { position: fixed; inset-inline: 0; inset-block: auto 0; width: 100%; max-width: 100%; height: auto; max-height: 46vh; overflow: auto; margin: 0; border-radius: 14px 14px 0 0; box-shadow: 0 -6px 18px rgba(0,0,0,.28); }
+  .exec-toolbar.is-pinned-bottom .exec-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; width: 100%; }
+  .exec-toolbar.is-pinned-bottom .uxc-gear, .exec-toolbar.is-pinned-bottom [data-more] { grid-column: 1 / -1; }
+  .exec-toolbar.is-pinned-bottom .uxc-gear { display: none; }
+  .exec-toolbar.is-pinned-bottom .exec-more-menu { position: absolute; bottom: calc(100% + 6px); inset-inline: 8px; max-width: none; margin: 0; background: var(--surface, #15181d); z-index: 41; }
+  .page-head.exec-head { flex-direction: column; }
+  .exec-head .head-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; width: 100%; }
+  .exec-head .head-actions button { width: 100%; }
+  .log-item { grid-template-columns: 30px 1fr; }
+  .log-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .exec-numbers .num b { font-size: 1.55rem; }
+  .exec-tab-panel, .exec-summary { padding-bottom: 96px; }
+  .exec-tab { flex: 1 1 auto; min-width: 46%; }
+}
+
+/* ---------- الطباعة ---------- */
+@media print {
+  .exec-toolbar, .exec-tabs, .head-actions, .completion-bar, .log-actions, .exec-more-menu { display: none !important; }
+  .exec-summary, .exec-tab-panel, .panel { break-inside: avoid; }
+}

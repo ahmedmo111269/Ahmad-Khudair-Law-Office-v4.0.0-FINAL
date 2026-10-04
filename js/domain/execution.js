@@ -125,13 +125,21 @@ export const POA_STATUSES = Object.freeze([
 export const POA_STATUS_LABELS = Object.freeze(Object.fromEntries(POA_STATUSES));
 export const poaStatusLabel = value => POA_STATUS_LABELS[value] || (value ? String(value) : '');
 
+// أنواع الإجراءات: أكواد قديمة محفوظة للتواكب + أكواد الواجهة المبسطة.
+// القائمة نفسها قابلة للتعديل من إعدادات التنفيذ (settings) ولا يفترض البرنامج ترتيبًا قانونيًا.
 export const ACTION_KINDS = Object.freeze([
+  ['summons', 'تكليف بالوفاء'],
+  ['notice', 'إعلان'],
   ['seizure', 'حجز'],
   ['sale_notice', 'إعلان بيع'],
   ['sale_session', 'جلسة بيع'],
-  ['dissipation', 'تبديد'],
+  ['dissipation', 'محضر تبديد'],
   ['petition_number', 'رقم عرائض'],
   ['judicial_number', 'رقم قضائي'],
+  ['petition', 'عريضة'],
+  ['misdemeanor', 'جنحة'],
+  ['refusal_record', 'محضر امتناع'],
+  ['request', 'طلب / تظلم'],
   ['other', 'إجراء آخر']
 ]);
 export const ACTION_KIND_LABELS = Object.freeze(Object.fromEntries(ACTION_KINDS));

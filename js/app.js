@@ -88,7 +88,17 @@ function recordRoute(route){
 
 class App{
  constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.maybeSeedDemo();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.maybeSeedDemo();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ /** ترحيل قسم التنفيذ: غير مدمّر، Idempotent، يعمل في الخلفية مرة واحدة لكل قاعدة بيانات. */
+ async runExecutionSimpleMigration(){
+  try{
+   const office=this.office;if(!office?.r?.meta)return null;
+   const {migrateSimpleExecutionData}=await import('./services/execution-simple.js');
+   const report=await migrateSimpleExecutionData(office);
+   if(report&&!report.reused)console.info('execution-simple-migration',{scanned:report.scanned,withIssues:report.withIssues,hasMore:report.hasMore});
+   return report;
+  }catch(error){console.info('execution-simple-migration skipped',error);return null}
+ }
  /** زرع بيانات تجريبية مرة واحدة فقط في قاعدة فارغة تمامًا — إضافة بحتة، لا تحذف شيئًا. */
  async maybeSeedDemo(){
   try{
@@ -145,6 +155,7 @@ class App{
  initShortcuts(){
   document.addEventListener('keydown',e=>{
    const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
+   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='t'){e.preventDefault();if(String(this.route||'').startsWith('exc:')){document.dispatchEvent(new CustomEvent('exec:record'));return}return}
    if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();openQuickNoteCapture(this);return}
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
    if((e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
@@ -156,7 +167,8 @@ class App{
   });
  }
  showShortcutsHelp(){
-  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],
+['Ctrl + Shift + T','بطاقة تنفيذ: فتح ورقة التسجيل (+ تسجيل)'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
   modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
  async go(route,opts={}){

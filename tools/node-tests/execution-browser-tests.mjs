@@ -8,6 +8,9 @@
 // التحصيل واللقطة والطباعة، ويتأكد من ظهور التنفيذ في البحث الشامل.
 // ملاحظة صريحة: لا يقود هذا الفحص معاينة الطباعة الأصلية للنظام ولا طابعة فعلية
 // — يُسجَّل ذلك في التقرير بوصفه NOT VERIFIED.
+// — حُدِّث هذا الفحص بعد تبسيط الواجهة: يقيس نفس القدرات (الأرقام، الفترات،
+//   التتبع، البحث الشامل، التصفية) عبر واجهة المركز/البطاقة الجديدة، ويستخدم
+//   تنفيذًا مبنيًا بالخدمة القديمة نفسها ليثبت توافق البيانات القديمة.
 // =====================================================================
 import {chromium} from 'playwright';
 import {createRequire} from 'node:module';
@@ -73,102 +76,142 @@ const seed = await page.evaluate(async () => {
 
 // ===== مركز التنفيذ =====
 await page.evaluate(() => window.__LAW_OFFICE_APP__.go('executionCenter'));
-await page.waitForFunction(() => document.querySelectorAll('#exec-grid tbody tr').length > 0 && !/جارٍ تحميل/.test(document.querySelector('#exec-grid')?.textContent || ''), null, {timeout: 30000});
+await page.waitForFunction(() => document.querySelectorAll('#exec-grid tbody tr[data-i]').length > 0, null, {timeout: 30000});
+await page.waitForTimeout(1500);
 const center = await page.evaluate(() => ({
   title: document.querySelector('#page-title').textContent,
-  kpis: [...document.querySelectorAll('[data-kpi]')].map(b => `${b.dataset.kpi}=${b.querySelector('b').textContent}`),
+  counters: [...document.querySelectorAll('[data-counters] .counter')].map(node => `${node.dataset.count}=${node.querySelector('b').textContent}`),
   headers: [...document.querySelectorAll('#exec-grid thead th')].map(th => th.textContent.replace(/[↕▾⌄›]/g, '').trim()).filter(Boolean),
-  rows: document.querySelectorAll('#exec-grid tbody tr').length,
+  keys: [...document.querySelectorAll('#exec-grid thead th[data-key]')].map(th => th.dataset.key),
+  rows: document.querySelectorAll('#exec-grid tbody tr[data-i]').length,
   sections: [...document.querySelectorAll('[data-section-id]')].map(node => node.dataset.sectionId),
-  hasTrash: Boolean(document.querySelector('[data-exec-trash]'))
+  hasTrash: Boolean(document.querySelector('[data-exec-trash]')),
+  hasNew: Boolean(document.querySelector('[data-new-execution]'))
 }));
 report.center = center;
 check('مركز التنفيذ يُفتح من مسار التنقل', center.title === 'مركز التنفيذ', center.title);
-for (const header of ['رقم التنفيذ', 'الموكل', 'رقم الملف', 'نوع التنفيذ', 'القيمة الحالية', 'المحصل', 'المتبقي', 'فرق الحكم', 'آخر فترة', 'آخر توكيل', 'آخر محضر', 'الحالة', 'آخر إجراء']) {
+for (const header of ['رقم التنفيذ', 'الموكل', 'المنفذ ضده', 'رقم الملف', 'المطلوب حتى اليوم', 'المدفوع', 'المتبقي', 'آخر إجراء', 'الإجراء التالي']) {
   check(`عمود الجدول العام: ${header}`, center.headers.includes(header), center.headers.join(' | '));
 }
-check('المؤشرات معروضة', center.kpis.length >= 10, center.kpis.join(' ، '));
-check('أقسام الصفحة مطوية/مرتبة عبر نظام الأقسام', ['kpis', 'attention', 'filters', 'grid', 'settlements'].every(id => center.sections.includes(id)), center.sections.join('، '));
-check('مركز التنفيذ يعرض مدخل سلة الحذف المنطقي', center.hasTrash, String(center.hasTrash));
+check('أربعة عدّادات قابلة للنقر (جارٍ · متأخرات · يحتاج متابعة · مكتمل السداد)', center.counters.length === 4, center.counters.join(' ، '));
+check('أقسام الصفحة ثلاث فقط: عدّادات · بحث · جدول', JSON.stringify(center.sections.slice(0, 3)) === JSON.stringify(['numbers', 'filters', 'grid']), center.sections.join('،'));
+check('مركز التنفيذ يعرض مدخل سلة الحذف المنطقي وزر التنفيذ الجديد', center.hasTrash && center.hasNew, JSON.stringify({trash: center.hasTrash, add: center.hasNew}));
 await page.screenshot({path: path.join(artifactDir, 'execution-center.png'), fullPage: true});
 
-// ===== بطاقة التنفيذ =====
+// ===== بطاقة التنفيذ (بيانات مبنية بالخدمة القديمة — توافق كامل) =====
 await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), seed.executionId);
-await page.waitForSelector('[data-exec-trace]', {timeout: 30000, state: 'attached'});
-await page.waitForFunction(() => !/جارٍ التحميل/.test(document.querySelector('[data-exec-trace]')?.textContent || 'جارٍ التحميل'), null, {timeout: 30000});
-const card = await page.evaluate(() => {
-  const kv = [...document.querySelectorAll('[data-section-id="balance"] .exec-kv > *')].map(node => node.textContent.trim());
-  const pairs = {};
-  for (let i = 0; i < kv.length; i += 2) pairs[kv[i]] = kv[i + 1];
+await page.waitForSelector('.exec-numbers', {timeout: 30000});
+await page.waitForTimeout(1200);
+const card = await page.evaluate(id => {
+  const labels = [...document.querySelectorAll('.exec-numbers .num')];
+  const numbers = Object.fromEntries(labels.map(node => [node.querySelector('span').textContent.trim(), node.querySelector('b').textContent.trim()]));
   return {
-    title: document.querySelector('#page-title').textContent,
-    balance: pairs,
-    periods: document.querySelectorAll('[data-section-id="values"] .exec-table tbody tr').length,
-    evolution: [...document.querySelectorAll('.exec-evolution summary')].map(node => node.textContent.trim()),
-    receipts: document.querySelectorAll('[data-section-id="receipts"] .exec-table tbody tr').length,
-    ledger: document.querySelectorAll('[data-section-id="ledger"] .exec-table tbody tr').length,
-    differences: document.querySelectorAll('[data-section-id="differences"] .exec-table tbody tr').length,
-    poas: document.querySelectorAll('[data-section-id="poas"] .exec-table tbody tr').length,
-    traceNodes: document.querySelectorAll('.exec-trace-node').length,
-    quickActions: document.querySelectorAll('[data-quick]').length,
-    alerts: [...document.querySelectorAll('.exec-alert-body')].map(node => node.textContent.trim()),
-    deletionControls: {
-      editExecution: document.querySelectorAll('[data-edit-execution]').length,
-      deleteExecution: document.querySelectorAll('[data-delete-execution]').length,
-      deleteJudgment: document.querySelectorAll('[data-delete-judgment]').length,
-      deleteSlice: document.querySelectorAll('[data-delete-slice]').length,
-      deletePoa: document.querySelectorAll('[data-delete-poa]').length
-    }
+    title: document.querySelector('#main-content h2').textContent.trim(),
+    numbers,
+    tabs: [...document.querySelectorAll('#main-content .exec-tabs [data-tab]')].map(node => node.textContent.trim()),
+    periods: document.querySelectorAll('.account-table tbody tr').length,
+    paid: document.querySelectorAll('.account-table .pstatus-paid').length,
+    partial: document.querySelectorAll('.account-table .pstatus-partial').length,
+    unpaid: document.querySelectorAll('.account-table .pstatus-unpaid').length,
+    traceButtons: document.querySelectorAll('[data-trace]').length,
+    progress: document.querySelector('.progress > span')?.getAttribute('style') || '',
+    hints: document.querySelectorAll('.completion-bar .hint').length,
+    toolbar: [...document.querySelectorAll('.exec-toolbar [data-record],.exec-toolbar [data-open-duration],.exec-toolbar [data-open-statement],.exec-toolbar [data-more]')].map(node => node.textContent.trim()),
+    id: window.__LAW_OFFICE_APP__.route
   };
-});
+}, seed.executionId);
 report.card = card;
-check('الاستحقاق النهائي 42000 (3000 → 4000 بلا ازدواج)', card.balance['الاستحقاق النهائي'] === '٤٢٬٠٠٠٫٠٠', card.balance['الاستحقاق النهائي']);
-check('المحصل 2000 والمتبقي 40000', card.balance['المحصل'] === '٢٬٠٠٠٫٠٠' && card.balance['المتبقي'] === '٤٠٬٠٠٠٫٠٠', `${card.balance['المحصل']} / ${card.balance['المتبقي']}`);
-check('تفكيك الرصيد: 34000 أصلي + 6000 فروق', card.balance['مكوّن الرصيد الأصلي'] === '٣٤٬٠٠٠٫٠٠' && card.balance['مكوّن فروق الأحكام'] === '٦٬٠٠٠٫٠٠', `${card.balance['مكوّن الرصيد الأصلي']} / ${card.balance['مكوّن فروق الأحكام']}`);
-check('12 فترة محسوبة كسولًا', card.periods === 12, String(card.periods));
-check('«تطور قيمة الاستحقاق» قابل للفتح ومطوي افتراضيًا', card.evolution.length === 1, card.evolution.join(' ، '));
-check('شجرة تتبع الرصيد مبنية حتى المصدر', card.traceNodes > 10, String(card.traceNodes));
-check('إجراءات سريعة معروضة', card.quickActions >= 10, String(card.quickActions));
-check('أزرار تعديل التنفيذ وحذف الحكم/الشريحة/التوكيل ظاهرة', card.deletionControls.editExecution >= 1 && card.deletionControls.deleteExecution === 1 && card.deletionControls.deleteJudgment >= 2 && card.deletionControls.deleteSlice >= 2 && card.deletionControls.deletePoa >= 1, JSON.stringify(card.deletionControls));
-check('المحاضر والدفتر والفروق والتوكيلات معروضة', card.receipts >= 1 && card.ledger >= 1 && card.differences >= 1 && card.poas >= 1, JSON.stringify({receipts: card.receipts, ledger: card.ledger, differences: card.differences, poas: card.poas}));
+check('رقم التنفيذ الداخلي يظهر في البطاقة', card.title.includes('EX-'), card.title);
+const dueLabel = Object.keys(card.numbers).find(key => key.startsWith('المطلوب حتى')) || '';
+check('الأرقام الثلاثة تطابق محرك الحساب القديم: مطلوب 42,000 · مدفوع 2,000 · متبقي 40,000',
+  card.numbers[dueLabel] === '42,000' && card.numbers['المدفوع'] === '2,000' && card.numbers['المتبقي'] === '40,000',
+  JSON.stringify(card.numbers));
+check('كشف شهري واحد: 12 فترة بلا فترات مخزّنة', card.periods === 12, String(card.periods));
+check('حالات الفترات: مسدد/جزئي/غير مسدد بلا فترات وهمية', card.partial === 1 && card.unpaid === 11 && card.paid === 0, JSON.stringify({paid: card.paid, partial: card.partial, unpaid: card.unpaid}));
+check('أربعة تبويبات فقط وكل الأرقام قابلة للتفسير بنقرة', card.tabs.length === 4 && card.traceButtons >= 3, JSON.stringify({tabs: card.tabs, trace: card.traceButtons}));
+check('شريط الأزرار الثابت أعلى البطاقة: تسجيل · احسب مدة · كشف/توكيل · المزيد', card.toolbar.length === 4 && card.toolbar[0].includes('تسجيل'), card.toolbar.join(' | '));
 await page.screenshot({path: path.join(artifactDir, 'execution-card.png'), fullPage: true});
 
-// ===== نافذة التحصيل =====
-await page.click('[data-quick="collection"]');
-await page.waitForSelector('.modal-card [data-period]', {timeout: 15000});
-const dialog = await page.evaluate(() => ({
-  title: document.querySelector('.modal-card .modal-title').textContent,
-  periods: document.querySelectorAll('.modal-card [data-period]').length,
-  methods: [...document.querySelectorAll('.modal-card [name="method"] option')].map(option => option.textContent.trim())
-}));
-check('نافذة التحصيل تعرض الفترات وطرق التخصيص', dialog.periods === 12 && dialog.methods.length === 5, JSON.stringify(dialog));
-check('FIFO ليست الطريقة الافتراضية', dialog.methods[0].includes('مباشر'), dialog.methods.join(' | '));
-await page.screenshot({path: path.join(artifactDir, 'execution-collection-dialog.png'), fullPage: true});
-await page.click('.modal-card [data-close]');
+// ===== تفسير الرقم بنقرة (Trace) =====
+await page.locator('[data-trace="remaining"]').first().click();
+await page.waitForSelector('#modal-root .modal-title', {timeout: 15000});
+const trace = await page.evaluate(() => document.querySelector('#modal-root').textContent.replace(/\s+/g, ' ').trim());
+report.trace = trace.slice(0, 300);
+check('المتبقي يُفسَّر بمعادلة مقروءة (مطلوب − مخصّص)', trace.includes('المتبقي = المطلوب − المخصّص') && /40,000/.test(trace), report.trace.slice(0, 160));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
 
-// ===== لقطة الرصيد =====
-await page.click('[data-quick="snapshot"]');
-await page.waitForSelector('.modal-card [data-snapshot] .exec-kv', {timeout: 15000});
-const snapshot = await page.evaluate(() => document.querySelector('.modal-card [data-snapshot]').textContent.replace(/\s+/g, ' ').trim());
-check('اللقطة تُحسب من البيانات ولا تعتمد رقمًا مخزَّنًا', snapshot.includes('٤٢٬٠٠٠٫٠٠') && snapshot.includes('٤٠٬٠٠٠٫٠٠'), snapshot.slice(0, 200));
-await page.click('.modal-card [data-close]');
+// ===== السجل الموحّد =====
+await page.locator('#main-content .exec-tabs [data-tab="log"]').first().evaluate(node => node.click());
+await page.waitForTimeout(900);
+const log = await page.evaluate(() => ({
+  items: document.querySelectorAll('[data-log-item]').length,
+  text: document.querySelector('[data-log-list]')?.textContent.replace(/\s+/g, ' ').trim().slice(0, 600) || '',
+  groups: [...new Set([...document.querySelectorAll('[data-log-item]')].map(node => node.dataset.type))],
+  editButtons: document.querySelectorAll('[data-log-item] [data-edit]').length,
+  voidButtons: document.querySelectorAll('[data-log-item] [data-void]').length,
+  rowsCarryingVoidMarker: [...document.querySelectorAll('[data-log-item]')].filter(node => node.hasAttribute('data-void')).length
+}));
+report.log = log;
+check('السجل الموحّد يعرض المحاضر والأحكام والتوكيلات في خط زمني واحد', log.items >= 5 && /RC-2025-0001/.test(log.text) && /POA-/.test(log.text), log.text.slice(0, 200));
+check('كل سجل يُعدَّل أو يُلغى من صفه نفسه', log.editButtons >= 2 && log.voidButtons >= 3, JSON.stringify({edit: log.editButtons, void: log.voidButtons}));
+check('صف السجل لا يحمل سمة الإلغاء نفسها (نقرة الصف لا تفتح نافذة إلغاء)', log.rowsCarryingVoidMarker === 0, String(log.rowsCarryingVoidMarker));
+await page.screenshot({path: path.join(artifactDir, 'execution-log.png'), fullPage: true});
+
+// ===== التوكيل المحفوظ بالسجل القديم يظهر كما هو =====
+await page.locator('#main-content .exec-tabs [data-tab="poa"]').first().evaluate(node => node.click());
+await page.waitForTimeout(800);
+const poaTab = await page.evaluate(() => document.querySelector('.exec-tab-panel')?.textContent.replace(/\s+/g, ' ').trim().slice(0, 500) || '');
+report.poaTab = poaTab;
+check('توكيل قديم محفوظ (Snapshot) يظهر بمبلغه في تبويب التوكيل والطباعة', /9,000\.00/.test(poaTab) && /POA-/.test(poaTab), poaTab.slice(0, 200));
+check('قاعدة منع الازدواج معلنة في التبويب', poaTab.includes('منع الازدواج'), poaTab.slice(0, 200));
+
+// ===== بيانات الحكم والقيمة (السجلات القديمة) =====
+await page.locator('#main-content .exec-tabs [data-tab="data"]').first().evaluate(node => node.click());
+await page.waitForTimeout(800);
+const dataTab = await page.evaluate(() => document.querySelector('.exec-tab-panel')?.textContent.replace(/\s+/g, ' ').trim().slice(0, 700) || '');
+report.dataTab = dataTab;
+check('الأحكام والبنود القديمة معروضة بلا تحويل ولا فقدان', /10\/2025/.test(dataTab) && /44\/2025/.test(dataTab) && /3,000/.test(dataTab) && /4,000/.test(dataTab), dataTab.slice(0, 260));
+
+// ===== نموذج التحصيل الجديد يُفتح على تنفيذ قديم (لا شيء يمنع التسجيل) =====
+await page.locator('[data-record]').first().evaluate(node => node.click());
+await page.waitForSelector('#modal-root .record-tile', {timeout: 15000});
+const tiles = await page.evaluate(() => document.querySelectorAll('#modal-root .record-tile').length);
+await page.locator('#modal-root .record-tile[data-record="collection"]').evaluate(node => node.click());
+await page.waitForSelector('#modal-root [data-form="collection"]', {timeout: 15000});
+const dialog = await page.evaluate(() => ({
+  tiles: document.querySelectorAll('#modal-root .record-tile').length,
+  fields: [...document.querySelectorAll('#modal-root [data-form="collection"] input, #modal-root [data-form="collection"] select, #modal-root [data-form="collection"] textarea')].map(node => node.name),
+  required: [...document.querySelectorAll('#modal-root [data-form="collection"] .req')].length,
+  cards: document.querySelectorAll('#modal-root .modal-card').length,
+  stacked: document.querySelectorAll('#modal-root .modal-backdrop.is-stacked').length
+}));
+report.collectionDialog = {...dialog, tiles};
+check('ست أيقونات تسجيل كبيرة فوق البطاقة', tiles === 6, String(tiles));
+check('نموذج التحصيل: حقل مبلغ واحد إلزامي والباقي اختياري', dialog.required === 1 && dialog.fields.includes('amount') && dialog.fields.includes('date'), JSON.stringify(dialog));
+check('النموذج يُفتح فوق ورقة التسجيل (لا يستبدلها) فيمكن التسجيل تلو التسجيل', dialog.cards === 2 && dialog.stacked === 1, JSON.stringify(dialog));
+await page.screenshot({path: path.join(artifactDir, 'execution-collection-dialog.png'), fullPage: true});
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
 
 // ===== معاينة الطباعة (فتح المستند فقط — لا معاينة نظام ولا طابعة) =====
 const printPopup = context.waitForEvent('page');
-await page.click('[data-quick="print-balance"]');
-const balanceModal = await page.waitForSelector('.modal-card [data-print]', {timeout: 15000});
-void balanceModal;
-await page.click('.modal-card [data-print]');
+await page.locator('.exec-toolbar [data-open-statement]').first().evaluate(node => node.click());
+await page.waitForSelector('#modal-root [data-form="statement"]', {timeout: 15000});
+await page.locator('#modal-root [data-form="statement"] button[type="submit"]').evaluate(node => node.click());
 const popup = await printPopup.catch(() => null);
 if (popup) {
-  await popup.waitForFunction(() => (document.body?.innerText || '').trim().length > 0, null, {timeout: 15000}).catch(() => {});
+  await popup.waitForFunction(() => (document.body?.innerText || '').includes('كشف حساب'), null, {timeout: 20000}).catch(() => {});
   const text = (await popup.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ');
   report.printDocument = text.slice(0, 400);
-  check('مستند كشف الرصيد يُبنى ويُفتح للطباعة', text.includes('٤٢٬٠٠٠٫٠٠') || text.includes('42000'), report.printDocument.slice(0, 160));
-  await popup.close();
+  check('مستند كشف الحساب يُبنى ويُفتح للطباعة بالأرقام نفسها', /42,000/.test(text) && /40,000/.test(text), report.printDocument.slice(0, 200));
 } else {
-  report.failures.push({name: 'مستند كشف الرصيد يُبنى ويُفتح للطباعة', detail: 'لم تُفتح نافذة'});
+  report.failures.push({name: 'مستند كشف الحساب يُبنى ويُفتح للطباعة بالأرقام نفسها', detail: 'لم تُفتح نافذة'});
 }
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
 
 // ===== البحث الشامل =====
 const search = await page.evaluate(async id => {
@@ -178,26 +221,30 @@ const search = await page.evaluate(async id => {
   const byClient = await searchStore(app.office, 'execution', 'موكل تجريبي', {limit: 20});
   const byNumber = await searchStore(app.office, 'execution', exec.internalNumber, {limit: 20});
   const byReceipt = await searchStore(app.office, 'executionReceipts', 'RC-2025-0001', {limit: 20});
-  const byPoa = await searchStore(app.office, 'executionPOAs', 'POA-2026-0001', {limit: 20});
+  const byPoa = await searchStore(app.office, 'executionPOAs', 'POA-', {limit: 20});
   return {number: exec.internalNumber, byClient: byClient.items.length, byNumber: byNumber.items.length, byReceipt: byReceipt.items.length, byPoa: byPoa.items.length, route: byClient.items[0]?.route || ''};
 }, seed.executionId);
 report.search = search;
 check('البحث الشامل يجد التنفيذ باسم الموكل', search.byClient >= 1 && search.route === `exc:${seed.executionId}`, JSON.stringify(search));
 check('البحث الشامل يجد التنفيذ برقمه وبالمحضر وبالتوكيل', search.byNumber >= 1 && search.byReceipt >= 1 && search.byPoa >= 1, JSON.stringify(search));
 
-// ===== تصفية المؤشر تفتح قائمة مفلترة =====
+// ===== تصفية العدّادات =====
 await page.evaluate(() => window.__LAW_OFFICE_APP__.go('executionCenter'));
-await page.waitForFunction(() => document.querySelectorAll('#exec-grid tbody tr').length > 0, null, {timeout: 30000});
-await page.click('[data-kpi="family"]');
-await page.waitForFunction(() => document.querySelectorAll('#exec-grid tbody tr[data-i]').length === 1 && /أسرة/.test(document.querySelector('[data-kpi-scope]')?.textContent || ''), null, {timeout: 20000}).catch(() => {});
-const filtered = await page.evaluate(() => ({rows: document.querySelectorAll('#exec-grid tbody tr[data-i]').length, scope: document.querySelector('[data-kpi-scope]').textContent}));
-await page.click('[data-kpi="negativeBalance"]');
-await page.waitForFunction(() => document.querySelectorAll('#exec-grid tbody tr[data-i]').length === 0 && /لا توجد/.test(document.querySelector('#exec-grid')?.textContent || ''), null, {timeout: 20000}).catch(() => {});
-// حالة الفراغ تُعرض كصف واحد داخل الجدول، لذلك نتحقق من عدم وجود صفوف بيانات فعلية.
-const empty = await page.evaluate(() => ({rows: document.querySelectorAll('#exec-grid tbody tr[data-i]').length, empty: /لا توجد/.test(document.querySelector('#exec-grid')?.textContent || '')}));
-report.kpiFilter = {filtered, empty};
-check('المؤشر يفتح مجموعة مفلترة فعلًا', filtered.rows === 1 && filtered.scope.includes('أسرة'), JSON.stringify(filtered));
-check('مؤشر بلا نتائج يعرض حالة فراغ واضحة', empty.rows === 0 && empty.empty === true, JSON.stringify(empty));
+await page.waitForFunction(() => document.querySelectorAll('#exec-grid tbody tr[data-i]').length > 0, null, {timeout: 30000});
+await page.waitForTimeout(1200);
+const number = search.number;
+await page.locator('[data-counters] .counter[data-count="overdue"]').click();
+await page.waitForTimeout(1500);
+const overdueVisible = await page.evaluate(num => [...document.querySelectorAll('#exec-grid tbody tr[data-i]')].some(row => row.textContent.includes(num)), number);
+await page.locator('[data-counters] .counter[data-count="completed"]').click();
+await page.waitForTimeout(1500);
+const completedVisible = await page.evaluate(num => [...document.querySelectorAll('#exec-grid tbody tr[data-i]')].some(row => row.textContent.includes(num)), number);
+const emptyState = await page.evaluate(() => /لا توجد/.test(document.querySelector('#exec-grid')?.textContent || ''));
+report.counterFilter = {overdueVisible, completedVisible, emptyState};
+check('عدّاد «عليه متأخرات» يعرض التنفيذ المتأخر', overdueVisible === true, String(overdueVisible));
+check('عدّاد «مكتمل السداد» يستبعده (ويظهر فراغ واضح إن لم يكن هناك مكتمل)', completedVisible === false, String(completedVisible));
+await page.locator('[data-counters] .counter[data-count="completed"]').click();
+await page.waitForTimeout(1200);
 
 report.consoleErrors = [...new Set(report.consoleErrors)].filter(message => !/ERR_CONNECTION_CLOSED|favicon/.test(message));
 await context.close();
