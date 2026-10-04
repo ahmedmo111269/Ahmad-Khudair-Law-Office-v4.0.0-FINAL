@@ -120,6 +120,7 @@ const ASSETS=[
   "./js/services/execution-migration.js",
   "./js/services/execution-simple.js",
   "./js/services/execution-settings.js",
+  "./js/services/print-paginate.js",
   "./js/services/lookups.js",
   "./js/services/maintenance.js",
   "./js/services/office.js",

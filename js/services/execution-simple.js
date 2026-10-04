@@ -962,11 +962,22 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
     </style></head><body>${parts.join('')}</body></html>`, totals: schedule.totals, currency, rows};
 }
 
-/** طباعة كشف الحساب/التوكيل عبر PrintContext القائم (بلا نظام طباعة ثانٍ). */
+/**
+ * طباعة كشف الحساب عبر PrintContext القائم (بلا نظام طباعة ثانٍ)، مع ترقيم صفحات
+ * مقيس على مقاس A4: كل صفحة تحمل «صفحة N من M» ورؤوس الجدول تتكرر في كل صفحة.
+ */
 export async function printSimpleStatement(office, executionId, options = {}) {
   const PR = await import('./execution-print.js');
   const doc = await simpleStatementDocument(office, executionId, options);
-  PR.openDocumentForPrint(doc.html);
+  PR.openDocumentForPrint(doc.html); // الترقيم موحّد داخل خدمة الطباعة
+  return doc;
+}
+
+/** طباعة توكيل محفوظ عبر نفس مسار الطباعة والترقيم (يُعيد استخدام مُنشئ مستند التوكيل القائم). */
+export async function printSimplePoa(office, poaId) {
+  const PR = await import('./execution-print.js');
+  const doc = await PR.buildPoaDocument(office, poaId);
+  PR.openDocumentForPrint(doc.html); // نفس المسار ونفس الترقيم
   return doc;
 }
 

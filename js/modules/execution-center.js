@@ -835,9 +835,9 @@ export async function bindExecutionDetail(app, executionId) {
       return receipt ? openCollection(receipt) : undefined;
     })));
     container.querySelectorAll('[data-print-poa]').forEach(button => button.addEventListener('click', guard(async () => {
-      const PR = await import('../services/execution-print.js');
-      await PR.printPoa(app.office, button.dataset.printPoa);
-      toast('فُتح التوكيل للطباعة');
+      // نفس مسار الطباعة القائم، مع ترقيم صفحات مقيس (كشف/توكيل متعدد الصفحات).
+      await S.printSimplePoa(app.office, button.dataset.printPoa);
+      toast('فُتح التوكيل للطباعة بترقيم الصفحات');
       return undefined;
     })));
     container.querySelectorAll('[data-reissue-poa]').forEach(button => button.addEventListener('click', guard(() => openPoa())));

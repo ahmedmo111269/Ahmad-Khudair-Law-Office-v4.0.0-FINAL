@@ -301,7 +301,12 @@ export function validateValueSlice(input = {}, {existing = []} = {}) {
   if (!(num(input.amount) > 0)) errors.amount = 'قيمة الاستحقاق يجب أن تكون أكبر من صفر.';
   if (valueType === 'periodic' && !PERIODICITY_LABELS[input.periodicity]) errors.periodicity = 'دورية الاستحقاق مطلوبة للمبلغ الدوري.';
   if (input.periodicity === 'custom' && !(num(input.customDays) > 0)) errors.customDays = 'عدد أيام الدورية المخصصة مطلوب.';
-  // تداخل الشرائح لنفس نوع الاستحقاق: يُسمح فقط إذا كانت هناك نهاية صريحة لشريحة سابقة (استبدال مقصود).
+  // تداخل الشرائح لنفس نوع الاستحقاق:
+  // - شريحة **لاحقة** تبدأ بعد بداية القائمة = استبدال مقصود (حكم لاحق/رفع قيمة)؛
+  //   نهاية القائمة تُشتق عند الحل من بداية اللاحقة، والصف القديم لا يُعدَّل
+  //   (التحقق بالأرقام: 2,500 حتى 31/12/2026 + 3,000 من 01/01/2026 ⇒ 24×2,500 + 12×3,000
+  //   = 96,000 بلا ازدواج ولا حذف صف).
+  // - أي تداخل آخر (بداية مساوية أو أسبق) يُرفض لأنه يخلق رقمين متناقضين لنفس المدة.
   for (const slice of existing) {
     if (slice.id && slice.id === input.id) continue;
     if (slice.isDeleted || slice.status === 'cancelled') continue;
@@ -309,6 +314,7 @@ export function validateValueSlice(input = {}, {existing = []} = {}) {
     const aStart = input.startDate, aEnd = input.endDate || '9999-12-31';
     const bStart = slice.startDate, bEnd = slice.endDate || '9999-12-31';
     if (isIsoDate(aStart) && isIsoDate(bStart) && aStart <= bEnd && bStart <= aEnd) {
+      if (aStart > bStart) continue; // استبدال من تاريخ لاحق: المحرك يقصّ القائمة تلقائيًا
       errors.startDate = `تعارض مع شريحة قائمة (${slice.startDate}${slice.endDate ? ' → ' + slice.endDate : ' → مفتوحة'}). عدّل تاريخ النهاية للشريحة السابقة أولًا أو أنشئ الشريحة الجديدة بتاريخ لاحق.`;
       break;
     }

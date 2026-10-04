@@ -13,7 +13,9 @@ import * as SIMPLE from '../services/execution-simple.js';
 import * as D from '../domain/execution-schedule.js';
 import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
 import {addExecutionJudgment, saveValueSlice} from '../services/execution.js';
+import {validateValueSlice} from '../domain/execution.js';
 import {executionSettings, saveExecutionSettings, resetExecutionSettings} from '../services/execution-settings.js';
+import * as PRINT from '../services/print-paginate.js';
 
 const rejects = async fn => { try { await fn(); } catch (error) { return error; } throw Error('Expected promise to reject'); };
 
@@ -578,5 +580,74 @@ export async function runExecutionCardTests(test, expect) {
       expect(judgmentsAfter.length).toBe(judgmentsBefore.length);
       expect(slicesAfter.length).toBe(slicesBefore.length);
     } finally { closeEnv(e); }
+  });
+}
+
+/* ==================== ترقيم صفحات الطباعة (دوال نصية بحتة) ==================== */
+
+export function runExecutionPrintDocumentTests(test, expect) {
+  test('مستند الطباعة: مقاس A4 وهوامشه وترقيم الصفحات مضمّنان في المستند النهائي', () => {
+    const doc = PRINT.wrapForPrint('<!doctype html><html><head><title>كشف حساب</title></head><body><p>س</p></body></html>');
+    expect(doc.includes('@page')).toBe(true);
+    expect(doc.includes('size: A4')).toBe(true);
+    expect(doc.includes('margin: 14mm 12mm')).toBe(true);
+    expect(doc.includes('data-print-paginator')).toBe(true);
+    expect(doc.includes('صفحة ')).toBe(true);                       // قالب رقم الصفحة داخل السكربت
+    expect(doc.includes("thead { display: table-header-group; }")).toBe(true); // رؤوس الجداول تتكرر
+    expect(doc.indexOf('data-print-paginator') < doc.indexOf('</body>')).toBe(true);
+  });
+
+  test('مستند الطباعة: الحقن يتم قبل </body> ودالة الورق ترفض المستند الفارغ', () => {
+    const wrapped = PRINT.wrapForPrint('<html><body><table><tbody><tr><td>1</td></tr></tbody></table></body></html>');
+    expect(wrapped.indexOf('<style data-print-pages>') < wrapped.indexOf('<script data-print-paginator>')).toBe(true);
+    expect(wrapped.endsWith('</body></html>')).toBe(true);
+    let threw = false;
+    try { PRINT.wrapForPrint(''); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
+  test('الترقيم لا يُطبَّق مرتين (لفّ مزدوج) — كل مسارات الطباعة تمرّ بنفس اللفّ مرة واحدة', () => {
+    const once = PRINT.wrapForPrint('<html><body><p>س</p></body></html>');
+    const twice = PRINT.wrapForPrint(once);
+    expect(twice).toBe(once);
+    expect(once.split('data-print-paginator').length - 1).toBe(1);
+    expect(once.split('<style data-print-pages>').length - 1).toBe(1);
+  });
+
+  test('سلوك الترقيم: لكل صفحة تذييل «صفحة N من M» وحدّ حماية للجداول الضخمة', () => {
+    const script = PRINT.PRINT_PAGINATOR_SCRIPT;
+    expect(script.includes("className = 'print-page'")).toBe(true);
+    expect(script.includes('صفحة ')).toBe(true);
+    expect(script.includes("(index + 1)")).toBe(true);
+    expect(script.includes("' من ' + used.length")).toBe(true);
+    expect(script.includes('MAX_ROWS = 2000')).toBe(true);           // مستند ضخم يبقى على ترقيم المتصفح
+    expect(script.includes('data-print-pages')).toBe(true);
+    const styles = PRINT.PRINT_PAGE_STYLES;
+    expect(styles.includes('break-after: page')).toBe(true);
+    expect(styles.includes('page-break-inside: avoid')).toBe(true);
+  });
+}
+
+/* ============ استبدال بند القيمة بحكم لاحق (بلا ازدواج وبلا حذف) ============ */
+
+export function runExecutionSupersedeTests(test, expect) {
+  test('حكم لاحق يبدأ بعد بداية القيمة السابقة: يُقبل والمحرك يقصّ السابقة بلا ازدواج', () => {
+    const slice = (id, amount, startDate, endDate) => ({id, executionId: 'e1', entitlementType: 'نفقة شهرية', valueType: 'periodic', periodicity: 'monthly', amount, amountMinor: amount * 100, currency: 'EGP', startDate, endDate, judgmentId: 'j' + id, isDeleted: false, status: 'active'});
+    const errors = validateValueSlice({entitlementType: 'نفقة شهرية', judgmentId: 'j2', startDate: '2026-01-01', endDate: '', valueType: 'periodic', periodicity: 'monthly', amount: 3_000},
+      {existing: [slice('A', 2_500, '2024-01-01', '2026-12-31')]});
+    expect(Object.keys(errors).length).toBe(0);
+    const schedule = D.buildExecutionSchedule({slices: [slice('A', 2_500, '2024-01-01', '2026-12-31'), slice('B', 3_000, '2026-01-01', '')], receipts: [], allocations: [], ledger: [], settings: {}, asOf: '2026-12-31'});
+    expect(schedule.totals.periodCount).toBe(36);
+    expect(schedule.totals.dueMinor).toBe((2_500 * 24 + 3_000 * 12) * 100);   // 96,000 بلا ازدواج
+    expect(schedule.rows.find(row => row.fromDate === '2026-01-01').dueMinor).toBe(300_000);
+    expect(schedule.rows.find(row => row.fromDate === '2025-12-01').dueMinor).toBe(250_000);
+  });
+
+  test('التداخل الحقيقي (بداية مساوية أو أسبق) يبقى مرفوضًا برسالة عربية واضحة', () => {
+    const existing = [{id: 'A', entitlementType: 'نفقة شهرية', startDate: '2024-01-01', endDate: '2026-12-31', isDeleted: false, status: 'active'}];
+    const sameStart = validateValueSlice({entitlementType: 'نفقة شهرية', judgmentId: 'j2', startDate: '2024-01-01', endDate: '', amount: 3_000, valueType: 'periodic', periodicity: 'monthly'}, {existing});
+    expect(typeof sameStart.startDate).toBe('string');
+    const earlierStart = validateValueSlice({entitlementType: 'نفقة شهرية', judgmentId: 'j2', startDate: '2023-06-01', endDate: '', amount: 3_000, valueType: 'periodic', periodicity: 'monthly'}, {existing});
+    expect(typeof earlierStart.startDate).toBe('string');
   });
 }
