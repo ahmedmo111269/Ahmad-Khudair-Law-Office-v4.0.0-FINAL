@@ -8,6 +8,7 @@
 // =====================================================================
 import {esc} from '../ui/dom.js';
 import {toast} from '../ui/toast.js';
+import {confirmBox, modal, closeModal} from '../ui/modal.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {createIndexedDbDataProvider} from '../db/grid-data-provider.js';
 import {registerPageLayout, openPageCustomizer} from '../ui/page-layout.js';
@@ -17,7 +18,7 @@ import {localDate} from '../core/clock.js';
 import {executionTypeLabel, executionStatusLabel, money, num, round2, EXECUTION_TYPE_LABELS, EXECUTION_STATUSES, EXECUTION_STATUS_LABELS, LEDGER_TYPE_LABELS, POA_STATUS_LABELS, DIFFERENCE_STATUS_LABELS, ACTION_KIND_LABELS, ALLOCATION_METHOD_LABELS, PRORATION_LABELS, valueTypeLabel, periodicityLabel} from '../domain/execution.js';
 import {FEAS_MODEL} from '../domain/execution-feas.js';
 import {currencyFractionDigits, fromMinorUnits} from '../domain/execution-money.js';
-import {executionCenterStats, executionBundle, executionActionRows, executionPoaRows, executionJudgments, executionSlices, createResultFile, listExecutionRows, refreshExecutionSearchText} from '../services/execution.js';
+import {executionCenterStats, executionBundle, executionActionRows, executionPoaRows, executionJudgments, executionSlices, createResultFile, listExecutionRows, listDeletedExecutions, restoreExecution, refreshExecutionSearchText} from '../services/execution.js';
 import * as L from '../services/execution-ledger.js';
 import * as DF from '../services/execution-differences.js';
 import * as POA from '../services/execution-poa.js';
@@ -199,6 +200,29 @@ function exampleSectionMarkup() {
   </section>`;
 }
 
+async function openExecutionTrash(app) {
+  const card = modal('<h2 class="modal-title">🗑 سلة التنفيذ</h2><p class="muted small">هذه قائمة حذف منطقي فقط. الاستعادة تعيد التنفيذ والصفوف التي حُذفت ضمن نفس العملية، ولا تعيد صفوفًا حُذفت يدويًا قبل ذلك.</p><div data-exec-trash-list><p class="muted">جارٍ التحميل…</p></div><div class="form-actions"><button type="button" class="ghost" data-close>إغلاق</button></div>');
+  const host = card.querySelector('[data-exec-trash-list]');
+  try {
+    const page = await listDeletedExecutions(app.office, {limit: 100});
+    host.replaceChildren();
+    if (!page.rows.length) { const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'سلة التنفيذ فارغة.'; host.append(empty); return; }
+    for (const row of page.rows) {
+      const item = document.createElement('article'); item.className = 'exec-trash-row';
+      const title = document.createElement('strong'); title.textContent = row.internalNumber || row.officialNumber || 'تنفيذ بلا رقم';
+      const meta = document.createElement('small'); meta.className = 'muted'; meta.textContent = `${row.executionType || 'غير محدد'} · حذف في ${String(row.deletedAt || '').slice(0, 10)}${row.deletionReason ? ` · ${row.deletionReason}` : ''}`;
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'ghost small'; button.textContent = 'استعادة';
+      button.addEventListener('click', async () => {
+        if (!await confirmBox('استعادة ملف التنفيذ والصفوف المحذوفة ضمن نفس العملية؟')) return;
+        try { await restoreExecution(app.office, row.id, row.version ?? null); closeModal(); toast('تمت استعادة ملف التنفيذ والصفوف التابعة المحذوفة ضمن العملية.', 'ok'); await app.refresh(); }
+        catch (error) { toast(userError(error), 'error'); }
+      });
+      item.append(title, meta, button); host.append(item);
+    }
+    if (page.hasMore) { const note = document.createElement('p'); note.className = 'muted small'; note.textContent = 'تُعرض أول 100 نتيجة؛ استخدم البحث/التدقيق للوصول إلى سجلات أقدم.'; host.append(note); }
+  } catch (error) { host.replaceChildren(Object.assign(document.createElement('p'), {className: 'error', textContent: userError(error)})); }
+}
+
 // ===== صفحة مركز التنفيذ =====
 export function executionCenterPage(app) {
   registerPageLayout({
@@ -218,6 +242,7 @@ export function executionCenterPage(app) {
   <p class="muted small">مدني وجزائي وأسرة في مكان واحد — وبدون حساب معقّد: اتبع الـ6 مراحل، واقرأ «المثال بالأرقام»، ولا تكتب أي رصيد بيدك. المؤشرات والقوائم هنا تنظيمية للمكتب ولا تُعد وصفًا قانونيًا.</p></div>
   <div class="head-actions">
     <button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها">⚙ تخصيص الصفحة</button>
+    <button class="ghost" data-exec-trash>🗑 سلة التنفيذ</button>
     <button class="ghost" data-exec-refresh>تحديث</button>
     <button class="primary" data-exec-new>+ تنفيذ جديد</button>
   </div></div>
@@ -350,20 +375,28 @@ export async function bindExecutionCenter(app) {
       },
       onRowMenu: row => [
         {id: 'open', label: 'فتح بطاقة التنفيذ'},
+        {id: 'edit', label: 'تعديل بيانات التنفيذ'},
         {id: 'collection', label: 'تسجيل تحصيل'},
         {id: 'poa', label: 'إنشاء توكيل'},
         {id: 'balance', label: 'كشف الرصيد وطباعته'},
         {id: 'attention', label: 'فتح التنبيهات'},
+        {id: 'delete', label: 'حذف ملف التنفيذ منطقيًا'},
         {id: 'file', label: 'فتح الملف', hidden: !row.fileId},
         {id: 'client', label: 'فتح الموكل', hidden: !row.clientId}
       ],
       onRowAction: async (id, row) => {
         if (id === 'open') return app.go(`exc:${row.id}`);
+        if (id === 'edit') return executionDialog(app, {execution: row.execution});
         if (id === 'file') return app.go(`file:${row.fileId}`);
         if (id === 'client') return app.go(`client:${row.clientId}`);
         if (id === 'collection') return collectionDialog(app, row.id);
         if (id === 'poa') return poaDialog(app, row.id);
         if (id === 'balance') return printBalanceDialog(app, row.id);
+        if (id === 'delete') {
+          if (!await confirmBox('حذف ملف التنفيذ بالكامل منطقيًا؟ سيُحفظ التنفيذ وكل الحكم/التحصيل/التوكيلات التابعة في السجل ويمكن استعادته من مركز الإصلاح.', {okText: 'حذف ملف التنفيذ'})) return;
+          try { await EX.deleteExecution(app.office, row.id, row.execution?.version ?? null, 'حذف من مركز التنفيذ'); toast('تم حذف ملف التنفيذ منطقيًا — البيانات محفوظة في السجل.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
+          return;
+        }
         if (id === 'attention') {
           const alerts = await B.executionAlertsFor(app.office, row.id).catch(error => { toast(userError(error), 'error'); return []; });
           toast(alerts.length ? `${alerts.length} تنبيه تنظيمي — افتح البطاقة للتفصيل` : 'لا توجد تنبيهات مسجلة');
@@ -389,6 +422,7 @@ export async function bindExecutionCenter(app) {
   root.querySelectorAll('[data-exec-new]').forEach(button => button.addEventListener('click', () => executionDialog(app)));
   root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root}));
   root.querySelector('[data-exec-refresh]')?.addEventListener('click', () => app.refresh());
+  root.querySelector('[data-exec-trash]')?.addEventListener('click', () => openExecutionTrash(app));
 
   // ===== المثال التجريبي: زرع بضغطة ثم فتح بطاقته =====
   root.querySelector('[data-demo-seed-exec]')?.addEventListener('click', async event => {
@@ -547,6 +581,7 @@ export async function executionDetailPage(app, executionId) {
     <button class="ghost" data-customize-page>⚙ تخصيص الصفحة</button>
     ${execution.fileId ? `<button class="ghost" data-route="file:${esc(execution.fileId)}">الملف القانوني</button>` : ''}
     <button class="ghost" data-print-balance>🖨 كشف الرصيد</button>
+    <button class="ghost danger" data-delete-execution>حذف ملف التنفيذ</button>
     <button class="primary" data-quick="collection">+ تحصيل</button>
   </div></div>
   <section class="panel" data-section-id="identity" data-collapse-id="exec-identity" data-collapse-default="open">
@@ -570,6 +605,7 @@ export async function executionDetailPage(app, executionId) {
     </div>
   </section>
   ${pathSectionMarkup(info)}
+  ${partiesSectionMarkup(info)}
   ${feasSectionMarkup(info)}
   ${balanceSectionMarkup(summary, info)}
   <section class="panel" data-section-id="attention" data-collapse-id="exec-attention" data-collapse-default="open">
@@ -669,6 +705,11 @@ function pathSectionMarkup(info) {
   </section>`;
 }
 
+function partiesSectionMarkup(info) {
+  const rows = (info.parties || []).filter(row => !row.isDeleted).slice().sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+  return `<section class="panel" data-section-id="parties" data-collapse-id="exec-parties" data-collapse-default="open"><div class="panel-head"><h3>أطراف التنفيذ</h3><span class="badge">${rows.length} طرف</span></div><div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الطرف</th><th>الجانب</th><th>الصفة</th><th>الربط</th><th></th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.name || '—')}</td><td>${esc(row.side === 'debtor' ? 'منفذ ضده' : 'مستحق')}</td><td>${esc(row.role || '—')}</td><td>${esc(row.clientId || row.opponentId || 'إدخال يدوي')}</td><td class="exec-cell-actions"><button type="button" class="ghost small" data-edit-party="${esc(row.id)}">تعديل</button><button type="button" class="ghost small danger" data-delete-party="${esc(row.id)}">حذف</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">لا توجد أطراف بعد.</td></tr>'}</tbody></table></div><div class="exec-actions-row"><button type="button" class="ghost small" data-quick="party">+ طرف تنفيذ</button></div></section>`;
+}
+
 function feasSectionMarkup(info) {
   if (info.execution.accountingModel !== FEAS_MODEL) return '';
   const obligations = info.obligations || [];
@@ -684,7 +725,7 @@ function feasSectionMarkup(info) {
     </tbody></table></div>
     <h4 class="exec-sub">لقطات الفترات المعترف بها</h4>
     <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>مفتاح الفترة</th><th>النطاق</th><th>نوع الالتزام</th><th>قيمة اللقطة</th><th>المصادر</th><th>الحالة</th><th></th></tr></thead><tbody>
-      ${periods.slice(-250).map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(`${row.fromDate} → ${row.toDate}`)}</td><td>${esc(row.obligationTypeSnapshot || '')}</td><td>${money(fromMinorUnits(row.recognizedAmountMinor, row.currency))} ${esc(row.currency)}</td><td class="muted small">${esc((row.sourceValuePeriodIds || []).join('، '))}</td><td>${esc(row.status)}</td><td>${row.status === 'RECOGNIZED' ? `<button type="button" class="ghost small" data-close-feas-period="${esc(row.id)}">إغلاق الحالة</button>` : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">لا توجد لقطات اعتراف محفوظة بعد.</td></tr>'}
+      ${periods.slice(-250).map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(`${row.fromDate} → ${row.toDate}`)}</td><td>${esc(row.obligationTypeSnapshot || '')}</td><td>${money(fromMinorUnits(row.recognizedAmountMinor, row.currency))} ${esc(row.currency)}</td><td class="muted small">${esc((row.sourceValuePeriodIds || []).join('، '))}</td><td>${esc(row.status)}</td><td>${row.status === 'RECOGNIZED' ? `<button type="button" class="ghost small" data-close-feas-period="${esc(row.id)}">إغلاق الحالة</button>` : ''}<button type="button" class="ghost small danger" data-delete-feas-period="${esc(row.id)}">حذف منطقي</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">لا توجد لقطات اعتراف محفوظة بعد.</td></tr>'}
     </tbody></table></div>
     ${periods.length > 250 ? '<p class="muted small">يُعرض آخر 250 لقطة هنا؛ الرصيد يستخدم حد القراءة الآمن ويوقف العرض الكامل إذا تجاوزه.</p>' : ''}
     <div class="exec-actions-row">
@@ -744,7 +785,7 @@ function judgmentsSectionMarkup(info) {
     <div class="panel-head"><h3>سلسلة الأحكام</h3><span class="badge">${rows.length} حكم</span></div>
     <p class="muted small">الحكم الأصلي ← الاستئناف ← الحكم اللاحق. كل حكم يحمل تاريخه وتاريخ سريان قيمته كما سُجّلا؛ لا استنتاج تلقائي.</p>
     <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>#</th><th>النوع</th><th>رقم الحكم</th><th>الاستئناف</th><th>تاريخ الحكم</th><th>سريان القيمة</th><th>القيمة</th><th>الدورية</th><th>المحكمة</th><th></th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(String(row.sequence ?? ''))}</td><td>${esc(row.judgmentKind === 'later' ? 'حكم لاحق' : row.judgmentKind === 'original' ? 'حكم أصلي' : (row.judgmentKind || '—'))}</td><td>${esc(row.judgmentNumber || '—')}</td><td>${esc(row.appealNumber || '—')}</td><td>${esc(row.judgmentDate || '—')}</td><td>${esc(row.effectiveFrom || 'غير محدد')}</td><td>${num(row.amount) ? money(row.amount) : '—'}</td><td>${esc(row.valueType === 'fixed' ? 'ثابت' : periodicityLabel(row.periodicity) || '—')}</td><td>${esc(row.court || '—')}</td><td><button type="button" class="ghost small" data-edit-judgment="${esc(row.id)}">تعديل</button></td></tr>`).join('') || '<tr><td colspan="10" class="muted">لا توجد أحكام مسجلة بعد.</td></tr>'}
+    ${rows.map(row => `<tr><td>${esc(String(row.sequence ?? ''))}</td><td>${esc(row.judgmentKind === 'later' ? 'حكم لاحق' : row.judgmentKind === 'original' ? 'حكم أصلي' : (row.judgmentKind || '—'))}</td><td>${esc(row.judgmentNumber || '—')}</td><td>${esc(row.appealNumber || '—')}</td><td>${esc(row.judgmentDate || '—')}</td><td>${esc(row.effectiveFrom || 'غير محدد')}</td><td>${num(row.amount) ? money(row.amount) : '—'}</td><td>${esc(row.valueType === 'fixed' ? 'ثابت' : periodicityLabel(row.periodicity) || '—')}</td><td>${esc(row.court || '—')}</td><td><button type="button" class="ghost small" data-edit-judgment="${esc(row.id)}">تعديل</button><button type="button" class="ghost small danger" data-delete-judgment="${esc(row.id)}">حذف</button></td></tr>`).join('') || '<tr><td colspan="10" class="muted">لا توجد أحكام مسجلة بعد.</td></tr>'}
     </tbody></table></div>
     <div class="exec-actions-row">
       <button class="ghost small" data-quick="judgment">+ تسجيل حكم</button>
@@ -763,7 +804,7 @@ function valuesSectionMarkup(info) {
     byType.set(slice.entitlementType, list);
   }
   const evolution = [...byType.entries()].map(([type, list]) => `<details class="exec-evolution" data-collapse-ignore><summary>${esc(type)} — ${list.length} شريحة قيمة</summary>
-    <ul class="exec-evolution-list">${list.map(slice => `<li><b>${money(slice.amount)}</b> ابتداءً من ${esc(slice.startDate)}${slice.valueType === 'fixed' ? ' (ثابت)' : ` (${esc(periodicityLabel(slice.periodicity) || '')})`}${slice.endDate ? ` وانتهاءً في ${esc(slice.endDate)}` : ''}<small class="muted"> — ${esc(slice.sourceReference || 'سند غير مذكور')} · الحكم: ${esc(slice.judgmentId ? (info.judgments.find(j => j.id === slice.judgmentId)?.judgmentNumber || 'مسجل') : 'غير مرتبط')} · سُجلت في ${esc(String(slice.createdAt || '').slice(0, 10))}</small></li>`).join('')}</ul></details>`).join('');
+    <ul class="exec-evolution-list">${list.map(slice => `<li><b>${money(slice.amount)}</b> ابتداءً من ${esc(slice.startDate)}${slice.valueType === 'fixed' ? ' (ثابت)' : ` (${esc(periodicityLabel(slice.periodicity) || '')})`}${slice.endDate ? ` وانتهاءً في ${esc(slice.endDate)}` : ''}<small class="muted"> — ${esc(slice.sourceReference || 'سند غير مذكور')} · الحكم: ${esc(slice.judgmentId ? (info.judgments.find(j => j.id === slice.judgmentId)?.judgmentNumber || 'مسجل') : 'غير مرتبط')} · سُجلت في ${esc(String(slice.createdAt || '').slice(0, 10))}</small><button type="button" class="ghost small danger" data-delete-slice="${esc(slice.id)}">حذف الشريحة</button></li>`).join('')}</ul></details>`).join('');
   const periods = info.periods || [];
   return `<section class="panel" data-section-id="values" data-collapse-id="exec-values" data-collapse-default="open">
     <div class="panel-head"><h3>فترات الاستحقاق وشرائح القيمة</h3><span class="badge">${periods.length} فترة · ${slices.length} شريحة</span></div>
@@ -847,7 +888,7 @@ function poasSectionMarkup(info) {
     <div class="panel-head"><h3>التوكيلات</h3><span class="badge">${rows.length} توكيل</span></div>
     <p class="muted small">التوكيل يعرض مكوناته ومصدر كل مبلغ (فترات جديدة، رصيد سابق، فروق معتمدة، مصروفات). عند إعادة التوكيل يظهر الرصيد السابق كلٌّ على حدة.</p>
     <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الرقم</th><th>النوع</th><th>الفترة</th><th>فترات جديدة</th><th>رصيد سابق</th><th>فروق</th><th>مصروفات</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(row.poaNumber || row.reference || '—')}</td><td>${esc(row.kind === 'reissue' ? 'إعادة توكيل' : 'توكيل')}</td><td>${esc(`${row.fromDate || ''} → ${row.toDate || ''}`)}</td><td>${money(row.baseAmount)}</td><td>${money(row.previousBalance)}</td><td>${money(row.differencesAmount)}</td><td>${money(row.expensesAmount)}</td><td><b>${money(row.total)}</b></td><td>${esc(POA_STATUS_LABELS[row.status] || row.status || '—')}</td><td class="exec-cell-actions"><button type="button" class="ghost small" data-print-poa="${esc(row.id)}">طباعة</button>${row.previousPoaId ? `<button type="button" class="ghost small" data-reissue="${esc(row.id)}">إعادة توكيل</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">لا توجد توكيلات بعد.</td></tr>'}
+    ${rows.map(row => `<tr><td>${esc(row.poaNumber || row.reference || '—')}</td><td>${esc(row.kind === 'reissue' ? 'إعادة توكيل' : 'توكيل')}</td><td>${esc(`${row.fromDate || ''} → ${row.toDate || ''}`)}</td><td>${money(row.baseAmount)}</td><td>${money(row.previousBalance)}</td><td>${money(row.differencesAmount)}</td><td>${money(row.expensesAmount)}</td><td><b>${money(row.total)}</b></td><td>${esc(POA_STATUS_LABELS[row.status] || row.status || '—')}</td><td class="exec-cell-actions"><button type="button" class="ghost small" data-print-poa="${esc(row.id)}">طباعة</button><button type="button" class="ghost small danger" data-delete-poa="${esc(row.id)}">حذف</button>${row.previousPoaId ? `<button type="button" class="ghost small" data-reissue="${esc(row.id)}">إعادة توكيل</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">لا توجد توكيلات بعد.</td></tr>'}
     </tbody></table></div>
     <div class="exec-actions-row"><button class="ghost small" data-quick="poa">+ توكيل جديد</button><button class="ghost small" data-quick="reissue">+ إعادة توكيل</button></div>
   </section>`;
@@ -859,7 +900,7 @@ function actionsSectionMarkup(info) {
     <div class="panel-head"><h3>إجراءات التنفيذ</h3><span class="badge">${rows.length} إجراء</span></div>
     <p class="muted small">حجز، إعلان بيع، جلسة بيع، تبديد، رقم عرائض، رقم قضائي — سجل تنظيمي بترتيب المكتب الفعلي، لا سير عمل قانوني مفروض.</p>
     <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>النوع</th><th>التاريخ</th><th>المرجع</th><th>الجهة</th><th>رقم عرائض</th><th>رقم قضائي</th><th>ملاحظات</th><th></th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(ACTION_KIND_LABELS[row.kind] || row.kind)}</td><td>${esc(row.date || '—')}</td><td>${esc(row.referenceNumber || '—')}</td><td>${esc(row.authority || '—')}</td><td>${esc(row.petitionNumber || '—')}</td><td>${esc(row.judicialNumber || '—')}</td><td class="muted small">${esc(row.notes || '')}</td><td class="exec-cell-actions"><button type="button" class="ghost small" data-edit-action="${esc(row.id)}">تعديل</button><button type="button" class="ghost small" data-result-file="${esc(row.id)}">ملف ناتج</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">لا توجد إجراءات مسجلة.</td></tr>'}
+    ${rows.map(row => `<tr><td>${esc(ACTION_KIND_LABELS[row.kind] || row.kind)}</td><td>${esc(row.date || '—')}</td><td>${esc(row.referenceNumber || '—')}</td><td>${esc(row.authority || '—')}</td><td>${esc(row.petitionNumber || '—')}</td><td>${esc(row.judicialNumber || '—')}</td><td class="muted small">${esc(row.notes || '')}</td><td class="exec-cell-actions"><button type="button" class="ghost small" data-edit-action="${esc(row.id)}">تعديل</button><button type="button" class="ghost small" data-result-file="${esc(row.id)}">ملف ناتج</button><button type="button" class="ghost small danger" data-delete-action="${esc(row.id)}">حذف</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">لا توجد إجراءات مسجلة.</td></tr>'}
     </tbody></table></div>
     <div class="exec-actions-row"><button class="ghost small" data-quick="execAction">+ تسجيل إجراء</button></div>
   </section>`;
@@ -896,11 +937,28 @@ export async function bindExecutionDetail(app, executionId) {
 
   root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'execution:card', root}));
   root.querySelectorAll('[data-edit-execution]').forEach(button => button.addEventListener('click', () => executionDialog(app, {execution})));
+  root.querySelector('[data-delete-execution]')?.addEventListener('click', async () => {
+    if (!await confirmBox('حذف ملف التنفيذ بالكامل منطقيًا؟ يشمل الصفوف التابعة ويحفظها دون حذف فعلي.', {okText: 'حذف ملف التنفيذ'})) return;
+    try { await EX.deleteExecution(app.office, executionId, execution.version ?? null, 'حذف من بطاقة التنفيذ'); toast('تم حذف ملف التنفيذ منطقيًا.'); await app.go('executionCenter'); } catch (error) { toast(userError(error), 'error'); }
+  });
+  root.querySelectorAll('[data-edit-party]').forEach(button => button.addEventListener('click', async () => {
+    const party = info.parties.find(row => row.id === button.dataset.editParty); if (!party) return;
+    const [clientsPage, opponentsPage] = await Promise.all([app.office.r.clients.page({index: 'createdAt', direction: 'prev', limit: 100}).catch(() => ({items: []})), app.office.r.opponents.page({index: 'createdAt', direction: 'prev', limit: 100}).catch(() => ({items: []}))]);
+    partyDialog(app, executionId, {party, clients: clientsPage.items || [], opponents: opponentsPage.items || []});
+  }));
+  root.querySelectorAll('[data-delete-party]').forEach(button => button.addEventListener('click', async () => {
+    if (!await confirmBox('حذف طرف التنفيذ منطقيًا؟ يُمنع إن كانت له تخصيصات مالية نشطة.', {okText: 'حذف الطرف'})) return;
+    try { await EX.deleteExecutionParty(app.office, button.dataset.deleteParty, {reason: 'حذف من بطاقة التنفيذ'}); toast('تم حذف الطرف منطقيًا.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
+  }));
   root.querySelector('[data-add-feas-obligation]')?.addEventListener('click', () => executionObligationDialog(app, executionId, {parties: info.parties}).catch(error => toast(userError(error), 'error')));
   root.querySelector('[data-recognize-feas]')?.addEventListener('click', () => recognitionDialog(app, executionId, info.obligations || []).catch(error => toast(userError(error), 'error')));
   root.querySelectorAll('[data-close-feas-period]').forEach(button => button.addEventListener('click', () => {
     const period = info.executionPeriods.find(row => row.id === button.dataset.closeFeasPeriod);
     if (period) closeRecognizedPeriod(app, period).catch(error => toast(userError(error), 'error'));
+  }));
+  root.querySelectorAll('[data-delete-feas-period]').forEach(button => button.addEventListener('click', async () => {
+    if (!await confirmBox('حذف الفترة منطقيًا؟ لا يُسمح بذلك إذا استُخدمت في تخصيص أو فرق محفوظ.', {okText: 'حذف الفترة'})) return;
+    try { await EX.deleteExecutionPeriod(app.office, button.dataset.deleteFeasPeriod, {reason: 'حذف من بطاقة التنفيذ'}); toast('تم حذف الفترة منطقيًا.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
   }));
   root.querySelectorAll('[data-print-balance]').forEach(button => button.addEventListener('click', () => printBalanceDialog(app, executionId)));
   root.querySelector('[data-refresh-search]')?.addEventListener('click', async () => {
@@ -939,9 +997,25 @@ export async function bindExecutionDetail(app, executionId) {
     const judgment = info.judgments.find(row => row.id === button.dataset.editJudgment);
     judgmentDialog(app, executionId, {judgment, slices: info.slices, obligations: info.obligations || [], accountingModel: execution.accountingModel}).catch(error => toast(userError(error), 'error'));
   }));
+  root.querySelectorAll('[data-delete-judgment]').forEach(button => button.addEventListener('click', async () => {
+    if (!await confirmBox('حذف الحكم منطقيًا؟ يُمنع الحذف إذا كان الحكم مصدر شريحة أو له حكم لاحق.', {okText: 'حذف الحكم'})) return;
+    try { await EX.deleteExecutionJudgment(app.office, button.dataset.deleteJudgment, {reason: 'حذف من بطاقة التنفيذ'}); toast('تم حذف الحكم منطقيًا.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
+  }));
+  root.querySelectorAll('[data-delete-slice]').forEach(button => button.addEventListener('click', async () => {
+    if (!await confirmBox('حذف شريحة القيمة منطقيًا؟ سيُرفض الحذف إن دخلت في تخصيص أو لقطة FEAS.', {okText: 'حذف الشريحة'})) return;
+    try { await EX.deleteExecutionValueSlice(app.office, button.dataset.deleteSlice, {reason: 'حذف من بطاقة التنفيذ'}); toast('تم حذف شريحة القيمة منطقيًا.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
+  }));
   root.querySelectorAll('[data-edit-action]').forEach(button => button.addEventListener('click', () => {
     const action = info.actions.find(row => row.id === button.dataset.editAction);
     actionDialog(app, executionId, {action}).catch(error => toast(userError(error), 'error'));
+  }));
+  root.querySelectorAll('[data-delete-action]').forEach(button => button.addEventListener('click', async () => {
+    if (!await confirmBox('حذف إجراء التنفيذ منطقيًا؟ الملف الناتج إن وجد لا يُحذف تلقائيًا.', {okText: 'حذف الإجراء'})) return;
+    try { await EX.deleteExecutionAction(app.office, button.dataset.deleteAction, {reason: 'حذف من بطاقة التنفيذ'}); toast('تم حذف الإجراء منطقيًا.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
+  }));
+  root.querySelectorAll('[data-delete-poa]').forEach(button => button.addEventListener('click', async () => {
+    if (!await confirmBox('حذف التوكيل منطقيًا؟ لا يمكن ذلك إذا استُخدم كمصدر لحركة مالية.', {okText: 'حذف التوكيل'})) return;
+    try { await EX.deleteExecutionPoa(app.office, button.dataset.deletePoa, {reason: 'حذف من بطاقة التنفيذ'}); toast('تم حذف التوكيل منطقيًا.'); await app.refresh(); } catch (error) { toast(userError(error), 'error'); }
   }));
   root.querySelectorAll('[data-correct-ledger]').forEach(button => button.addEventListener('click', () => {
     const entry = info.ledger.find(row => row.id === button.dataset.correctLedger);

@@ -186,7 +186,14 @@ async function handleRowAction(app,store,id,row,reload){
  if(id==='relations'&&fid){app.__fileTab={id:fid,tab:'relations'};return app.go('file:'+fid)}
  if(id==='copy')return copyText(formatFileNumber(row.fileNumber)||row.fileNumber||row.caseNumber||row.poaNumber||row.noticeNumber||'');
  const preset={fileId:fid||undefined,caseId:row.caseId||row.currentStageId||undefined,clientId:row.clientId||undefined};
- const map={ 'add-hearing':'hearings','add-procedure':'procedures','add-note':'caseNotes','add-service':'serviceRecords','add-judgment':'judgments' };
+ if(id==='add-note'){
+  const noteTypes={clients:'CLIENT',files:'LEGAL_FILE',cases:'CASE',hearings:'HEARING',procedures:'PROCEDURE',judgments:'JUDGMENT',execution:'EXECUTION',powersOfAttorney:'POA',serviceRecords:'SERVICE_RECORD',expertReports:'EXPERT_REPORT',appointments:'APPOINTMENT',communications:'COMMUNICATION',fees:'FEE',documentReferences:'DOCUMENT_REFERENCE'};
+  const entityType=noteTypes[store];
+  const context=entityType ? [{entityType,entityId:row.id,relationType:'CONTEXT'}] : (fid ? [{entityType:'LEGAL_FILE',entityId:fid,relationType:'CONTEXT'}] : []);
+  const {openQuickNoteCapture}=await import('./quick-notes.js');
+  return openQuickNoteCapture(app,{context,onSaved:()=>reload?.()});
+ }
+ const map={ 'add-hearing':'hearings','add-procedure':'procedures','add-service':'serviceRecords','add-judgment':'judgments' };
  if(map[id]){
   if(id==='add-hearing'&&!preset.caseId){if(fid){app.__fileTab={id:fid,tab:'hearings'};return app.go('file:'+fid)}toast('أضف الجلسة من ملف له مرحلة قضائية','error');return}
   if((id==='add-judgment')&&!preset.caseId){toast('الحكم يرتبط بمرحلة قضائية. افتح الملف وأضف المرحلة أولًا.','error');return}

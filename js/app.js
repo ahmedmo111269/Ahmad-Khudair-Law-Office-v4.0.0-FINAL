@@ -17,6 +17,7 @@ import {listPage,bindListPage} from './modules/list-page.js';
 import {clientPage,bindClientPage,opponentPage,bindOpponentPage,recordPage,bindRecordPage} from './modules/record-page.js';
 import {filePage,bindFilePage} from './modules/file-page.js';
 import {openQuickAdd} from './modules/quick-add.js';
+import {quickNotesPage,bindQuickNotes,openQuickNoteCapture,bindQuickNoteGlobalEvents} from './modules/quick-notes.js';
 import {renderDatabases,bindDatabases,renderBackup,bindBackup,renderRecovery,bindRecovery} from './modules/databases.js';
 import {reportsPage,bindReports} from './modules/reports.js';
 import {renderSearch,bindSearch} from './modules/search.js';
@@ -52,6 +53,7 @@ const PAGES={
  search:{title:'البحث',render:app=>renderSearch(app),bind:app=>bindSearch(app)},
  reports:{title:'التقارير',render:(app,q)=>reportsPage(app,q),bind:app=>bindReports(app)},
  actionCenter:{title:'مركز العمل',render:(app,q)=>workCenterPage(app,q),bind:(app,q)=>bindWorkCenter(app,q)},
+ quickNotes:{title:'الملاحظات السريعة',render:(app,q)=>quickNotesPage(app,q),bind:(app,q)=>bindQuickNotes(app,q),layoutId:'quickNotes',store:'caseNotes'},
  executionCenter:{title:'مركز التنفيذ',render:app=>executionCenterPage(app),bind:app=>bindExecutionCenter(app),layoutId:'executionCenter'},
  analytics:{title:'الإحصاءات',render:(app,q)=>analyticsPage(app,q),bind:app=>bindAnalytics(app)},
  integrity:{title:'سلامة البيانات والتدقيق',render:app=>integrityPage(app),bind:app=>bindIntegrity(app)},
@@ -62,6 +64,8 @@ const PAGES={
  settings:{title:'الإعدادات',render:app=>renderSettings(app),bind:app=>bindSettings(app)}
 };
 for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>listPage(app,s,q),bind:app=>bindListPage(app,s)};
+// المسار القديم caseNotes يبقى رابط توافق إلى شاشة الملاحظات السريعة، لا شاشة Notes ثانية.
+PAGES.caseNotes=PAGES.quickNotes;
 
 // صفحات السجل: client:ID, opponent:ID, file:ID, case:ID, rec:STORE:ID
 function recordRoute(route){
@@ -75,6 +79,9 @@ function recordRoute(route){
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
  // المهمة المستقلة لا صفحة سجل عامة لها: تُفتح في مجلّد مركز العمل (رابط ثابت rec:workItems:ID).
  if(m&&m[1]==='workItems')return {title:'مركز العمل',render:app=>workCenterPage(app,new URLSearchParams({item:m[2]})),bind:app=>bindWorkCenter(app,new URLSearchParams({item:m[2]})),store:'actionCenter',layoutId:'actionCenter'};
+ // Old caseNotes record URLs open the single Quick Notes surface and its editor;
+ // they never expose the retired generic Notes screen as a second system.
+ if(m&&m[1]==='caseNotes')return {title:'الملاحظات السريعة',render:app=>quickNotesPage(app,new URLSearchParams({status:'ALL',note:m[2]})),bind:(app,q)=>bindQuickNotes(app,new URLSearchParams({status:'ALL',note:m[2]})),store:'caseNotes',layoutId:'quickNotes'};
  if(m&&m[1]!=='witnesses'&&ENTITIES[m[1]])return {title:ENTITIES[m[1]].label,render:app=>recordPage(app,m[1],m[2]),bind:app=>bindRecordPage(app,m[1],m[2]),store:m[1],layoutId:'rec:'+m[1]};
  return null;
 }
@@ -102,7 +109,10 @@ class App{
   // أفقية بعرض مساحة البرنامج، مع لوحات منظمة لكل تبويب، وطي، وتخصيص كامل.
   buildSidebar();initSidebarState();
   $('#mobile-menu').onclick=()=>{isDesktop()?toggleCollapsed():toggleMobile()};
-  $('#quick-add').onclick=()=>openQuickAdd(this);initCombobox();
+  $('#quick-add').onclick=()=>openQuickAdd(this);
+  $('#quick-note-fab')?.addEventListener('click',()=>openQuickNoteCapture(this));
+  bindQuickNoteGlobalEvents(this);
+  initCombobox();
   $('#command-btn').innerHTML=`${icon('search')} <span>لوحة الأوامر</span> <kbd>Ctrl K</kbd>`;
   $('#command-btn').onclick=()=>openPalette(this);
   $('#nav-back').onclick=()=>this.back();
@@ -135,6 +145,7 @@ class App{
  initShortcuts(){
   document.addEventListener('keydown',e=>{
    const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
+   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();openQuickNoteCapture(this);return}
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
    if((e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
    if(e.key==='Escape'&&!document.querySelector('.dg-pop')){

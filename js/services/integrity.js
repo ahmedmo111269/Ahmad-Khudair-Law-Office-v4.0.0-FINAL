@@ -7,7 +7,7 @@ const REQUIRED={
   fileClients:['id','fileId','clientId'],caseClients:['id','caseId','clientId'],
   caseOpponents:['id','caseId','opponentId'],caseRelations:['id','sourceCaseId','targetCaseId'],
   hearings:['id','caseId','hearingDate'],procedures:['id','fileId','status'],
-  appointments:['id','date'],communications:['id','fileId'],caseNotes:['id','fileId','content'],
+  appointments:['id','date'],communications:['id','fileId'],caseNotes:['id','content','createdAt'],
   witnesses:['id','caseId','name'],expertReports:['id','caseId','reportDate'],
   // الأحكام والتنفيذ يُقبلان أيضًا مرتبطين بملف/تنفيذ بلا قضية (سلسلة أحكام التنفيذ)،
   // لذلك الحقول الدنيا هي المعرّف والتاريخ/الحالة، والعلاقات تُفحص في relationRules عند وجودها.
@@ -50,7 +50,8 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
       ['fileRelations','sourceFileId','files','targetFileId','files'],
       ['hearings','caseId','cases','fileId','files'],['hearings','previousHearingId','hearings'],
       ['procedures','fileId','files','caseId','cases'],['appointments','clientId','clients','fileId','files'],['communications','clientId','clients','fileId','files'],
-      ['caseNotes','fileId','files','caseId','cases'],['witnesses','caseId','cases'],['expertReports','caseId','cases'],['judgments','caseId','cases'],['execution','caseId','cases'],
+      ['caseNotes','fileId','files','caseId','cases'],
+      ['quickNoteLinks','noteId','caseNotes'],['witnesses','caseId','cases'],['expertReports','caseId','cases'],['judgments','caseId','cases'],['execution','caseId','cases'],
       ['serviceRecords','fileId','files','caseId','cases'],['serviceRecords','hearingId','hearings','partyId','fileParties'],
       ['serviceRecords','previousServiceId','serviceRecords','bailiffId','bailiffs'],
       ['fees','fileId','files'],['feePayments','feeId','fees'],['documentReferences','fileId','files'],
@@ -81,7 +82,7 @@ export async function deepHealth(ctx,{scanRows=true,maxIssues=500}={}){
     if(ctx.db.objectStoreNames.contains('workItems'))await scan(ctx.db,'workItems',row=>{
       if(out.dataIssues.length>=maxIssues)return;
       const bad=[];
-      if(row.kind==='native'){for(const k of ['id','title','status','createdAt'])if(!has(row,k))bad.push(k);if(row.sourceType!=='task'||row.sourceId!==row.id)bad.push('sourceId')}
+      if(row.kind==='native'){for(const k of ['id','title','status','createdAt'])if(!has(row,k))bad.push(k);if(!(['task','QUICK_NOTE'].includes(row.sourceType))||!has(row,'sourceId'))bad.push('sourceId')}
       else if(row.kind==='overlay'){for(const k of ['id','sourceType','sourceId'])if(!has(row,k))bad.push(k);if(row.id!==`${row.sourceType}::${row.sourceId}`)bad.push('id')}
       else bad.push('kind');
       if(bad.length)out.dataIssues.push({type:'work-item-invalid',store:'workItems',id:row.id,fields:bad});

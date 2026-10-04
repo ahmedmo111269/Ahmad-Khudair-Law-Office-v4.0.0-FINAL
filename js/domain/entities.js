@@ -248,12 +248,18 @@ export const ENTITIES={
   {k:'followUpDate',l:'تاريخ المتابعة',t:'date',grid:true,g:'بيانات الاتصال'},
   {k:'clientId',l:'الموكل',t:'ref',ref:'clients',grid:true,g:'الربط (ملف أو موكل)'},
   {k:'fileId',l:'الملف',t:'ref',ref:'files',grid:true,g:'الربط (ملف أو موكل)'}]},
- caseNotes:{label:'ملاحظة',plural:'الملاحظات',title:r=>String(r.content||'ملاحظة').slice(0,40),route:'rec:caseNotes',dateField:'createdAt',dateIndex:'createdAt',fields:[
-  {k:'fileId',l:'الملف',t:'ref',ref:'files',req:true,grid:true,g:'الربط'},
+ caseNotes:{label:'ملاحظة',plural:'الملاحظات',title:r=>r.title||String(r.content||'ملاحظة').slice(0,40),route:'rec:caseNotes',dateField:'createdAt',dateIndex:'createdAt',fields:[
+  {k:'title',l:'العنوان (اختياري)',t:'text',grid:true,g:'الملاحظة'},
+  {k:'fileId',l:'الملف (اختياري)',t:'ref',ref:'files',grid:true,g:'الربط'},
   {k:'caseId',l:'القضية / المرحلة (اختياري)',t:'ref',ref:'cases',g:'الربط'},
   {k:'category',l:'التصنيف',t:'lookup',lk:'noteCategory',grid:true,g:'الملاحظة'},
+  {k:'noteType',l:'نوع الملاحظة السريعة',t:'lookup',lk:'quickNoteType',grid:true,g:'الملاحظة'},
   {k:'content',l:'نص الملاحظة',t:'textarea',grid:true,g:'الملاحظة'},
-  {k:'createdAt',l:'تاريخ الإضافة',t:'readonly',dt:'date',grid:true}]},
+  {k:'priority',l:'الأولوية',t:'select',opts:[['LOW','منخفضة'],['NORMAL','عادية'],['HIGH','مرتفعة'],['URGENT','عاجلة']],grid:true,g:'التنظيم'},
+  {k:'lifecycle',l:'الدورة',t:'select',opts:[['OPEN','مفتوحة'],['DONE','منجزة']],grid:true,g:'التنظيم'},
+  {k:'dueAt',l:'موعد الاستحقاق',t:'date',grid:true,g:'التنظيم'},
+  {k:'createdAt',l:'تاريخ الإضافة',t:'readonly',dt:'date',grid:true},
+  {k:'updatedAt',l:'آخر تعديل',t:'readonly',dt:'date',grid:true}]},
  powersOfAttorney:{label:'توكيل',plural:'التوكيلات',title:r=>`توكيل ${r.poaNumber||''}`,route:'rec:powersOfAttorney',dateField:'issuedDate',dateIndex:'issuedDate',fields:[
   {k:'clientId',l:'الموكل',t:'ref',ref:'clients',req:true,grid:true,g:'الربط'},
   {k:'fileId',l:'الملف (اختياري)',t:'ref',ref:'files',g:'الربط'},

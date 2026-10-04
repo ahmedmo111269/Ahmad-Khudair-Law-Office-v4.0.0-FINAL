@@ -1,3 +1,35 @@
+# تقرير التحقق الحالي — الملاحظات السريعة وحذف التنفيذ · v5.11.0 / Schema 18 — 2026-10-04
+
+**النطاق:** Quick Notes تشغيلية Offline-First فوق `caseNotes`، وحذف منطقي آمن لمجمع التنفيذ وتوابعه، مع الحفاظ على Activity Log وSearch وWork Center وBackup/Restore وSync وUniversal DataGrid وPrintContext الموجودة. البيانات الاختبارية اصطناعية، ولا يُسجَّل PASS لما لم يُنفَّذ.
+
+## النتائج الفعلية
+
+| الفحص | الأمر / الطريقة | النتيجة |
+|---|---|---|
+| اختبارات Node الكاملة | `cd tools/node-tests && npm test` | **389/389 PASS**؛ 0 فشل، ويشمل v18 وQuick Notes والحذف الذري/حواجز الأثر |
+| Quick Notes في Chromium | `QN_BASE_URL=http://127.0.0.1:4173 npm run test:quick-notes-browser` | **8/8 PASS**، Chromium 153، 0 أخطاء Console غير متوقعة |
+| مركز التنفيذ في Chromium | `GRID_BASE_URL=http://127.0.0.1:4173 npm run test:execution-browser` | **34/34 PASS**؛ البطاقة/الجدول/التحصيل/اللقطة/البحث، وجود زر السلة وزر التعديل وأزرار حذف الحكم/الشريحة/التوكيل؛ النقر المؤكد على الحذف نفسه مغطى بخدمات Node لا بمسار UI مستقل |
+| FEAS في Chromium | `GRID_BASE_URL=http://127.0.0.1:4173 npm run test:execution-feas-browser` | **10/10 PASS** |
+| Offline/Backup/Restore/Sync في Chromium | `GRID_BASE_URL=http://127.0.0.1:4173 npm run test:offline-sync-browser` | **PASS**؛ كل الفحوص المدرجة، 0 Console غير متوقع؛ schema 18 وcache الجديد موجودان |
+| التدقيق الساكن | `git diff --check` و`node --check` للوحدات المعدلة | **PASS** |
+
+## التدقيق المعماري والتكامل
+
+- **Architecture:** لا مخزن Notes أو Tasks أو Search أو Sync أو DataGrid موازٍ؛ `caseNotes` canonical، وعمليات الكتابة عبر `quick-notes.js`/repositories، والمعاملات تحفظ note+links+activity أو مجمع التنفيذ+التوابع.
+- **Database:** v18 additive فقط؛ `quickNoteLinks` و`caseNoteDrafts`، وفهارس lifecycle/priority/due/reminder/sort/search. لا backfill ولا حذف ولا تغيير للمعرفات التاريخية؛ الصفوف القديمة بلا `sortKey` تدخل مسار manual compatibility cursor.
+- **UX:** RTL/Mobile-First، Ctrl+Shift+N، Command Center، FAB الهاتف، Inbox/Triage، Agenda، Needs Action، أولوية/لون/وسوم/Checklist/Pin/Star، ترتيب يدوي، Archive منفصل عن Trash، Restore وSnooze/Reminder.
+- **Integrations:** روابط سياقية معتمدة للموكل/الملف/القضية/الطرف/الجلسة/الحكم/التنفيذ/التوكيل وسجلات الخدمة/الخبراء/المواعيد/الاتصالات/الأتعاب/المستندات؛ عرض في صفحات السجل/الملف؛ تحويل إلى Work Center idempotent؛ بحث شامل محلي؛ Backup/Restore/Sync القائمة.
+- **Execution deletion:** حذف منطقي ذري للمجمع، الحكم، شريحة القيمة، فترة FEAS، الطرف، الإجراء والتوكيل؛ لا حذف تلقائي للملف/القضية/الملفات الناتجة، ولا حذف عنصر مالي ذي تخصيص/أثر تاريخي؛ الاستعادة تعيد فقط ما حذفه aggregate نفسه.
+
+## NOT VERIFIED / المخاطر والأداء
+
+- **NOT VERIFIED:** مسارات Browser المخصصة للأرشفة، التذكير، Agenda/Needs Action، وكل نوع ربط سياقي في UI؛ اختُبرت الخدمات وبعض المسارات فقط. النقر على FAB الهاتف مغطى في فحص Chromium العام.
+- **NOT VERIFIED:** Print Preview/طابعة فعلية، المتصفحات والأجهزة غير Chromium، بيانات إنتاجية وملايين السجلات، Sync بين أجهزة/ناقل فعلي.
+- **Performance:** القراءة pagination/cursor/index-bounded ولا تُحمّل كل الملاحظات؛ لا benchmark إنتاجي مستقل لـQuick Notes.
+- **Risks:** التذكير محلي لا يضمن إشعار نظام تشغيل؛ كلمات الاقتراح لا تُحوّل إلى ربط/أولوية/تاريخ إلا بعد اعتماد المستخدم؛ النسخة الاحتياطية JSON القائمة ليست تشفيرًا تلقائيًا، كما يوضح التطبيق.
+
+---
+
 # تقرير التحقق الحالي — FEAS · v5.10.0 / Schema 17 — 2026-10-03
 
 **النطاق:** إضافة محرك حساب FEAS صريح وقابل لإعادة البناء للتنفيذ الأسري، مع إبقاء مسار البيانات القديمة، الدفتر، Backup/Restore وSync كما هي. جميع بيانات الفحوص اصطناعية. لا يُسجَّل PASS لما لم يُنفَّذ، ولا يعني أي اختبار صحة إجراء قانونيًا.

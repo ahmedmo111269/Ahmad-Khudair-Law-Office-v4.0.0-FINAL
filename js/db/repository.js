@@ -42,7 +42,7 @@ export class Repository{
   * cursor: opaque token returned as nextCursor by the previous call; iteration resumes strictly after it.
   * Backward navigation is handled by the caller keeping a stack of cursors (see ui/pagination.js).
   */
- async page({index=null,key=undefined,lower=undefined,upper=undefined,lowerOpen=false,upperOpen=false,cursor=null,limit=25,direction='next',filter=null,signal=null,includeItemCursors=false}={}){
+ async page({index=null,key=undefined,lower=undefined,upper=undefined,lowerOpen=false,upperOpen=false,cursor=null,limit=25,direction='next',filter=null,signal=null,includeItemCursors=false,includeDeleted=false}={}){
    if(limit<1||limit>MAX_PAGE_SIZE)throw new AppError(ERR.VALIDATION,'حجم الصفحة غير مسموح.');
    if(signal?.aborted)throw abortError();
    this.ctx.assert();
@@ -97,7 +97,7 @@ export class Repository{
          positioned=true;
        }
        const v=cur.value;
-       if(!v.isDeleted&&(!filter||filter(v)))items.push({value:v,meta:{key:cur.key,primaryKey:cur.primaryKey}});
+       if((includeDeleted||!v.isDeleted)&&(!filter||filter(v)))items.push({value:v,meta:{key:cur.key,primaryKey:cur.primaryKey}});
        if(items.length>limit){finish(true);return}
        cur.continue();
      };

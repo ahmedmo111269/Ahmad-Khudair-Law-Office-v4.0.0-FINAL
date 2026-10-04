@@ -19,10 +19,13 @@ import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
 import {linkedTasksPanelHtml,bindLinkedTasksPanel} from '../ui/work-links.js';
+import {notesForEntity} from '../services/quick-notes.js';
+import {openQuickNoteCapture,openQuickNoteEditor} from './quick-notes.js';
 
 // السجلات التي تقبل «مهمة مرتبطة» من مركز العمل (المعرّف فقط يُخزَّن في المهمة).
 const TASK_LINK_STORES=['hearings','procedures','appointments','communications','judgments','serviceRecords','expertReports','execution','caseNotes','powersOfAttorney','cases'];
 const taskScope=(store,id)=>store==='cases'?{caseId:id}:{relatedId:id};
+const NOTE_ENTITY_TYPES={clients:'CLIENT',files:'LEGAL_FILE',cases:'CASE',fileParties:'PARTY',hearings:'HEARING',procedures:'PROCEDURE',judgments:'JUDGMENT',execution:'EXECUTION',powersOfAttorney:'POA',serviceRecords:'SERVICE_RECORD',expertReports:'EXPERT_REPORT',appointments:'APPOINTMENT',communications:'COMMUNICATION',fees:'FEE',documentReferences:'DOCUMENT_REFERENCE'};
 
 export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
  const items=fields.map(f=>{const v=displayValue(f,row,refs);if(skipEmpty&&!v)return '';const link=f.ref&&row[f.k]?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}</dd></div>`}).join('');
@@ -154,8 +157,10 @@ export async function recordPage(app,store,id){
  if(store==='cases')await Promise.all(CASE_CHILDREN.map(async([s])=>{children[s]=await app.office.r[s].byIndex('caseId',id,2000)}));
  if(store==='fees')children.feePayments=await app.office.r.feePayments.byIndex('feeId',id,2000);
  const activity=await app.office.r.activityLog.byIndex('entityId',id,200);
+ const noteEntityType=NOTE_ENTITY_TYPES[store];
+ const quickNotes=noteEntityType?await notesForEntity(app.office,noteEntityType,id,{limit:100}):[];
  const caseTimeline=store==='cases'?await buildCaseTimeline(app.office,id):null;
- app.__rec={store,id,row,children,activity,hearingSequence,serviceSequence,caseTimeline};
+ app.__rec={store,id,row,children,activity,hearingSequence,serviceSequence,caseTimeline,quickNotes,noteEntityType};
  trackRecent(`rec:${store}:${id}`,ent.title(row)||ent.label,{icon:{hearings:'calendar',appointments:'clock',communications:'phone',fees:'wallet',judgments:'landmark',procedures:'clipboard',caseNotes:'note',serviceRecords:'file',expertReports:'microscope',execution:'hammer'}[store]||'file',sub:ent.label});
  const parentBtns=ent.fields.filter(f=>f.ref&&row[f.k]).map(f=>`<button class="ghost" data-open-ref="${esc(f.ref)}:${esc(row[f.k])}">فتح ${esc(f.l.replace(/\s*\(.*\)/,''))}: ${esc(refs.get(row[f.k])||'')}</button>`).join('');
  const extraBtns=[
@@ -170,6 +175,7 @@ export async function recordPage(app,store,id){
  return `<div class="record-head"><div><small class="muted">${esc(ent.label)}</small><h2>${esc(ent.title(row)||ent.label)}</h2><div class="parent-links">${parentBtns}</div></div>
  <div class="head-actions">${extraBtns}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:true})}
+ ${recordQuickNotesPanel(quickNotes,store,id)}
  ${workPanel}
  ${store==='hearings'?section('hearing-cycle','دورة الجلسات',hearingSequence?.items.length||0,`<ol class="hearing-cycle">${(hearingSequence?.items||[]).map((h,i)=>`<li style="--depth:${Math.min(6,h.__depth||0)}"><button type="button" data-cycle-hearing="${esc(h.id)}"><time>${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(h.hearingTime):''}</time><b>${esc(h.type||'جلسة')}</b><small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></button>${i<(hearingSequence?.items.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
  ${store==='serviceRecords'?section('service-cycle','دورة الإعلان / الإنذار',serviceSequence?.records.length||0,`${serviceSequence?.hasBranches?'<p class="notice">توجد أكثر من إعادة مرتبطة بسجل واحد؛ عُرضت الفروع كما سُجلت.</p>':''}${serviceSequence?.more?'<p class="notice">تعرض دورة الملف أول 5000 سجل نشط؛ استخدم التقرير العام لتضييق نطاق السجلات الأقدم.</p>':''}<ol class="hearing-cycle service-cycle">${(serviceSequence?.records||[]).map((r,i)=>`<li style="--depth:${Math.min(6,r.__depth||0)}"><button type="button" data-cycle-service="${esc(r.id)}"><time>${fmtDate(r.createdAt)||'بدون تاريخ'}${r.serviceDate?' — '+fmtDate(r.serviceDate):''}</time><b>${esc(r.actionType||r.type||'إعلان')} · ${esc(r.internalNumber||'')}</b><small>${esc(r.partyName||'')} ${r.partyRole?'— '+esc(r.partyRole):''} · ${esc(r.status||'')}</small></button>${i<(serviceSequence?.records.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{open:true}):''}
@@ -179,7 +185,8 @@ export async function recordPage(app,store,id){
  ${section('activity','سجل النشاط',activity.length,'<div data-grid="activityLog"></div>',{open:false})}`;
 }
 export async function bindRecordPage(app,store,id){
- const root=document.querySelector('#main-content');const {row,children,activity}=app.__rec;
+ const root=document.querySelector('#main-content');const {row,children,activity,quickNotes,noteEntityType}=app.__rec;
+ bindRecordQuickNotes(root,quickNotes,app,store,id,noteEntityType);
  if(TASK_LINK_STORES.includes(store)){
   const opts={relatedType:store,relatedId:id,title:store==='hearings'?'متابعة الجلسة':''};
   bindLinkedTasksPanel(app,root,opts);
@@ -207,3 +214,21 @@ export async function bindRecordPage(app,store,id){
 }
 export function notFound(what){return `<div class="empty"><h3>${esc(what)} غير موجود</h3><p>ربما حُذف منطقيًا أو أن الرابط قديم.</p></div>`}
 export {refLabel,routeFor,fmtDate};
+
+
+function recordQuickNotesPanel(rows,store,id) {
+  if (!NOTE_ENTITY_TYPES[store]) return '';
+  return `<section class="panel record-quick-notes" data-record-quick-notes data-collapse-default="open"><div class="panel-head"><h3>📝 ملاحظات سريعة مرتبطة</h3><button type="button" class="primary" data-record-quick-add>+ ملاحظة سريعة</button></div><p class="muted small">روابط تشغيلية فقط — لا تُنشئ حكمًا أو إجراءً ولا تنسخ بيانات هذا السجل.</p><div data-record-quick-list></div></section>`;
+}
+function bindRecordQuickNotes(root,rows,app,store,id,entityType) {
+  const section=root.querySelector('[data-record-quick-notes]'); if(!section)return;
+  const list=section.querySelector('[data-record-quick-list]'); list.replaceChildren();
+  if(!rows?.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='لا توجد ملاحظات سريعة مرتبطة.';list.append(empty)}
+  (rows||[]).forEach(note=>{
+    const article=document.createElement('article');article.className='qn-card';
+    const head=document.createElement('div');head.className='qn-card-head';const title=document.createElement('button');title.type='button';title.className='qn-title';title.textContent=note.title||'ملاحظة بلا عنوان';title.onclick=()=>openQuickNoteEditor(app,note.id,{onSaved:()=>app.refresh()});const meta=document.createElement('span');meta.className='qn-meta';meta.textContent=`${note.lifecycle==='DONE'?'منجزة':'مفتوحة'} · ${note.priority||'NORMAL'}`;head.append(title,meta);article.append(head);
+    const body=document.createElement('p');body.className='qn-body';body.textContent=note.content||'—';article.append(body);
+    const action=document.createElement('button');action.type='button';action.className='ghost qn-action';action.textContent=note.lifecycle==='DONE'?'إعادة فتح':'إنجاز';action.onclick=async()=>{try{const service=await import('../services/quick-notes.js');await (note.lifecycle==='DONE'?service.reopenQuickNote:service.completeQuickNote)(app.office,note.id);await app.refresh()}catch(error){toast(userError(error),'error')}};article.append(action);list.append(article);
+  });
+  section.querySelector('[data-record-quick-add]').onclick=()=>openQuickNoteCapture(app,{context:[{entityType,entityId:id}],onSaved:()=>app.refresh()});
+}

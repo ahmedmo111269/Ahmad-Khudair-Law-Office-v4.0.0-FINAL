@@ -57,7 +57,7 @@ try {
   const swInstalled = await page.evaluate(async () => {
     const registrations = await navigator.serviceWorker?.getRegistrations?.() || [];
     const keys = await caches.keys();
-    return {active:registrations.some(registration => registration.active?.state === 'activated'), cache:keys.some(key => key.includes('v5.10.0-feas-offline'))};
+    return {active:registrations.some(registration => registration.active?.state === 'activated'), cache:keys.some(key => key.includes('v5.11.0-feas-offline'))};
   });
   check('PWA service worker installs and application-shell cache is present', swInstalled.active && swInstalled.cache, JSON.stringify(swInstalled));
   await page.evaluate(() => window.__LAW_OFFICE_APP__.go('dashboard'));
