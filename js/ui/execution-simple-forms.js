@@ -107,6 +107,24 @@ export async function newExecutionDialog(app, {preset = {}} = {}) {
           </label>
         </div>
       </fieldset>
+      <details class="advanced-options">
+        <summary>خيارات متقدمة (اختياري)</summary>
+        <div class="form-grid">
+          <label class="field">نموذج الحساب
+            <select name="accountingModel">
+              <option value="legacy-v1" selected>المسار المبسط (موصى به)</option>
+              <option value="feas-v1">FEAS — اعتراف صريح بفترات ولقطات</option>
+            </select>
+            <small class="hint">المسار المبسط: تسجّل الحكم والمبلغ فيُبنى الجدول فورًا. FEAS للمتمرسين: لا يُحتسب أي مبلغ إلا باعتراف صريح بكل فترة. يُختار هنا فقط ولا يتغيّر بعد الحفظ على سجل فيه أرقام.</small>
+          </label>
+          <label class="field">رقم التنفيذ الرسمي
+            <input name="officialNumber" placeholder="اختياري">
+          </label>
+          <label class="field">تاريخ الفتح
+            <input name="openedDate" type="date" value="${esc(localDate())}">
+          </label>
+        </div>
+      </details>
       <fieldset><legend>3) طريقة التنفيذ</legend>
         <div class="form-grid">
           <label class="field">نوع التنفيذ

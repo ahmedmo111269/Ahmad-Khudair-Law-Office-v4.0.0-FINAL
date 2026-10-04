@@ -26,6 +26,11 @@ const MAX_CHILD_ROWS = 3000;
 const RAW_LIMIT = 5000;
 const IDB = () => globalThis.IDBKeyRange;
 const now = () => Clock.now();
+
+/** سياسة الجزء من الفترة: من التنفيذ نفسه ثم الافتراضي 'days' — بلا ثابت قانوني في الكود. */
+function startDatePolicy(settings, execution) {
+  return execution?.prorationPolicy || settings?.schedule?.prorationPolicy || 'days';
+}
 const only = key => IDB().only(key);
 const emitChanged = (entityType, id) => events.emit('entity:changed', {entityType, id});
 
@@ -74,7 +79,7 @@ export async function simpleSchedule(office, executionId, {asOf = '', fromDate =
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
   const schedule = buildExecutionSchedule({
-    slices: capSlicesAtHorizon(inputs.execution, inputs.slices, feasRecognizedThrough(inputs.periods)), receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
+    slices: feasScheduleSlices(inputs.execution, inputs.slices, inputs.periods), receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
     settings: settings.schedule, asOf: isCivilDate(asOf) ? asOf : localDate(), fromDate
   });
   schedule.expenses = expensesFrom(inputs.ledger, settings);
@@ -107,6 +112,19 @@ export function capSlicesAtHorizon(execution, slices = [], extraThrough = '') {
     if (end && end <= through) return slice;
     return {...slice, endDate: through};
   });
+}
+
+/**
+ * شرائح الجدول لتنفيذ FEAS: لا دين إلا باعتراف صريح.
+ * - FEAS بلا أي فترة معترف بها ⇒ لا فترات ولا مطلوب (واجهتها تعرض «الخطوة التالية: اعتراف»).
+ * - FEAS باعتراف ⇒ يُقصّ الحساب عند آخر فترة معترف بها فلا يظهر رقم يناقض الرصيد المعترف به.
+ * - غير FEAS ⇒ الشرائح كما هي.
+ */
+export function feasScheduleSlices(execution, slices = [], periods = []) {
+  // غير FEAS: سلوكه كما كان بلا تغيير — يُقصّ فقط عند «تاريخ الاستحقاق حتى» المسجَّل.
+  if (String(execution?.accountingModel || '') !== 'feas-v1') return capSlicesAtHorizon(execution, slices);
+  const through = feasRecognizedThrough(periods);
+  return through ? capSlicesAtHorizon(execution, slices, through) : [];
 }
 
 /**
@@ -169,7 +187,7 @@ export async function hydrateSimpleRows(office, executions = []) {
       office.r.executionActions.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
       office.r.executionPeriods.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => [])
     ]);
-    const schedule = buildExecutionSchedule({slices: capSlicesAtHorizon(execution, slices, feasRecognizedThrough(periods)), receipts, allocations, ledger, settings: settings.schedule, asOf: today});
+    const schedule = buildExecutionSchedule({slices: feasScheduleSlices(execution, slices, periods), receipts, allocations, ledger, settings: settings.schedule, asOf: today});
     const status = derivedStatus(execution, schedule, today);
     const creditor = parties.find(party => party.side === 'creditor') || null;
     const debtor = parties.find(party => party.side === 'debtor') || null;
@@ -281,8 +299,11 @@ export async function createSimpleExecution(office, input = {}) {
   }
 
   // 4) رأس التنفيذ
+  // نموذج الحساب يُختار عند الإنشاء فقط (المسار المبسط افتراضيًا، وFEAS لِمن يحتاجه):
+  // لا يُغيَّر لاحقًا على سجل فيه أرقام — يمنع تفسير الأرقام القديمة بنموذج آخر.
+  const requestedModel = input.accountingModel === 'feas-v1' ? 'feas-v1' : 'legacy-v1';
   const execution = await createExecution(office, {
-    executionType, clientId: client.id, fileId: file.id,
+    executionType, accountingModel: requestedModel, clientId: client.id, fileId: file.id,
     openedDate: isCivilDate(input.openedDate) ? input.openedDate : localDate(),
     officialNumber: String(input.officialNumber || '').trim(),
     authority: String(input.authority || '').trim(),
@@ -306,10 +327,24 @@ export async function createSimpleExecution(office, input = {}) {
     amount: fromMinorUnits(amountMinor, currency), effectiveFrom, effectiveTo,
     operativeSummary: String(input.operativeSummary || '').trim(), notes: 'أُنشئ من نموذج التنفيذ المبسّط'
   });
+  // FEAS: الالتزام كيان منفصل عن الحكم، ولا يجوز إنشاء شريحة بلا التزام.
+  // هنا نُنشئ الالتزام من نفس ما أدخله المحامي صراحةً في «خيارات متقدمة» (نوعه ودوريته
+  // وعملته وسريانه) بلا استنتاج أي قيمة من الحكم — والاعتراف بالفترات يبقى قرارًا لاحقًا.
+  let obligation = null;
+  if (requestedModel === 'feas-v1') {
+    const FEAS = await import('./execution-feas.js');
+    obligation = await FEAS.saveExecutionObligation(office, {
+      executionId: execution.id, obligationType: entitlementType, description: 'أُنشئ مع التنفيذ (نموذج FEAS)',
+      frequency: valueType === 'fixed' ? 'custom' : (input.periodicity || 'monthly'),
+      customDays: valueType === 'fixed' ? 1 : null, currency,
+      startDate: effectiveFrom, endDate: effectiveTo, prorationPolicy: startDatePolicy(settings, execution)
+    });
+  }
   const slice = await saveValueSlice(office, {
     executionId: execution.id, judgmentId: judgment.id, entitlementType, valueType,
     periodicity: valueType === 'fixed' ? 'fixed' : (input.periodicity || 'monthly'),
     amount: fromMinorUnits(amountMinor, currency), currency, startDate: effectiveFrom, endDate: effectiveTo,
+    ...(obligation ? {obligationId: obligation.id} : {}),
     sourceReference: judgment.judgmentNumber ? `الحكم ${judgment.judgmentNumber}` : 'الحكم الأصلي'
   });
   // حفظ الوحدات الصغرى على شريحة القيمة: دقة قرش كاملة بلا كسور عائمة لاحقًا.
@@ -320,7 +355,7 @@ export async function createSimpleExecution(office, input = {}) {
   });
   await refreshExecutionSearchText(office, execution.id).catch(() => null);
   emitChanged(STORE.execution, execution.id);
-  return {execution, client, opponent, file, judgment, slice: storedSlice};
+  return {execution, client, opponent, file, judgment, obligation, slice: storedSlice};
 }
 
 /* =============================== التسجيلات =============================== */
@@ -371,6 +406,41 @@ export async function previewSimpleCollection(office, {executionId, amount, date
  * - «يخص شهرًا محددًا» أو إعادة التخصيص: يُثبَّت كسطر تخصيص محفوظ (DIRECT).
  * - الزائد رصيد دائن مرئي ولا يُرفض. وقبل إدخال القيمة يُحفظ التحصيل غير مخصص.
  */
+/**
+ * تخصيص تحصيل على تنفيذ FEAS: FEAS لا يرى التخصيص المشتق، فالتخصيص عنده صفوف صريحة.
+ * نخطط على **الفترات المعترف بها فقط** (الأقدم أولًا افتراضيًا) ونثبّت الأسطر المحفوظة
+ * بنفس periodKey الخاص بـFEAS — فيتفق رقم البطاقة مع رصيد FEAS بلا استثناء.
+ */
+async function planFeasCollectionTargets(office, {executionId, amountMinor, currency, date, target = 'auto', periodKey = '', method = 'FIFO'}) {
+  const FEAS = await import('./execution-feas.js');
+  const balance = await FEAS.executionFeasBalanceData(office, executionId);
+  const open = (balance.summary?.periods || []).filter(row => Number(row.remainingMinor || 0) > 0)
+    .sort((a, b) => String(a.fromDate).localeCompare(String(b.fromDate)));
+  if (!open.length) return {rows: [], open: [], currency: balance.summary?.currency || currency, balance};
+  const labelOf = row => `${row.start || row.fromDate} → ${row.end || row.toDate}`;
+  if (target === 'period' && periodKey) {
+    // الفترة الافتراضية في الواجهة شهر؛ نحوّل الشهر إلى الفترة المعترف بها الحاضنة له.
+    const month = String(periodKey).split('::').at(-1);
+    const direct = open.find(row => row.periodKey === periodKey)
+      || open.find(row => String(row.fromDate || row.start) <= month && month <= String(row.toDate || row.end));
+    if (!direct) throw new AppError(ERR.VALIDATION, 'الشهر المحدد خارج الفترات المعترف بها في هذا التنفيذ؛ اختر شهرًا داخل فترة معترف بها أو اترك «تلقائي».', {periodKey: 'لا يوجد استحقاق معترف به في هذه الفترة'});
+    const capacity = Math.min(Number(direct.remainingMinor || 0), amountMinor);
+    return {rows: [{periodKey: direct.periodKey, amountMinor: capacity, label: labelOf(direct), fromDate: direct.fromDate}], open, currency: balance.summary?.currency || currency, balance};
+  }
+  let rest = amountMinor;
+  const rows = [];
+  for (const row of open) {
+    if (rest <= 0) break;
+    const take = Math.min(Number(row.remainingMinor || 0), rest);
+    if (take <= 0) continue;
+    rows.push({periodKey: row.periodKey, amountMinor: take, label: labelOf(row), fromDate: row.fromDate});
+    rest -= take;
+  }
+  void date;
+  void method;
+  return {rows, open, currency: balance.summary?.currency || currency, balance, creditMinor: Math.max(0, rest)};
+}
+
 export async function recordSimpleCollection(office, input = {}) {
   office.ctx.assert();
   const execution = await requireExecution(office, input.executionId);
@@ -379,9 +449,15 @@ export async function recordSimpleCollection(office, input = {}) {
   const inputs = await executionSimpleInputs(office, input.executionId);
   const currency = currencyCode(inputs.slices.find(slice => slice.currency)?.currency, settings.schedule.defaultCurrency);
   const amountMinor = requireAmount(input.amount, currency, {label: 'مبلغ التحصيل'});
+  const isFeas = String(execution.accountingModel || '') === 'feas-v1';
   const preview = await previewSimpleCollection(office, {executionId: input.executionId, amount: fromMinorUnits(amountMinor, currency), date, target: input.target, periodKey: input.periodKey, asOf: input.asOf});
   let pins = [];
-  if (input.target === 'period') {
+  if (isFeas) {
+    // FEAS: أسطر التخصيص صريحة ومحفوظة على الفترات المعترف بها (وإلا لظهر رقمين متناقضين).
+    if (input.target === 'period' && !input.periodKey) throw new AppError(ERR.VALIDATION, 'اختر الشهر/الفترة التي يخصها التحصيل.', {periodKey: 'مطلوب'});
+    const plan = await planFeasCollectionTargets(office, {executionId: execution.id, amountMinor, currency, date, target: input.target, periodKey: input.periodKey});
+    pins = plan.rows.map(row => ({periodKey: row.periodKey, amountMinor: row.amountMinor}));
+  } else if (input.target === 'period') {
     if (!input.periodKey) throw new AppError(ERR.VALIDATION, 'اختر الشهر/الفترة التي يخصها التحصيل.', {periodKey: 'مطلوب'});
     const pinLine = preview.lines.find(line => line.fromDate === String(input.periodKey).split('::').at(-1));
     const capacity = pinLine?.amountMinor || 0;
@@ -424,7 +500,7 @@ export async function recordSimpleCollection(office, input = {}) {
       const row = {
         id: uid(), executionId: execution.id, ledgerId, receiptId, periodKey: pin.periodKey,
         amount: fromMinorUnits(pin.amountMinor, currency), amountMinor, currency,
-        method: 'DIRECT', mode: 'direct', isActive: true, createdBy: receipt.createdBy,
+        method: input.target === 'period' ? 'DIRECT' : (isFeas ? 'FIFO' : 'AUTO'), mode: input.target === 'period' ? 'direct' : 'auto', isActive: true, createdBy: receipt.createdBy,
         createdAt: now(), updatedAt: now(), version: 1, isDeleted: false
       };
       allocationRows.push(row);
@@ -543,12 +619,27 @@ export async function recordSubsequentJudgment(office, input = {}) {
     effectiveTo: isCivilDate(input.effectiveTo) ? input.effectiveTo : '',
     notes: String(input.notes || '').trim()
   });
+  // FEAS: كل شريحة قيمة يجب أن تُربط بالتزام. نستعمل التزام الشريحة السابقة نفسها،
+  // وإن لم تكن (قيمة أُنشئت قبل الالتزام) فنلتزم بالتزام التنفيذ الوحيد، وإلا نرفض بوضوح.
+  let obligationId = previousSlice?.obligationId || '';
+  if (execution.accountingModel === 'feas-v1' && !obligationId) {
+    const FEAS = await import('./execution-feas.js');
+    const obligations = await FEAS.executionObligations(office, execution.id).catch(() => []);
+    const active = obligations.filter(row => row.status !== 'inactive');
+    if (active.length !== 1) {
+      throw new AppError(ERR.VALIDATION, active.length
+        ? 'هذا التنفيذ على نموذج FEAS وفيه أكثر من التزام؛ حدّد البند المرتبط من «أدوات متقدمة ← شريحة قيمة».'
+        : 'هذا التنفيذ على نموذج FEAS بلا التزام معرَّف؛ عرّف الالتزام من «أدوات متقدمة ← التزام FEAS» أولًا.', {obligationId: 'مطلوب'});
+    }
+    obligationId = active[0].id;
+  }
   const slice = await saveValueSlice(office, {
     executionId: execution.id, judgmentId: judgment.id, entitlementType: type,
     valueType: previousSlice?.valueType === 'fixed' ? 'fixed' : 'periodic',
     periodicity: input.periodicity || previousSlice?.periodicity || 'monthly',
     amount: fromMinorUnits(amountMinor, currency), currency, startDate: input.effectiveFrom,
     endDate: isCivilDate(input.effectiveTo) ? input.effectiveTo : '',
+    ...(obligationId ? {obligationId} : {}),
     sourceReference: judgment.judgmentNumber ? `الحكم ${judgment.judgmentNumber}` : 'حكم لاحق'
   });
   const storedSlice = {...slice, amountMinor, currency};
@@ -1039,6 +1130,50 @@ export async function migrateSimpleExecutionData(office, {limit = 300} = {}) {
     await office.log?.(STORE.meta, SIMPLE_MIGRATION_ID, 'execution_simple_migration').catch(() => null);
   }
   return {...summary, reused: false};
+}
+
+/** عناصر مالية/معرفية تمنع تفعيل نموذج FEAS على سجل قائم (لا تُفسَّر أرقام قديمة بنموذج آخر). */
+async function executionFinancialFootprint(office, executionId) {
+  const [slices, receipts, ledger, periods, differences, poas, obligations] = await Promise.all([
+    office.r.executionValuePeriods.byIndex('executionId', executionId, 1).catch(() => []),
+    office.r.executionReceipts.byIndex('executionId', executionId, 1).catch(() => []),
+    office.r.executionLedger.byIndex('executionId', executionId, 1).catch(() => []),
+    office.r.executionPeriods.byIndex('executionId', executionId, 1).catch(() => []),
+    office.r.differenceRecords.byIndex('executionId', executionId, 1).catch(() => []),
+    office.r.executionPOAs.byIndex('executionId', executionId, 1).catch(() => []),
+    office.r.executionObligations.byIndex('executionId', executionId, 1).catch(() => [])
+  ]);
+  const live = rows => rows.filter(row => !row.isDeleted).length;
+  return {
+    slices: live(slices), receipts: live(receipts), ledger: live(ledger), periods: live(periods),
+    differences: live(differences), poas: live(poas), obligations: live(obligations)
+  };
+}
+
+/**
+ * تفعيل مسار FEAS صراحةً على تنفيذ قائم **فارغ من أي أثر مالي**.
+ * القاعدة المحاسبية: لا يُحوَّل سجل فيه أرقام إلى نموذج آخر؛ لذلك نرفض بوضوح
+ * ونذكر ما وُجد. القرار يُسجَّل في Activity Log ويُعاد الصف المحدَّث.
+ */
+export async function enableFeasModel(office, executionId, {reason = ''} = {}) {
+  office.ctx.assert();
+  const execution = await requireExecution(office, executionId);
+  if (execution.accountingModel === 'feas-v1') return {execution, reused: true};
+  const footprint = await executionFinancialFootprint(office, executionId);
+  const blocking = Object.entries(footprint).filter(([, count]) => count > 0);
+  if (blocking.length) {
+    const labels = {slices: 'بنود قيمة', receipts: 'محاضر تحصيل', ledger: 'حركات مالية', periods: 'فترات معترف بها', differences: 'فروق أحكام', poas: 'توكيلات', obligations: 'التزامات'};
+    throw new AppError(ERR.CONFLICT, `لا يمكن تفعيل FEAS على تنفيذ فيه أثر مالي مسجَّل (${blocking.map(([key, count]) => `${labels[key]}: ${count}`).join(' · ')}). أنشئ تنفيذًا جديدًا بنموذج FEAS من «خيارات متقدمة» في نافذة التنفيذ الجديد، أو استمر على المسار المبسط.`);
+  }
+  const stamp = now();
+  const row = {...execution, accountingModel: 'feas-v1', updatedAt: stamp, version: (execution.version || 0) + 1};
+  await transaction(office.ctx, [STORE.execution, STORE.activityLog], async tx => {
+    await request(tx.objectStore(STORE.execution).put(row));
+    await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.execution, row.id, 'update',
+      `تفعيل نموذج FEAS على تنفيذ فارغ من الأثر المالي${String(reason || '').trim() ? ` — ${String(reason).trim()}` : ''}`, row.fileId || '')));
+  });
+  emitChanged(STORE.execution, row.id);
+  return {execution: row, reused: false, footprint};
 }
 
 /** تنفيذات تحتاج إكمال بيانات (شريط لطيف في البطاقة، لا رسالة خطأ). */

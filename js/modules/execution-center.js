@@ -449,6 +449,16 @@ function feasNote(bundle) {
   return `<p class="hint hint-info">هذا التنفيذ مسجَّل بنموذج «اعتراف الفترات» (FEAS): الحساب أعلاه يقف عند آخر فترة معترف بها${through ? ` (<b>${esc(dateText(through))}</b>)` : ''} فلا يتعارض مع الرصيد المعترف به، والاعتراف نفسه كما هو في <button type="button" class="link" data-action="advanced">أدوات متقدمة</button>.</p>`;
 }
 
+/** تنفيذ FEAS فيه قيمة بلا اعتراف: لا رقم بعد، والخطوة التالية واضحة بزر واحد. */
+function feasRecognitionHint(bundle) {
+  if (String(bundle.execution?.accountingModel || '') !== 'feas-v1') return '';
+  const recognized = (bundle.periods || []).filter(row => !row.isDeleted && ['RECOGNIZED', 'CLOSED'].includes(String(row.status || '')));
+  if (recognized.length) return '';
+  const slices = (bundle.slices || []).filter(slice => !slice.isDeleted && !['cancelled', 'superseded'].includes(String(slice.status || '')));
+  if (!slices.length) return '';
+  return `<div class="hint hint-warn feas-next-step">لا يظهر مبلغ بعد: هذا التنفيذ على نموذج FEAS، والقيمة وحدها لا تُنشئ دينًا. الخطوة التالية: <button type="button" class="link" data-action="feas-recognize">اعتراف بفترة</button> — تعاين المدة ثم تعتمدها فيظهر المستحق والمدفوع والمتبقي.</div>`;
+}
+
 /** ملاحظة صريحة إن كان الحساب متوقفًا عند «تاريخ الاستحقاق حتى» المسجَّل على التنفيذ. */
 function cappedNote(bundle) {
   const through = bundle.execution?.entitlementThroughDate || '';
@@ -499,7 +509,11 @@ function accountTabMarkup(bundle) {
   const currency = schedule.currency;
   const filter = prefs.get(accountFilterKey(execution.id), 'all');
   if (!schedule.rows.length) {
-    return `<section class="panel"><h3>الكشف الشهري</h3>
+    // حالة فراغ موجَّهة: FEAS يحتاج «اعترافًا» أولًا، والمسار المبسّط يحتاج القيمة والدورية.
+    const feasHint = feasRecognitionHint(bundle);
+    if (feasHint) return `<section class="panel" data-collapse-default="open"><h3>الكشف الشهري</h3>${feasHint}
+      <div class="form-actions"><button class="primary" data-action="feas-recognize">اعتراف بفترة</button><button class="ghost" data-open-duration>🧮 احسب مدة</button></div></section>`;
+    return `<section class="panel" data-collapse-default="open"><h3>الكشف الشهري</h3>
       <p class="muted">لا توجد فترات محسوبة بعد. أدخل القيمة والدورية وتاريخ السريان ليُبنى الجدول تلقائيًا — بلا أي خطوة إضافية.</p>
       <div class="form-actions"><button class="primary" data-action="value">أدخل القيمة والدورية</button><button class="ghost" data-open-duration>🧮 احسب مدة</button></div></section>`;
   }
@@ -526,11 +540,12 @@ function accountTabMarkup(bundle) {
         <tfoot><tr><td>إجمالي ${esc(year)}</td><td>${money(list.reduce((sum, row) => sum + row.dueMinor, 0), currency)}</td><td>${money(list.reduce((sum, row) => sum + row.paidMinor, 0), currency)}</td><td><b>${money(list.reduce((sum, row) => sum + row.remainingMinor, 0), currency)}</b></td><td></td><td></td></tr></tfoot>
       </table></div>
     </details>`).join('');
-  return `<section class="panel">
+  return `<section class="panel" data-collapse-default="open">
     <div class="panel-head"><h3>الكشف الشهري</h3>
       <div class="quick-chips">${[['all', 'الكل'], ['unpaid', 'غير المسدد'], ['paid', 'المسدد']].map(([key, label]) => `<button type="button" class="chip${filter === key ? ' is-active' : ''}" data-account-filter="${key}">${label}</button>`).join('')}</div>
     </div>
     ${feasNote(bundle)}
+    ${feasRecognitionHint(bundle)}
     <p class="muted small">الجدول مشتق وقت العرض من قيمة الحكم ومن التحصيلات؛ لا فترات مستقبلية مخزّنة، والتوزيع التلقائي «الأقدم أولًا» قابل للتغيير من الإعدادات.</p>
     ${yearMarkup}
     <p class="muted small">المعروض: مستحق ${money(rows.reduce((sum, row) => sum + row.dueMinor, 0), currency)} · مدفوع ${money(rows.reduce((sum, row) => sum + row.paidMinor, 0), currency)} · متبقٍ <b>${money(rows.reduce((sum, row) => sum + row.remainingMinor, 0), currency)}</b></p>
@@ -541,7 +556,7 @@ function accountTabMarkup(bundle) {
 function logTabMarkup(bundle) {
   const items = timelineItems(bundle);
   const types = [...new Set(items.map(item => item.group))];
-  return `<section class="panel">
+  return `<section class="panel" data-collapse-default="open">
     <div class="panel-head"><h3>السجل — كل ما حدث على هذا التنفيذ</h3><span class="badge">${items.length} واقعة</span></div>
     <div class="exec-controls">
       <select data-log-type aria-label="تصفية النوع"><option value="">كل الأنواع</option>${types.map(type => `<option value="${esc(type)}">${esc(type)}</option>`).join('')}</select>
@@ -644,7 +659,7 @@ function dataTabMarkup(bundle) {
   }).join('');
   const snapshotRows = (periods || []).filter(period => !period.isDeleted).map(period => `<li>مطالبة مثبتة ${esc(dateText(period.fromDate))} → ${esc(dateText(period.toDate))} بمبلغ ${money(Math.round(Number(period.recognizedAmount ?? 0) * 100) || Number(period.recognizedAmountMinor || 0))} <span class="muted">(لقطة محفوظة لا تتغير)</span></li>`).join('');
   const partyLines = (parties || []).filter(party => !party.isDeleted).map(party => `<li><b>${party.side === 'debtor' ? 'منفذ ضده' : 'من يستحق'}:</b> ${esc(party.name)}${party.role ? ` <span class="muted">(${esc(party.role)})</span>` : ''}</li>`).join('');
-  return `<section class="panel">
+  return `<section class="panel" data-collapse-default="open">
     <div class="panel-head"><h3>بيانات التنفيذ</h3><button type="button" class="ghost small" data-action="edit">تعديل</button></div>
     <div class="exec-kv">
       <span>الموكل</span><b>${esc(client?.fullName || creditor?.name || '—')}</b>
@@ -669,7 +684,10 @@ function dataTabMarkup(bundle) {
   ${snapshotRows ? `<section class="panel"><div class="panel-head"><h3>مطالبات مثبتة (لقطات محفوظة)</h3></div><ul class="plain-list">${snapshotRows}</ul></section>` : ''}
   <section class="panel advanced-anchor">
     <div class="panel-head"><h3>أدوات متقدمة (اختيارية)</h3></div>
-    <p class="muted small">لا تحتاجها في العمل اليومي: مسار FEAS القديم (التزام صريح + اعتراف بفترات) وتسويات فروق الأحكام والمحاكاة. تبقى متاحة بلا حذف أي بيانات ولا تغيير أي رقم ظاهر.</p>
+    ${String(bundle.execution?.accountingModel || '') === 'feas-v1'
+      ? '<p class="muted small">هذا التنفيذ على نموذج FEAS (اعتراف صريح بفترات): لا يدخل الرصيد إلا ما اعتُرف به، والقرار يمرّ بمراجعتك. لا تُحذف أي بيانات ولا يتغيّر أي رقم ظاهر.</p>'
+      : `<p class="muted small">هذا التنفيذ على <b>المسار المبسط</b> (الحساب تلقائي من الحكم والمبلغ) فلا تحتاج هذه الأدوات. ومسار FEAS (التزام صريح + اعتراف بفترات + مراجعة فروق) متاح إن طلبه مكتبك، ويُفعَّل على تنفيذ <b>فارغ من أي أرقام مالية</b> فقط.</p>
+        <div class="form-actions"><button type="button" class="ghost small" data-action="enable-feas">تفعيل مسار FEAS لهذا التنفيذ</button></div>`}
     <div class="form-actions">
       <button type="button" class="ghost small" data-action="feas-obligation">التزام FEAS</button>
       <button type="button" class="ghost small" data-action="feas-recognize">اعتراف بفترة</button>
@@ -685,7 +703,7 @@ function dataTabMarkup(bundle) {
 function poaTabMarkup(bundle) {
   const {poas, schedule} = bundle;
   const currency = schedule.currency;
-  return `<section class="panel">
+  return `<section class="panel" data-collapse-default="open">
     <div class="panel-head"><h3>التوكيلات المحفوظة</h3><button type="button" class="ghost small" data-action="poa">+ توكيل جديد</button></div>
     ${poas.length ? `<div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>التاريخ</th><th>الرقم</th><th>المدة</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>
       ${poas.map(poa => `<tr><td>${esc(dateText(poa.date))}</td><td>${esc(poa.poaNumber || '—')}</td><td>${esc(dateText(poa.fromDate))} ← ${esc(dateText(poa.toDate))}</td><td>${money(Math.round(Number(poa.total || 0) * 100), currency)}</td><td>${String(poa.status || '') === 'cancelled' ? 'ملغى' : 'محفوظ (نسخة ثابتة)'}</td>
@@ -751,11 +769,20 @@ export async function bindExecutionDetail(app, executionId) {
       return undefined;
     },
     advanced: () => showTab('data', {scrollTo: '.advanced-anchor'}),
+    'enable-feas': async () => {
+      if (String(bundle.execution?.accountingModel || '') === 'feas-v1') { toast('هذا التنفيذ على نموذج FEAS بالفعل'); return undefined; }
+      const answer = await confirmBox('تفعيل مسار FEAS لهذا التنفيذ؟ FEAS لا يحتسب أي مبلغ إلا بعد «اعتراف صريح» بكل فترة، وهو للمتمرسين. التفعيل ممكن الآن فقط لأن التنفيذ بلا أي أرقام مالية؛ وبعد إدخال أرقام لا يعود النموذج قابلاً للتغيير.', {okText: 'تفعيل FEAS'});
+      if (!answer) return undefined;
+      const out = await S.enableFeasModel(app.office, executionId);
+      toast(out.reused ? 'النموذج مفعَّل بالفعل' : 'فُعِّل مسار FEAS — ابدأ بتعريف الالتزام');
+      await app.refresh();
+      return undefined;
+    },
     'feas-obligation': async () => {
       const FEAS = await import('../services/execution-feas.js');
       const obligations = await FEAS.executionObligations(app.office, executionId).catch(() => []);
-      void obligations;
-      return executionObligationDialog(app, executionId, {parties: bundle.parties});
+      // التزام واحد ⇒ النافذة تُفتح تعديلًا لا إنشاءً جديدًا (لا تكرار بلا داعٍ).
+      return executionObligationDialog(app, executionId, {parties: bundle.parties, obligation: obligations.length === 1 ? obligations[0] : null});
     },
     'feas-recognize': async () => {
       const FEAS = await import('../services/execution-feas.js');

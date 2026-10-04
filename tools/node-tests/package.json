@@ -11,7 +11,8 @@
   "test:execution-simple-browser": "node execution-simple-browser-tests.mjs",
   "test:offline-sync-browser": "node offline-sync-browser-tests.mjs",
   "test:quick-notes-browser": "node quick-notes-browser-tests.mjs",
-  "test:execution-print-browser": "node execution-print-browser-tests.mjs"
+  "test:execution-print-browser": "node execution-print-browser-tests.mjs",
+  "test:execution-feas-cycle-browser": "node execution-feas-cycle-browser-tests.mjs"
  },
  "keywords": [],
  "author": "",

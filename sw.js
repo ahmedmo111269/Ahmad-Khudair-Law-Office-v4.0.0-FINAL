@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.12.0-simple-execution';
+const CACHE='ahmad-khudair-law-office-v5.12.0-simple-execution-2';
 const ASSETS=[
   "./",
   "./index.html",

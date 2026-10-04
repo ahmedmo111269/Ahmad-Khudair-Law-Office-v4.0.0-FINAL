@@ -299,3 +299,7 @@
   .exec-toolbar, .exec-tabs, .head-actions, .completion-bar, .log-actions, .exec-more-menu { display: none !important; }
   .exec-summary, .exec-tab-panel, .panel { break-inside: avoid; }
 }
+
+/* خطوة FEAS التالية: تنبيه بارز بزر واحد بلا حجب أي شيء آخر */
+.feas-next-step { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.feas-next-step .link { background: transparent; text-decoration: underline; cursor: pointer; font: inherit; color: inherit; padding: 0; }
