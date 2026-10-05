@@ -114,6 +114,40 @@
 
 ## 6) التحقق والحالة
 
-- **PASS (v5.13.2):** `node tools/node-tests/run-tests.mjs` = **470/470**، و`node tools/node-tests/execution-practical-tests.mjs` = **44/44** (تشمل الأرقام المرجعية 3,000/9,000، الانعكاس الفوري للإعدادات، عزل تاريخ كل بطاقة، رسوم/دمغة التوكيل، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية). وفحوص Chromium حقيقية: `execution-settings-browser` **8/8** · `execution-print-browser` **13/13** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19.
+- **PASS (v5.13.2):** `node tools/node-tests/run-tests.mjs` = **470/470**، و`node tools/node-tests/execution-practical-tests.mjs` = **44/44** (تشمل الأرقام المرجعية 3,000/9,000، الانعكاس الفوري للإعدادات، عزل تاريخ كل بطاقة، رسوم/دمغة التوكيل، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية، ومذكرة الحساب اليدوي). وفحوص Chromium حقيقية: `execution-settings-browser` **8/8** · `execution-print-browser` **13/13** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19.
 - **NOT VERIFIED:** معاينة الطباعة الأصلية والطابعة الورقية، المتصفحات غير Chromium، قارئ الشاشة. (`execution-print-browser` 9/3 و`grid-browser` فشل قائم على `main` قبل هذا الإصدار.)
 - أي قاعدة حساب جديدة مستقبلًا يجب أن تحفظ `asOf` بوصفه تاريخ الحساب وتصرّح بأفق الوحدة منفصلًا؛ لا يجوز إعادة إدخال تناسب الأيام أو تفسير ممارسة المكتب على أنها حكم قانوني ثابت.
+
+---
+
+## 7) إصلاحات v5.13.1 — مركز التنفيذ فقط (BUG-1..7)
+
+### BUG-1 — روابط الإعدادات/المساعدة داخل السطر الجاري لا تعمل
+- السبب: `querySelector` مفرد يعيد أول عنصر فقط، وعند تكرار البطاقات في نفس الصفحة يبقى الزر داخل `runningPeriodNote` بلا مستمع.
+- الحل: كل ربطات `data-new-execution, data-demo-example, data-help, data-settings, data-customize-page, data-exec-trash, data-exec-demo, data-exec-clear, data-search, data-clear-search` في `execution-center.js` تحوّلت إلى `querySelectorAll.forEach`. كذلك في بطاقة التنفيذ: `data-record, data-open-duration, data-open-statement, data-help, data-settings, data-more, data-delete-execution, data-asof, data-asof-today`. زر `data-more` و`data-settings` داخل `runningPeriodNote` مربوط عبر `bindContainer`.
+
+### BUG-2/3 — أفق الحساب يقصّ المستقبل صامتًا
+- السابق: `claimHorizon` و`simpleScheduleHorizon` كانت تقصّ أي تاريخ بعد اليوم إلى `today` بلا تنبيه، فيختفي رقم 12,000 المتوقع عند اختيار 04/01/2027.
+- الجديد: `claimHorizon(execution,asOf,{allowFuture})` و`simpleScheduleHorizon(...{allowFuture})` و`simpleSchedule(...{allowFuture})` — إذا `allowFuture:true` لا قصّ. بطاقة التنفيذ تستخدم `allowFuture:true` افتراضيًا (المطلوب حتى تاريخ قد يكون مستقبليًا تقديريًا)، بينما قائمة الملخص تستخدم `allowFuture:false` لتظل محافظة.
+- `simpleSchedule` يعيد حقول شفافية: `requestedAsOf, effectiveAsOf, horizonCapped, horizonNote, allowFuture`. واجهة البطاقة تعرض تنبيهًا أصفر عند `horizonCapped` مع التاريخ الفعّال، وشارة «تقديري» عند `allowFuture:true` وتاريخ مستقبلي، وتمنع عرض رقم بجانب تاريخ لم يُحسب.
+
+### BUG-4 — تاريخ «المطلوب حتى» موحّد لكل التنفيذات
+- السابق: مفتاح واحد `ui:exec:asof` لكل التنفيذات، فيختلط تاريخ تنفيذ بآخر.
+- الجديد: مفتاح لكل تنفيذ `ui:exec:asof:${executionId}` + مفتاح عام احتياطي + وضع `ui:exec:asof-mode:v1` = `per` (لكل تنفيذ) أو `global` (موحّد). في وضع `per`، زر «اليوم» يمسح المحلي فقط. تغيير التاريخ يحفظ المحلي والعام إذا الوضع `global`.
+
+### BUG-5 — فشل حفظ الإعدادات صامت
+- `executionSettingsDialog` الآن بمعالجة `try/catch` كاملة: زر الحفظ يتعطّل ويظهر «جارٍ الحفظ…»، خطأ ظاهر `data-error`، و`toast` بالعربي. تقرير الترحيل وزر الاستعادة بنفس النمط. لا `location.reload` — يستخدم `app.refresh()`.
+
+### BUG-6 — أحداث `execution:cache-invalidated` بلا مستمع
+- أُنشئ `js/services/execution-cache.js` — LRU 200 مدخل، مفتاح `${executionId}|${asOf}|${allowFuture}|${ruleVersion}|${engineVersion}`، يستمع لـ `execution:cache-invalidated` و`execution:configuration-changed` ويمسح. كل كتابة في `execution-simple.js` (`recordSimpleCollection, recordSimpleAction, recordSimpleExpense, recordSubsequentJudgment, saveSimplePoa, voidSimpleRecord, updateSimpleReceipt, reallocateSimpleReceipt, updateSimpleAction, setExecutionLifecycle, enableFeasModel, cancelValueSlice, deleteExecutionJudgment, updateSimpleSlice, createSimpleValueSlice`) تستدعي `executionCache.clearExecution(executionId)`، و`simpleSchedule` و`simpleCardBundle` تستخدمان الـ cache مع `ruleVersion`.
+
+### BUG-7 — التوكيل بلا معادلة ولا رسوم/دمغة ولا ربط بمحضر
+- `buildPoaFigures` توقيعه الجديد: `{schedule, fromDate, toDate, includePreviousBalance, expenses, expenseIds, rangeDecisions, feesMinor, stampsMinor, previousAction}` — يضيف `feesLine/stampsLine` مع تلميح إلزامي «النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.»، و`periodEquations` (متساوية: 9×3000=27000، مختلفة: 3×3000+6×3500، جزئية مع ملاحظة)، و`previousNote` مرتبط بمحضر التبديد/الحجز برقم وتاريخ، و`totalMinor = previous + period + expenses + fees + stamps` ومعادلات تشمل تفصيل الرسوم والدمغة والرصيد السابق.
+- `simplePoaDraft({fees,stamps,allowFuture})` يلتقط آخر `dissipation/seizure/sale_notice/sale_session` من `inputs.actions`، يحوّل الرسوم/الدمغة عبر `toMinorUnits`، ويمررها إلى `buildPoaFigures`.
+- واجهة `simplePoaDialog` أضافت حقلين `fees` و`stamps` مع تلميح النظام لا يفترض، ومعاينة تظهر الربط بالمحضر ومعادلة كل فترة والرسوم والدمغة وإجمالي بصيغة `السابق + المدة + المصروفات + الرسوم + الدمغة = الإجمالي`.
+
+### قبول
+- `asOf 2026-11-04 allowFuture:true` ⇒ فترة واحدة 3,000 (ANNIVERSARY) — 1 × 3,000.
+- `asOf 2027-01-04 allowFuture:true` ⇒ 3 فترات 9,000 ANNIVERSARY / 4 فترات 12,000 CALENDAR_MONTH — النظام لا يقصّ صامتًا.
+- `asOf 2027-01-04 allowFuture:false` ⇒ مقصوص إلى اليوم + تنبيه `horizonCapped` + `horizonNote`.
+- تاريخ لكل تنفيذ، زر الإعدادات داخل السطر الجاري يعمل، حفظ الإعدادات بمعالجة أخطاء، التوكيل يظهر المعادلة والرسوم اليدوية والربط بالمحضر.

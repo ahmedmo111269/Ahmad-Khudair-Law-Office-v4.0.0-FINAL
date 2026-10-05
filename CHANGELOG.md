@@ -23,6 +23,11 @@
 - **الكشف والطباعة**: التاريخ المطبوع هو تاريخ الشاشة نفسه؛ والطلب المستقبلي الصريح يُطبع موسومًا **«تقديري»** بدل قصّه صامتًا إلى اليوم.
 - **إبطال ذاكرة الحساب**: أُضيفت مخازن التسويات والتعديلات إلى أسباب الإبطال، وصار أي حدث على كيان تنفيذي يُبطل الذاكرة؛ وهذا أزال عرض رقم اعتراف قديم بعد اعتماد فرق في FEAS.
 
+## 3.2) «احسب مدة»: مذكرة بمبلغ يدوي (مضافة بعد دمج عمل الفرع الموازي على `main`)
+
+- صار بإمكان المكتب أن يحسب مدة بمبلغ ودورية يكتبهما بنفسه (شهري/أسبوعي/نصف شهري/سنوي) + رسوم ودمغة يدويين — **حتى بدون تسجيل قيمة على التنفيذ**. النتيجة مذكرة بأرقامها ومعادلاتها: `4,000 × 3 فترات + رسوم 500 + دمغة 100 = 12,600`، مع تنبيه صريح أن المذكرة **لا تُنشئ استحقاقًا ولا تغيّر الرصيد المسجَّل**، وأن الكشف/التوكيل يبقيان على البيانات المسجَّلة وحدها. الجدول المسجَّل يبقى المصدر الافتراضي والخيار اليدوي بيد المستخدم (غير مُفعَّل مسبقًا).
+- عند دمج `main` (عمل الفرعين الموازيين على نفس الملفات) اعتُمدت نسخة هذا الفرع لمنطق الحساب والأفق والإعدادات بعد أن أثبتت الفحوص تفوّقها في التغطية، وانتُقلت منه إضافتان مفيدتان: **المذكرة اليدوية** أعلاه، و**إبطال ذاكرة مخصوص لتنفيذ واحد** (`executionCache.clearExecution(id)`) يُنادى من مسارات كتابة شرائح القيمة، فلم يُفقد أي عمل من `main` ولم يُقبل أي انحدار.
+
 ## 3.1) الكشف/الطباعة: التاريخ المطلوب صراحةً يُنفَّذ ولا يُقصّ صامتًا
 
 - كان `simpleStatementDocument` يعلن «تاريخ الحساب الفعلي: 31/12/2026» بينما يوقف الفترات عند اليوم — أي رقم منسوب إلى تاريخ لا يخصّه. صار **طلب التاريخ المستقبلي بذاته طلبًا صريحًا**: الأفق يساوي التاريخ المعلن، ويُوسم الكشف **«تقديري»**، ولا يُطبع صف واحد بعد النطاق المطلوب. وكشف «حتى اليوم» لا يحمل الوسم.
@@ -35,6 +40,39 @@
 - **فحص متصفح جديد مخصص للشكوى**: `tools/node-tests/execution-settings-browser-tests.mjs` = **8/8** في Chromium حقيقي (`npm run test:execution-settings-browser`): 3,000 من اليوم ← «+شهر» = 04/11/2026 = 3,000 · 04/01/2027 = 3 × 3,000 = 9,000 بلا قصّ صامت · الإعدادات تُفتح من البطاقة وكل قواعدها قابلة للتعديل والحفظ ينعكس فورًا · التوكيل 9,600 · قوالب الطباعة تُعدَّل وتُحفظ · بلا أخطاء كونسول. وفحصا **موبايل** بعرض 390px بنفس الرحلات: الأرقام والأفق والإعدادات تظهر وتُحفظ بلمسة، وبلا تجاوز أفقي وبلا أخطاء. لقطاته في `docs/execution-ux-shots/v5.13.2-*.png`.
 - فحوص Chromium الحقيقية: `execution-simple-browser` **20/20** · `execution-browser` **34/34** · `execution-feas-browser` **10/10** · `execution-feas-cycle` **19/19** · **`execution-print-browser` 13/13** (صار أخضر بعد إصلاح أفق الكشف) · `offline-sync` و`quick-notes` ناجحان. ويبقى `grid-browser` فشلًا قائمًا على `main` في مسائل تخصيص/جدول لا علاقة لها بالتنفيذ (لم يُزد عليه).
 - `sw.js`: إضافة `execution-cache.js` و`execution-horizon-picker.js` و`execution-summary-card.js` إلى precache ورفع اسم الذاكرة إلى `…v5.13.2-execution-settings-and-horizon` — الوحدات الجديدة كانت تغيب عن العمل بلا شبكة قبل ذلك.
+
+---
+
+# v5.13.1 — إصلاح مركز التنفيذ فقط (BUG-1..7) — تراكمي فوق إصلاح «لا يُحسب أي شيء»
+
+**2026-10-05 — النطاق: مركز التنفيذ فقط، المحرك سليم — إصلاح واجهة + سياسة أفق + توكيل.**
+
+## BUG-1 — روابط الإعدادات/المساعدة داخل السطر الجاري لا تعمل
+- كل ربطات مركز التنفيذ تحوّلت من `querySelector` إلى `querySelectorAll.forEach`: `data-new-execution, data-demo-example, data-help, data-settings, data-customize-page, data-exec-trash, data-exec-demo, data-exec-clear, data-search, data-clear-search` و`data-record, data-open-duration, data-open-statement, data-help, data-settings, data-more, data-delete-execution, data-asof, data-asof-today`. زر `data-settings` و`data-more` داخل `runningPeriodNote` مربوط عبر `bindContainer`.
+
+## BUG-2/3 — أفق الحساب يقصّ المستقبل صامتًا
+- `claimHorizon(execution,asOf,{allowFuture})` و`simpleScheduleHorizon(...{allowFuture})` — إذا `allowFuture:true` لا قصّ. بطاقة التنفيذ `allowFuture:true` (تقديري)، القائمة `allowFuture:false`. `simpleSchedule` يعيد `requestedAsOf, effectiveAsOf, horizonCapped, horizonNote, allowFuture`، والواجهة تعرض تنبيهًا أصفر عند القصّ وشارة «تقديري» عند المستقبل.
+- قبول: `asOf 2026-11-04 allowFuture:true => 1 فترة 3000`، `asOf 2027-01-04 allowFuture:true => 4 فترات 12000 (CALENDAR_MONTH) / 3 فترات 9000 (ANNIVERSARY)` بلا قصّ صامت، `allowFuture:false => مقصوص + note`.
+
+## BUG-4 — تاريخ «المطلوب حتى» موحّد
+- مفتاح لكل تنفيذ `ui:exec:asof:${id}` + عام احتياطي + وضع `ui:exec:asof-mode:v1` = `per|global`. اليوم يمسح المحلي فقط. واجهة الإعدادات تتيح اختيار الوضع يدويًا.
+
+## BUG-5 — فشل حفظ الإعدادات صامت
+- `executionSettingsDialog` بمعالجة `try/catch` كاملة، زر معطّل + «جارٍ الحفظ…» + سطر خطأ `data-error` + `toast`. تقرير الترحيل والاستعادة بنفس النمط. يستخدم `app.refresh()` لا `location.reload`.
+
+## BUG-6 — أحداث `execution:cache-invalidated` بلا مستمع
+- `js/services/execution-cache.js` جديد — LRU 200، مفتاح `${executionId}|${asOf}|${allowFuture}|${ruleVersion}|${engineVersion}`، يستمع لحدثي الإبطال. كل كتابة في `execution-simple.js` تمسح cache التنفيذ، و`simpleSchedule` و`simpleCardBundle` تستخدمانه مع `ruleVersion`.
+
+## BUG-7 — التوكيل بلا معادلة ولا رسوم/دمغة ولا ربط بمحضر
+- `buildPoaFigures` يضيف `feesMinor, stampsMinor, previousAction` → `feesLine/stampsLine` مع تلميح «النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.»، و`periodEquations` (9×3000=27000، 3×3000+6×3500)، و`previousNote` مرتبط بمحضر تبديد/حجز برقم وتاريخ، و`total = previous + period + expenses + fees + stamps` ومعادلات تشمل التفصيل.
+- `simplePoaDraft({fees,stamps})` يلتقط آخر تبديد/حجز ويحوّل عبر `toMinorUnits`. واجهة `simplePoaDialog` أضافت حقلين رسوم/دمغة ومعاينة بالربط والمعادلة.
+
+## التحقق
+- `tools/node-tests/run-tests.mjs` يبقى 470/470 بعد الإصلاح (التخزين المؤقت يراعي `ruleVersion`).
+- `execution-practical-tests.mjs` 29/29 مع per-card asOf وتقديري مستقبلي.
+- لا تغيير `SCHEMA_VERSION` (18)، لا bundler، مسارات نسبية، لا `location.reload`.
+
+---
 
 # v5.13.1 — إصلاح «لا يُحسب أي شيء» في التنفيذ + أدوات إدارة البيانات
 

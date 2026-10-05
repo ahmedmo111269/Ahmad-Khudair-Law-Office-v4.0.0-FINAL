@@ -832,6 +832,30 @@ await check('29) ترتيب التوزيع والعملة الافتراضية: 
   await resetAsOfPrefs([anchorId, anchorTwoId]);
 });
 
+await check('30) «احسب مدة» بمبلغ يدوي: 4,000 × 3 فترات + رسوم 500 + دمغة 100 = 12,600 مع المعادلة', async () => {
+  await app.go(`exc:${anchorId}`);
+  await tick(700);
+  await openModalBy('[data-open-duration]', 500);
+  const form = modalRoot().querySelector('[data-form="duration"]');
+  assert.ok(form, 'نموذج «احسب مدة» غير موجود');
+  const manualBox = form.querySelector('[data-use-manual]');
+  assert.ok(manualBox, 'خيار «استخدم الحساب اليدوي» مفقود');
+  assert.equal(manualBox.checked, false, 'الجدول المسجَّل هو المصدر الافتراضي — والخيار اليدوي اختياري');
+  await fill(form, {fromDate: '2026-10-05', toDate: '2027-01-04', manualAmount: '4000', manualPeriodicity: 'monthly', manualFees: '500', manualStamps: '100'});
+  manualBox.checked = true;
+  await submit(form, 900);
+  const result = text(form.querySelector('[data-result]'));
+  assert.ok(result.includes('12,600'), `الإجمالي اليدوي غير صحيح: ${result.slice(0, 260)}`);
+  assert.ok(result.includes('3'), 'عدد الفترات غير ظاهر');
+  assert.ok(/12,000/.test(result), `إجمالي الفترات غير ظاهر: ${result.slice(0, 260)}`);
+  assert.ok(result.includes('مذكرة'), 'تنبيه «مذكرة يدوية لا تغيّر الرصيد» مفقود');
+  await closeModals();
+  // الجدول المسجَّل لم يتغير من الحساب اليدوي.
+  const after = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: true});
+  assert.equal(Number(after.schedule.totals.dueMinor), 900000, `الحساب المسجَّل تأثر بالمذكرة اليدوية: ${after.schedule.totals.dueMinor}`);
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+});
+
 /* ==================== التقرير ==================== */
 console.log(`\n==================================================`);
 console.log(`${results.length - failures}/${results.length} فحصًا ناجحًا · ${failures} فشل`);

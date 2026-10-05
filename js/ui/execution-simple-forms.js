@@ -12,7 +12,7 @@ import {formatFileNumber} from '../core/file-number.js';
 import {localDate} from '../core/clock.js';
 import {userError} from '../core/errors.js';
 import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
-import {addCivilDays, isCivilDate} from '../domain/execution-calendar.js';
+import {addCivilDays, isCivilDate, enumerateExecutionUnits} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import * as S from '../services/execution-simple.js';
 import {executionSettings, saveExecutionSettings, resetExecutionSettings, actionKindOptions, expenseTypeOptions, entitlementOptions, collectionMethodOptions, executionMethodOptions, borneByLabelOf} from '../services/execution-settings.js';
@@ -657,6 +657,7 @@ export function simpleNoteDialog(app, executionId) {
 /* ======================= احسب مدة (S5) ======================= */
 export async function durationDialog(app, executionId = '', {bundle = null, lockExecution = false, fromDate = '', toDate = ''} = {}) {
   const presetFrom = isCivilDate(fromDate) ? fromDate : '';
+  const presetAmount = (bundle?.slices || []).filter(slice => !['cancelled', 'superseded'].includes(String(slice.status || ''))).at(-1)?.amount || '';
   const presetTo = isCivilDate(toDate) ? toDate : '';
   const clientsDefault = lockExecution ? executionId : '';
   const executions = lockExecution ? [] : (await app.office.r.execution.page({index: 'openedDate', direction: 'prev', limit: 100}).catch(() => ({items: []}))).items || [];
@@ -678,6 +679,24 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
         <label class="field">من <b class="req">*</b><input name="fromDate" type="date" value="${esc(presetFrom || `${today.slice(0, 4)}-01-01`)}"></label>
         <label class="field">إلى <b class="req">*</b><input name="toDate" type="date" value="${esc(presetTo || today)}"></label>
       </div>
+      <fieldset data-manual-calc>
+        <legend>💰 الحساب بمبلغ يدوي (بدلًا من الجدول المسجَّل)</legend>
+        <p class="muted small">مذكرة حساب سريعة بالمبلغ والدورية الذين تكتبهما — تعمل حتى لو لم تُسجَّل قيمة على التنفيذ. لا تُنشئ استحقاقًا ولا تغيّر الرصيد المسجَّل.</p>
+        <div class="form-grid">
+          <label class="field">المبلغ (ج.م)<input name="manualAmount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(presetAmount)}" placeholder="مثال: 3,000"></label>
+          <label class="field">الدورية
+            <select name="manualPeriodicity">
+              <option value="monthly" selected>شهري</option>
+              <option value="weekly">أسبوعي</option>
+              <option value="semiMonthly">نصف شهري</option>
+              <option value="yearly">سنوي</option>
+            </select>
+          </label>
+          <label class="field">رسوم التنفيذ (اختياري)<input name="manualFees" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 500"></label>
+          <label class="field">دمغة (اختياري)<input name="manualStamps" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 100"></label>
+        </div>
+        <label class="check-line"><input type="checkbox" name="useManual" data-use-manual> استخدم هذا الحساب اليدوي في النتيجة</label>
+      </fieldset>
       <label class="check-line"><input type="checkbox" name="allowFuture" data-allow-future> احسب حتى تاريخ مستقبلي (تقديري)</label>
       <p class="hint hint-info small" data-future-hint>إن كان تاريخ النهاية بعد اليوم: النظام ينفّذ التاريخ الذي اخترته ويتضمن الفترات المنتهية داخله، ويعلّم الفترات التي لم تنتهِ بعد بأنها <b>تقديرية</b> — بلا قصّ صامت إلى اليوم.</p>
       <div class="alloc-preview" data-result aria-live="polite"><span class="muted small">اختر المدة ثم اضغط احسب.</span></div>
@@ -690,6 +709,8 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
     </form>`);
   const form = card.querySelector('[data-form="duration"]');
   const resultHost = form.querySelector('[data-result]');
+  // اقتراح مبدئي لمبلغ الحساب اليدوي من آخر بند قيمة مسجَّل (عرض فقط — لا يُنشئ شيئًا).
+  if (presetAmount && !form.querySelector('[name="manualAmount"]').value) form.querySelector('[name="manualAmount"]').value = presetAmount;
   const futureBox = form.querySelector('[data-allow-future]');
   const currentId = () => (lockExecution ? executionId : (form.closest('.modal-card').querySelector('[name="executionId"]')?.value || executionId));
   // اختيار تاريخ نهاية مستقبلي = طلب صريح: يُفعَّل خيار «تقديري» تلقائيًا
@@ -715,10 +736,65 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
     resultHost.innerHTML = '<span class="muted small">اختر المدة ثم اضغط احسب.</span>';
     form.requestSubmit();
   }));
+  /** عرض نتيجة الحساب اليدوي: مذكرة بأرقامها ومعادلاتها — بلا أي كتابة على السجل. */
+  const renderManualDuration = calc => {
+    const money0 = minor => `${fromMinorUnits(minor, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    const label = {monthly: 'شهريًا', weekly: 'أسبوعيًا', semiMonthly: 'نصف شهري', yearly: 'سنويًا'}[calc.periodicity] || '';
+    const rows = calc.units.map(unit => `<tr><td>${displayDate(unit.fromDate)} – ${displayDate(unit.toDate)}</td><td>${money0(calc.amountMinor)}</td></tr>`).join('');
+    const equations = [
+      `قيمة الفترة = ${money0(calc.amountMinor)} ج.م ${label}`,
+      `عدد الفترات من ${displayDate(form.querySelector('[name="fromDate"]').value)} إلى ${displayDate(form.querySelector('[name="toDate"]').value)} = ${calc.units.length}`,
+      `إجمالي الفترات = ${calc.units.length} × ${money0(calc.amountMinor)} = ${money0(calc.totalMinor)} ج.م`,
+      calc.feesMinor ? `رسوم التنفيذ (إدخال يدوي) = ${money0(calc.feesMinor)} ج.م` : '',
+      calc.stampsMinor ? `الدمغة (إدخال يدوي) = ${money0(calc.stampsMinor)} ج.م` : '',
+      `الإجمالي = ${money0(calc.grandMinor)} ج.م`
+    ].filter(Boolean);
+    resultHost.dataset.currency = 'EGP';
+    resultHost.innerHTML = `<div class="result-numbers">
+        <div><span>قيمة الفترة (${esc(label)})</span><b>${money0(calc.amountMinor)}</b></div>
+        <div><span>عدد الفترات</span><b>${calc.units.length}</b></div>
+        <div><span>إجمالي الفترات</span><b>${money0(calc.totalMinor)}</b></div>
+        ${calc.feesMinor ? `<div><span>رسوم (يدوي)</span><b>${money0(calc.feesMinor)}</b></div>` : ''}
+        ${calc.stampsMinor ? `<div><span>دمغة (يدوي)</span><b>${money0(calc.stampsMinor)}</b></div>` : ''}
+        <div class="total"><span>الإجمالي المطلوب</span><b>${money0(calc.grandMinor)}</b></div>
+      </div>
+      <p class="hint hint-info small">هذه <b>مذكرة حساب يدوي</b> بالأرقام التي أدخلتها: لا تُنشئ استحقاقًا مسجَّلًا ولا تغيّر «المطلوب/المدقوع» على التنفيذ. أما «طباعة كشف» و«توكيل» فيعتمدان على بيانات التنفيذ المسجَّلة وحدها.</p>
+      <table class="mini-table"><thead><tr><th>الفترة</th><th>المبلغ</th></tr></thead><tbody>${rows}
+        <tr class="total"><td><b>إجمالي الفترات</b></td><td><b>${money0(calc.totalMinor)}</b></td></tr>
+        ${calc.feesMinor ? `<tr><td>رسوم التنفيذ (يدوي)</td><td>${money0(calc.feesMinor)}</td></tr>` : ''}
+        ${calc.stampsMinor ? `<tr><td>الدمغة (يدوي)</td><td>${money0(calc.stampsMinor)}</td></tr>` : ''}
+        <tr class="total"><td><b>الإجمالي النهائي</b></td><td><b>${money0(calc.grandMinor)}</b></td></tr>
+      </tbody></table>
+      <ol class="small">${equations.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
+    form.querySelector('[data-save]').textContent = 'احسب';
+    form.querySelector('[data-copy]').hidden = false;
+    form.querySelector('[data-print]').hidden = true;
+    form.querySelector('[data-poa]').hidden = true;
+    form.querySelector('[data-copy]').onclick = async () => {
+      try { await navigator.clipboard.writeText(equations.join('\n')); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
+    };
+  };
+  /**
+   * الحساب اليدوي: عدد فترات النطاق بالمحرك النقي نفسه × المبلغ الذي أدخله المكتب,
+   * ثم + رسوم/دمغة يدوية. لا يستنتج النظام مبلغًا ولا ينشئ استحقاقًا — مذكرة فقط.
+   */
+  const manualDuration = values => {
+    const amountMinor = toMinorUnits(values.manualAmount || '', 'EGP');
+    if (!amountMinor || amountMinor <= 0) throw new Error('أدخل مبلغًا يدويًا أكبر من صفر (أو ألغِ خيار الحساب اليدوي).');
+    if (!isCivilDate(values.fromDate) || !isCivilDate(values.toDate) || values.toDate < values.fromDate) throw new Error('نطاق المدة غير صحيح: راجع تاريخي البداية والنهاية.');
+    const periodicity = values.manualPeriodicity || 'monthly';
+    const {units} = enumerateExecutionUnits({fromDate: values.fromDate, toDate: values.toDate, frequency: periodicity});
+    if (!units.length) throw new Error('لا توجد فترات في النطاق المحدد.');
+    const feesMinor = toMinorUnits(values.manualFees || '', 'EGP') || 0;
+    const stampsMinor = toMinorUnits(values.manualStamps || '', 'EGP') || 0;
+    const totalMinor = amountMinor * units.length;
+    return {amountMinor, feesMinor, stampsMinor, totalMinor, grandMinor: totalMinor + feesMinor + stampsMinor, periodicity, units};
+  };
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
     try {
+      if (flag(values.useManual)) return renderManualDuration(manualDuration(values));
       const pendingControls = [...resultHost.querySelectorAll('[data-range-decision]')];
       let rangeDecisions = [];
       if (pendingControls.length) {

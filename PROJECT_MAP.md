@@ -5,11 +5,11 @@
 | المسار | الدور والتكامل |
 |---|---|
 | `js/services/execution-simple.js` | فصل `asOf` المعلن عن `periodThroughDate` (أفق الفترات) داخل `simpleSchedule`، وفي الكشف/الطباعة صار التاريخ المستقبلي المطلوب صراحةً هو الأفق نفسه موسومًا «تقديري» (لا كشف يعلن تاريخًا ويحسب غيره)؛ `claimHorizon`/`simpleScheduleHorizon` تقبلان `allowFuture`؛ `horizonTransparency` يخرج `requestedAsOf`/`effectiveAsOf`/`periodThroughDate`/`horizonCapReasons`/`horizonShowWarning`/`horizonNote`/`estimatedPeriods`؛ `simpleDurationClaim` و`simplePoaDraft` و`simpleStatementDocument` تحترم النطاق المستقبلي عند الطلب الصريح وتعلن القصّ بسببه؛ جدول التوكيل يُبنى حتى نهاية النطاق (كان عند اليوم فحسب)؛ `simpleStatementDocument` تقبل `allowFuture` وتوسم الكشف المستقبلي «تقديري». |
-| `js/services/execution-cache.js` | مفتاح جديد يشمل `periodThrough`، وإبطال عند أي كتابة على كيان تنفيذي (أُضيفت `executionSettlements` و`executionAdjustments` وكل ما يبدأ بـ`execution`)، فلا يبقى رقم اعتراف قديم بعد اعتماد فرق في FEAS. |
+| `js/services/execution-cache.js` | `executionCache.clearExecution(id)` لإبطال مخصوص لتنفيذ واحد (تُنادى من كتابة شرائح القيمة)؛ مفتاح جديد يشمل `periodThrough`، وإبطال عند أي كتابة على كيان تنفيذي (أُضيفت `executionSettlements` و`executionAdjustments` وكل ما يبدأ بـ`execution`)، فلا يبقى رقم اعتراف قديم بعد اعتماد فرق في FEAS. |
 | `js/ui/execution-horizon-picker.js` | شاشة «المطلوب حتى»: اختصارات من ارتكاز الفترة، مفتاح «احسب حتى تاريخ مستقبلي» يحترم الإلغاء الصريح، بيانات الفترات الداخلة والمعادلة، وإنذار القصّ/التقدير/التاريخ الأقدم من اليوم. |
 | `js/ui/execution-summary-card.js` | بطاقة الملخص السريع: الموكل/النوع/طريقة التنفيذ + الأرقام الثلاثة القابلة للتفسير + المعادلة + أزرار العمل و«⚙ إعدادات التنفيذ» داخل البطاقة. |
 | `js/modules/execution-center.js` | تاريخ حساب لكل تنفيذ (`asOfKeyFor`/`resolveAsOf` ونطاق موحّد اختياري)؛ قرار المستقبل لكل بطاقة في جلسة العرض (`detailAllowFuture`)؛ `bindAll` لكل العناصر بدل `querySelector` المفرد فتعمل روابط الإعدادات كلها؛ تمرير `allowFuture` للطباعة؛ سطر الفترة الجارية يصف حالها بحسب توقيت الاستحقاق الفعلي. |
-| `js/ui/execution-simple-forms.js` | نافذة إعدادات كاملة قابلة للتعديل (قواعد + سبع قوائم + نطاق تاريخ الحساب + قوالب + سجل النسخ) بتحقق عربي ورسالة فشل داخل النموذج؛ «احسب مدة» و«التوكيل»: قراءة قرارات المربعات بأي قيمة تفعيل غير فارغة، ومزامنة خيار المستقبل عند اختيار تاريخ لاحق، ومعاينة توكيل بمعادلة الفترات ورسوم/دمغة يدوية ومصدر الرصيد السابق، مع تعطيل الرسوم اليدوية في مسار FEAS. |
+| `js/ui/execution-simple-forms.js` | «احسب مدة» فيها مساران: الجدول المسجَّل (الافتراضي) و**مذكرة بمبلغ يدوي** (مبلغ + دورية + رسوم/دمغة) تعمل بلا تسجيل قيمة وتُعلن أنها لا تُنشئ استحقاقًا؛ نافذة إعدادات كاملة قابلة للتعديل (قواعد + سبع قوائم + نطاق تاريخ الحساب + قوالب + سجل النسخ) بتحقق عربي ورسالة فشل داخل النموذج؛ «احسب مدة» و«التوكيل»: قراءة قرارات المربعات بأي قيمة تفعيل غير فارغة، ومزامنة خيار المستقبل عند اختيار تاريخ لاحق، ومعاينة توكيل بمعادلة الفترات ورسوم/دمغة يدوية ومصدر الرصيد السابق، مع تعطيل الرسوم اليدوية في مسار FEAS. |
 | `js/domain/execution-schedule.js` | `amountEquation` تعرض الأعداد بفواصل الآلاف (`3 × 3,000 = 9,000`) فتطابق المعادلة المعروضة في كل الشاشات؛ `valueTimeline` يحترم `defaultCurrency` في البنود بلا عملة صريحة. |
 | `js/services/execution-settings.js` | `RULE_KEYS` صار يضم `allocationOrder` و`defaultCurrency`، فتغييرهما يرفع نسخة القواعد ويُسجَّل في سجل النسخ ويُبطل الذاكرة — لا خيار بلا أثر. |
 | `sw.js` + `js/core/constants.js` | `APP_VERSION = 5.13.2`، و`CACHE=…-v5.13.2-execution-settings-and-horizon` مع إضافة الوحدات الثلاث الجديدة إلى precache (كان غيابها يُفشل الإقلاع بلا شبكة). |
@@ -17,7 +17,27 @@
 | `tools/node-tests/dom-forms.mjs` | `TestFormData` يطابق المتصفح في قيمة مربع الاختيار الافتراضية (`on`) فلا تنجح الاختبارات على سلوك لا يراه المستخدم. |
 | `tools/node-tests/execution-settings-browser-tests.mjs` (جديد) | 8 فحوص Chromium حقيقية لرحلة الشكوى نفسها (ستة مكتبي + فحصا موبايل بعرض 390px): الأرقام المرجعية 3,000/9,000 · الإعدادات من البطاقة وانعكاسها الفوري · التوكيل 9,600 · قوالب الطباعة · بلا أخطاء كونسول. `npm run test:execution-settings-browser`، ولقطاته في `docs/execution-ux-shots/v5.13.2-*.png`. |
 
-**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **44/44**؛ Chromium: `execution-settings-browser` 8/8 · `execution-print-browser` **13/13** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19 · `offline-sync` و`quick-notes` ناجحان. يبقى `grid-browser` فشلًا قائمًا على `main` في تخصيص الجدول (خارج نطاق التنفيذ). **NOT VERIFIED:** معاينة الطباعة الأصلية والطباعة الورقية ومتصفحات غير Chromium.
+**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **45/45**؛ Chromium: `execution-settings-browser` 8/8 · `execution-print-browser` **13/13** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19 · `offline-sync` و`quick-notes` ناجحان. يبقى `grid-browser` فشلًا قائمًا على `main` في تخصيص الجدول (خارج نطاق التنفيذ). **NOT VERIFIED:** معاينة الطباعة الأصلية والطباعة الورقية ومتصفحات غير Chromium.
+
+---
+
+# v5.13.1 — إصلاح مركز التنفيذ فقط (BUG-1..7) تراكمي
+
+**2026-10-05 — النطاق: Execution Center فقط، المحرك سليم — إصلاح واجهة + أفق + توكيل.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/modules/execution-center.js` | كل الروابط `querySelectorAll.forEach` (مركز + بطاقة + runningPeriodNote)، ثوابت `ASOF_MODE_KEY` و`asOfKeyFor(id)`، قراءة `localAsOf/globalAsOf/effectiveAsOf` مع `allowFuture:true`، `summarySectionMarkup` يعرض `requestedAsOf/effectiveAsOf` وتنبيه `horizonCapped` وشارة «تقديري»، و`bindContainer` يربط `data-settings/data-help` داخل الملاحظة الجارية. |
+| `js/services/execution-simple.js` | `claimHorizon(...,{allowFuture})` و`simpleScheduleHorizon` — قصّ فقط إذا `allowFuture:false`، `simpleSchedule({allowFuture})` يعيد حقول شفافية + `horizonNote`، `simpleCardBundle` افتراضي `allowFuture:true` ويستخدم `executionCache` بمفتاح يشمل `ruleVersion`، وكل كتابات (تحصيل/إجراء/مصروف/حكم لاحق/توكيل/إلغاء/تعديل/حالة) تمسح `executionCache.clearExecution(id)`، و`simplePoaDraft({fees,stamps,allowFuture})` يلتقط آخر تبديد/حجز ويحوّل الرسوم عبر `toMinorUnits`. |
+| `js/domain/execution-schedule.js` | `buildPoaFigures({schedule,fromDate,toDate,feesMinor,stampsMinor,previousAction,...})` — يضيف `feesLine/stampsLine` بتلميح «النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت»، و`periodEquations` (متساوية/مختلفة/جزئية)، و`previousNote` مرتبط بمحضر برقم وتاريخ، و`totalMinor = previous+period+expenses+fees+stamps` ومعادلات تشمل التفصيل. |
+| `js/ui/execution-simple-forms.js` | `executionSettingsDialog` بمعالجة `try/catch` كاملة + تعطيل زر + `data-error` + `toast` + اختيار وضع `asofMode per/global` وقوائم قابلة للتعديل يدويًا (بما فيها `borneBy, laterJudgmentKinds, templates, followUpThresholds`) + يستخدم `app.refresh()`، و`simplePoaDialog` يضيف حقلي `fees/stamps` ومعاينة بالربط والمعادلة والرسوم. |
+| `js/services/execution-cache.js` (جديد) | LRU 200 مدخل، مفتاح `${executionId}|${asOf}|${allowFuture}|${ruleVersion}|${engineVersion}`، يستمع لـ `execution:cache-invalidated` و`execution:configuration-changed`، `get/set/clear/clearExecution/key`. |
+| `docs/EXECUTION.md` | قسم 7 يوثق BUG-1..7 وقبول `allowFuture`. |
+| `CHANGELOG.md` | إدخال تراكمي يوثق كل إصلاح وقبول 1 فترة/4 فترات/مقصوص. |
+
+**التحقق:** `claimHorizon` allowTrue لا يقصّ، allowFalse يقصّ إلى اليوم؛ `simpleSchedule` 2026-11-04 ⇒ 1 فترة 3000، 2027-01-04 ⇒ 3 فترات ANNIVERSARY / 4 فترات CALENDAR_MONTH بلا قصّ صامت؛ `execution-cache` LRU ويُبطل عند تغيير الإعدادات؛ `buildPoaFigures` يظهر معادلة ورسوم يدوية وربط بمحضر. لا `SCHEMA_VERSION` جديد، لا bundler، مسارات نسبية، لا `location.reload`.
+
+---
 
 # v5.13.1 — خريطة إصلاح حساب التنفيذ وإدارة البيانات
 

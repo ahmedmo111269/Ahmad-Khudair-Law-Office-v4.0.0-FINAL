@@ -79,6 +79,22 @@ export const executionCache = {
   },
   has: key => entries.has(key),
   delete: key => entries.delete(key),
+  /**
+   * إبطال مخصوص لتنفيذ واحد (يُنادى من مسارات الكتابة المباشرة مثل شرائح القيمة):
+   * يمسح كل المفاتيح التي تبدأ بـ`scope|executionId|` فلا يتأثر رقم تنفيذ آخر.
+   */
+  clearExecution(executionId, reason = '') {
+    if (!executionId) return 0;
+    let removed = 0;
+    for (const key of [...entries.keys()]) {
+      if (!key.includes(`|${executionId}|`)) continue;
+      entries.delete(key);
+      removed += 1;
+    }
+    if (removed) stats.invalidations += 1;
+    stats.lastInvalidationReason = String(reason || `كتابة على التنفيذ ${executionId}`);
+    return removed;
+  },
   get size() { return entries.size; },
   keys: () => [...entries.keys()],
   stats: () => ({...stats, size: entries.size}),
