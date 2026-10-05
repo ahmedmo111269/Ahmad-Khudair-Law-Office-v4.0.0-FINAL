@@ -487,6 +487,7 @@ export async function subsequentJudgmentDialog(app, executionId, {bundle = null}
         </label>
       </div>
       <div class="alloc-preview" data-preview aria-live="polite"><span class="muted small">اكتب القيمة الجديدة وتاريخ السريان لتظهر معاينة الأثر شهرًا بشهر…</span></div>
+      <div class="exec-decision-list" data-decision-fields></div>
       <label class="check-line" data-confirm-line hidden><input type="checkbox" name="confirmedDecrease"> أُقرّ بأن هذا الحكم يخفض القيمة وأريد الحفظ</label>
       <div class="form-actions">
         <button type="submit" class="primary" data-save>حفظ الحكم اللاحق</button>
@@ -496,28 +497,103 @@ export async function subsequentJudgmentDialog(app, executionId, {bundle = null}
   const form = card.querySelector('[data-form="later-judgment"]');
   const previewHost = form.querySelector('[data-preview]');
   const confirmLine = form.querySelector('[data-confirm-line]');
+  const decisionHost = form.querySelector('[data-decision-fields]');
+  const choiceLabels = {KEEP_OLD_VALUE: 'القيمة القديمة كاملة', USE_NEW_VALUE: 'القيمة الجديدة كاملة', INCLUDE_FULL: 'الفترة كاملة', EXCLUDE: 'استبعاد الفترة', MANUAL: 'مبلغ كامل يدوي'};
+  const scenarioSummary = (preview, scenarios) => {
+    const rows = scenarios.map(([choice, key]) => {
+      const result = preview.scenarios?.[key];
+      if (!result) return '';
+      const manualAmount = key === 'END_MANUAL' ? preview.manualEndAmountMinor : preview.manualPeriodAmountMinor;
+      const awaitingManual = choice === 'MANUAL' && !Number.isSafeInteger(manualAmount);
+      return `<tr><td>${esc(choiceLabels[choice] || choice)}</td><td>${awaitingManual ? 'أدخل مبلغًا كاملًا للاحتساب' : money(result.newDueMinor)}</td><td>${awaitingManual ? '—' : money(result.differenceMinor)}</td></tr>`;
+    }).join('');
+    return rows ? `<table class="mini-table"><thead><tr><th>الخيار</th><th>المطلوب بعده</th><th>فرق المطلوب</th></tr></thead><tbody>${rows}</tbody></table>` : '';
+  };
+  const decisionPanel = (period, {kind, title, choiceName, reasonName, amountName, policy, choices}) => {
+    if (!period) return '';
+    if (data.execution?.accountingModel === 'feas-v1') return `<p class="muted small">${esc(title)}: سيُطلب القرار والسبب لكل فترة عند معاينة/اعتراف FEAS.</p>`;
+    if (!['ASK', 'MANUAL'].includes(policy)) return `<p class="muted small">${esc(title)} تُحسم حاليًا وفق إعداد المكتب ${esc(policy)}؛ البدائل أعلاه للمقارنة.</p>`;
+    const existing = new FormData(form);
+    const selected = String(existing.get(choiceName) || (policy === 'MANUAL' ? 'MANUAL' : ''));
+    const manualVisible = selected === 'MANUAL';
+    return `<section class="exec-decision-card" data-period-decision>
+      <b>${esc(title)} — ${esc(period.fromDate)} → ${esc(period.toDate)}</b>
+      <label class="field">القرار<select name="${choiceName}" data-boundary-choice="${kind}" required>
+        <option value="">— اختر صراحةً —</option>${choices.map(choice => `<option value="${choice}"${selected === choice ? ' selected' : ''}>${esc(choiceLabels[choice] || choice)}</option>`).join('')}
+      </select></label>
+      <label class="field">سبب القرار<textarea name="${reasonName}" rows="2" required>${esc(existing.get(reasonName) || '')}</textarea></label>
+      <label class="field" data-manual-for="${kind}"${manualVisible ? '' : ' hidden'}>المبلغ الكامل يدويًا (ج.م)
+        <input name="${amountName}" type="number" min="0" step="0.01" value="${esc(existing.get(amountName) || '')}"${manualVisible ? ' required' : ''}>
+      </label>
+    </section>`;
+  };
+  const toggleManualFields = () => {
+    for (const select of decisionHost.querySelectorAll('[data-boundary-choice]')) {
+      const manual = decisionHost.querySelector(`[data-manual-for="${select.dataset.boundaryChoice}"]`);
+      const input = manual?.querySelector('input');
+      if (manual) manual.hidden = select.value !== 'MANUAL';
+      if (input) input.required = select.value === 'MANUAL';
+    }
+  };
   let timer = 0;
   const renderPreview = async () => {
     const amount = form.querySelector('[name="amount"]').value.trim();
     const effectiveFrom = form.querySelector('[name="effectiveFrom"]').value;
-    if (!amount || !isCivilDate(effectiveFrom)) { previewHost.innerHTML = '<span class="muted small">اكتب القيمة الجديدة وتاريخ السريان لتظهر معاينة الأثر شهرًا بشهر…</span>'; return; }
+    const effectiveTo = form.querySelector('[name="effectiveTo"]').value;
+    if (!amount || !isCivilDate(effectiveFrom)) {
+      previewHost.innerHTML = '<span class="muted small">اكتب القيمة الجديدة وتاريخ السريان لتظهر معاينة الأثر شهرًا بشهر…</span>';
+      decisionHost.innerHTML = ''; return;
+    }
+    if (data.execution?.accountingModel === 'feas-v1') {
+      confirmLine.hidden = true;
+      previewHost.innerHTML = '<span class="muted small">هذا التنفيذ يتبع FEAS؛ قرارات الفترات تُطلب في مسار الاعتراف المنفصل، ولا تُطبَّق معاينة المحرك القديم هنا.</span>';
+      decisionHost.innerHTML = ''; return;
+    }
     try {
-      const preview = await S.previewSubsequentJudgment(app.office, executionId, {amount, effectiveFrom, entitlementType: form.querySelector('[name="entitlementType"]').value, asOf: data.schedule.asOf});
+      const preview = await S.previewSubsequentJudgment(app.office, executionId, {amount, effectiveFrom, effectiveTo,
+        manualPeriodAmount: form.querySelector('[name="manualPeriodAmount"]')?.value || '',
+        manualEndAmount: form.querySelector('[name="manualEndAmount"]')?.value || '',
+        entitlementType: form.querySelector('[name="entitlementType"]').value, asOf: data.schedule.asOf});
       const currentMinor = current ? toMinorUnitsSafe(current.amount, preview.currency) : 0;
       const newMinor = toMinorUnitsSafe(amount, preview.currency);
       const decrease = currentMinor > 0 && newMinor < currentMinor;
       confirmLine.hidden = !decrease;
-      if (preview.rows.length === 0) { previewHost.innerHTML = '<span class="muted small">لا يوجد تغيير في الاستحقاق بهذه القيمة/التاريخ.</span>'; return; }
+      const scenarios = [
+        ...(preview.midPeriod ? [[['KEEP_OLD_VALUE', 'KEEP_OLD_VALUE'], ['USE_NEW_VALUE', 'USE_NEW_VALUE'], ['MANUAL', 'MANUAL']]] : []),
+        ...(preview.midEndPeriod ? [[['INCLUDE_FULL', 'INCLUDE_FULL'], ['EXCLUDE', 'EXCLUDE'], ['MANUAL', 'END_MANUAL']]] : [])
+      ].flat();
+      const panels = [
+        decisionPanel(preview.midPeriod, {kind: 'MID_CHANGE', title: 'قرار الحكم اللاحق الذي يبدأ منتصف الفترة',
+          choiceName: 'midPeriodChoice', reasonName: 'midPeriodReason', amountName: 'manualPeriodAmount',
+          policy: settings.schedule.midChangePolicy, choices: ['KEEP_OLD_VALUE', 'USE_NEW_VALUE', 'MANUAL']}),
+        decisionPanel(preview.midEndPeriod, {kind: 'END_DATE', title: 'قرار نهاية الحكم التي تقع منتصف الفترة',
+          choiceName: 'endPeriodChoice', reasonName: 'endPeriodReason', amountName: 'manualEndAmount',
+          policy: settings.schedule.endPolicy, choices: ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']})
+      ].filter(Boolean).join('');
+      decisionHost.innerHTML = panels;
+      toggleManualFields();
+      if (preview.rows.length === 0 && !scenarios.length) { previewHost.innerHTML = '<span class="muted small">لا يوجد تغيير في الاستحقاق بهذه القيمة/التاريخ.</span>'; return; }
       previewHost.innerHTML = `<b>الأثر شهرًا بشهر:</b>
         <table class="mini-table"><thead><tr><th>الشهر</th><th>القيمة الحالية</th><th>الجديدة</th><th>الفرق</th></tr></thead><tbody>
         ${preview.rows.map(row => `<tr><td>${esc(row.label)}</td><td>${money(row.oldMinor)}</td><td>${money(row.newMinor)}</td><td class="${row.differenceMinor < 0 ? 'neg' : 'pos'}">${money(row.differenceMinor)}</td></tr>`).join('')}
         </tbody><tfoot><tr><td>الإجمالي</td><td>${money(preview.totals.oldDueMinor)}</td><td>${money(preview.totals.newDueMinor)}</td><td class="${preview.totals.differenceMinor < 0 ? 'neg' : 'pos'}">${money(preview.totals.differenceMinor)}</td></tr></tfoot></table>
+        ${scenarios.length ? `<h4>مقارنة خيارات الحدود — بلا تناسب بالأيام</h4>${scenarioSummary(preview, scenarios)}` : ''}
         ${decrease ? `<p class="warn-line">تخفيض: أي مبلغ مدفوع يتجاوز الاستحقاق الجديد يظهر كـ«دفعة زائدة / رصيد دائن» بلا رد تلقائي.</p>` : ''}
         <p class="muted small">${esc(preview.equations.join(' — '))}</p>`;
-    } catch (error) { previewHost.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; }
+    } catch (error) { previewHost.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; decisionHost.innerHTML = ''; }
   };
-  form.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => renderPreview().catch(() => {}), 200); });
-  form.addEventListener('change', () => renderPreview().catch(() => {}));
+  form.addEventListener('input', event => {
+    if (event.target.closest('[data-period-decision]')) return;
+    clearTimeout(timer); timer = setTimeout(() => renderPreview().catch(() => {}), 200);
+  });
+  form.addEventListener('change', event => {
+    if (event.target.closest('[data-period-decision]')) {
+      toggleManualFields();
+      if (event.target.matches('[name="manualPeriodAmount"], [name="manualEndAmount"]')) renderPreview().catch(() => {});
+      return;
+    }
+    renderPreview().catch(() => {});
+  });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
@@ -527,6 +603,8 @@ export async function subsequentJudgmentDialog(app, executionId, {bundle = null}
       executionId, entitlementType: values.entitlementType, amount: values.amount, effectiveFrom: values.effectiveFrom,
       effectiveTo: values.effectiveTo, judgmentNumber: values.judgmentNumber, court: values.court,
       judgmentDate: values.judgmentDate, notes: values.notes, confirmedDecrease: values.confirmedDecrease === 'on',
+      midPeriodChoice: values.midPeriodChoice, midPeriodReason: values.midPeriodReason, manualPeriodAmount: values.manualPeriodAmount,
+      endPeriodChoice: values.endPeriodChoice, endPeriodReason: values.endPeriodReason, manualEndAmount: values.manualEndAmount,
       previousSliceId: current?.id || ''
     }), 'تم تسجيل الحكم اللاحق وأُعيد بناء الجدول');
     if (!out) save.disabled = false;
@@ -594,15 +672,47 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
   card.querySelectorAll('[data-from]').forEach(button => button.addEventListener('click', () => {
     form.querySelector('[name="fromDate"]').value = button.dataset.from;
     form.querySelector('[name="toDate"]').value = button.dataset.to;
+    resultHost.innerHTML = '<span class="muted small">اختر المدة ثم اضغط احسب.</span>';
     form.requestSubmit();
   }));
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
     try {
-      const claim = await S.simpleDurationClaim(app.office, currentId(), {fromDate: values.fromDate, toDate: values.toDate});
+      const pendingControls = [...resultHost.querySelectorAll('[data-range-decision]')];
+      let rangeDecisions = [];
+      if (pendingControls.length) {
+        const decisions = pendingControls.map(host => {
+          const choice = host.querySelector('[data-range-choice]')?.value || '';
+          const amountInput = host.querySelector('[data-range-amount]');
+          const amountMinor = choice === 'MANUAL' ? toMinorUnits(amountInput?.value || '', resultHost.dataset.currency || 'EGP') : null;
+          return {periodKey: host.dataset.periodKey, kind: host.dataset.kind, itemId: host.dataset.itemId, anchorDate: host.dataset.anchorDate,
+            k: Number(host.dataset.k), fromDate: host.dataset.fromDate, toDate: host.dataset.toDate, choice,
+            reason: host.querySelector('[data-range-reason]')?.value || '', ...(choice === 'MANUAL' ? {amountMinor} : {})};
+        });
+        if (decisions.some(row => row.choice)) {
+          if (decisions.some(row => !row.choice)) throw new Error('اختر قرارًا لكل فترة حدّية قبل الحفظ.');
+          const saved = await S.recordSimpleDurationDecisions(app.office, currentId(), {fromDate: values.fromDate, toDate: values.toDate, decisions});
+          rangeDecisions = saved.decisions;
+        }
+      }
+      const claim = await S.simpleDurationClaim(app.office, currentId(), {fromDate: values.fromDate, toDate: values.toDate, rangeDecisions});
       const currency = claim.totals.currency;
+      resultHost.dataset.currency = currency;
       const amount = minor => `${fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      const boundaryHtml = claim.partials.length ? `<section class="hint hint-warning"><b>الفترة الحدّية لا تُحتسب بنسبة الأيام.</b><p class="small">اختر قرارًا صريحًا لكل فترة؛ القرار وسببه وتاريخه والمستخدم سيُحفظ في سجل النشاط.</p>
+        ${claim.partials.map(decision => `<div class="form-grid" data-range-decision data-period-key="${esc(decision.periodKey)}" data-kind="${esc(decision.kind)}" data-item-id="${esc(decision.itemId || '')}" data-anchor-date="${esc(decision.anchorDate || '')}" data-k="${esc(decision.k)}" data-from-date="${esc(decision.fromDate)}" data-to-date="${esc(decision.toDate)}">
+          <p class="small">${displayDate(decision.fromDate)} – ${displayDate(decision.toDate)} — قيمة الفترة الكاملة ${amount(decision.dueMinor)}.</p>
+          <label class="field">القرار<select data-range-choice><option value="">— اختر صراحةً —</option><option value="INCLUDE_FULL">احتساب الفترة كاملة</option><option value="EXCLUDE">استبعاد الفترة</option><option value="MANUAL">قيمة كاملة يدوية</option></select></label>
+          <label class="field">سبب القرار<textarea data-range-reason rows="2" placeholder="سبب القرار" required></textarea></label>
+          <label class="field" data-manual-wrap hidden>المبلغ الكامل يدويًا<input data-range-amount type="number" min="0" step="0.01" inputmode="decimal"></label>
+        </div>`).join('')}</section>` : '';
+      const sideBySideHtml = claim.sideBySideScenarios.length ? `<details><summary>مقارنة الخيارات بلا تناسب</summary><table class="mini-table"><thead><tr><th>الفترة</th><th>الخيار</th><th>قيمة الفترة</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>${claim.sideBySideScenarios.map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(row.choice)}</td><td>${row.amountMinor === null ? '—' : amount(row.amountMinor)}</td><td>${row.paidMinor === null ? '—' : amount(row.paidMinor)}</td><td>${row.remainingMinor === null ? '—' : amount(row.remainingMinor)}</td></tr>`).join('')}</tbody></table></details>` : '';
+      const statusNotes = [
+        ...claim.decisionRows.map(row => `تحتاج الفترة ${displayDate(row.fromDate)} – ${displayDate(row.toDate)} قرارًا مستقلًا بشأن القيمة: ${row.reason}`),
+        ...claim.notYetComplete.map(row => `فترة جارية معلوماتية فقط وليست مستحقة: ${displayDate(row.fromDate)} – ${displayDate(row.toDate)}`),
+        claim.horizonCapped ? `قُصّ أفق الحساب إلى ${displayDate(claim.toDate)}؛ تاريخ الحساب الفعلي ${displayDate(claim.asOf)}.` : ''
+      ].filter(Boolean);
       resultHost.innerHTML = `<div class="result-numbers">
           <div><span>المستحق عن المدة</span><b>${amount(claim.totals.dueMinor)}</b></div>
           <div><span>المدفوع عنها</span><b>${amount(claim.totals.paidMinor)}</b></div>
@@ -610,25 +720,37 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
           <div><span>رصيد سابق للمدة</span><b>${amount(claim.totals.beforeMinor)}</b></div>
           <div class="total"><span>الإجمالي المطلوب</span><b>${amount(claim.totals.totalRequiredMinor)}</b></div>
         </div>
-        <table class="mini-table"><thead><tr><th>الشهر</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
+        ${boundaryHtml}${statusNotes.length ? `<ul class="hint hint-info small">${statusNotes.map(note => `<li>${esc(note)}</li>`).join('')}</ul>` : ''}
+        <table class="mini-table"><thead><tr><th>الفترة</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
         ${claim.rows.map(row => `<tr><td>${esc(row.label)}</td><td>${amount(row.dueMinor)}</td><td>${amount(row.paidMinor)}</td><td>${amount(row.remainingMinor)}</td><td>${statusLabel(row.status)}</td></tr>`).join('')}
-        </tbody></table>`;
+        </tbody></table>${sideBySideHtml}<ol class="small">${claim.equations.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
+      resultHost.querySelectorAll('[data-range-choice]').forEach(select => select.addEventListener('change', () => {
+        const manual = select.value === 'MANUAL';
+        const wrap = select.closest('[data-range-decision]').querySelector('[data-manual-wrap]');
+        const amountInput = wrap.querySelector('[data-range-amount]');
+        wrap.hidden = !manual;
+        amountInput.required = manual;
+      }));
+      const canFinalize = !claim.partials.length && !claim.decisionRows.length && !claim.notYetComplete.length;
+      form.querySelector('[data-save]').textContent = claim.partials.length ? 'احفظ القرارات واحسب' : 'احسب';
       form.querySelector('[data-copy]').hidden = false;
       form.querySelector('[data-print]').hidden = false;
+      form.querySelector('[data-print]').disabled = Boolean(claim.partials.length || claim.decisionRows.length);
       form.querySelector('[data-poa]').hidden = false;
+      form.querySelector('[data-poa]').disabled = !canFinalize;
       form.querySelector('[data-copy]').onclick = async () => {
-        const text = claim.equations.join('\n');
+        const text = claim.equations.join('\\n');
         try { await navigator.clipboard.writeText(text); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
       };
-      form.querySelector('[data-print]').onclick = () => app.office && S.printSimpleStatement(app.office, currentId(), {mode: 'range', fromDate: values.fromDate, toDate: values.toDate}).catch(error => toast(userError(error), 'error'));
-      form.querySelector('[data-poa]').onclick = () => simplePoaDialog(app, currentId(), {fromDate: values.fromDate, toDate: values.toDate}).catch(error => toast(userError(error), 'error'));
+      form.querySelector('[data-print]').onclick = () => app.office && S.printSimpleStatement(app.office, currentId(), {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: claim.decisions}).catch(error => toast(userError(error), 'error'));
+      form.querySelector('[data-poa]').onclick = () => simplePoaDialog(app, currentId(), {fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: claim.decisions}).catch(error => toast(userError(error), 'error'));
     } catch (error) { resultHost.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; }
   });
   return card;
 }
 
 /* ======================= التوكيل والطباعة (S7) ======================= */
-export async function simplePoaDialog(app, executionId, {fromDate = '', toDate = '', bundle = null} = {}) {
+export async function simplePoaDialog(app, executionId, {fromDate = '', toDate = '', bundle = null, rangeDecisions = []} = {}) {
   const data = bundle || await S.simpleCardBundle(app.office, executionId);
   const today = localDate();
   const firstUnpaid = data.schedule.rows.find(row => row.remainingMinor > 0)?.fromDate || data.schedule.rows[0]?.fromDate || today;
@@ -656,12 +778,13 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
     </form>`);
   const form = card.querySelector('[data-form="poa"]');
   const previewHost = form.querySelector('[data-preview]');
+  let activeRangeDecisions = Array.isArray(rangeDecisions) ? rangeDecisions : [];
   const currentDraft = async () => {
     const values = Object.fromEntries(new FormData(form).entries());
     const expenseIds = [...form.querySelectorAll('[name="expense"]:checked')].map(input => input.value);
     const draft = await S.simplePoaDraft(app.office, executionId, {
       fromDate: values.fromDate, toDate: values.toDate,
-      includePreviousBalance: values.includePreviousBalance === 'on', expenseIds
+      includePreviousBalance: values.includePreviousBalance === 'on', expenseIds, rangeDecisions: activeRangeDecisions
     });
     return {draft, values, expenseIds};
   };
@@ -670,25 +793,62 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
       const {draft} = await currentDraft();
       const currency = draft.currency;
       const amount = minor => `${fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-      previewHost.innerHTML = `<div class="result-numbers">
+      const boundaries = draft.partials || [];
+      const boundaryHtml = boundaries.length ? `<section class="hint hint-warning"><b>الفترة الحدّية لا تُقسَّم بالأيام.</b><p class="small">اختر قرارًا كاملًا لكل فترة واذكر السبب؛ يُحفظ القرار في سجل النشاط وبنسخة التوكيل.</p>
+        ${boundaries.map(row => `<div class="form-grid" data-range-poa data-period-key="${esc(row.periodKey)}" data-kind="${esc(row.kind)}" data-item-id="${esc(row.itemId || '')}" data-anchor-date="${esc(row.anchorDate || '')}" data-k="${esc(row.k)}" data-from-date="${esc(row.fromDate)}" data-to-date="${esc(row.toDate)}">
+          <p class="small">${displayDate(row.fromDate)} – ${displayDate(row.toDate)} — الفترة الكاملة ${amount(row.dueMinor || 0)}.</p>
+          <label class="field">القرار<select data-poa-choice><option value="">— اختر صراحةً —</option><option value="INCLUDE_FULL">إدراج الفترة كاملة</option><option value="EXCLUDE">استبعاد الفترة</option><option value="MANUAL">مبلغ كامل يدوي</option></select></label>
+          <label class="field">سبب القرار<textarea data-poa-reason rows="2" placeholder="سبب القرار" required></textarea></label>
+          <label class="field" data-poa-manual hidden>المبلغ الكامل<input data-poa-amount type="number" min="0" step="0.01" inputmode="decimal"></label>
+        </div>`).join('')}</section>` : '';
+      const scenarioRows = draft.rangeScenarios || [];
+      const scenarioHtml = scenarioRows.length ? `<details><summary>مقارنة خيارات الحدّ بلا تناسب</summary><table class="mini-table"><thead><tr><th>الفترة</th><th>الخيار</th><th>القيمة</th></tr></thead><tbody>${scenarioRows.map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(row.choice)}</td><td>${row.amountMinor === null ? '—' : amount(row.amountMinor)}</td></tr>`).join('')}</tbody></table></details>` : '';
+      previewHost.innerHTML = `${boundaryHtml}<div class="result-numbers">
           <div><span>رصيد سابق</span><b>${amount(draft.previousAppliedMinor)}</b></div>
           <div><span>فترة التوكيل</span><b>${amount(draft.periodDueMinor)}</b></div>
           <div><span>مصروفات مختارة</span><b>${amount(draft.expensesMinor)}</b></div>
           <div class="total"><span>إجمالي التوكيل</span><b>${amount(draft.totalMinor)}</b></div>
         </div>
-        <p class="muted small">${esc(draft.equations.join(' — '))}</p>
+        ${scenarioHtml}<p class="muted small">${esc(draft.equations.join(' — '))}</p>
         <p class="muted small">إصدار التوكيل لا يغيّر المتبقي: ${amount(draft.periodRemainingMinor)} متبقٍ داخل الفترة.</p>`;
+      previewHost.querySelectorAll('[data-poa-choice]').forEach(select => select.addEventListener('change', () => {
+        const wrap = select.closest('[data-range-poa]').querySelector('[data-poa-manual]');
+        const amountInput = wrap.querySelector('[data-poa-amount]');
+        wrap.hidden = select.value !== 'MANUAL';
+        amountInput.required = select.value === 'MANUAL';
+      }));
     } catch (error) { previewHost.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; }
   };
-  form.addEventListener('change', () => render().catch(() => {}));
-  form.addEventListener('input', () => render().catch(() => {}));
+  form.addEventListener('change', event => {
+    if (event.target.closest('[data-range-poa]')) return;
+    render().catch(() => {});
+  });
+  form.addEventListener('input', event => {
+    if (event.target.closest('[data-range-poa]')) return;
+    render().catch(() => {});
+  });
   await render();
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const save = form.querySelector('[data-save]');
     save.disabled = true;
     try {
-      const {draft, values} = await currentDraft();
+      let {draft, values} = await currentDraft();
+      if (draft.partials?.length) {
+        const controls = [...previewHost.querySelectorAll('[data-range-poa]')];
+        const decisions = controls.map(host => {
+          const choice = host.querySelector('[data-poa-choice]')?.value || '';
+          const amountMinor = choice === 'MANUAL' ? toMinorUnits(host.querySelector('[data-poa-amount]')?.value || '', draft.currency) : null;
+          return {periodKey: host.dataset.periodKey, kind: host.dataset.kind, itemId: host.dataset.itemId, anchorDate: host.dataset.anchorDate,
+            k: Number(host.dataset.k), fromDate: host.dataset.fromDate, toDate: host.dataset.toDate, choice,
+            reason: host.querySelector('[data-poa-reason]')?.value || '', ...(choice === 'MANUAL' ? {amountMinor} : {})};
+        });
+        if (decisions.some(row => !row.choice)) throw new Error('اختر قرارًا صريحًا لكل فترة حدّية قبل إصدار التوكيل.');
+        const saved = await S.recordSimpleDurationDecisions(app.office, executionId, {fromDate: values.fromDate, toDate: values.toDate, decisions});
+        activeRangeDecisions = saved.decisions;
+        ({draft, values} = await currentDraft());
+        if (draft.partials?.length) throw new Error('بقيت فترة حدّية بلا قرار صالح؛ لم يُحفظ التوكيل.');
+      }
       await S.saveSimplePoa(app.office, executionId, {...draft, poaNumber: values.poaNumber}, {date: values.date, printNow: true});
       closeModal();
       toast('حُفظ التوكيل كنسخة غير قابلة للتعديل وفُتح للطباعة', 'ok');
@@ -699,7 +859,8 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
   form.querySelector('[data-print-only]').addEventListener('click', async () => {
     try {
       const {draft, values} = await currentDraft();
-      await S.printSimpleStatement(app.office, executionId, {mode: 'range', fromDate: values.fromDate, toDate: values.toDate});
+      if (draft.partials?.length) throw new Error('احسم حدود الفترات قبل طباعة هذا النطاق.');
+      await S.printSimpleStatement(app.office, executionId, {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: activeRangeDecisions});
       void draft;
     } catch (error) { toast(userError(error), 'error'); }
   });
@@ -816,41 +977,58 @@ export function executionSettingsDialog(app) {
   const card = modal(`<h2 class="modal-title">⚙ إعدادات التنفيذ</h2>
     <p class="muted small">لا يوجد رسم أو دمغة أو مدة مفروضة في الكود: كل القوائم يعدّلها المكتب، والافتراضيات مقترحات فقط.</p>
     <form class="simple-form" data-form="settings">
-      <fieldset><legend>الحساب</legend>
+      <fieldset><legend>قواعد الفترة — ممارسة المكتب المؤرخة، وليست قاعدة قانونية مفروضة</legend>
+        <p class="muted small">النسخة ${esc(String(settings.ruleVersion))} · المحرك ${esc(String(settings.engineVersion))} · السريان ${esc(settings.effectiveFrom || '—')} · المصدر: ${esc(settings.source || '—')}</p>
         <div class="form-grid">
-          <label class="field">احتساب الشهر
-            <select name="monthBasis">
-              <option value="calendar"${schedule.monthBasis === 'calendar' ? ' selected' : ''}>شهر تقويمي (1 → نهاية الشهر)</option>
-              <option value="fromStart"${schedule.monthBasis === 'fromStart' ? ' selected' : ''}>من تاريخ السريان (مثال 15 → 14)</option>
+          <label class="field">أساس الفترة الشهرية
+            <select name="periodBasis">
+              <option value="ANNIVERSARY"${schedule.periodBasis === 'ANNIVERSARY' ? ' selected' : ''}>من يوم الارتكاز إلى ما قبل يوم الارتكاز التالي</option>
+              <option value="CALENDAR_MONTH"${schedule.periodBasis === 'CALENDAR_MONTH' ? ' selected' : ''}>شهر تقويمي كامل</option>
             </select>
           </label>
-          <label class="field">الشهر الأول الناقص
-            <select name="firstMonthPolicy">
-              <option value="prorateDays"${schedule.firstMonthPolicy === 'prorateDays' ? ' selected' : ''}>بالأيام الفعلية</option>
-              <option value="fullMonth"${schedule.firstMonthPolicy === 'fullMonth' ? ' selected' : ''}>شهر كامل</option>
+          <label class="field">البداية داخل فترة ناقصة
+            <select name="startPolicy">
+              <option value="ASK"${schedule.startPolicy === 'ASK' ? ' selected' : ''}>اسأل المستخدم</option>
+              <option value="INCLUDE_FULL"${schedule.startPolicy === 'INCLUDE_FULL' ? ' selected' : ''}>احتساب الفترة كاملة</option>
+              <option value="EXCLUDE"${schedule.startPolicy === 'EXCLUDE' ? ' selected' : ''}>استبعاد الفترة</option>
+              <option value="MANUAL"${schedule.startPolicy === 'MANUAL' ? ' selected' : ''}>مبلغ يدوي للفترة</option>
             </select>
           </label>
-          <label class="field">أساس الأيام
-            <select name="monthDayBasis">
-              <option value="actual"${schedule.monthDayBasis === 'actual' ? ' selected' : ''}>الأيام الفعلية للشهر</option>
-              <option value="thirty"${schedule.monthDayBasis === 'thirty' ? ' selected' : ''}>على أساس 30 يومًا</option>
+          <label class="field">تغير القيمة منتصف الفترة
+            <select name="midChangePolicy">
+              <option value="ASK"${schedule.midChangePolicy === 'ASK' ? ' selected' : ''}>اسأل المستخدم</option>
+              <option value="KEEP_OLD_VALUE"${schedule.midChangePolicy === 'KEEP_OLD_VALUE' ? ' selected' : ''}>القيمة القديمة للفترة كاملة</option>
+              <option value="USE_NEW_VALUE"${schedule.midChangePolicy === 'USE_NEW_VALUE' ? ' selected' : ''}>القيمة الجديدة للفترة كاملة</option>
+              <option value="MANUAL"${schedule.midChangePolicy === 'MANUAL' ? ' selected' : ''}>مبلغ يدوي للفترة</option>
+            </select>
+          </label>
+          <label class="field">نهاية الحكم منتصف الفترة
+            <select name="endPolicy">
+              <option value="ASK"${schedule.endPolicy === 'ASK' ? ' selected' : ''}>اسأل المستخدم</option>
+              <option value="INCLUDE_FULL"${schedule.endPolicy === 'INCLUDE_FULL' ? ' selected' : ''}>احتساب الفترة كاملة</option>
+              <option value="EXCLUDE"${schedule.endPolicy === 'EXCLUDE' ? ' selected' : ''}>استبعاد الفترة</option>
+              <option value="MANUAL"${schedule.endPolicy === 'MANUAL' ? ' selected' : ''}>مبلغ يدوي للفترة</option>
+            </select>
+          </label>
+          <label class="field">توقيت الاستحقاق
+            <select name="accrualTiming">
+              <option value="AFTER_PERIOD_END" selected>بعد اكتمال الفترة</option>
+            </select>
+          </label>
+          <label class="field">قص اليوم في نهاية الشهر
+            <select name="monthEndPolicy">
+              <option value="CLAMP_TO_LAST_DAY" selected>قص إلى آخر يوم — بلا انجراف</option>
             </select>
           </label>
           <label class="field">ترتيب التخصيص الافتراضي
             <select name="allocationOrder">
-              <option value="fifo"${schedule.allocationOrder === 'fifo' ? ' selected' : ''}>الأقدم أولًا</option>
-              <option value="lifo"${schedule.allocationOrder === 'lifo' ? ' selected' : ''}>الأحدث أولًا</option>
+              <option value="fifo"${schedule.allocationOrder === 'fifo' ? ' selected' : ''}>الأقدم أولًا (FIFO)</option>
+              <option value="lifo"${schedule.allocationOrder === 'lifo' ? ' selected' : ''}>الأحدث فالأقدم</option>
               <option value="proportional"${schedule.allocationOrder === 'proportional' ? ' selected' : ''}>تناسبي</option>
             </select>
           </label>
-          <label class="field">الاعتماد
-            <select name="laterJudgmentApproval">
-              <option value="false"${!settings.laterJudgmentApproval ? ' selected' : ''}>أحكام لاحقة بلا اعتماد (افتراضي)</option>
-              <option value="true"${settings.laterJudgmentApproval ? ' selected' : ''}>مراجعة واعتماد قبل الأثر</option>
-            </select>
-          </label>
-          <label class="field">التقريب
-            <input value="الأقرب لقرش (ثابت ومعلن)" readonly>
+          <label class="field">الدقة النقدية
+            <input value="${esc(schedule.roundingPolicy || 'وحدات العملة الصغرى') }" readonly>
           </label>
         </div>
       </fieldset>
@@ -878,11 +1056,13 @@ export function executionSettingsDialog(app) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
     await saveExecutionSettings(app.office, {
+      source: 'ممارسة المكتب — تعديل يدوي من واجهة إعدادات التنفيذ',
       schedule: {
-        ...schedule, monthBasis: values.monthBasis, firstMonthPolicy: values.firstMonthPolicy,
-        monthDayBasis: values.monthDayBasis, allocationOrder: values.allocationOrder
+        ...schedule, periodBasis: values.periodBasis, startPolicy: values.startPolicy,
+        midChangePolicy: values.midChangePolicy, endPolicy: values.endPolicy,
+        accrualTiming: values.accrualTiming, monthEndPolicy: values.monthEndPolicy,
+        allocationOrder: values.allocationOrder
       },
-      laterJudgmentApproval: values.laterJudgmentApproval === 'true',
       lists: {
         ...settings.lists,
         entitlementTypes: lines(values.entitlementTypes),

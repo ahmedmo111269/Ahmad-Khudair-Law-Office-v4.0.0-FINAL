@@ -330,7 +330,6 @@ export const ENTITIES={
   {k:'openedDate',l:'تاريخ الفتح',t:'date',grid:true,g:'بيانات التنفيذ'},
   {k:'stage',l:'المرحلة',t:'text',g:'بيانات التنفيذ'},
   {k:'status',l:'الحالة',t:'select',opts:[['not_started','لم يبدأ'],['active','جارٍ'],['suspended','موقوف'],['partial','تحصيل جزئي'],['completed','مكتمل'],['cancelled','ملغي']],grid:true,g:'بيانات التنفيذ'},
-  {k:'prorationPolicy',l:'سياسة احتساب الفترة الجزئية',t:'select',opts:[['days','تقسيم أيام الفترة'],['periodStart','الاعتماد على قيمة بداية الفترة']],g:'بيانات التنفيذ'},
   {k:'needsReview',l:'يحتاج مراجعة',t:'bool',grid:true,g:'المتابعة'},
   {k:'notes',l:'ملاحظات',t:'textarea',g:'بيانات التنفيذ'}]},
  fees:{label:'أتعاب',plural:'الأتعاب',title:r=>`أتعاب ${r.agreedAmount||''}`,route:'rec:fees',dateField:'createdAt',dateIndex:'createdAt',fields:[
@@ -437,7 +436,7 @@ export const ENTITIES={
   {k:'receiptType',l:'نوع التحصيل',t:'text',grid:true,g:'المحضر'},
   {k:'collectionSide',l:'جهة التحصيل',t:'text',g:'المحضر'},
   {k:'collectorName',l:'المحصّل',t:'text',grid:true,g:'المحضر'},
-  {k:'allocationMethod',l:'طريقة التخصيص',t:'select',opts:[['DIRECT','مباشر'],['MANUAL','يدوي'],['FIFO','الأقدم فالأحدث'],['PROPORTIONAL','بالتناسب'],['BY_PARTY','حسب المستحق']],grid:true,g:'التخصيص'},
+  {k:'allocationMethod',l:'طريقة التخصيص',t:'select',opts:[['DIRECT','مباشر'],['MANUAL','يدوي'],['FIFO','الأقدم فالأحدث'],['LIFO','الأحدث فالأقدم'],['PROPORTIONAL','بالتناسب'],['BY_PARTY','حسب المستحق']],grid:true,g:'التخصيص'},
   {k:'reference',l:'المرجع',t:'text',g:'المحضر'},
   {k:'notes',l:'ملاحظات',t:'textarea',g:'المحضر'}]},
  executionPOAs:{label:'توكيل تنفيذ',plural:'توكيلات التنفيذ',title:r=>`توكيل ${r.poaNumber||''}`.trim(),route:'rec:executionPOAs',dateField:'date',dateIndex:'date',fields:[

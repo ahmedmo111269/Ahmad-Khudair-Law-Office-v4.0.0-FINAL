@@ -44,7 +44,7 @@ page.on('console', message => { if (message.type() === 'error' && !/favicon|ERR_
 await page.goto(`${base}/index.html`);
 await page.waitForFunction(() => window.__LAW_OFFICE_APP__ && !window.__LAW_OFFICE_APP__.booting, null, {timeout: 90000});
 
-// ===== تجهيز البيانات: تنفيذ 3 سنوات (36 شهرًا) بتحصيلات وحكم لاحق ومصروف =====
+// ===== تجهيز البيانات: 33 فترة مكتملة حتى 05/10/2026 + فترة أكتوبر الجارية للإعلام =====
 const seed = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__, office = app.office;
   const S = await import('/js/services/execution-simple.js');
@@ -67,8 +67,9 @@ const seed = await page.evaluate(async () => {
   };
 });
 report.seed = seed;
-check('تنفيذ 3 سنوات يُبنى بـ36 فترة والقيم الرقمية صحيحة',
-  seed.totals.periods === 36 && seed.totals.due === (2500 * 24 + 3000 * 12) * 100 && seed.totals.paid === 42_000 * 100,
+check('المستحق يضم 33 فترة مكتملة حتى أفق 05/10/2026، ولا يستحق أكتوبر الجاري',
+  seed.totals.periods === 33 && seed.totals.due === (2500 * 24 + 3000 * 9) * 100
+  && seed.totals.paid === 42_000 * 100 && seed.totals.remaining === 45_000 * 100,
   JSON.stringify(seed.totals));
 
 // ===== كشف الحساب: فتح مسار الطباعة من الواجهة ثم قياس الصفحات =====
@@ -107,14 +108,18 @@ report.statementPdfPages = statementPdfPages;
 check('كشف 36 شهرًا انقسم إلى أكثر من صفحة واحدة بترقيم متسلسل صحيح',
   statement.pageCount >= 2 && statement.footers.every((text, index) => text === `صفحة ${index + 1} من ${statement.pageCount}`),
   JSON.stringify({pages: statement.pageCount, footers: statement.footers}));
-check('كل الصفوف الـ36 ظاهرة مرة واحدة (مع صف الإجمالي) والرؤوس تتكرر في كل صفحة',
-  statement.periodRows === 37 && statement.headRowsPerPage.every(count => count >= 1),
+check('33 فترة مكتملة + صف أكتوبر الجاري المعلوماتي + الإجمالي ظاهرة مرة واحدة، والرؤوس تتكرر',
+  statement.periodRows === 35 && statement.headRowsPerPage.every(count => count >= 1),
   JSON.stringify({periodRows: statement.periodRows, rowsPerPage: statement.rowCounts, heads: statement.headRowsPerPage}));
 check('عدد صفحات PDF الفعلي يطابق عدد الصفحات المُرقَّمة (لا قطع ولا صفحة زائدة)',
   statementPdfPages === statement.pageCount, `${statementPdfPages} صفحة PDF مقابل ${statement.pageCount} صفحة مرقّمة`);
-check('إجمالي الكشف صحيح وظاهر مرة واحدة: 96,000 مستحق · 42,000 مدفوع · 54,000 متبقٍ (والمصروف لا يُخصم من أصل النفقة)',
-  statement.totalsText.length === 1 && /96,000/.test(statement.totalsText[0]) && /42,000/.test(statement.totalsText[0]) && /54,000/.test(statement.totalsText[0]),
+check('إجمالي الكشف صحيح: 87,000 مستحق · 42,000 مدفوع · 45,000 متبقٍ، والمصروف مستقل',
+  statement.totalsText.length === 1 && /87,000/.test(statement.totalsText[0]) && /42,000/.test(statement.totalsText[0]) && /45,000/.test(statement.totalsText[0]),
   statement.totalsText[0] || '');
+check('كشف الطباعة يفصل asOf عن أفق الاستحقاق ويُظهر الفترة الجارية بصفر فقط',
+  statement.bodyText.includes('تاريخ الحساب الفعلي: 31/12/2026') && statement.bodyText.includes('أفق الفترات: 05/10/2026')
+  && /01\/10\/2026 – 31\/10\/2026 0\.00/.test(statement.bodyText),
+  statement.bodyText.slice(0, 180));
 check('حافة الطباعة: المصروف يظهر كسطر مستقل ولا يزيد أصل النفقة',
   /رسوم تنفيذ/.test(statement.bodyText) && /منفصلة عن أصل الدين/.test(statement.bodyText),
   statement.bodyText.slice(0, 120));

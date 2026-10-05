@@ -1,5 +1,5 @@
 // FEAS money primitives: integer minor units only for persisted/accounting operations.
-// No binary floating-point arithmetic is used to add or prorate monetary amounts.
+// Monetary amounts are stored and combined as integer minor units.
 const CURRENCY_DIGITS = Object.freeze({
   BHD: 3, IQD: 3, JOD: 3, KWD: 3, OMR: 3, TND: 3,
   CLF: 4,
@@ -53,30 +53,6 @@ export function fromMinorUnits(value, currency = 'EGP', {fractionDigits = undefi
   const digits = currencyFractionDigits(currency, fractionDigits);
   if (!Number.isSafeInteger(value)) throw new TypeError('المبلغ بوحدات صغرى يجب أن يكون عددًا صحيحًا آمنًا.');
   return value / (10 ** digits);
-}
-
-/** Exact integer division, rounded half away from zero (used for day proration). */
-function roundRationalHalfUp(numerator, denominator) {
-  const n = BigInt(numerator), d = BigInt(denominator);
-  if (d <= 0n) throw new RangeError('مقام التقسيم المالي يجب أن يكون موجبًا.');
-  const sign = n < 0n ? -1n : 1n;
-  const abs = n < 0n ? -n : n;
-  const q = abs / d, r = abs % d;
-  const rounded = q + (r * 2n >= d ? 1n : 0n);
-  const result = sign * rounded;
-  if (result > BigInt(Number.MAX_SAFE_INTEGER) || result < BigInt(Number.MIN_SAFE_INTEGER)) throw new RangeError('ناتج الحساب يتجاوز حد الدقة الآمن.');
-  return Number(result);
-}
-
-export function divideMinorHalfUp(numerator, denominator) {
-  if (!Number.isSafeInteger(numerator) || !Number.isSafeInteger(denominator) || denominator <= 0) throw new RangeError('معاملات التقسيم المالي غير صحيحة.');
-  return roundRationalHalfUp(numerator, denominator);
-}
-
-/** Multiply an integer amount by a ratio without overflowing Number's integer precision. */
-export function prorateMinorHalfUp(amountMinor, numeratorUnits, denominatorUnits) {
-  if (!Number.isSafeInteger(amountMinor) || !Number.isSafeInteger(numeratorUnits) || !Number.isSafeInteger(denominatorUnits) || numeratorUnits < 0 || denominatorUnits <= 0) throw new RangeError('معاملات التناسب المالي غير صحيحة.');
-  return roundRationalHalfUp(BigInt(amountMinor) * BigInt(numeratorUnits), denominatorUnits);
 }
 
 export function addMinor(...values) {

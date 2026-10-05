@@ -1,51 +1,56 @@
 // =====================================================================
-// محرك الجدول الشهري المشتق (Derived Execution Schedule)
-// ---------------------------------------------------------------------
-// • دالة نقية: (بنود القيمة + الدورية + التحصيلات) → صفوف شهرية حتى تاريخ الحساب.
-//   لا تُخزَّن صفوف مستقبلية، ولا تُبنى فترات على «اعتراف» يدوي.
-// • المال: أعداد صحيحة بالقروش (minor units) فقط، وبلا كسور عائمة في الجمع.
-// • التاريخ: تاريخ مدني نقي YYYY-MM-DD بلا منطقة زمنية.
-// • التخصيص: تخصيصات مُثبَّتة (DIRECT) يحترمها المحرك، وما بقي يُخصَّص تلقائيًا
-//   بالترتيب الذي يحدده المكتب (الأقدم أولًا افتراضيًا)؛ الزائد رصيد دائن مرئي.
-// • لكل رقم عقدة تتبع {الصيغة، المدخلات، المصادر، النتيجة}.
+// محرك جدول الاستحقاق المشتق (Derived Execution Schedule)
+// • الفترات من تاريخ ارتكاز ثابت، بقيمة كاملة، ولا تدخل الفترة الجارية في المستحق.
+// • كل الحسابات المالية وحدات صغرى صحيحة؛ أطوال الفترات لا تدخل معادلة القيمة.
 // =====================================================================
-import {addCivilDays, civilDaysInclusive, daysInCivilMonth, isCivilDate} from './execution-calendar.js';
-import {addMinor, fromMinorUnits, prorateMinorHalfUp, sumMinor, toMinorUnits} from './execution-money.js';
+import {
+  addCivilDays, completedPeriods, isCivilDate, periodEnd, periodIndexOf, periodStart, runningPeriod,
+  semiMonthlyPeriod, semiMonthlyPeriodIndex
+} from './execution-period-calendar.js';
+import {addMinor, fromMinorUnits, sumMinor, toMinorUnits} from './execution-money.js';
 
 export const SCHEDULE_MAX_UNITS = 1200;
+export const EXECUTION_ENGINE_VERSION = 2;
 
 export const PERIOD_STATUS = Object.freeze({
-  PAID: 'paid', PARTIAL: 'partial', UNPAID: 'unpaid', NOTHING_DUE: 'nothing_due'
+  PAID: 'paid', PARTIAL: 'partial', UNPAID: 'unpaid', NOTHING_DUE: 'nothing_due',
+  RUNNING: 'RUNNING', NEEDS_DECISION: 'NEEDS_DECISION'
 });
 
 export const PERIOD_STATUS_LABELS = Object.freeze({
-  paid: '✔ مسدد', partial: '◐ جزئي', unpaid: '✗ لم يُدفع', nothing_due: '· لا استحقاق'
+  paid: '✔ مسدد', partial: '◐ جزئي', unpaid: '✗ غير مدفوع', nothing_due: '· لا استحقاق',
+  RUNNING: '⏳ جارية (تُستحق عند اكتمالها)', NEEDS_DECISION: '⚠ بحاجة قرار'
 });
 
-/** إعدادات الحساب الافتراضية — كلها قابلة للتعديل من إعدادات المكتب. */
+/** إعداد ممارسة المكتب المؤرخة — لا تمثل حكمًا قانونيًا ثابتًا. */
 export const DEFAULT_SCHEDULE_SETTINGS = Object.freeze({
-  monthBasis: 'calendar',           // calendar | fromStart | thirtyDays
-  firstMonthPolicy: 'prorateDays',  // prorateDays | fullMonth
-  monthDayBasis: 'actual',          // actual | thirty
-  allocationOrder: 'fifo',          // fifo | lifo | proportional
-  roundingPolicy: 'halfUpToPiaster',// سياسة معلنة: التقريب لأقرب قرش (نصف لأعلى)
-  carryCreditForward: true,         // الرصيد الدائن يُطبَّق تلقائيًا على الاستحقاقات الجديدة
+  engineVersion: EXECUTION_ENGINE_VERSION,
+  effectiveFrom: '2026-10-05',
+  source: 'ممارسة المكتب — بحسب إفادة المستخدم',
+  periodBasis: 'ANNIVERSARY',
+  startPolicy: 'ASK',
+  midChangePolicy: 'ASK',
+  endPolicy: 'ASK',
+  accrualTiming: 'AFTER_PERIOD_END',
+  monthEndPolicy: 'CLAMP_TO_LAST_DAY',
+  allocationOrder: 'fifo',
+  roundingPolicy: 'integerMinorUnits',
+  carryCreditForward: true,
   defaultCurrency: 'EGP'
 });
 
 const EXPENSE_LEDGER_TYPES = new Set(['EXECUTION_FEE', 'STAMP', 'COLLECTION_FEE', 'OTHER_EXPENSE']);
-/** أنواع المصروفات القابلة للتعديل من إعدادات المكتب — تُقرأ من حقل category أيضًا. */
 export const isExpenseLedgerRow = row => EXPENSE_LEDGER_TYPES.has(String(row?.type || '')) || String(row?.category || '') === 'expense';
 const VOIDED_STATUSES = new Set(['voided', 'cancelled']);
+const MID_CHOICES = new Set(['KEEP_OLD_VALUE', 'USE_NEW_VALUE', 'MANUAL']);
+const END_CHOICES = new Set(['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']);
 
-/** العملة: يقبل رمز ISO أو نصًا عربيًا قديمًا («جنيه») ويعود للعملة الافتراضية بلا تخمين قانوني. */
 export function currencyCode(value, fallback = 'EGP') {
   const text = String(value || '').trim().toUpperCase();
   if (/^[A-Z]{3}$/.test(text)) return text;
   return String(fallback || 'EGP').toUpperCase();
 }
 
-/** مبلغ بسيط (major units) → قروش بلا كسور عائمة. */
 export function minorFromRow(row, currency = 'EGP') {
   if (Number.isSafeInteger(row?.amountMinor)) return row.amountMinor;
   const raw = row?.amount;
@@ -54,24 +59,35 @@ export function minorFromRow(row, currency = 'EGP') {
 }
 
 function settingsWith(settings) {
-  return {...DEFAULT_SCHEDULE_SETTINGS, ...(settings || {})};
+  const out = {...DEFAULT_SCHEDULE_SETTINGS, ...(settings || {})};
+  if (!['ANNIVERSARY', 'CALENDAR_MONTH'].includes(out.periodBasis)) out.periodBasis = 'ANNIVERSARY';
+  if (!['ASK', 'INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].includes(out.startPolicy)) out.startPolicy = 'ASK';
+  if (!['ASK', 'KEEP_OLD_VALUE', 'USE_NEW_VALUE', 'MANUAL'].includes(out.midChangePolicy)) out.midChangePolicy = 'ASK';
+  if (!['ASK', 'INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].includes(out.endPolicy)) out.endPolicy = 'ASK';
+  out.accrualTiming = 'AFTER_PERIOD_END';
+  out.monthEndPolicy = 'CLAMP_TO_LAST_DAY';
+  if (!['fifo', 'lifo', 'proportional'].includes(out.allocationOrder)) out.allocationOrder = 'fifo';
+  return out;
 }
 
-const isActiveSlice = slice => slice
-  && !slice.isDeleted
+const isActiveSlice = slice => slice && !slice.isDeleted
   && !VOIDED_STATUSES.has(String(slice.status || '').toLowerCase())
   && String(slice.status || '') !== 'superseded';
-
-const sliceStart = slice => (isCivilDate(slice.startDate) ? slice.startDate : '');
-const sliceEnd = slice => (isCivilDate(slice.endDate) ? slice.endDate : '');
-
-const maximum = (...values) => values.filter(Boolean).sort().at(-1) || '';
+const sliceStart = slice => isCivilDate(slice?.startDate) ? slice.startDate : '';
+const sliceEnd = slice => isCivilDate(slice?.endDate) ? slice.endDate : '';
 const minimum = (...values) => values.filter(Boolean).sort()[0] || '';
 
-/**
- * تقسيم بنود القيمة إلى «مجموعات بند»: كل بند له سلسلة زمنية من القيم.
- * الحكم اللاحق يقسّم السلسلة تلقائيًا: الشريحة القديمة تنتهي قبل بداية الجديدة.
- */
+function calendarFor(group, settings) {
+  const frequency = String(group.periodicity || 'monthly');
+  if (frequency === 'yearly') return {unit: 'YEAR', monthEndPolicy: settings.monthEndPolicy};
+  if (frequency === 'weekly') return {unit: 'WEEK'};
+  if (frequency === 'daily') return {unit: 'DAY'};
+  if (frequency === 'custom') return {unit: 'DAY', step: Math.max(1, Number(group.customDays) || 1)};
+  if (frequency === 'semiMonthly') return {unit: 'DAY', step: 15, semiMonthly: true};
+  return {unit: 'MONTH', periodBasis: settings.periodBasis, monthEndPolicy: settings.monthEndPolicy};
+}
+
+/** قيم البند على محور زمني، مع إبقاء ارتكاز أول قيمة ثابتًا في السلسلة كلها. */
 export function valueTimeline(slices = []) {
   const groups = new Map();
   for (const slice of (slices || []).filter(isActiveSlice)) {
@@ -79,62 +95,166 @@ export function valueTimeline(slices = []) {
     if (!start) continue;
     const fixed = String(slice.valueType || 'periodic') === 'fixed';
     const type = String(slice.entitlementType || slice.obligationType || 'بند').trim() || 'بند';
-    const key = fixed ? `${type}::ثابت` : `${type}::دوري`;
-    if (!groups.has(key)) groups.set(key, {key, entitlementType: type, fixed, slices: [], periodicity: slice.periodicity || 'monthly'});
+    const itemId = String(slice.itemId || slice.obligationId || `legacy:${type}`);
+    const key = `${itemId}::${fixed ? 'fixed' : 'periodic'}`;
+    if (!groups.has(key)) groups.set(key, {key, itemId, entitlementType: type, fixed, slices: [], periodicity: slice.periodicity || 'monthly', currency: currencyCode(slice.currency, DEFAULT_SCHEDULE_SETTINGS.defaultCurrency)});
     const group = groups.get(key);
     group.slices.push({
       id: slice.id, startDate: start, endDate: sliceEnd(slice), fixed,
-      amountMinor: minorFromRow(slice), judgmentId: slice.judgmentId || slice.linkedJudgmentId || '',
-      judgmentKind: slice.judgmentKind || '', periodicity: slice.periodicity || group.periodicity,
-      sourceReference: slice.sourceReference || '', currency: slice.currency || '',
-      raw: slice
+      amountMinor: minorFromRow(slice, currencyCode(slice.currency, DEFAULT_SCHEDULE_SETTINGS.defaultCurrency)), judgmentId: slice.judgmentId || slice.linkedJudgmentId || '',
+      partyId: slice.partyId || '', judgmentKind: slice.judgmentKind || '', periodicity: slice.periodicity || group.periodicity,
+      customDays: Number(slice.customDays) || null,
+      anchorDate: isCivilDate(slice.anchorDate) ? slice.anchorDate : (isCivilDate(slice.anchor) ? slice.anchor : ''),
+      startPeriodChoice: slice.startPeriodChoice || '', midPeriodChoice: slice.midPeriodChoice || '', endPeriodChoice: slice.endPeriodChoice || '',
+      periodDecisionsSnapshot: Array.isArray(slice.periodDecisionsSnapshot) ? slice.periodDecisionsSnapshot.map(row => ({...row})) : [],
+      manualStartAmountMinor: Number.isSafeInteger(slice.manualStartAmountMinor) ? slice.manualStartAmountMinor : null,
+      manualPeriodAmountMinor: Number.isSafeInteger(slice.manualPeriodAmountMinor) ? slice.manualPeriodAmountMinor : null,
+      manualEndAmountMinor: Number.isSafeInteger(slice.manualEndAmountMinor) ? slice.manualEndAmountMinor : null,
+      choiceReason: String(slice.choiceReason || slice.midPeriodReason || ''),
+      startChoiceReason: String(slice.startChoiceReason || ''),
+      sourceReference: slice.sourceReference || '', currency: slice.currency || '', raw: slice
     });
     if (!fixed && slice.periodicity) group.periodicity = slice.periodicity;
   }
   for (const group of groups.values()) {
     group.slices.sort((a, b) => a.startDate.localeCompare(b.startDate) || String(a.id).localeCompare(String(b.id)));
-    // نهاية كل شريحة تُشتق من بداية الشريحة اللاحقة في نفس البند (الحكم اللاحق).
+    group.anchorDate = group.slices.map(slice => slice.anchorDate).find(isCivilDate) || group.slices[0].startDate;
+    group.periodicity = group.slices[0]?.periodicity || group.periodicity || 'monthly';
+    group.customDays = group.slices[0]?.customDays || null;
     group.slices.forEach((slice, index) => {
       const next = group.slices[index + 1];
-      slice.effectiveEnd = minimum(slice.endDate || '', next ? addCivilDays(next.startDate, -1) : '', '9999-12-31');
+      const derivedEnd = next ? addCivilDays(next.startDate, -1) : '';
+      slice.effectiveEnd = minimum(slice.endDate || '', derivedEnd || '', '9999-12-31');
       slice.previous = index ? group.slices[index - 1] : null;
     });
+    group.calendar = calendarFor(group, settingsWith({}));
   }
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
-/** حدود الوحدة (شهر/فترة) بحسب أساس الاحتساب المختار في الإعدادات. */
-function unitBounds(cursor, group, settings) {
-  if (settings.monthBasis === 'fromStart') {
-    const anchor = group.slices[0].startDate;
-    const anchorDay = Number(anchor.slice(-2));
-    const start = cursor <= anchor ? anchor : `${cursor.slice(0, 7)}-${String(Math.min(anchorDay, daysInCivilMonth(Number(cursor.slice(0, 4)), Number(cursor.slice(5, 7))))).padStart(2, '0')}`;
-    if (start < cursor) {
-      const nextMonthStart = addCivilDays(`${start.slice(0, 7)}-01`, daysInCivilMonth(Number(start.slice(0, 4)), Number(start.slice(5, 7))));
-      const [y, m] = [Number(nextMonthStart.slice(0, 4)), Number(nextMonthStart.slice(5, 7))];
-      const day = Math.min(anchorDay, daysInCivilMonth(y, m));
-      return {start: `${nextMonthStart.slice(0, 7)}-${String(day).padStart(2, '0')}`, nextAnchor: true};
-    }
-    const [year, month, day] = start.split('-').map(Number);
-    const nextYear = month === 12 ? year + 1 : year;
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const nextDay = Math.min(day, daysInCivilMonth(nextYear, nextMonth));
-    return {start, end: addCivilDays(`${String(nextYear).padStart(4, '0')}-${String(nextMonth).padStart(2, '0')}-${String(nextDay).padStart(2, '0')}`, -1)};
+function periodIndexFor(group, date, settings) {
+  return group.periodicity === 'semiMonthly'
+    ? semiMonthlyPeriodIndex(group.anchorDate, date)
+    : periodIndexOf(group.anchorDate, date, calendarFor(group, settings));
+}
+function periodForIndex(group, k, settings) {
+  if (group.periodicity === 'semiMonthly') return semiMonthlyPeriod(group.anchorDate, k);
+  const calendar = calendarFor(group, settings);
+  return {k, from: periodStart(group.anchorDate, k, calendar), to: periodEnd(group.anchorDate, k, calendar)};
+}
+function periodsForGroup(group, asOf, settings, maxUnits) {
+  if (asOf < group.anchorDate) return {complete: [], running: [], truncated: false};
+  if (group.periodicity !== 'semiMonthly') {
+    const calendar = calendarFor(group, settings);
+    const complete = completedPeriods(group.anchorDate, asOf, {
+      ...calendar, accrualTiming: settings.accrualTiming, maxPeriods: maxUnits
+    });
+    const running = runningPeriod(group.anchorDate, asOf, {...calendar, accrualTiming: settings.accrualTiming});
+    return {complete, running: running ? [running] : [], truncated: complete.length >= maxUnits};
   }
-  const start = `${cursor.slice(0, 7)}-01`;
-  const [year, month] = start.split('-').map(Number);
-  return {start, end: `${start.slice(0, 7)}-${String(daysInCivilMonth(year, month)).padStart(2, '0')}`};
+  const currentK = semiMonthlyPeriodIndex(group.anchorDate, asOf);
+  const complete = [], running = [];
+  let k = 0;
+  for (; k <= currentK && complete.length < maxUnits; k += 1) {
+    const period = periodForIndex(group, k, settings);
+    if (period.to <= asOf) complete.push(period);
+    else if (period.from <= asOf && period.to >= asOf) running.push(period);
+  }
+  const nextUnvisited = periodForIndex(group, k, settings);
+  return {complete, running, truncated: k <= currentK || nextUnvisited.from <= asOf};
 }
 
-function unitDays(unit, settings) {
-  const actual = civilDaysInclusive(unit.start, unit.end);
-  if (settings.monthDayBasis === 'thirty' && actual >= 28) return 30;
-  return actual;
+function periodUnitKey(group, k) {
+  return `${encodeURIComponent(group.itemId)}::${group.anchorDate}::${k}`;
+}
+
+function configuredChoice(sliceChoice, configured, choices) {
+  if (choices.has(sliceChoice)) return sliceChoice;
+  return choices.has(configured) ? configured : 'ASK';
+}
+const sliceDecision = (slice, kind) => (slice?.periodDecisionsSnapshot || []).find(row => row.kind === kind) || null;
+
+/** Decide one whole period; this routine has no day counts or fractional-value inputs. */
+function resolvePeriodValue(group, period, settings) {
+  const insideStarts = group.slices.filter(slice => slice.startDate > period.from && slice.startDate <= period.to);
+  const firstSlice = group.slices[0];
+  const initialStartK = firstSlice ? periodIndexFor(group, firstSlice.startDate, settings) : null;
+  const initialPartial = Boolean(firstSlice && period.k === initialStartK && firstSlice.startDate > period.from && firstSlice.startDate <= period.to);
+  let selected = group.slices.filter(slice => slice.startDate <= period.from).at(-1) || null;
+  let manualValue = null;
+  let choice = '';
+  const decisionSnapshots = [];
+  if (initialPartial) {
+    const startChoice = configuredChoice(firstSlice.startPeriodChoice, settings.startPolicy, new Set(['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']));
+    choice = startChoice;
+    const startDecision = sliceDecision(firstSlice, 'START_DATE');
+    if (startDecision) decisionSnapshots.push(startDecision);
+    if (startChoice === 'ASK') return {needsDecision: true, reason: 'بداية الالتزام تقع في منتصف فترة', transition: firstSlice, choiceOptions: ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL'], decisionKind: 'START_DATE'};
+    if (startChoice === 'EXCLUDE') return {amountMinor: 0, parts: [], skipped: true, startChoice};
+    if (startChoice === 'INCLUDE_FULL') selected = firstSlice;
+    else {
+      manualValue = firstSlice.manualStartAmountMinor;
+      if (!Number.isSafeInteger(manualValue) || manualValue < 0) return {needsDecision: true, reason: 'المبلغ اليدوي لفترة البداية غير مسجل', transition: firstSlice, choiceOptions: ['MANUAL'], decisionKind: 'START_MANUAL'};
+      selected = firstSlice;
+    }
+  }
+  const initialCalendarStart = initialPartial;
+  const transitions = initialCalendarStart ? insideStarts.filter(slice => slice.id !== firstSlice?.id) : insideStarts;
+  if (transitions.length) {
+    const transition = transitions.at(-1);
+    const choiceValue = configuredChoice(transition.midPeriodChoice, settings.midChangePolicy, MID_CHOICES);
+    choice = choiceValue;
+    const midDecision = sliceDecision(transition, 'MID_CHANGE');
+    if (midDecision) decisionSnapshots.push(midDecision);
+    if (choiceValue === 'ASK') return {needsDecision: true, reason: 'حكم لاحق يبدأ في منتصف فترة', transition, choiceOptions: ['KEEP_OLD_VALUE', 'USE_NEW_VALUE', 'MANUAL']};
+    if (choiceValue === 'KEEP_OLD_VALUE') {
+      if (!selected) selected = group.slices.find(slice => slice.id === transition.previous?.id) || null;
+    } else if (choiceValue === 'USE_NEW_VALUE') selected = transition;
+    else {
+      manualValue = transition.manualPeriodAmountMinor;
+      if (!Number.isSafeInteger(manualValue) || manualValue < 0) return {needsDecision: true, reason: 'المبلغ اليدوي للفترة غير مسجل', transition, choiceOptions: ['MANUAL']};
+      selected = transition;
+    }
+  }
+  if (!selected && initialCalendarStart) selected = group.slices[0];
+  if (!selected || selected.startDate > period.to || selected.effectiveEnd < period.from) return {amountMinor: 0, parts: [], skipped: true};
+
+  const endsMidPeriod = selected.endDate && selected.endDate >= period.from && selected.endDate < period.to;
+  if (endsMidPeriod) {
+    const endChoice = configuredChoice(selected.endPeriodChoice, settings.endPolicy, END_CHOICES);
+    const endDecision = sliceDecision(selected, 'END_DATE');
+    if (endDecision) decisionSnapshots.push(endDecision);
+    if (endChoice === 'ASK') return {needsDecision: true, reason: 'نهاية الحكم تقع في منتصف فترة', transition: selected, choiceOptions: ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']};
+    if (endChoice === 'EXCLUDE') return {amountMinor: 0, parts: [], skipped: true, endChoice};
+    if (endChoice === 'MANUAL') {
+      const amountMinor = selected.manualEndAmountMinor;
+      if (!Number.isSafeInteger(amountMinor) || amountMinor < 0) return {needsDecision: true, reason: 'المبلغ اليدوي لنهاية الفترة غير مسجل', transition: selected, choiceOptions: ['MANUAL']};
+      manualValue = amountMinor;
+    }
+  }
+  const amountMinor = manualValue === null ? selected.amountMinor : manualValue;
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 0) throw new RangeError('قيمة الفترة ليست عددًا صحيحًا بوحدات صغرى.');
+  return {
+    amountMinor,
+    selected,
+    choice,
+    parts: amountMinor > 0 ? [{
+      sliceId: selected.id, judgmentId: selected.judgmentId, judgmentKind: selected.judgmentKind, partyId: selected.partyId,
+      amountMinor, rateAmountMinor: selected.amountMinor, currency: selected.currency, sourceReference: selected.sourceReference,
+      valueChange: selected.previous ? {
+        previousSliceId: selected.previous.id, previousAmountMinor: selected.previous.amountMinor,
+        previousJudgmentId: selected.previous.judgmentId, newAmountMinor: selected.amountMinor,
+        differenceMinor: addMinor(selected.amountMinor, -selected.previous.amountMinor)
+      } : null,
+      choice, choiceReason: decisionSnapshots.map(row => row.reason).filter(Boolean).join('؛ ') || selected.choiceReason || '',
+      decisionsSnapshot: decisionSnapshots, equation: `1 فترة كاملة (${period.from} → ${period.to}) × ${amountMinor} وحدة صغرى`
+    }] : []
+  };
 }
 
 /**
- * الجدول المشتق: وحدات (بند × فترة) حتى تاريخ الحساب، بلا أي تخزين.
- * كل وحدة تحمل مستحقها ومصادره ومعادلته الكسرية.
+ * Build derived units for completed periods plus an informational running period.
+ * Periods are generated from each item's immutable original anchor.
  */
 export function buildScheduleUnits({slices = [], asOf = '', fromDate = '', settings = {}, maxUnits = SCHEDULE_MAX_UNITS} = {}) {
   const options = settingsWith(settings);
@@ -142,88 +262,65 @@ export function buildScheduleUnits({slices = [], asOf = '', fromDate = '', setti
   if (fromDate && !isCivilDate(fromDate)) throw new RangeError('تاريخ البداية غير صحيح.');
   const groups = valueTimeline(slices);
   const units = [];
+  const decisions = [];
   let truncated = false;
   for (const group of groups) {
     const first = group.slices[0];
     if (!first) continue;
-    // مدى التغطية = اتحاد الشرائح (لا تتوقف السلسلة عند نهاية أول شريحة).
-    const openEnd = maximum(...group.slices.map(slice => slice.effectiveEnd).filter(Boolean), '9999-12-31');
-    const end = minimum(openEnd, asOf);
-    let cursor = maximum(first.startDate, fromDate || '', `${first.startDate.slice(0, 7)}-01`);
     if (group.fixed || String(group.periodicity) === 'fixed') {
-      const start = first.startDate;
-      if (start > end) continue;
-      const fixedSlice = group.slices[0];
+      if (first.startDate > asOf || (first.endDate && first.endDate < first.startDate)) continue;
+      const key = periodUnitKey(group, 0);
       units.push({
-        periodKey: `${group.entitlementType}::${start}`, unitKey: `${group.entitlementType}::${start}`,
-        entitlementType: group.entitlementType, fixed: true, fromDate: start, toDate: start,
-        dueMinor: fixedSlice.amountMinor,
-        parts: [{
-          sliceId: fixedSlice.id, judgmentId: fixedSlice.judgmentId, judgmentKind: fixedSlice.judgmentKind,
-          amountMinor: fixedSlice.amountMinor, rateAmountMinor: fixedSlice.amountMinor,
-          coveredStart: start, coveredEnd: start, days: 1, periodDays: 1, whole: true, sourceReference: fixedSlice.sourceReference,
-          valueChange: null, equation: `${fixedSlice.amountMinor} قرش (مبلغ مقطوع مرة واحدة)`
-        }]
+        periodKey: key, unitKey: key, legacyPeriodKey: `${group.entitlementType}::${first.startDate}`,
+        itemId: group.itemId, anchorDate: group.anchorDate, k: 0, entitlementType: group.entitlementType,
+        periodicity: 'fixed', currency: group.currency, fixed: true, isComplete: true, fromDate: first.startDate, toDate: first.startDate,
+        dueMinor: first.amountMinor, projectedMinor: first.amountMinor,
+        parts: [{sliceId: first.id, judgmentId: first.judgmentId, judgmentKind: first.judgmentKind, partyId: first.partyId, currency: first.currency,
+          amountMinor: first.amountMinor, rateAmountMinor: first.amountMinor, sourceReference: first.sourceReference,
+          valueChange: null, equation: `${first.amountMinor} وحدة صغرى (مبلغ مقطوع مرة واحدة)`}]
       });
       continue;
     }
-    let guard = 0;
-    while (civilDaysInclusive(cursor, end) > 0) {
-      if (units.length >= maxUnits * 4 || guard++ > maxUnits) { truncated = true; break; }
-      const bounds = unitBounds(cursor, group, options);
-      const start = bounds.start;
-      const finish = minimum(bounds.end, end);
-      if (!start || !finish || finish < start) break;
-      const parts = [];
-      let dueMinor = 0;
-      for (const slice of group.slices) {
-        const coveredStart = maximum(start, slice.startDate, first.startDate);
-        const coveredEnd = minimum(finish, slice.effectiveEnd);
-        if (!coveredStart || !coveredEnd || coveredEnd < coveredStart) continue;
-        const whole = coveredStart === start && coveredEnd === finish;
-        const days = civilDaysInclusive(coveredStart, coveredEnd);
-        const denominator = unitDays({start, end: finish}, options);
-        const openedHere = slice.startDate >= start && slice.startDate <= finish;
-        // «الشهر الأول الناقص» سياسة إعداد: تُحتسب فترة كاملة أو تُقسَّم بالأيام.
-        const useWhole = whole || (openedHere && options.firstMonthPolicy === 'fullMonth');
-        const amountMinor = useWhole ? slice.amountMinor : prorateMinorHalfUp(slice.amountMinor, days, denominator);
-        if (amountMinor <= 0) continue;
-        parts.push({
-          sliceId: slice.id, judgmentId: slice.judgmentId, judgmentKind: slice.judgmentKind,
-          amountMinor, rateAmountMinor: slice.amountMinor, coveredStart, coveredEnd, days,
-          periodDays: denominator, whole, sourceReference: slice.sourceReference,
-          valueChange: slice.previous ? {
-            previousSliceId: slice.previous.id, previousAmountMinor: slice.previous.amountMinor,
-            previousJudgmentId: slice.previous.judgmentId, newAmountMinor: slice.amountMinor,
-            differenceMinor: addMinor(slice.amountMinor, -slice.previous.amountMinor)
-          } : null,
-          equation: useWhole
-            ? `${slice.amountMinor} قرش (قيمة البند كاملة)`
-            : `${days}/${denominator} يوم × ${slice.amountMinor} قرش = ${amountMinor} قرش`
-        });
-        dueMinor = addMinor(dueMinor, amountMinor);
-      }
-      if (parts.length) {
+
+    const generated = periodsForGroup(group, asOf, options, maxUnits);
+    const complete = generated.complete;
+    if (generated.truncated) truncated = true;
+    const periods = [...complete, ...generated.running.filter(item => !complete.some(done => done.k === item.k))];
+    const uniquePeriods = [...new Map(periods.map(period => [period.k, period])).values()].sort((a, b) => a.k - b.k);
+    for (const period of uniquePeriods) {
+      if (fromDate && period.to < fromDate) continue;
+      if (period.from > asOf) continue;
+      const isComplete = complete.some(item => item.k === period.k);
+      const result = resolvePeriodValue(group, period, options);
+      const unitKey = periodUnitKey(group, period.k);
+      if (result.needsDecision) {
+        decisions.push({itemId: group.itemId, periodKey: unitKey, k: period.k, fromDate: period.from, toDate: period.to, kind: result.decisionKind || 'MID_CHANGE', reason: result.reason, choiceOptions: result.choiceOptions || []});
         units.push({
-          periodKey: `${group.entitlementType}::${start}`, unitKey: `${group.entitlementType}::${start}`,
-          entitlementType: group.entitlementType, fixed: false, fromDate: start, toDate: finish,
-          dueMinor, parts
+          periodKey: unitKey, unitKey, legacyPeriodKey: `${group.entitlementType}::${period.from}`,
+          itemId: group.itemId, anchorDate: group.anchorDate, k: period.k, entitlementType: group.entitlementType,
+          periodicity: group.periodicity, currency: group.currency, fixed: false, isComplete, needsDecision: true, status: PERIOD_STATUS.NEEDS_DECISION,
+          decisionReason: result.reason, fromDate: period.from, toDate: period.to, dueOn: period.to,
+          dueMinor: 0, projectedMinor: 0, parts: []
         });
+        continue;
       }
-      const nextCursor = addCivilDays(finish, 1);
-      if (nextCursor <= cursor) break;
-      cursor = nextCursor;
+      if (result.skipped || !result.parts.length) continue;
+      const unit = {
+        periodKey: unitKey, unitKey, legacyPeriodKey: `${group.entitlementType}::${period.from}`,
+        itemId: group.itemId, anchorDate: group.anchorDate, k: period.k, entitlementType: group.entitlementType,
+        periodicity: group.periodicity, currency: group.currency, fixed: false, isComplete, fromDate: period.from, toDate: period.to, dueOn: period.to,
+        dueMinor: isComplete ? result.amountMinor : 0,
+        projectedMinor: result.amountMinor, parts: result.parts,
+        valueMinor: result.amountMinor,
+        choice: result.choice || '', choiceReason: result.parts[0]?.choiceReason || ''
+      };
+      units.push(unit);
     }
   }
-  const deduped = [];
-  const seen = new Set();
-  for (const unit of units) {
-    if (seen.has(unit.unitKey)) continue;
-    seen.add(unit.unitKey);
-    deduped.push(unit);
-  }
-  deduped.sort((a, b) => a.fromDate.localeCompare(b.fromDate) || a.unitKey.localeCompare(b.unitKey));
-  return {units: deduped, truncated, groups};
+  const deduped = [...new Map(units.map(unit => [unit.unitKey, unit])).values()]
+    .filter(unit => !fromDate || unit.toDate >= fromDate)
+    .sort((a, b) => a.fromDate.localeCompare(b.fromDate) || a.unitKey.localeCompare(b.unitKey));
+  return {units: deduped, truncated, groups, decisions, engineVersion: options.engineVersion};
 }
 
 /**
@@ -232,7 +329,14 @@ export function buildScheduleUnits({slices = [], asOf = '', fromDate = '', setti
  */
 export function allocateReceipts({units = [], receipts = [], allocations = [], settings = {}, asOf = ''} = {}) {
   const options = settingsWith(settings);
-  const unitsByKey = new Map(units.map(unit => [unit.unitKey, unit]));
+  const unitsByKey = new Map();
+  const unitsByLegacyKey = new Map();
+  for (const unit of units) {
+    unitsByKey.set(unit.unitKey, unit);
+    const aliases = unitsByLegacyKey.get(unit.legacyPeriodKey) || [];
+    aliases.push(unit);
+    unitsByLegacyKey.set(unit.legacyPeriodKey, aliases);
+  }
   const activeReceipts = (receipts || [])
     .filter(receipt => !receipt.isDeleted && !VOIDED_STATUSES.has(String(receipt.status || '').toLowerCase()))
     .filter(receipt => !asOf || !receipt.date || receipt.date <= asOf)
@@ -249,46 +353,59 @@ export function allocateReceipts({units = [], receipts = [], allocations = [], s
   const remainingCapacity = new Map();
   for (const unit of units) {
     paidByUnit.set(unit.unitKey, []);
-    remainingCapacity.set(unit.unitKey, unit.dueMinor);
+    remainingCapacity.set(unit.unitKey, unit.isComplete ? unit.dueMinor : unit.projectedMinor);
   }
 
   const warnings = [];
-  // 1) التثبيت اليدوي: تخصيصات محفوظة (مباشرة/معاد تخصيصها) — لها الأولوية على التلقائي.
   const pins = (allocations || [])
     .filter(row => !row.isDeleted && row.isActive !== false && !row.supersededBy && row.receiptId)
     .filter(row => receiptById.has(row.receiptId))
     .map(row => ({
-      receiptId: row.receiptId, unitKey: row.periodKey,
+      receiptId: row.receiptId, requestedKey: row.periodKey,
       amountMinor: minorFromRow(row, receiptById.get(row.receiptId)?.currency || options.defaultCurrency),
       method: row.method || 'DIRECT', ledgerId: row.ledgerId || '', mode: row.mode || 'direct'
     }))
     .sort((a, b) => String(receiptById.get(a.receiptId)?.date || '').localeCompare(String(receiptById.get(b.receiptId)?.date || ''))
-      || a.unitKey.localeCompare(b.unitKey));
+      || a.requestedKey.localeCompare(b.requestedKey));
   const pinnedRequestedByUnit = new Map();
   const pinnedSpent = new Map();
   for (const pin of pins) {
-    const unit = unitsByKey.get(pin.unitKey);
-    if (!unit) { warnings.push({code: 'pin-unknown-period', receiptId: pin.receiptId, periodKey: pin.unitKey}); continue; }
-    pinnedRequestedByUnit.set(pin.unitKey, addMinor(pinnedRequestedByUnit.get(pin.unitKey) || 0, pin.amountMinor));
-    const capacity = remainingCapacity.get(pin.unitKey);
+    let unit = unitsByKey.get(pin.requestedKey);
+    if (!unit) {
+      const candidates = unitsByLegacyKey.get(pin.requestedKey) || [];
+      if (candidates.length === 1) unit = candidates[0];
+      else {
+        warnings.push({code: candidates.length ? 'pin-ambiguous-period' : 'pin-unknown-period', receiptId: pin.receiptId, periodKey: pin.requestedKey});
+        continue;
+      }
+    }
+    pinnedRequestedByUnit.set(unit.unitKey, addMinor(pinnedRequestedByUnit.get(unit.unitKey) || 0, pin.amountMinor));
+    const capacity = remainingCapacity.get(unit.unitKey) || 0;
     const allowance = Math.min(pin.amountMinor, capacity);
-    if (allowance < pin.amountMinor) warnings.push({code: 'pin-over-period', receiptId: pin.receiptId, periodKey: pin.unitKey, requestedMinor: pin.amountMinor, appliedMinor: allowance});
+    if (allowance < pin.amountMinor) warnings.push({code: 'pin-over-period', receiptId: pin.receiptId, periodKey: unit.unitKey, requestedMinor: pin.amountMinor, appliedMinor: allowance});
     if (allowance <= 0) continue;
-    remainingCapacity.set(pin.unitKey, addMinor(capacity, -allowance));
-    paidByUnit.get(pin.unitKey).push({receiptId: pin.receiptId, amountMinor: allowance, mode: 'direct', ledgerId: pin.ledgerId});
+    remainingCapacity.set(unit.unitKey, addMinor(capacity, -allowance));
+    paidByUnit.get(unit.unitKey).push({receiptId: pin.receiptId, amountMinor: allowance, mode: unit.isComplete ? 'direct' : 'advance', ledgerId: pin.ledgerId});
     pinnedSpent.set(pin.receiptId, addMinor(pinnedSpent.get(pin.receiptId) || 0, allowance));
   }
 
-  // 2) التلقائي: باقي كل محضر يُطبَّق على القدرة المتبقية بالترتيب المختار.
   const order = options.allocationOrder === 'lifo' ? -1 : 1;
-  const openUnits = () => units.filter(unit => (remainingCapacity.get(unit.unitKey) || 0) > 0)
-    .sort((a, b) => order * (a.fromDate.localeCompare(b.fromDate) || a.unitKey.localeCompare(b.unitKey)));
+  const orderedOpenUnits = () => units.filter(unit => (remainingCapacity.get(unit.unitKey) || 0) > 0)
+    .sort((a, b) => Number(b.isComplete) - Number(a.isComplete)
+      || order * (a.fromDate.localeCompare(b.fromDate) || a.unitKey.localeCompare(b.unitKey)));
   const autoLines = [];
   for (const receipt of activeReceipts) {
     let left = addMinor(receipt.amountMinor, -(pinnedSpent.get(receipt.id) || 0));
     if (left <= 0) continue;
+    const completedTargets = orderedOpenUnits().filter(unit => unit.isComplete);
+    left = allocatePool(completedTargets, left);
+    // Any remainder is a visible advance only on the current running period(s), never a reduction of due today.
+    if (left > 0) left = allocatePool(orderedOpenUnits().filter(unit => !unit.isComplete && unit.status !== PERIOD_STATUS.NEEDS_DECISION), left);
+    if (left > 0) warnings.push({code: 'receipt-credit', receiptId: receipt.id, amountMinor: left});
+  }
+  function allocatePool(targets, left) {
+    if (left <= 0 || !targets.length) return left;
     if (options.allocationOrder === 'proportional') {
-      const targets = openUnits();
       const pool = sumMinor(targets, unit => remainingCapacity.get(unit.unitKey) || 0);
       const distributable = Math.min(left, pool);
       if (pool > 0 && distributable > 0) {
@@ -297,128 +414,159 @@ export function allocateReceipts({units = [], receipts = [], allocations = [], s
           return {unit, floor: Number(numerator / BigInt(pool)), remainder: numerator % BigInt(pool)};
         });
         let rest = distributable - shares.reduce((sum, share) => sum + share.floor, 0);
-        shares.sort((a, b) => (a.remainder === b.remainder ? a.unit.fromDate.localeCompare(b.unit.fromDate) : (a.remainder > b.remainder ? -1 : 1)));
+        shares.sort((a, b) => a.remainder === b.remainder ? a.unit.fromDate.localeCompare(b.unit.fromDate) : (a.remainder > b.remainder ? -1 : 1));
         for (const share of shares) {
           const extra = rest > 0 ? 1 : 0;
           const amount = share.floor + extra;
           rest -= extra;
-          if (amount <= 0) continue;
-          applyAuto(share.unit, amount);
+          if (amount > 0) applyAuto(share.unit, amount);
         }
-        left = addMinor(left, -distributable);
+        return addMinor(left, -distributable);
       }
-    } else {
-      for (const unit of openUnits()) {
-        if (left <= 0) break;
-        const capacity = remainingCapacity.get(unit.unitKey) || 0;
-        const take = Math.min(left, capacity);
-        if (take <= 0) continue;
-        applyAuto(unit, take);
-        left = addMinor(left, -take);
-      }
+      return left;
     }
-    if (left > 0) warnings.push({code: 'receipt-credit', receiptId: receipt.id, amountMinor: left});
+    for (const unit of targets) {
+      if (left <= 0) break;
+      const capacity = remainingCapacity.get(unit.unitKey) || 0;
+      const take = Math.min(left, capacity);
+      if (take <= 0) continue;
+      applyAuto(unit, take);
+      left = addMinor(left, -take);
+    }
+    return left;
   }
   function applyAuto(unit, amountMinor) {
     remainingCapacity.set(unit.unitKey, addMinor(remainingCapacity.get(unit.unitKey) || 0, -amountMinor));
-    paidByUnit.get(unit.unitKey).push({receiptId: null, amountMinor, mode: 'auto'});
-    autoLines.push({unitKey: unit.unitKey, amountMinor});
+    const mode = unit.isComplete ? 'auto' : 'advance';
+    paidByUnit.get(unit.unitKey).push({receiptId: null, amountMinor, mode});
+    autoLines.push({unitKey: unit.unitKey, amountMinor, mode});
   }
 
   return {paidByUnit, remainingCapacity, autoLines, pinnedSpent, pinnedRequestedByUnit, warnings, receiptById};
 }
 
-/** بناء الجدول الكامل: صفوف عرض مجمّعة بالشهر + الأرقام الثلاثة + التتبع. */
+/** Build the displayed schedule and totals. Running rows are informational only. */
 export function buildExecutionSchedule({
-  slices = [], receipts = [], allocations = [], ledger = [], settings = {}, asOf = '', fromDate = '', expenses = null
+  slices = [], receipts = [], allocations = [], ledger = [], settings = {}, asOf = '', fromDate = '', expenses = null,
+  periodThroughDate = '', receiptAsOf = ''
 } = {}) {
   const options = settingsWith(settings);
-  const {units, truncated} = buildScheduleUnits({slices, asOf, fromDate, settings: options});
-  const allocation = allocateReceipts({units, receipts, allocations, settings: options, asOf});
-  const rowsByDate = new Map();
+  if (!isCivilDate(asOf)) throw new RangeError('تاريخ الحساب غير صحيح.');
+  const unitAsOf = isCivilDate(periodThroughDate) && periodThroughDate < asOf ? periodThroughDate : asOf;
+  const receiptCutoff = isCivilDate(receiptAsOf) ? receiptAsOf : asOf;
+  const built = buildScheduleUnits({slices, asOf: unitAsOf, fromDate, settings: options});
+  const units = built.units;
+  const allocation = allocateReceipts({units, receipts, allocations, settings: options, asOf: receiptCutoff});
+  const rowsByRange = new Map();
+  const dateText = iso => isCivilDate(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : iso;
+  const labelOf = (from, to) => `${dateText(from)} – ${dateText(to)}`;
   for (const unit of units) {
     const lines = allocation.paidByUnit.get(unit.unitKey) || [];
     const paidMinor = sumMinor(lines, line => line.amountMinor);
-    const dueMinor = unit.dueMinor;
-    const status = dueMinor <= 0 ? PERIOD_STATUS.NOTHING_DUE
-      : paidMinor >= dueMinor ? PERIOD_STATUS.PAID
-        : paidMinor > 0 ? PERIOD_STATUS.PARTIAL : PERIOD_STATUS.UNPAID;
-    if (!rowsByDate.has(unit.fromDate)) {
-      rowsByDate.set(unit.fromDate, {
-        fromDate: unit.fromDate, toDate: unit.toDate, label: monthLabel(unit.fromDate),
-        dueMinor: 0, paidMinor: 0, remainingMinor: 0, units: [], lines: [], valueChanges: []
-      });
-    }
-    const row = rowsByDate.get(unit.fromDate);
-    row.fromDate = minimum(row.fromDate, unit.fromDate);
-    row.toDate = maximum(row.toDate, unit.toDate);
+    const dueMinor = unit.isComplete ? unit.dueMinor : 0;
+    const rowState = unit.needsDecision ? 'decision' : (unit.isComplete ? 'complete' : 'running');
+    const rowKey = `${unit.fromDate}..${unit.toDate}::${rowState}`;
+    const isRunning = !unit.isComplete && !unit.needsDecision;
+    const status = unit.needsDecision ? PERIOD_STATUS.NEEDS_DECISION
+      : isRunning ? PERIOD_STATUS.RUNNING
+        : dueMinor <= 0 ? PERIOD_STATUS.NOTHING_DUE
+          : paidMinor >= dueMinor ? PERIOD_STATUS.PAID
+            : paidMinor > 0 ? PERIOD_STATUS.PARTIAL : PERIOD_STATUS.UNPAID;
+    if (!rowsByRange.has(rowKey)) rowsByRange.set(rowKey, {
+      fromDate: unit.fromDate, toDate: unit.toDate, label: labelOf(unit.fromDate, unit.toDate),
+      dueMinor: 0, paidMinor: 0, advanceMinor: 0, projectedMinor: 0,
+      remainingMinor: 0, units: [], lines: [], valueChanges: [], isComplete: true,
+      needsDecision: false, dueOn: unit.toDate
+    });
+    const row = rowsByRange.get(rowKey);
     row.units.push(unit);
-    row.lines.push(...lines.map(line => ({...line, unitKey: unit.unitKey, entitlementType: unit.entitlementType, fromDate: unit.fromDate, toDate: unit.toDate})));
+    row.isComplete = row.isComplete && unit.isComplete;
+    row.needsDecision ||= Boolean(unit.needsDecision);
+    row.lines.push(...lines.map(line => ({...line, unitKey: unit.unitKey, periodKey: unit.periodKey,
+      entitlementType: unit.entitlementType, fromDate: unit.fromDate, toDate: unit.toDate,
+      advance: !unit.isComplete})));
     row.dueMinor = addMinor(row.dueMinor, dueMinor);
-    row.paidMinor = addMinor(row.paidMinor, paidMinor);
-    for (const part of unit.parts) if (part.valueChange) row.valueChanges.push({...part.valueChange, entitlementType: unit.entitlementType, fromDate: unit.fromDate});
+    row.projectedMinor = addMinor(row.projectedMinor, unit.isComplete ? unit.dueMinor : unit.projectedMinor || 0);
+    if (unit.isComplete) row.paidMinor = addMinor(row.paidMinor, paidMinor);
+    else row.advanceMinor = addMinor(row.advanceMinor, paidMinor);
+    for (const part of unit.parts || []) if (part.valueChange) row.valueChanges.push({...part.valueChange, entitlementType: unit.entitlementType, fromDate: unit.fromDate});
+    row.status = row.needsDecision ? PERIOD_STATUS.NEEDS_DECISION : status;
   }
-  const rows = [...rowsByDate.values()].sort((a, b) => a.fromDate.localeCompare(b.fromDate)).map(row => ({
-    ...row,
-    // «دفعة زائدة»: مبلغ مُثبَّت على الفترة يتجاوز استحقاقها الحالي (بعد تخفيض مثلًا).
-    // تُعرض بلا رد ولا تسوية تلقائية، ولا تمسّ طريقة تدفّق المال في التخصيص.
-    overpaidMinor: Math.max(0, addMinor(
-      sumMinor(row.units, unit => allocation.pinnedRequestedByUnit.get(unit.unitKey) || 0), -row.dueMinor
-    )),
-    remainingMinor: Math.max(0, addMinor(row.dueMinor, -row.paidMinor)),
-    status: row.dueMinor <= 0 ? PERIOD_STATUS.NOTHING_DUE
-      : row.paidMinor >= row.dueMinor ? PERIOD_STATUS.PAID
-        : row.paidMinor > 0 ? PERIOD_STATUS.PARTIAL : PERIOD_STATUS.UNPAID,
-    trace: {
-      equation: row.units.map(unit => `${unit.entitlementType}: ${unit.parts.map(part => part.equation).join(' + ')}`).join(' | '),
-      sources: row.units.flatMap(unit => unit.parts.map(part => ({sliceId: part.sliceId, judgmentId: part.judgmentId, from: part.coveredStart, to: part.coveredEnd}))),
-      paidFrom: row.lines.map(line => ({receiptId: line.receiptId, amountMinor: line.amountMinor, mode: line.mode}))
-    }
-  }));
+  const rows = [...rowsByRange.values()].sort((a, b) => a.fromDate.localeCompare(b.fromDate) || a.toDate.localeCompare(b.toDate)).map(row => {
+    const duePaid = row.isComplete ? row.paidMinor : 0;
+    const remainingMinor = row.isComplete ? Math.max(0, addMinor(row.dueMinor, -duePaid)) : 0;
+    const overpaidMinor = Math.max(0, addMinor(
+      sumMinor(row.units.filter(unit => unit.isComplete), unit => allocation.pinnedRequestedByUnit.get(unit.unitKey) || 0), -row.dueMinor
+    ));
+    const status = row.needsDecision ? PERIOD_STATUS.NEEDS_DECISION
+      : !row.isComplete ? PERIOD_STATUS.RUNNING
+        : row.dueMinor <= 0 ? PERIOD_STATUS.NOTHING_DUE
+          : duePaid >= row.dueMinor ? PERIOD_STATUS.PAID
+            : duePaid > 0 ? PERIOD_STATUS.PARTIAL : PERIOD_STATUS.UNPAID;
+    const equation = row.units.map(unit => {
+      const value = fromMinorUnits(unit.isComplete ? unit.dueMinor : unit.projectedMinor || 0, currencyCode(unit.parts?.[0]?.currency || unit.currency, options.defaultCurrency));
+      const formatted = Number(value).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      return `${unit.entitlementType}: 1 فترة كاملة (${dateText(unit.fromDate)} → ${dateText(unit.toDate)}) × ${formatted} = ${formatted} ج.م`;
+    }).join(' | ');
+    return {
+      ...row, overpaidMinor, remainingMinor, status,
+      periodNumber: Math.max(0, ...row.units.map(unit => Number(unit.k || 0) + 1)),
+      periodKeys: row.units.map(unit => unit.periodKey),
+      dueOn: row.toDate,
+      projectedRemainingMinor: Math.max(0, addMinor(row.projectedMinor, -row.advanceMinor)),
+      trace: {
+        equation,
+        sources: row.units.flatMap(unit => (unit.parts || []).map(part => ({sliceId: part.sliceId, judgmentId: part.judgmentId,
+          from: unit.fromDate, to: unit.toDate, sourceReference: part.sourceReference, itemId: unit.itemId, anchorDate: unit.anchorDate, k: unit.k}))),
+        paidFrom: row.lines.map(line => ({receiptId: line.receiptId, amountMinor: line.amountMinor, mode: line.mode, advance: line.advance}))
+      }
+    };
+  });
 
-  const dueMinor = sumMinor(rows, row => row.dueMinor);
-  const allocatedMinor = sumMinor(rows, row => row.paidMinor);
+  const completedRows = rows.filter(row => row.isComplete && !row.needsDecision);
+  const runningRows = rows.filter(row => !row.isComplete && !row.needsDecision);
+  const dueMinor = sumMinor(completedRows, row => row.dueMinor);
+  const allocatedMinor = sumMinor(completedRows, row => row.paidMinor);
+  const advanceMinor = sumMinor(runningRows, row => row.advanceMinor);
   const receiptList = [...allocation.receiptById.values()];
   const paidMinor = sumMinor(receiptList, receipt => receipt.amountMinor);
   const creditMinor = Math.max(0, addMinor(paidMinor, -allocatedMinor));
+  const unallocatedCreditMinor = Math.max(0, addMinor(creditMinor, -advanceMinor));
   const expenseRows = (ledger || []).filter(entry => !entry.isDeleted
-    && !VOIDED_STATUSES.has(String(entry.status || '').toLowerCase())
-    && (EXPENSE_LEDGER_TYPES.has(entry.type) || entry.category === 'expense'));
+    && !VOIDED_STATUSES.has(String(entry.status || '').toLowerCase()) && isExpenseLedgerRow(entry));
   const expenseMinor = sumMinor(expenseRows, entry => minorFromRow(entry, currencyCode(entry.currency, options.defaultCurrency)));
   const expenseInPoaMinor = sumMinor(expenseRows.filter(entry => entry.includeInPoa), entry => minorFromRow(entry, currencyCode(entry.currency, options.defaultCurrency)));
-  const currency = currencyCode(
-    slices.find(slice => slice.currency)?.currency
-      || receiptList.find(receipt => receipt.currency)?.currency, options.defaultCurrency);
+  const currency = currencyCode(slices.find(slice => slice.currency)?.currency
+    || receiptList.find(receipt => receipt.currency)?.currency, options.defaultCurrency);
   const unallocatedReceipts = receiptList.map(receipt => {
     const allocatedForReceipt = pinnedAndAutoFor(receipt.id, allocation);
     return {...receipt, allocatedMinor: allocatedForReceipt, creditMinor: Math.max(0, addMinor(receipt.amountMinor, -allocatedForReceipt))};
   });
-
+  const remainingMinor = Math.max(0, addMinor(dueMinor, -allocatedMinor));
+  const equations = [
+    `المطلوب حتى ${dateText(unitAsOf)} = ${fromMinorUnits(dueMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency}`,
+    `المدفوع = ${fromMinorUnits(paidMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency}`,
+    `المخصّص على الفترات المستحقة = ${fromMinorUnits(allocatedMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency}`,
+    `المتبقي = max(0, المستحق − المخصّص على المستحق) = ${fromMinorUnits(remainingMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency}`,
+    advanceMinor > 0 ? `مدفوع مقدمًا على الفترة الجارية = ${fromMinorUnits(advanceMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency} — لا يخفض المطلوب حتى اكتمال الفترة` : '',
+    unallocatedCreditMinor > 0 ? `رصيد دائن غير مخصّص = ${fromMinorUnits(unallocatedCreditMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency}` : '',
+    expenseMinor > 0 ? `مصروفات ورسوم (منفصلة عن أصل الدين) = ${fromMinorUnits(expenseMinor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${currency}` : ''
+  ].filter(Boolean);
   return {
-    asOf, fromDate, settings: options, currency,
-    rows,
-    units,
-    truncated,
+    asOf, periodThroughDate: unitAsOf, fromDate, settings: options, engineVersion: options.engineVersion, currency,
+    rows, units, decisions: built.decisions, runningRows, truncated: built.truncated,
     receipts: unallocatedReceipts,
     totals: {
-      dueMinor, paidMinor, allocatedMinor, creditMinor,
-      remainingMinor: Math.max(0, addMinor(dueMinor, -allocatedMinor)),
-      overpaidMinor: sumMinor(rows, row => row.overpaidMinor),
-      expenseMinor, expenseInPoaMinor,
-      periodCount: rows.length,
-      paidPeriods: rows.filter(row => row.status === PERIOD_STATUS.PAID).length,
-      partialPeriods: rows.filter(row => row.status === PERIOD_STATUS.PARTIAL).length,
-      unpaidPeriods: rows.filter(row => row.status === PERIOD_STATUS.UNPAID).length
+      dueMinor, paidMinor, allocatedMinor, advanceMinor, creditMinor, unallocatedCreditMinor,
+      remainingMinor, overpaidMinor: sumMinor(rows, row => row.overpaidMinor),
+      expenseMinor, expenseInPoaMinor, periodCount: completedRows.filter(row => row.dueMinor > 0).length,
+      paidPeriods: completedRows.filter(row => row.status === PERIOD_STATUS.PAID).length,
+      partialPeriods: completedRows.filter(row => row.status === PERIOD_STATUS.PARTIAL).length,
+      unpaidPeriods: completedRows.filter(row => row.status === PERIOD_STATUS.UNPAID).length,
+      runningPeriods: runningRows.length, decisionPeriods: rows.filter(row => row.needsDecision).length
     },
-    warnings: allocation.warnings,
-    equations: [
-      `المطلوب حتى ${asOf} = ${fromMinorUnits(dueMinor, currency)} ${currency}`,
-      `المدفوع (محاضر محصلة) = ${fromMinorUnits(paidMinor, currency)} ${currency}`,
-      `المخصّص على الفترات = ${fromMinorUnits(allocatedMinor, currency)} ${currency}`,
-      `المتبقي = المطلوب − المخصّص = ${fromMinorUnits(Math.max(0, addMinor(dueMinor, -allocatedMinor)), currency)} ${currency}`,
-      creditMinor > 0 ? `رصيد دائن غير مخصّص = ${fromMinorUnits(creditMinor, currency)} ${currency}` : '',
-      expenseMinor > 0 ? `مصروفات ورسوم (منفصلة عن أصل الدين) = ${fromMinorUnits(expenseMinor, currency)} ${currency}` : ''
-    ].filter(Boolean)
+    warnings: [...allocation.warnings, ...built.decisions.map(row => ({code: 'period-decision-required', ...row}))],
+    equations
   };
 }
 
@@ -428,112 +576,284 @@ function pinnedAndAutoFor(receiptId, allocation) {
   return total;
 }
 
-/** مطالبة عن مدة (احسب مدة): المستحق/المدفوع/المتبقي عن نطاق + الرصيد السابق له. */
-export function claimForRange({slices = [], receipts = [], allocations = [], settings = {}, fromDate, toDate, asOf = ''} = {}) {
+/** «احسب مدة»: count only whole completed periods enclosed by the range. */
+export function claimForRange({slices = [], receipts = [], allocations = [], settings = {}, schedule: suppliedSchedule = null, fromDate, toDate, asOf = '', rangeDecisions = []} = {}) {
   const options = settingsWith(settings);
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new RangeError('نطاق المدة غير صحيح.');
-  const horizon = isCivilDate(asOf) ? maximum(asOf, toDate) : toDate;
-  const full = buildExecutionSchedule({slices, receipts, allocations, settings: options, asOf: horizon});
-  const rows = [];
-  let dueMinor = 0, paidMinor = 0, beforeMinor = 0;
-  for (const row of full.rows) {
-    if (row.toDate < fromDate) { beforeMinor = addMinor(beforeMinor, row.remainingMinor); continue; }
-    if (row.fromDate > toDate) continue;
-    const overlapStart = maximum(row.fromDate, fromDate);
-    const overlapEnd = minimum(row.toDate, toDate);
-    const days = civilDaysInclusive(overlapStart, overlapEnd);
-    const rowDays = civilDaysInclusive(row.fromDate, row.toDate);
-    const ratio = days >= rowDays ? 1 : days / rowDays;
-    const due = ratio === 1 ? row.dueMinor : prorateMinorHalfUp(row.dueMinor, days, rowDays);
-    const paid = ratio === 1 ? row.paidMinor : Math.min(row.paidMinor, due);
-    dueMinor = addMinor(dueMinor, due);
-    paidMinor = addMinor(paidMinor, paid);
-    rows.push({...row, overlapStart, overlapEnd, dueMinor: due, paidMinor: paid, remainingMinor: Math.max(0, addMinor(due, -paid))});
+  const horizon = isCivilDate(asOf) ? asOf : toDate;
+  const full = suppliedSchedule || buildExecutionSchedule({slices, receipts, allocations, settings: options, asOf: horizon});
+  const allUnits = full.rows.flatMap(row => (row.units || []).map(unit => ({
+    unit, row, lines: row.lines.filter(line => line.unitKey === unit.unitKey)
+  })));
+  const complete = [], partials = [], decisionRows = [], notYetComplete = [], boundaryCandidates = [];
+  const seenCandidates = new Set();
+  for (const entry of allUnits) {
+    const {unit, row, lines} = entry;
+    if (unit.toDate < fromDate || unit.fromDate > toDate) continue;
+    const enclosed = unit.fromDate >= fromDate && unit.toDate <= toDate;
+    const values = {
+      dueMinor: unit.isComplete && !unit.needsDecision ? unit.dueMinor : 0,
+      paidMinor: unit.isComplete && !unit.needsDecision ? sumMinor(lines, line => line.amountMinor) : 0
+    };
+    values.remainingMinor = Math.max(0, values.dueMinor - values.paidMinor);
+    if (unit.needsDecision) {
+      decisionRows.push({periodKey: unit.periodKey, fromDate: unit.fromDate, toDate: unit.toDate, reason: unit.decisionReason || 'الفترة تحتاج قرارًا بشأن القيمة'});
+      continue;
+    }
+    if (!unit.isComplete) {
+      notYetComplete.push({periodKey: unit.periodKey, fromDate: unit.fromDate, toDate: unit.toDate, projectedMinor: unit.projectedMinor || 0});
+      continue;
+    }
+    if (enclosed) {
+      complete.push({...unit, ...values, row});
+      continue;
+    }
+    const startsBefore = unit.fromDate < fromDate;
+    const endsAfter = unit.toDate > toDate;
+    const kind = startsBefore && endsAfter ? 'RANGE_BOUNDARY' : startsBefore ? 'RANGE_START' : 'RANGE_END';
+    const candidateId = `${unit.periodKey}|${kind}`;
+    if (seenCandidates.has(candidateId)) continue;
+    seenCandidates.add(candidateId);
+    const supplied = rangeDecisions.find(decision => decision?.periodKey === unit.periodKey
+      && (decision.kind === kind || decision.kind === 'RANGE_BOUNDARY')
+      && (!decision.range || (decision.range.fromDate === fromDate && decision.range.toDate === toDate))) || null;
+    const allowed = new Set(['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']);
+    const choice = allowed.has(supplied?.choice) ? supplied.choice : '';
+    const reason = String(supplied?.reason || '').trim();
+    const amountMinor = supplied?.amountMinor;
+    const needsReason = Boolean(choice && !reason);
+    const needsAmount = choice === 'MANUAL' && (!Number.isSafeInteger(amountMinor) || amountMinor < 0);
+    const candidate = {periodKey: unit.periodKey, itemId: unit.itemId, anchorDate: unit.anchorDate, k: unit.k,
+      fromDate: unit.fromDate, toDate: unit.toDate, kind, options: [...allowed], dueMinor: values.dueMinor,
+      paidMinor: values.paidMinor, choice, reason, amountMinor: Number.isSafeInteger(amountMinor) ? amountMinor : null,
+      needsReason, needsAmount, decidedAt: supplied?.decidedAt || '', decidedBy: supplied?.decidedBy || ''};
+    boundaryCandidates.push(candidate);
+    if (!choice || needsReason || needsAmount) {
+      partials.push(candidate);
+      continue;
+    }
+    if (choice === 'EXCLUDE') continue;
+    const selectedDue = choice === 'MANUAL' ? amountMinor : values.dueMinor;
+    const selectedPaid = Math.min(values.paidMinor, selectedDue);
+    const selectedRemaining = Math.max(0, selectedDue - selectedPaid);
+    complete.push({...unit, ...values, dueMinor: selectedDue, paidMinor: selectedPaid, remainingMinor: selectedRemaining,
+      row, rangeDecision: {...candidate, choice, reason}});
   }
-  const remainingMinor = Math.max(0, addMinor(dueMinor, -paidMinor));
+  const includedRows = complete.map(unit => ({
+    periodKey: unit.periodKey, fromDate: unit.fromDate, toDate: unit.toDate,
+    label: `${dateLabel(unit.fromDate)} – ${dateLabel(unit.toDate)}`,
+    dueMinor: unit.dueMinor, paidMinor: unit.paidMinor, remainingMinor: unit.remainingMinor,
+    projectedMinor: unit.dueMinor, advanceMinor: 0, isComplete: true, needsDecision: false,
+    status: unit.dueMinor <= 0 ? PERIOD_STATUS.NOTHING_DUE : unit.paidMinor >= unit.dueMinor ? PERIOD_STATUS.PAID : unit.paidMinor > 0 ? PERIOD_STATUS.PARTIAL : PERIOD_STATUS.UNPAID,
+    units: [unit], rangeDecision: unit.rangeDecision || null
+  })).sort((a, b) => a.fromDate.localeCompare(b.fromDate) || a.periodKey.localeCompare(b.periodKey));
+  const dueMinor = sumMinor(includedRows, row => row.dueMinor);
+  const paidMinor = sumMinor(includedRows, row => row.paidMinor);
+  const remainingMinor = Math.max(0, dueMinor - paidMinor);
+  const beforeMinor = sumMinor(allUnits.filter(({unit}) => unit.isComplete && !unit.needsDecision && unit.toDate < fromDate),
+    ({unit, lines}) => Math.max(0, unit.dueMinor - sumMinor(lines, line => line.amountMinor)));
+  const sideBySideScenarios = boundaryCandidates.flatMap(candidate => ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].map(choice => {
+    const amount = choice === 'INCLUDE_FULL' ? candidate.dueMinor
+      : choice === 'EXCLUDE' ? 0
+        : (candidate.choice === 'MANUAL' && Number.isSafeInteger(candidate.amountMinor) ? candidate.amountMinor : null);
+    const paid = amount === null ? null : Math.min(candidate.paidMinor, amount);
+    return {periodKey: candidate.periodKey, kind: candidate.kind, choice, amountMinor: amount,
+      paidMinor: paid, remainingMinor: amount === null ? null : Math.max(0, amount - paid),
+      equation: amount === null ? 'يلزم إدخال مبلغ كامل صراحةً؛ لا يُحسب بنسبة الأيام.'
+        : `قيمة الفترة المختارة كاملة ${amount} − المدفوع ${paid} = المتبقي ${Math.max(0, amount - paid)} وحدة صغرى`};
+  }));
+  const decisions = boundaryCandidates.filter(candidate => candidate.choice && !candidate.needsReason && !candidate.needsAmount)
+    .map(candidate => ({...candidate, trace: `قرار ${candidate.choice} للفترة ${candidate.fromDate} → ${candidate.toDate}: ${candidate.reason}`}));
+  const fmt = value => fromMinorUnits(value, full.currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const equations = [
+    `${includedRows.length} فترات مكتملة/محسومة داخل المدة = ${fmt(dueMinor)} ${full.currency}`,
+    `المدفوع على الفترات المختارة = ${fmt(paidMinor)} ${full.currency}`,
+    `المتبقي عن المدة = max(0, ${fmt(dueMinor)} − ${fmt(paidMinor)}) = ${fmt(remainingMinor)} ${full.currency}`,
+    decisions.length ? `قرارات حدود المدة المسجلة: ${decisions.map(row => `${row.trace} — ${row.decidedBy || 'فاعل غير محدد'} — ${row.decidedAt || 'تاريخ غير محدد'}`).join('؛ ')}` : '',
+    partials.length ? `حدود فترة ناقصة تنتظر قرارًا صريحًا: ${partials.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : 'لا توجد حدود ناقصة بلا قرار',
+    decisionRows.length ? `فترات تحتاج قرار قيمة منفصلًا: ${decisionRows.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
+    notYetComplete.length ? `فترات جارية معلوماتية فقط وليست مستحقة: ${notYetComplete.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
+    beforeMinor ? `رصيد سابق غير مسدد قبل المدة = ${fmt(beforeMinor)} ${full.currency}` : 'لا يوجد رصيد سابق غير مسدد قبل المدة',
+    `الإجمالي المطلوب = ${fmt(remainingMinor + beforeMinor)} ${full.currency}`
+  ].filter(Boolean);
   return {
-    fromDate, toDate, rows,
-    totals: {
-      dueMinor, paidMinor, remainingMinor, beforeMinor,
-      totalRequiredMinor: addMinor(remainingMinor, beforeMinor),
-      currency: full.currency
-    },
-    equations: [
-      `المستحق عن المدة (${fromDate} → ${toDate}) = ${fromMinorUnits(dueMinor, full.currency)}`,
-      `المدفوع عنها = ${fromMinorUnits(paidMinor, full.currency)}`,
-      `المتبقي عنها = ${fromMinorUnits(remainingMinor, full.currency)}`,
-      beforeMinor ? `رصيد سابق غير مسدد قبل المدة = ${fromMinorUnits(beforeMinor, full.currency)}` : 'لا يوجد رصيد سابق غير مسدد قبل المدة',
-      `الإجمالي المطلوب = ${fromMinorUnits(addMinor(remainingMinor, beforeMinor), full.currency)}`
-    ]
+    fromDate, toDate, rows: includedRows, complete: includedRows,
+    partialAtStart: partials.find(row => row.kind === 'RANGE_START' || row.kind === 'RANGE_BOUNDARY') || null,
+    partialAtEnd: partials.find(row => row.kind === 'RANGE_END' || row.kind === 'RANGE_BOUNDARY') || null,
+    partials, decisionRows, notYetComplete, decisions, sideBySideScenarios,
+    totals: {dueMinor, paidMinor, remainingMinor, beforeMinor, totalRequiredMinor: dueMinor ? remainingMinor + beforeMinor : beforeMinor, currency: full.currency},
+    equations, asOf: horizon, settings: options
   };
 }
 
-/** معاينة حكم لاحق: فرق كل شهر مرة واحدة، بلا إعادة احتساب المبلغ كاملًا. */
-export function previewValueChange({slices = [], receipts = [], allocations = [], settings = {}, asOf = '', candidate, previousSliceId = ''} = {}) {
+function dateLabel(iso) { return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`; }
+function makeChangeSummary(before, after, currency) {
+  const beforeRows = new Map(before.rows.flatMap(row => row.units.map(unit => [unit.unitKey, {row, unit}])));
+  const afterRows = new Map(after.rows.flatMap(row => row.units.map(unit => [unit.unitKey, {row, unit}])));
+  const keys = [...new Set([...beforeRows.keys(), ...afterRows.keys()])].sort();
+  const rows = keys.map(key => {
+    const old = beforeRows.get(key), next = afterRows.get(key);
+    const oldMinor = old?.unit.isComplete ? old.unit.dueMinor : 0;
+    const newMinor = next?.unit.isComplete ? next.unit.dueMinor : 0;
+    const differenceMinor = addMinor(newMinor, -oldMinor);
+    const unit = next?.unit || old?.unit;
+    return {
+      periodKey: key, k: unit?.k, fromDate: unit?.fromDate || '', toDate: unit?.toDate || '',
+      label: unit ? `${dateLabel(unit.fromDate)} – ${dateLabel(unit.toDate)}` : '',
+      oldMinor, newMinor, differenceMinor,
+      oldValue: fromMinorUnits(oldMinor, currency), newValue: fromMinorUnits(newMinor, currency),
+      difference: fromMinorUnits(differenceMinor, currency),
+      oldPaidMinor: old?.row?.paidMinor || 0, newPaidMinor: next?.row?.paidMinor || 0,
+      creditBecauseOverpaidMinor: Math.max(0, addMinor((old?.row?.paidMinor || 0), -newMinor))
+    };
+  }).filter(row => row.differenceMinor !== 0 || row.oldMinor !== row.newMinor);
+  return {rows, oldDueMinor: before.totals.dueMinor, newDueMinor: after.totals.dueMinor,
+    differenceMinor: addMinor(after.totals.dueMinor, -before.totals.dueMinor), creditMinor: after.totals.creditMinor,
+    remainingMinor: after.totals.remainingMinor};
+}
+
+/** Preview a subsequent judgment, including side-by-side choices for an incomplete boundary. */
+export function previewValueChange({slices = [], receipts = [], allocations = [], settings = {}, asOf = '', periodThroughDate = '', candidate, previousSliceId = '', manualAmountMinor = null, manualPeriodAmountMinor = null, manualEndAmountMinor = null} = {}) {
   if (!candidate?.startDate || !isCivilDate(candidate.startDate)) throw new RangeError('تاريخ سريان الحكم اللاحق مطلوب.');
   if (!(minorFromRow(candidate) > 0)) throw new RangeError('القيمة الجديدة يجب أن تكون أكبر من صفر.');
-  const before = buildExecutionSchedule({slices, receipts, allocations, settings, asOf});
+  const options = settingsWith(settings);
+  const before = buildExecutionSchedule({slices, receipts, allocations, settings: options, asOf, periodThroughDate});
+  const prior = (slices || []).filter(slice => String(slice.entitlementType || '') === String(candidate.entitlementType || '')
+    && (!candidate.startDate || !slice.startDate || slice.startDate <= candidate.startDate))
+    .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || ''))).at(-1);
+  const itemId = String(candidate.itemId || candidate.obligationId || prior?.itemId || `legacy:${candidate.entitlementType || 'بند'}`);
   const candidateSlice = {
-    id: candidate.id || '__candidate__', entitlementType: candidate.entitlementType,
-    valueType: candidate.valueType || 'periodic', amountMinor: minorFromRow(candidate, before.currency),
-    amount: candidate.amount, startDate: candidate.startDate, endDate: candidate.endDate || '',
+    ...candidate, id: candidate.id || '__candidate__', itemId,
+    entitlementType: candidate.entitlementType, valueType: candidate.valueType || 'periodic',
+    amountMinor: minorFromRow(candidate, before.currency), amount: candidate.amount,
+    startDate: candidate.startDate, endDate: candidate.endDate || '',
     periodicity: candidate.periodicity || 'monthly', judgmentId: candidate.judgmentId || '',
     judgmentKind: candidate.judgmentKind || 'later', status: 'active'
   };
-  const withoutPrevious = previousSliceId
-    ? slices.filter(slice => slice.id !== previousSliceId)
-    : slices;
-  const after = buildExecutionSchedule({slices: [...withoutPrevious, candidateSlice], receipts, allocations, settings, asOf});
-  const beforeByKey = new Map(before.rows.map(row => [row.fromDate, row]));
-  const afterByKey = new Map(after.rows.map(row => [row.fromDate, row]));
-  const keys = [...new Set([...beforeByKey.keys(), ...afterByKey.keys()])].sort();
-  const rows = keys.map(key => {
-    const oldRow = beforeByKey.get(key), newRow = afterByKey.get(key);
-    const oldMinor = oldRow?.dueMinor || 0, newMinor = newRow?.dueMinor || 0;
-    const differenceMinor = addMinor(newMinor, -oldMinor);
-    return {
-      fromDate: key, label: monthLabel(key), oldMinor, newMinor, differenceMinor,
-      oldValue: fromMinorUnits(oldMinor, after.currency), newValue: fromMinorUnits(newMinor, after.currency),
-      difference: fromMinorUnits(differenceMinor, after.currency),
-      oldPaidMinor: oldRow?.paidMinor || 0, newPaidMinor: newRow?.paidMinor || 0,
-      creditBecauseOverpaidMinor: Math.max(0, addMinor((oldRow?.paidMinor || 0), -(newMinor)))
-    };
-  }).filter(row => row.differenceMinor !== 0 || row.oldMinor !== row.newMinor);
-  const beforeTotals = before.totals, afterTotals = after.totals;
+  if (Number.isSafeInteger(manualAmountMinor)) candidateSlice.manualPeriodAmountMinor = manualAmountMinor;
+  const withoutPrevious = previousSliceId ? slices.filter(slice => slice.id !== previousSliceId) : slices;
+  const evaluate = (midPeriodChoice = '', endPeriodChoice = '', manualMinor = null) => {
+    const nextCandidate = {...candidateSlice};
+    if (midPeriodChoice) nextCandidate.midPeriodChoice = midPeriodChoice;
+    if (endPeriodChoice) nextCandidate.endPeriodChoice = endPeriodChoice;
+    if (Number.isSafeInteger(manualMinor)) {
+      nextCandidate.manualPeriodAmountMinor = manualMinor;
+      nextCandidate.manualEndAmountMinor = manualMinor;
+    }
+    return buildExecutionSchedule({slices: [...withoutPrevious, nextCandidate], receipts, allocations, settings: options, asOf, periodThroughDate});
+  };
+  const defaultAfter = evaluate();
+  const nextGroups = valueTimeline([...withoutPrevious, candidateSlice]);
+  const group = nextGroups.find(row => row.entitlementType === candidateSlice.entitlementType && row.itemId === itemId);
+  const anchor = group?.anchorDate || candidate.startDate;
+  const normalizedGroup = group || {anchorDate: anchor, periodicity: candidate.periodicity || 'monthly', customDays: candidate.customDays || null};
+  const k = periodIndexFor(normalizedGroup, candidate.startDate, options);
+  const affected = periodForIndex(normalizedGroup, k, options);
+  const affectedFrom = affected.from;
+  const affectedTo = affected.to;
+  const midPeriod = candidate.startDate !== affectedFrom;
+  const endK = candidate.endDate && isCivilDate(candidate.endDate) ? periodIndexFor(normalizedGroup, candidate.endDate, options) : -1;
+  const endPeriod = endK >= 0 ? periodForIndex(normalizedGroup, endK, options) : null;
+  const endPeriodFrom = endPeriod?.from || '';
+  const endPeriodTo = endPeriod?.to || '';
+  const midEnd = Boolean(candidate.endDate && candidate.endDate >= endPeriodFrom && candidate.endDate < endPeriodTo);
+  const midManualMinor = Number.isSafeInteger(manualPeriodAmountMinor) ? manualPeriodAmountMinor
+    : Number.isSafeInteger(manualAmountMinor) ? manualAmountMinor : null;
+  const endManualMinor = Number.isSafeInteger(manualEndAmountMinor) ? manualEndAmountMinor
+    : Number.isSafeInteger(manualAmountMinor) ? manualAmountMinor : null;
+  const scenarios = {};
+  if (midPeriod) {
+    for (const choice of ['KEEP_OLD_VALUE', 'USE_NEW_VALUE']) {
+      const computed = evaluate(choice);
+      scenarios[choice] = makeChangeSummary(before, computed, computed.currency);
+    }
+    scenarios.MANUAL = makeChangeSummary(before, evaluate('MANUAL', '', midManualMinor), before.currency);
+  }
+  if (midEnd) {
+    for (const choice of ['INCLUDE_FULL', 'EXCLUDE']) {
+      const computed = evaluate('', choice);
+      scenarios[choice] = makeChangeSummary(before, computed, computed.currency);
+    }
+    scenarios.END_MANUAL = makeChangeSummary(before, evaluate('', 'MANUAL', endManualMinor), before.currency);
+  }
+  const summary = makeChangeSummary(before, defaultAfter, defaultAfter.currency);
   return {
-    rows, currency: after.currency, asOf,
+    ...summary, currency: defaultAfter.currency, asOf,
+    oldDueMinor: before.totals.dueMinor, newDueMinor: defaultAfter.totals.dueMinor,
+    differenceMinor: addMinor(defaultAfter.totals.dueMinor, -before.totals.dueMinor),
     totals: {
-      oldDueMinor: beforeTotals.dueMinor, newDueMinor: afterTotals.dueMinor,
-      differenceMinor: addMinor(afterTotals.dueMinor, -beforeTotals.dueMinor),
-      oldRemainingMinor: beforeTotals.remainingMinor, newRemainingMinor: afterTotals.remainingMinor,
-      creditMinor: afterTotals.creditMinor
+      oldDueMinor: before.totals.dueMinor, newDueMinor: defaultAfter.totals.dueMinor,
+      differenceMinor: addMinor(defaultAfter.totals.dueMinor, -before.totals.dueMinor),
+      oldRemainingMinor: before.totals.remainingMinor, newRemainingMinor: defaultAfter.totals.remainingMinor,
+      creditMinor: defaultAfter.totals.creditMinor
     },
+    midPeriod: midPeriod ? {periodKey: periodUnitKey(normalizedGroup, k), itemId, anchorDate: normalizedGroup.anchorDate, k,
+      fromDate: affectedFrom, toDate: affectedTo, effectiveFrom: candidate.startDate} : null,
+    midEndPeriod: midEnd ? {periodKey: periodUnitKey(normalizedGroup, endK), itemId, anchorDate: normalizedGroup.anchorDate, k: endK,
+      fromDate: endPeriodFrom, toDate: endPeriodTo, effectiveTo: candidate.endDate} : null,
+    scenarios, manualPeriodAmountMinor: midManualMinor, manualEndAmountMinor: endManualMinor,
     equations: [
-      `قبل: ${fromMinorUnits(beforeTotals.dueMinor, after.currency)} — بعد: ${fromMinorUnits(afterTotals.dueMinor, after.currency)}`,
-      `الفرق = ${fromMinorUnits(addMinor(afterTotals.dueMinor, -beforeTotals.dueMinor), after.currency)} (يظهر مرة واحدة على الشهور المتأثرة)`
-    ]
+      `قبل: ${fromMinorUnits(before.totals.dueMinor, before.currency)} — بعد القرار المسجل: ${fromMinorUnits(defaultAfter.totals.dueMinor, defaultAfter.currency)}`,
+      midPeriod ? `تاريخ السريان ${dateLabel(candidate.startDate)} يقع داخل الفترة ${dateLabel(affectedFrom)} → ${dateLabel(affectedTo)}؛ اعرض البدائل ولا تحتسبها صامتًا.` : '',
+      midEnd ? `تاريخ النهاية ${dateLabel(candidate.endDate)} يقع داخل الفترة ${dateLabel(endPeriodFrom)} → ${dateLabel(endPeriodTo)}؛ اعرض البدائل ولا تحتسبها صامتًا.` : '',
+      `الفترات الكاملة × قيمتها الكاملة — لا تناسب بالأيام.`
+    ].filter(Boolean)
   };
 }
 
 /** رصيد سابق + فترة جديدة + مصروفات مختارة = إجمالي التوكيل (بلا ازدواج). */
-export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBalance = true, expenses = [], expenseIds = []} = {}) {
+export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBalance = true, expenses = [], expenseIds = [], rangeDecisions = []} = {}) {
   if (!schedule) throw new TypeError('جدول التنفيذ مطلوب لحساب التوكيل.');
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new RangeError('مدة التوكيل غير صحيحة.');
   let previousMinor = 0, periodDueMinor = 0, periodPaidMinor = 0, differencesMinor = 0;
-  const lines = [];
-  for (const row of schedule.rows) {
+  const lines = [], partials = [], decisionsUsed = [];
+  const units = schedule.rows.flatMap(row => (row.units || []).length ? row.units.map(unit => {
+    const linesForUnit = (row.lines || []).filter(line => line.unitKey === unit.unitKey);
+    const dueMinor = Number.isSafeInteger(unit.dueMinor) ? unit.dueMinor : 0;
+    const paidMinor = sumMinor(linesForUnit, line => line.amountMinor);
+    return {...unit, dueMinor, paidMinor, remainingMinor: Math.max(0, dueMinor - paidMinor),
+      label: monthLabel(unit.fromDate, unit.toDate),
+      valueChanges: (unit.parts || []).map(part => part.valueChange).filter(Boolean)};
+  }) : [row]);
+  for (const row of units) {
+    if (!row.isComplete || row.needsDecision) continue;
     if (row.toDate < fromDate) {
-      previousMinor = addMinor(previousMinor, row.remainingMinor);
+      previousMinor = addMinor(previousMinor, Math.max(0, row.remainingMinor));
       continue;
     }
-    if (row.fromDate > toDate) continue;
-    periodDueMinor = addMinor(periodDueMinor, row.dueMinor);
-    periodPaidMinor = addMinor(periodPaidMinor, row.paidMinor);
+    if (row.fromDate > toDate || row.toDate < fromDate) continue;
+    const enclosed = row.fromDate >= fromDate && row.toDate <= toDate;
+    let dueMinor = row.dueMinor, paidMinor = row.paidMinor, rangeDecision = null;
+    if (!enclosed) {
+      const startsBefore = row.fromDate < fromDate;
+      const endsAfter = row.toDate > toDate;
+      const kind = startsBefore && endsAfter ? 'RANGE_BOUNDARY' : startsBefore ? 'RANGE_START' : 'RANGE_END';
+      const decision = rangeDecisions.find(item => item?.periodKey === row.periodKey
+        && (item.kind === kind || item.kind === 'RANGE_BOUNDARY')
+        && (!item.range || (item.range.fromDate === fromDate && item.range.toDate === toDate))) || null;
+      const valid = decision && ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].includes(decision.choice) && String(decision.reason || '').trim()
+        && (decision.choice !== 'MANUAL' || (Number.isSafeInteger(decision.amountMinor) && decision.amountMinor >= 0));
+      if (!valid) {
+        partials.push({periodKey: row.periodKey, itemId: row.itemId || '', anchorDate: row.anchorDate || '', k: row.k,
+          fromDate: row.fromDate, toDate: row.toDate, kind, dueMinor: row.dueMinor, paidMinor: row.paidMinor,
+          choice: decision?.choice || '', reason: decision?.reason || '', amountMinor: decision?.amountMinor ?? null,
+          options: ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']});
+        continue;
+      }
+      rangeDecision = {...decision, kind, trace: `قرار ${decision.choice} للفترة ${row.fromDate} → ${row.toDate}: ${decision.reason}`};
+      decisionsUsed.push(rangeDecision);
+      if (decision.choice === 'EXCLUDE') continue;
+      if (decision.choice === 'MANUAL') dueMinor = decision.amountMinor;
+      paidMinor = Math.min(paidMinor, dueMinor);
+    }
+    periodDueMinor = addMinor(periodDueMinor, dueMinor);
+    periodPaidMinor = addMinor(periodPaidMinor, paidMinor);
     for (const change of row.valueChanges || []) differencesMinor = addMinor(differencesMinor, Math.abs(change.differenceMinor || 0));
     lines.push({
-      kind: 'period', fromDate: row.fromDate, toDate: row.toDate, label: row.label,
-      amountMinor: row.dueMinor, paidMinor: row.paidMinor, remainingMinor: row.remainingMinor,
-      note: row.dueMinor ? '' : 'لا استحقاق'
+      kind: 'period', periodKey: row.periodKey || '', fromDate: row.fromDate, toDate: row.toDate, label: row.label || monthLabel(row.fromDate, row.toDate),
+      amountMinor: dueMinor, paidMinor, remainingMinor: Math.max(0, dueMinor - paidMinor),
+      note: rangeDecision ? `${rangeDecision.trace} — لا تناسب بالأيام` : (dueMinor ? '' : 'لا استحقاق'),
+      rangeDecision: rangeDecision || null
     });
   }
   const expenseLines = (expenses || []).filter(expense => !expenseIds || expenseIds.includes(expense.id))
@@ -549,7 +869,7 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     fromDate, toDate, currency: schedule.currency,
     previousBalanceMinor: previousMinor, previousAppliedMinor: previousApplied,
     periodDueMinor, periodPaidMinor, periodRemainingMinor: Math.max(0, addMinor(periodDueMinor, -periodPaidMinor)),
-    differencesMinor, expensesMinor, totalMinor,
+    differencesMinor, expensesMinor, totalMinor, partials, rangeDecisions: decisionsUsed,
     lines: [
       ...(previousApplied ? [{kind: 'previous', label: `رصيد سابق غير مسدد حتى ${addCivilDays(fromDate, -1)}`, fromDate: '', toDate: '', amountMinor: previousApplied, remainingMinor: previousApplied, note: 'جزء من المتبقي — لا يُضاف عليه مرة ثانية'}] : []),
       ...lines, ...expenseLines
@@ -557,6 +877,8 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     equations: [
       ...(previousApplied ? [`رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}`] : []),
       `فترة التوكيل (${fromDate} → ${toDate}) = ${fromMinorUnits(periodDueMinor, schedule.currency)}`,
+      ...decisionsUsed.map(row => row.trace),
+      partials.length ? `فترات حدّية تنتظر قرارًا صريحًا: ${partials.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
       ...(expensesMinor ? [`مصروفات مختارة = ${fromMinorUnits(expensesMinor, schedule.currency)}`] : []),
       `إجمالي التوكيل = ${fromMinorUnits(totalMinor, schedule.currency)}`,
       differencesMinor ? `منها فروق أحكام ${fromMinorUnits(differencesMinor, schedule.currency)} مضمّنة داخل الفترة — لا تُضاف مرة ثانية` : ''
@@ -564,17 +886,16 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
   };
 }
 
-export function monthLabel(fromDate) {
+export function monthLabel(fromDate, toDate = '') {
   if (!isCivilDate(fromDate)) return '';
-  const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-  const [year, month] = fromDate.split('-').map(Number);
-  return `${months[month - 1]} ${year}`;
+  const display = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  return isCivilDate(toDate) && toDate !== fromDate ? `${display(fromDate)} – ${display(toDate)}` : display(fromDate);
 }
 
 export function emptySchedule(asOf = '', currency = 'EGP') {
   return {
     asOf, fromDate: '', settings: settingsWith({}), currency, rows: [], units: [], receipts: [], truncated: false, warnings: [],
-    totals: {dueMinor: 0, paidMinor: 0, allocatedMinor: 0, creditMinor: 0, remainingMinor: 0, expenseMinor: 0, expenseInPoaMinor: 0, periodCount: 0, paidPeriods: 0, partialPeriods: 0, unpaidPeriods: 0},
+    totals: {dueMinor: 0, paidMinor: 0, allocatedMinor: 0, advanceMinor: 0, creditMinor: 0, unallocatedCreditMinor: 0, remainingMinor: 0, expenseMinor: 0, expenseInPoaMinor: 0, periodCount: 0, paidPeriods: 0, partialPeriods: 0, unpaidPeriods: 0, runningPeriods: 0, decisionPeriods: 0},
     equations: []
   };
 }

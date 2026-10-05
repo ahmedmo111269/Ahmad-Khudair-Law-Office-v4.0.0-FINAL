@@ -18,6 +18,7 @@ import {FEAS_MODEL, FEAS_RECOGNIZED_STATES, calculateFeasBalance} from '../domai
 import {addCivilDays} from '../domain/execution-calendar.js';
 import {addMinor, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
 import {executionIntegrityReport as getFeasIntegrityReport} from './execution-feas.js';
+import {executionSettings} from './execution-settings.js';
 import {executionSlices, executionAllocations, executionLedgerRows, executionDifferences, executionPoaRows} from './execution.js';
 
 const logRow = (office, entityType, entityId, action, summary, {fileId = null, metadata = {}} = {}) => {
@@ -26,7 +27,7 @@ const logRow = (office, entityType, entityId, action, summary, {fileId = null, m
   return row;
 };
 
-async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId = '', fromDate = '', toDate = '', includePreviousBalance = true, includeExpenses = false, stampAmount = '', extraAmount = '', extraLabel = ''}) {
+async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId = '', fromDate = '', toDate = '', includePreviousBalance = true, includeExpenses = false, expenseIds = null, rangeDecisions = [], stampAmount = '', extraAmount = '', extraLabel = ''}) {
   const limit = 2000;
   const [periods, allocations, ledger, differences, poas, obligations] = await Promise.all([
     office.r.executionPeriods.byIndex('executionId', executionId, limit + 1),
@@ -57,20 +58,48 @@ async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId 
   if (!currency) throw new AppError(ERR.CONFLICT, 'لا توجد عملة FEAS معرفة لهذا التنفيذ؛ لم يُفترض رمز عملة لإنشاء التوكيل.');
   // POA is an issue-time snapshot over explicit recognized periods, not a historical balance-as-of the end date.
   const summary = calculateFeasBalance({executionPeriods: periods, allocations, ledger, differences});
-  const intersects = (row) => from && to && row.fromDate <= to && from <= row.toDate;
-  const partiallySelected = recognized.filter(row => intersects(row) && !(row.fromDate >= from && row.toDate <= to));
-  if (partiallySelected.length) throw new AppError(ERR.VALIDATION, `نطاق التوكيل يقطع لقطة اعتراف محفوظة (${partiallySelected[0].fromDate} → ${partiallySelected[0].toDate}). اختر النطاق كاملًا؛ لا تُقسَّم اللقطة تلقائيًا.`);
+  const intersects = row => from && to && row.fromDate <= to && from <= row.toDate;
   const periodRows = summary.periods.filter(row => from && to && row.fromDate >= from && row.toDate <= to);
+  const partials = [], rangeDecisionsUsed = [];
+  for (const recognizedRow of recognized.filter(row => intersects(row) && !(row.fromDate >= from && row.toDate <= to))) {
+    const kind = recognizedRow.fromDate < from && recognizedRow.toDate > to ? 'RANGE_BOUNDARY'
+      : recognizedRow.fromDate < from ? 'RANGE_START' : 'RANGE_END';
+    const decision = (rangeDecisions || []).find(item => item?.periodKey === recognizedRow.periodKey
+      && (item.kind === kind || item.kind === 'RANGE_BOUNDARY')
+      && (!item.range || (item.range.fromDate === from && item.range.toDate === to))) || null;
+    const valid = decision && ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].includes(decision.choice)
+      && String(decision.reason || '').trim() && decision.decidedAt && decision.decidedBy
+      && (decision.choice !== 'MANUAL' || (Number.isSafeInteger(decision.amountMinor) && decision.amountMinor >= 0));
+    if (!valid) {
+      partials.push({periodKey: recognizedRow.periodKey, itemId: recognizedRow.obligationId || '', anchorDate: recognizedRow.anchorDateSnapshot || '',
+        k: Number(String(recognizedRow.periodKey || '').split('::').at(-1) || 0), fromDate: recognizedRow.fromDate, toDate: recognizedRow.toDate,
+        kind, dueMinor: summary.periods.find(row => row.periodKey === recognizedRow.periodKey)?.finalAmountMinor || recognizedRow.recognizedAmountMinor,
+        options: ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']});
+      continue;
+    }
+    rangeDecisionsUsed.push({...decision, kind, trace: `قرار ${decision.choice} للفترة ${recognizedRow.fromDate} → ${recognizedRow.toDate}: ${decision.reason}`});
+    if (decision.choice === 'EXCLUDE') continue;
+    const source = summary.periods.find(row => row.periodKey === recognizedRow.periodKey);
+    if (!source) throw new AppError(ERR.CONFLICT, `لقطة الفترة ${recognizedRow.periodKey} غير موجودة في رصيد FEAS الحالي.`);
+    const selectedMinor = decision.choice === 'MANUAL' ? decision.amountMinor : source.finalAmountMinor;
+    periodRows.push({...source, finalAmountMinor: selectedMinor, finalAmount: fromMinorUnits(selectedMinor, currency),
+      rangeDecision: rangeDecisionsUsed.at(-1)});
+  }
+  periodRows.sort((a, b) => String(a.fromDate).localeCompare(String(b.fromDate)) || String(a.periodKey).localeCompare(String(b.periodKey)));
   const periodMinor = sumMinor(periodRows, row => row.finalAmountMinor);
   const previousMinor = from ? Math.max(0, sumMinor(summary.periods.filter(row => row.toDate < from), row => row.remainingMinor)) : 0;
   const derivedPreviousBalance = fromMinorUnits(previousMinor, currency || 'EGP');
   const previousPoaTotal = previousPoa && Number.isSafeInteger(previousPoa.totalMinor) ? previousPoa.totalMinor : null;
   const previouslyUsedExpenseIds = new Set(poas.filter(row => !row.isDeleted).flatMap(row => (row.lines || []).filter(line => line.sourceType === 'expense' && line.included).flatMap(line => line.sourceIds || [])));
+  const selectedExpenseIds = Array.isArray(expenseIds) ? new Set(expenseIds) : null;
   const expenseRows = summary.netLedger.filter(row => ['EXECUTION_FEE', 'STAMP', 'COLLECTION_FEE', 'OTHER_EXPENSE'].includes(row.type)
-    && row.includeInPoa && (!to || row.date <= to) && !previouslyUsedExpenseIds.has(row.id));
+    && row.includeInPoa && (!to || row.date <= to) && !previouslyUsedExpenseIds.has(row.id)
+    && (!selectedExpenseIds || selectedExpenseIds.has(row.id)));
   const expenseMinor = sumMinor(expenseRows, row => row.netAmountMinor);
   const sourceFingerprint = JSON.stringify({
     executionId, from, to, currency,
+    expenseIds: selectedExpenseIds ? [...selectedExpenseIds].sort() : null,
+    rangeDecisions: rangeDecisionsUsed.map(row => [row.periodKey, row.kind, row.choice, row.amountMinor ?? null, row.reason, row.decidedAt, row.decidedBy]),
     periods: summary.periods.map(row => [row.periodKey, row.status, row.recognizedAmountMinor, row.finalAmountMinor, row.allocatedMinor, row.recognizedAt]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     ledger: summary.netLedger.map(row => [row.id, row.type, row.netAmountMinor, row.date, row.includeInPoa]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     allocations: allocations.map(row => [row.id, row.periodKey, row.amountMinor, row.isActive, row.createdAt, row.supersededAt]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
@@ -86,7 +115,7 @@ async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId 
     ...periodRows.map(period => ({key: `period:${period.key}`, label: `لقطة معترف بها ${period.fromDate} → ${period.toDate}`,
       amountMinor: period.finalAmountMinor, amount: period.finalAmount, included: period.finalAmountMinor > 0, sourceType: 'period',
       sourceIds: [period.id, ...(differences.filter(row => !row.isDeleted && ['APPROVED', 'POSTED'].includes(row.status) && row.periodKey === period.periodKey).map(row => row.id))],
-      detail: `${period.originalAmountMinor} + ${period.differenceMinor} فرق تفسيري = ${period.finalAmountMinor} وحدة صغرى؛ التخصيص: ${period.allocatedMinor} وحدة صغرى؛ مرجع الاعتراف ${period.periodKey}`})),
+      detail: `${period.originalAmountMinor} + ${period.differenceMinor} فرق تفسيري = ${period.finalAmountMinor} وحدة صغرى؛ التخصيص: ${period.allocatedMinor} وحدة صغرى؛ مرجع الاعتراف ${period.periodKey}${period.rangeDecision ? `؛ ${period.rangeDecision.trace}` : ''}`})),
     {key: 'differences', label: 'الفروق التفسيرية (مدمجة في مبالغ اللقطات أعلاه)', amountMinor: 0, amount: 0, included: false, sourceType: 'difference', sourceIds: [],
       detail: 'لا تُضاف مرة ثانية إلى مبلغ اللقطة؛ اعتمادها لا ينشئ حركة دين.'},
     {key: 'expenses', label: `مصروفات فعلية مُعلَّمة للدخول (${expenseRows.length})`, amountMinor: expenseMinor,
@@ -101,8 +130,14 @@ async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId 
   const previousTotal = fromMinorUnits(includePreviousBalance ? previousMinor : 0, currency || 'EGP');
   const differenceTotal = 0;
   const expenseTotal = fromMinorUnits(expenseMinor, currency || 'EGP');
+  const rangeScenarios = partials.flatMap(row => ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].map(choice => ({
+    periodKey: row.periodKey, kind: row.kind, choice,
+    amountMinor: choice === 'INCLUDE_FULL' ? row.dueMinor : choice === 'EXCLUDE' ? 0 : null,
+    equation: choice === 'MANUAL' ? 'أدخل مبلغًا كاملًا صراحةً؛ لا تناسب بالأيام.' : choice === 'EXCLUDE' ? 'استبعاد الفترة كاملة.' : `اختيار القيمة الكاملة ${row.dueMinor} وحدة صغرى.`
+  })));
   return {
     execution, accountingModel: FEAS_MODEL, currency, previousPoa, previousPoaId: previousPoa?.id || '', fromDate: from, toDate: to, lines, included,
+    includePreviousBalance: Boolean(includePreviousBalance), includeExpenses: Boolean(includeExpenses), expenseIds: expenseIds || null,
     sourceFingerprint, idempotencyKey: uid(),
     totals: {previousBalance: previousTotal, previousBalanceMinor: includePreviousBalance ? previousMinor : 0,
       derivedPreviousBalance, derivedPreviousBalanceMinor: previousMinor, periods: periodTotal, periodsMinor: periodMinor,
@@ -110,10 +145,12 @@ async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId 
       differences: differenceTotal, differencesMinor: 0, expenses: expenseTotal, expensesMinor: expenseMinor,
       stamp: fromMinorUnits(stampMinor, currency || 'EGP'), stampMinor, extra: fromMinorUnits(extraMinor, currency || 'EGP'), extraMinor,
       total: fromMinorUnits(includedMinor, currency || 'EGP'), totalMinor: includedMinor, newPeriodValue: periodTotal, newPeriodValueMinor: periodMinor},
-    periodRows,
+    periodRows, partials, rangeScenarios, rangeDecisionsSnapshot: rangeDecisionsUsed,
     equations: [`لقطات معترف بها داخل النطاق: ${periodRows.length} · ${periodMinor} وحدة صغرى (تشمل الفروق التفسيرية مرة واحدة)`,
+      ...rangeDecisionsUsed.map(row => row.trace),
+      partials.length ? `توجد ${partials.length} فترة حدّية تنتظر قرارًا صريحًا؛ لا تُحتسب قبل القرار.` : '',
       `الرصيد السابق من الحساب المعاد بناؤه: ${previousMinor} وحدة صغرى — التوكيل السابق لا يغيّر الرصيد`,
-      `المصروفات الفعلية المتاحة: ${expenseMinor} وحدة صغرى`, `إجمالي لقطة التوكيل: ${includedMinor} وحدة صغرى`]
+      `المصروفات الفعلية المتاحة: ${expenseMinor} وحدة صغرى`, `إجمالي لقطة التوكيل: ${includedMinor} وحدة صغرى`].filter(Boolean)
   };
 }
 
@@ -121,10 +158,10 @@ async function buildFeasPoaDraft(office, {execution, executionId, previousPoaId 
  * مسودة توكيل: كل بند بمصدره. لا شيء «يُخمَّن»؛ كل بند يظهر مع إمكانية استثنائه.
  * includePreviousBalance / includeDifferences / includeExpenses: قرار المستخدم.
  */
-export async function buildPoaDraft(office, {executionId, previousPoaId = '', fromDate = '', toDate = '', includePreviousBalance = true, includeDifferences = true, includeExpenses = false, stampAmount = '', extraAmount = '', extraLabel = '', partyIds = [], previousBalanceOverride = ''} = {}) {
+export async function buildPoaDraft(office, {executionId, previousPoaId = '', fromDate = '', toDate = '', includePreviousBalance = true, includeDifferences = true, includeExpenses = false, expenseIds = null, rangeDecisions = [], stampAmount = '', extraAmount = '', extraLabel = '', partyIds = [], previousBalanceOverride = ''} = {}) {
   const execution = await office.r.execution.get(executionId);
   if (!execution || execution.isDeleted) throw new AppError(ERR.NOT_FOUND, 'سجل التنفيذ غير موجود.');
-  if (execution.accountingModel === FEAS_MODEL) return buildFeasPoaDraft(office, {execution, executionId, previousPoaId, fromDate, toDate, includePreviousBalance, includeExpenses, stampAmount, extraAmount, extraLabel});
+  if (execution.accountingModel === FEAS_MODEL) return buildFeasPoaDraft(office, {execution, executionId, previousPoaId, fromDate, toDate, includePreviousBalance, includeExpenses, expenseIds, rangeDecisions, stampAmount, extraAmount, extraLabel});
   const previousPoa = previousPoaId ? await office.r.executionPOAs.get(previousPoaId) : null;
   const rangeExplicit = isIsoDate(fromDate) || isIsoDate(toDate);
   const from = isIsoDate(fromDate) ? fromDate : (previousPoa?.toDate ? localDateAfter(previousPoa.toDate) : (execution.openedDate || localDate()));
@@ -136,14 +173,15 @@ export async function buildPoaDraft(office, {executionId, previousPoaId = '', fr
     executionSlices(office, executionId), executionAllocations(office, executionId),
     executionLedgerRows(office, executionId), executionDifferences(office, executionId)
   ]);
-  const beforeFrom = balanceAsOf({slices, allocations, ledger, differences, asOf: localDateBefore(from), throughDate: localDateBefore(from), policy: execution.prorationPolicy});
+  const settings = executionSettings(office).schedule;
+  const beforeFrom = balanceAsOf({slices, allocations, ledger, differences, asOf: localDateBefore(from), throughDate: localDateBefore(from), settings});
   const derivedPreviousBalance = round2(Math.max(0, beforeFrom.remaining));
   // عند إعادة التوكيل: الرصيد السابق = إجمالي التوكيل السابق كما سُجِّل (أو قيمة يدوية),
   // والمكتب يرى أيضًا الرصيد المشتق ليقارن بنفسه — لا دمج خفي بين الرقمين.
   const previousBalanceValue = previousBalanceOverride !== undefined && previousBalanceOverride !== null && previousBalanceOverride !== ''
     ? round2(num(previousBalanceOverride))
     : (previousPoa ? round2(num(previousPoa.total)) : derivedPreviousBalance);
-  const build = buildEntitlementPeriods({slices, to, policy: execution.prorationPolicy});
+  const build = buildEntitlementPeriods({slices, to, settings});
   const periodRows = build.periods.filter(period => period.start >= from && period.start <= to);
   const periodTotal = round2(periodRows.reduce((sum, period) => sum + period.finalAmount, 0));
   const periodAllocations = allocations.filter(allocation => allocation.isActive !== false && !allocation.isDeleted && periodRows.some(period => period.key === allocation.periodKey));
@@ -217,7 +255,10 @@ async function saveFeasExecutionPoa(office, input, execution, previousPoaId) {
     if (existingRequest.sourceFingerprint === input.sourceFingerprint && existingRequest.totalMinor === input.totalMinor && lineSignature(existingRequest.lines) === lineSignature(input.lines)) return existingRequest;
     throw new AppError(ERR.CONFLICT, 'مفتاح التوكيل استُخدم مع بيانات مختلفة؛ لم تُنشأ لقطة مكررة.');
   }
-  const freshDraft = await buildFeasPoaDraft(office, {execution, executionId: execution.id, previousPoaId, fromDate: input.fromDate, toDate: input.toDate, includePreviousBalance: true, includeExpenses: false});
+  const freshDraft = await buildFeasPoaDraft(office, {execution, executionId: execution.id, previousPoaId, fromDate: input.fromDate, toDate: input.toDate,
+    includePreviousBalance: input.includePreviousBalance !== false, includeExpenses: Boolean(input.includeExpenses), expenseIds: input.expenseIds ?? null,
+    rangeDecisions: input.rangeDecisionsSnapshot || []});
+  if (freshDraft.partials.length) throw new AppError(ERR.VALIDATION, 'نطاق لقطة التوكيل يتقاطع مع فترة اعتراف ناقصة القرار؛ احسم الحدّ صراحةً قبل الحفظ.');
   if (freshDraft.sourceFingerprint !== input.sourceFingerprint) throw new AppError(ERR.CONFLICT, 'تغيرت لقطات/حركات التنفيذ بعد إعداد مسودة التوكيل؛ أعد فتح المسودة قبل الحفظ.');
   const generatedByKey = new Map(freshDraft.lines.map(line => [line.key, line]));
   const sameIds = (left = [], right = []) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
@@ -266,6 +307,8 @@ async function saveFeasExecutionPoa(office, input, execution, previousPoaId) {
     judgmentIds: Array.isArray(input.judgmentIds) ? [...new Set(input.judgmentIds.filter(Boolean))] : [],
     partyIds: Array.isArray(input.partyIds) ? [...new Set(input.partyIds.filter(Boolean))] : [],
     lines: lines.map(line => ({key: line.key, label: line.label, amount: line.amount, amountMinor: line.amountMinor, included: Boolean(line.included), sourceType: line.sourceType || '', sourceIds: line.sourceIds, detail: line.detail || ''})),
+    rangeDecisionsSnapshot: freshDraft.rangeDecisionsSnapshot || [], expenseIdsSnapshot: input.expenseIds || [],
+    includePreviousBalance: input.includePreviousBalance !== false, includeExpenses: Boolean(input.includeExpenses),
     status: 'active', sequence: existingPoas.length + 1, notes: String(input.notes || '').trim(),
     snapshotAt: now, createdAt: now, updatedAt: now, version: 1, isDeleted: false
   };

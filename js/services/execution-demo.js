@@ -104,7 +104,7 @@ export async function seedFamilyExecutionExample(office) {
     authority: 'قلم تنفيذ الأسرة — محكمة المنصورة الابتدائية',
     executionOffice: 'قلم تنفيذ الأسرة — المنصورة',
     executionMethod: 'bailiffs', status: 'active',
-    entitlementThroughDate: F.through, prorationPolicy: 'days',
+    entitlementThroughDate: F.through,
     notes: marker
   });
   await backdate(office, 'execution', execution.id, `${F.year}-01-15`);

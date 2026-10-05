@@ -14,7 +14,8 @@ import {
   validateFeasObligation
 } from '../domain/execution-feas.js';
 import {fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
-import {isCivilDate} from '../domain/execution-calendar.js';
+import {isCivilDate} from '../domain/execution-period-calendar.js';
+import {executionSettings} from './execution-settings.js';
 
 const MAX_CHILD_ROWS = 2000;
 const only = key => globalThis.IDBKeyRange.only(key);
@@ -45,8 +46,18 @@ function snapshotFingerprint(snapshot) {
   return JSON.stringify({
     obligationId: snapshot.obligationId, fromDate: snapshot.fromDate, toDate: snapshot.toDate,
     currency: snapshot.currency, recognizedAmountMinor: snapshot.recognizedAmountMinor,
-    segments: snapshot.segments.map(row => [row.unitStart, row.unitEnd, row.valuePeriodId, row.judgmentId, row.coveredStart, row.coveredEnd, row.amountMinor])
+    periods: (snapshot.periods || []).map(period => [period.periodKey, period.fromDate, period.toDate, period.amountMinor]),
+    periodBasis: snapshot.periodBasis, startPolicy: snapshot.startPolicy, midChangePolicy: snapshot.midChangePolicy, endPolicy: snapshot.endPolicy,
+    accrualTiming: snapshot.accrualTiming, monthEndPolicy: snapshot.monthEndPolicy,
+    partials: (snapshot.partials || []).map(row => [row.k, row.fromDate, row.toDate]),
+    decisions: (snapshot.decisions || []).map(row => [row.periodKey, row.kind, row.reason]),
+    segments: snapshot.segments.map(row => [row.periodKey, row.unitStart, row.unitEnd, row.valuePeriodId, row.judgmentId, row.amountMinor, JSON.stringify(row.decisions || [])])
   });
+}
+function periodSnapshotFingerprint(period, currency) {
+  return JSON.stringify({periodKey: period.periodKey, fromDate: period.fromDate, toDate: period.toDate,
+    currency, recognizedAmountMinor: period.amountMinor,
+    segments: (period.segments || []).map(row => [row.periodKey, row.unitStart, row.unitEnd, row.valuePeriodId, row.judgmentId, row.amountMinor, JSON.stringify(row.decisions || [])])});
 }
 
 /** Create/update office-defined obligation metadata. No legal type or rate is inferred. */
@@ -56,7 +67,16 @@ export async function saveExecutionObligation(office, input = {}, id = null, exp
   if (id && (!old || old.isDeleted)) throw new AppError(ERR.NOT_FOUND, 'الالتزام غير موجود.');
   if (old && old.executionId !== execution.id) throw new AppError(ERR.CONFLICT, 'لا يمكن نقل الالتزام إلى تنفيذ آخر.');
   if (old) assertExpectedVersion(old, expectedVersion, 'الالتزام');
-  const data = {...(old || {}), ...input, executionId: execution.id};
+  const officeRules = executionSettings(office).schedule;
+  const data = {
+    ...(old || {}), ...input, executionId: execution.id,
+    periodBasis: input.periodBasis || old?.periodBasis || officeRules.periodBasis,
+    startPolicy: input.startPolicy || old?.startPolicy || officeRules.startPolicy,
+    midChangePolicy: input.midChangePolicy || old?.midChangePolicy || officeRules.midChangePolicy,
+    endPolicy: input.endPolicy || old?.endPolicy || officeRules.endPolicy,
+    monthEndPolicy: 'CLAMP_TO_LAST_DAY',
+    accrualTiming: 'AFTER_PERIOD_END'
+  };
   const errors = validateFeasObligation(data);
   if (Object.keys(errors).length) throw new AppError(ERR.VALIDATION, 'راجع تعريف الالتزام وسياسة الفترة.', errors);
   const siblings = await office.r.executionObligations.byIndex('executionId', execution.id, MAX_CHILD_ROWS + 1);
@@ -64,8 +84,9 @@ export async function saveExecutionObligation(office, input = {}, id = null, exp
   if (old) {
     const recognizedRows = await office.r.executionPeriods.byIndex('executionId', execution.id, MAX_CHILD_ROWS + 1);
     const hasRecognized = recognizedRows.some(row => row.obligationId === old.id && !row.isDeleted && FEAS_RECOGNIZED_STATES.includes(row.status));
-    const stableFields = ['obligationType', 'frequency', 'currency', 'prorationPolicy', 'startDate', 'endDate', 'anchorDate', 'customDays', 'beneficiaryPartyId'];
-    const changedStableField = stableFields.some(key => String(old[key] ?? '') !== String(data[key] ?? ''));
+    const stableFields = ['obligationType', 'frequency', 'currency', 'periodBasis', 'startPolicy', 'midChangePolicy', 'endPolicy', 'accrualTiming', 'monthEndPolicy', 'startDate', 'endDate', 'anchorDate', 'customDays', 'beneficiaryPartyId'];
+    const policyKeys = new Set(['periodBasis', 'startPolicy', 'midChangePolicy', 'endPolicy', 'accrualTiming', 'monthEndPolicy']);
+    const changedStableField = stableFields.some(key => String(old[key] ?? (policyKeys.has(key) ? officeRules[key] : '')) !== String(data[key] ?? ''));
     if (hasRecognized && changedStableField) throw new AppError(ERR.CONFLICT, 'تعريف مالي له فترات معترف بها؛ لا يُعدَّل بأثر رجعي. أنشئ التزامًا جديدًا أو سجّل شريحة قيمة/فرقًا موثقًا.');
   }
   if (data.beneficiaryPartyId) {
@@ -81,7 +102,7 @@ export async function saveExecutionObligation(office, input = {}, id = null, exp
     beneficiaryScope: data.beneficiaryPartyId ? 'PARTY' : (data.beneficiaryScope || 'UNSPECIFIED'),
     beneficiaryPartyId: data.beneficiaryPartyId || '', currency: String(data.currency).toUpperCase(),
     frequency: data.frequency, customDays: data.frequency === 'custom' ? Number(data.customDays) : null,
-    anchorDate: ['weekly', 'custom'].includes(data.frequency) ? data.anchorDate : '',
+    anchorDate: data.anchorDate || data.startDate || '',
     status: data.status === 'inactive' ? 'inactive' : 'active',
     createdAt: old?.createdAt || now, updatedAt: now, version: (old?.version || 0) + 1, isDeleted: false
   };
@@ -105,9 +126,9 @@ export async function executionRecognizedPeriods(office, executionId, {includeDe
   return rows.filter(row => includeDeleted || !row.isDeleted).sort((a, b) => String(a.fromDate || '').localeCompare(String(b.fromDate || '')) || String(a.periodKey || '').localeCompare(String(b.periodKey || '')));
 }
 
-async function previewWithRows({execution, obligation, valuePeriods, fromDate, toDate}) {
+async function previewWithRows({execution, obligation, valuePeriods, fromDate, toDate, periodDecisions = []}) {
   try {
-    const preview = resolveExecutionClaim({obligation, valuePeriods, fromDate, toDate});
+    const preview = resolveExecutionClaim({obligation, valuePeriods, fromDate, toDate, periodDecisions});
     if (preview.truncated) throw new AppError(ERR.VALIDATION, 'النطاق يتجاوز حد الفترات الآمن؛ قسّمه إلى نطاقات أصغر قبل الاعتراف.');
     return {...preview, fingerprint: snapshotFingerprint(preview)};
   } catch (error) {
@@ -116,32 +137,46 @@ async function previewWithRows({execution, obligation, valuePeriods, fromDate, t
   }
 }
 
-export async function projectExecutionPeriod(office, {executionId, obligationId, fromDate, toDate} = {}) {
+export async function projectExecutionPeriod(office, {executionId, obligationId, fromDate, toDate, periodDecisions = []} = {}) {
   const execution = await getExecution(office, executionId);
   const obligation = await office.r.executionObligations.get(obligationId);
   if (!obligation || obligation.isDeleted || obligation.executionId !== executionId || obligation.status === 'inactive') throw new AppError(ERR.NOT_FOUND, 'الالتزام غير متاح لهذا التنفيذ.');
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new AppError(ERR.VALIDATION, 'أدخل نطاقًا مدنيًا صحيحًا للفترة.', {fromDate: 'مطلوب', toDate: 'مطلوب'});
   const valuePeriods = (await office.r.executionValuePeriods.byIndex('executionId', executionId, MAX_CHILD_ROWS)).filter(row => !row.isDeleted);
-  return previewWithRows({execution, obligation, valuePeriods, fromDate, toDate});
+  const base = {execution, obligation, valuePeriods, fromDate, toDate};
+  const preview = await previewWithRows({...base, periodDecisions});
+  const scenarioRows = [];
+  for (const decision of preview.decisions) {
+    if (['DECISION_REASON', 'RANGE_MANUAL', 'START_MANUAL', 'MID_CHANGE_MANUAL', 'END_MANUAL'].includes(decision.kind)) continue;
+    for (const choice of decision.options || []) {
+      if (['REASON', 'MANUAL_AMOUNT'].includes(choice)) continue;
+      const scenarioDecisions = [...periodDecisions.filter(item => !(item.periodKey === decision.periodKey && item.kind === decision.kind)),
+        {periodKey: decision.periodKey, kind: decision.kind, choice, reason: 'معاينة مقارنة فقط'}];
+      const scenario = await previewWithRows({...base, periodDecisions: scenarioDecisions});
+      const period = scenario.periods.find(item => item.periodKey === decision.periodKey);
+      scenarioRows.push({periodKey: decision.periodKey, kind: decision.kind, choice,
+        amountMinor: period?.amountMinor ?? null, remainingDecisions: scenario.decisions.length,
+        equation: period?.equation || 'لا قيمة للفترة بهذا الاختيار'});
+    }
+  }
+  const asOf = Clock.now().slice(0, 10);
+  const notYetCompletePeriods = preview.periods.filter(period => period.toDate > asOf).map(period => ({periodKey: period.periodKey, fromDate: period.fromDate, toDate: period.toDate, amountMinor: period.amountMinor}));
+  return {...preview, asOf, notYetCompletePeriods, sideBySideScenarios: scenarioRows};
 }
 
 /**
  * Recognize an explicit period. The deterministic id and unique composite index make
  * re-submission idempotent. Existing snapshots are returned unchanged, never rebuilt.
  */
-export async function recognizeExecutionPeriod(office, {executionId, obligationId, fromDate, toDate, status = 'RECOGNIZED', reason = '', expectedFingerprint = ''} = {}) {
+export async function recognizeExecutionPeriod(office, {executionId, obligationId, fromDate, toDate, status = 'RECOGNIZED', reason = '', periodDecisions = [], expectedFingerprint = ''} = {}) {
   if (!FEAS_RECOGNIZED_STATES.includes(status)) throw new AppError(ERR.VALIDATION, 'اختر «معترف» أو «مغلق» صراحةً؛ الإسقاط وحده لا يكتب فترة مالية.');
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new AppError(ERR.VALIDATION, 'أدخل تاريخي بداية ونهاية صحيحين.', {fromDate: 'مطلوب', toDate: 'مطلوب'});
   const execution = await getExecution(office, executionId);
   const obligation = await office.r.executionObligations.get(obligationId);
   if (!obligation || obligation.isDeleted || obligation.executionId !== executionId || obligation.status === 'inactive') throw new AppError(ERR.NOT_FOUND, 'الالتزام غير متاح لهذا التنفيذ.');
-  const periodKey = recognitionPeriodKey(obligationId, fromDate, toDate);
-  const id = recognitionId(executionId, periodKey);
   const now = Clock.now();
   const txResult = await transaction(office.ctx, [STORE.execution, STORE.executionObligations, STORE.executionValuePeriods, STORE.executionPeriods, STORE.activityLog], async tx => {
     const periodsStore = tx.objectStore(STORE.executionPeriods);
-    const existing = await request(periodsStore.get(id));
-    if (existing) return {row: existing, reused: true};
     const currentExecution = requireFeasExecution(await request(tx.objectStore(STORE.execution).get(executionId)));
     const currentObligation = await request(tx.objectStore(STORE.executionObligations).get(obligationId));
     if (!currentObligation || currentObligation.isDeleted || currentObligation.executionId !== executionId || currentObligation.status === 'inactive') throw new AppError(ERR.CONFLICT, 'تغير تعريف الالتزام قبل حفظ الفترة؛ أعد المعاينة.');
@@ -149,36 +184,77 @@ export async function recognizeExecutionPeriod(office, {executionId, obligationI
       readAll(tx, STORE.executionValuePeriods, 'executionId', executionId),
       request(periodsStore.index('executionId_obligationId_fromDate').getAll(globalThis.IDBKeyRange.bound([executionId, obligationId, '0000-01-01'], [executionId, obligationId, '9999-12-31'])))
     ]);
-    const preview = await previewWithRows({execution: currentExecution, obligation: currentObligation, valuePeriods: valuePeriods.filter(row => !row.isDeleted), fromDate, toDate});
-    if (!preview.segments.length) throw new AppError(ERR.VALIDATION, 'لا توجد قيمة مصدر تغطي النطاق؛ لم تُسجَّل فترة صفرية.');
-    const fingerprint = snapshotFingerprint(preview);
-    if (expectedFingerprint && expectedFingerprint !== fingerprint) throw new AppError(ERR.CONFLICT, 'تغيرت شرائح القيمة بعد المعاينة؛ أعد المعاينة قبل الاعتراف.');
-    const overlap = existingPeriods.find(row => !row.isDeleted && FEAS_RECOGNIZED_STATES.includes(row.status) && row.periodKey !== periodKey && row.fromDate <= toDate && fromDate <= row.toDate);
-    if (overlap) throw new AppError(ERR.CONFLICT, `يتداخل النطاق مع فترة معترف بها محفوظة (${overlap.fromDate} → ${overlap.toDate}). لا تُكرر الاعتراف؛ استخدم الفرق/التسوية الموثقة.`);
-    const sourceValuePeriodIds = [...new Set(preview.segments.map(row => row.valuePeriodId).filter(Boolean))];
-    const sourceJudgmentIds = [...new Set(preview.segments.map(row => row.judgmentId).filter(Boolean))];
-    const row = {
-      id, accountingModel: FEAS_MODEL, executionId, obligationId, periodKey,
-      fileId: currentExecution.fileId || '', clientId: currentExecution.clientId || '',
-      obligationTypeSnapshot: currentObligation.obligationType,
-      beneficiaryPartyIdSnapshot: currentObligation.beneficiaryPartyId || '',
-      currency: preview.currency, fromDate, toDate, status,
-      recognizedAmountMinor: preview.recognizedAmountMinor,
-      segmentsSnapshot: preview.segments.map(segment => ({...segment})),
-      sourceValuePeriodIds, sourceJudgmentIds,
-      frequencySnapshot: currentObligation.frequency,
-      anchorDateSnapshot: currentObligation.anchorDate || '', customDaysSnapshot: currentObligation.customDays ?? null,
-      prorationPolicySnapshot: currentObligation.prorationPolicy,
-      equationSnapshot: preview.equation,
-      recognitionReason: String(reason || '').trim(),
-      recognizedAt: now, recognizedBy: office.ctx?.profile?.id || 'user',
-      createdAt: now, updatedAt: now, version: 1, isDeleted: false
-    };
-    await request(periodsStore.add(row));
-    await request(tx.objectStore(STORE.activityLog).add(activity(STORE.executionPeriods, id, 'recognize', `اعتراف صريح بفترة ${currentObligation.obligationType}: ${fromDate} → ${toDate} (${row.recognizedAmountMinor} وحدة صغرى)`, row.fileId)));
-    return {row, reused: false};
+    const preview = await previewWithRows({execution: currentExecution, obligation: currentObligation, valuePeriods: valuePeriods.filter(row => !row.isDeleted), fromDate, toDate, periodDecisions});
+    if (expectedFingerprint && expectedFingerprint !== preview.fingerprint) throw new AppError(ERR.CONFLICT, 'تغيرت شرائح القيمة أو سياسة الفترة بعد المعاينة؛ أعد المعاينة قبل الاعتراف.');
+    if (preview.decisions.length) {
+      const labels = preview.decisions.map(row => `${row.kind} (${row.fromDate} → ${row.toDate})`).join('، ');
+      throw new AppError(ERR.VALIDATION, `توجد فترة ناقصة تتطلب قرارًا صريحًا قبل الاعتراف: ${labels}.`);
+    }
+    if (preview.partials.length) {
+      const labels = preview.partials.map(row => `${row.fromDate} → ${row.toDate}`).join('، ');
+      throw new AppError(ERR.VALIDATION, `النطاق يتقاطع مع فترة غير كاملة (${labels}). قسّم النطاق ليشمل حدود فترات كاملة، أو سجّل القرار الصريح أولًا.`);
+    }
+    const notYetComplete = preview.periods.filter(period => period.toDate > now.slice(0, 10));
+    if (notYetComplete.length) throw new AppError(ERR.VALIDATION, `لا تُعترف فترة قبل اكتمالها: ${notYetComplete.map(period => `${period.fromDate} → ${period.toDate}`).join('، ')}.`);
+    if (!preview.periods.length) throw new AppError(ERR.VALIDATION, 'لا توجد فترة كاملة ذات قيمة لتسجيلها؛ لم تُسجَّل فترة صفرية أو تناسب يومي.');
+    const specs = preview.periods.map(period => ({period, id: recognitionId(executionId, period.periodKey), fingerprint: periodSnapshotFingerprint(period, preview.currency)}));
+    const specKeys = new Set(specs.map(spec => spec.period.periodKey));
+    const overlap = existingPeriods.find(row => !row.isDeleted && FEAS_RECOGNIZED_STATES.includes(row.status)
+      && !specKeys.has(row.periodKey) && specs.some(spec => row.fromDate <= spec.period.toDate && spec.period.fromDate <= row.toDate));
+    if (overlap) throw new AppError(ERR.CONFLICT, `يتداخل نطاق الفترة المطلوب مع فترة معترف بها محفوظة (${overlap.fromDate} → ${overlap.toDate}). لا تُكرر الاعتراف؛ استخدم الفرق/التسوية الموثقة.`);
+
+    const rows = [];
+    let created = 0;
+    for (const spec of specs) {
+      const existing = await request(periodsStore.get(spec.id));
+      if (existing) {
+        if (existing.snapshotFingerprint && existing.snapshotFingerprint !== spec.fingerprint) throw new AppError(ERR.CONFLICT, `الفترة ${spec.period.fromDate} → ${spec.period.toDate} معترف بها مسبقًا ببيانات مصدر مختلفة؛ بقيت اللقطة التاريخية كما صدرت.`);
+        rows.push(existing); continue;
+      }
+      const period = spec.period;
+      const actorId = office.ctx?.profile?.id || 'user';
+      const decisionsSnapshot = (period.decisions || []).map(decision => {
+        const supplied = periodDecisions.find(item => item.periodKey === period.periodKey && item.kind === decision.kind);
+        return {...decision, ...(supplied ? {decidedAt: supplied.decidedAt || now, decidedBy: supplied.decidedBy || actorId} : {})};
+      });
+      const segmentsSnapshot = period.segments.map(segment => ({...segment,
+        decisions: (segment.decisions || []).map(decision => decisionsSnapshot.find(item => item.kind === decision.kind) || decision)
+      }));
+      const sourceValuePeriodIds = [...new Set(period.segments.map(row => row.valuePeriodId).filter(Boolean))];
+      const sourceJudgmentIds = [...new Set(period.segments.map(row => row.judgmentId).filter(Boolean))];
+      const row = {
+        id: spec.id, accountingModel: FEAS_MODEL, executionId, obligationId, periodKey: period.periodKey,
+        fileId: currentExecution.fileId || '', clientId: currentExecution.clientId || '',
+        obligationTypeSnapshot: currentObligation.obligationType,
+        beneficiaryPartyIdSnapshot: currentObligation.beneficiaryPartyId || '',
+        currency: preview.currency, fromDate: period.fromDate, toDate: period.toDate, status,
+        recognizedAmountMinor: period.amountMinor,
+        segmentsSnapshot,
+        decisionsSnapshot,
+        sourceValuePeriodIds, sourceJudgmentIds,
+        frequencySnapshot: currentObligation.frequency,
+        anchorDateSnapshot: currentObligation.anchorDate || currentObligation.startDate || '', customDaysSnapshot: currentObligation.customDays ?? null,
+        periodBasisSnapshot: currentObligation.periodBasis || 'ANNIVERSARY',
+        startPolicySnapshot: currentObligation.startPolicy || 'ASK',
+        midChangePolicySnapshot: currentObligation.midChangePolicy || 'ASK',
+        endPolicySnapshot: currentObligation.endPolicy || 'ASK',
+        accrualTimingSnapshot: currentObligation.accrualTiming || 'AFTER_PERIOD_END',
+        monthEndPolicySnapshot: currentObligation.monthEndPolicy || 'CLAMP_TO_LAST_DAY',
+        equationSnapshot: period.equation,
+        recognitionReason: String(reason || '').trim(),
+        snapshotFingerprint: spec.fingerprint,
+        recognizedAt: now, recognizedBy: office.ctx?.profile?.id || 'user',
+        createdAt: now, updatedAt: now, version: 1, isDeleted: false
+      };
+      await request(periodsStore.add(row));
+      const log = activity(STORE.executionPeriods, row.id, 'recognize', `اعتراف صريح بفترة ${currentObligation.obligationType}: ${row.fromDate} → ${row.toDate} (${row.recognizedAmountMinor} وحدة صغرى)`, row.fileId);
+      log.metadata = {periodKey: row.periodKey, decisions: decisionsSnapshot};
+      await request(tx.objectStore(STORE.activityLog).add(log));
+      rows.push(row); created += 1;
+    }
+    return {rows, row: rows[0] || null, reused: created === 0};
   });
-  if (!txResult.reused) emitChanged(STORE.executionPeriods, txResult.row.id);
+  if (!txResult.reused) for (const row of txResult.rows) emitChanged(STORE.executionPeriods, row.id);
   return txResult;
 }
 
@@ -217,9 +293,9 @@ async function readExecutionInputs(office, executionId) {
   return {execution, valuePeriods, obligations, periods, allocations, ledger, differences};
 }
 
-export async function executionFeasBalanceData(office, executionId, {asOf = ''} = {}) {
+export async function executionFeasBalanceData(office, executionId, {asOf = '', periodThroughDate = ''} = {}) {
   const inputs = await readExecutionInputs(office, executionId);
-  const summary = calculateFeasBalance({executionPeriods: inputs.periods, allocations: inputs.allocations, ledger: inputs.ledger, differences: inputs.differences, asOf});
+  const summary = calculateFeasBalance({executionPeriods: inputs.periods, allocations: inputs.allocations, ledger: inputs.ledger, differences: inputs.differences, asOf, periodThroughDate});
   return {...inputs, summary};
 }
 
@@ -262,7 +338,8 @@ function differenceRow(office, execution, settlement, impactRow, now, old = null
     oldValue: impactRow.oldValue, newValue: impactRow.newValue,
     differenceAmount: impactRow.difference, previouslyCollected: impactRow.collected,
     originalOutstanding: fromMinorUnits(Math.max(0, impactRow.oldValueMinor - impactRow.collectedMinor), settlement.currency),
-    remainingAfter: fromMinorUnits(impactRow.newValueMinor - impactRow.collectedMinor, settlement.currency),
+    remainingAfter: fromMinorUnits(Math.max(0, impactRow.newValueMinor - impactRow.collectedMinor), settlement.currency),
+    creditAfter: fromMinorUnits(Math.max(0, impactRow.collectedMinor - impactRow.newValueMinor), settlement.currency),
     equation: impactRow.equation, executedEarlier: impactRow.collectedMinor > 0,
     status: 'PENDING_REVIEW', postedLedgerId: '',
     createdAt: old?.createdAt || now, createdBy: office.ctx?.profile?.id || 'user',

@@ -9,7 +9,7 @@ import {userError} from '../core/errors.js';
 import {localDate, Clock} from '../core/clock.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {money, round2, num, ALLOCATION_METHODS, ALLOCATION_METHOD_LABELS, EXPENSE_TYPES, LEDGER_TYPE_LABELS, LEDGER_TYPES, POA_STATUS_LABELS, DIFFERENCE_STATUS_LABELS, ACTION_KINDS, ACTION_KIND_LABELS, PERIODICITIES, PERIODICITY_LABELS, VALUE_TYPES, VALUE_TYPE_LABELS, EXECUTION_METHODS, EXECUTION_METHOD_LABELS, EXECUTION_STATUSES, EXECUTION_STATUS_LABELS, EXECUTION_TYPES, EXECUTION_TYPE_LABELS} from '../domain/execution.js';
-import {FEAS_MODEL, FEAS_FREQUENCIES, FEAS_PRORATION_POLICIES} from '../domain/execution-feas.js';
+import {FEAS_MODEL, FEAS_FREQUENCIES, FEAS_PERIOD_BASES, FEAS_PERIOD_START_POLICIES, FEAS_MID_CHANGE_POLICIES, FEAS_END_POLICIES, FEAS_ACCRUAL_TIMINGS, FEAS_MONTH_END_POLICIES} from '../domain/execution-feas.js';
 import {currencyFractionDigits, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
 import * as EX from '../services/execution.js';
 import * as L from '../services/execution-ledger.js';
@@ -76,7 +76,7 @@ export async function executionDialog(app, {execution = null} = {}) {
       ${field('حالة التنفيذ', `<select name="status">${options(EXECUTION_STATUSES, v.status || 'active')}</select>`, 'حالة المتابعة الآن كما هي في الملف: جارٍ، موقوف، تحصيل جزئي، مكتمل… تُغيَّر يدويًا.', 'status')}
       ${field('موعد المتابعة القادم', `<input name="nextReviewDate" type="date" value="${value('nextReviewDate')}">`, 'موعد تذكيرك الذاتي — يظهر في قسم «يحتاج انتباهي» عند حلوله.', 'nextReviewDate')}
       ${field('حساب الاستحقاقات حتى تاريخ', `<input name="entitlementThroughDate" type="date" value="${value('entitlementThroughDate')}">`, 'حتى متى تُبنى الفترات (مثال: 2025-12-31). بعدها لا يضيف النظام فترات جديدة.', 'entitlementThroughDate')}
-      ${field('سياسة احتساب الشهر الناقص', `<select name="prorationPolicy">${options([['days', 'بالأيام (دقيق)'], ['periodStart', 'بقيمة بداية الفترة']], v.prorationPolicy || 'days')}</select>`, 'إذا بدأت القيمة في منتصف الشهر: تُقسم بالأيام أم تُحتسب كاملة؟', 'prorationPolicy')}
+      <p class="muted small">يُحسب الجدول وفق نسخة إعدادات المكتب المؤرخة؛ الفترات لا تُقسَّم بالأيام. رسوم التنفيذ والمصروفات تبقى منفصلة عن أصل الاستحقاق.</p>
     </div>
     <h4 class="exec-sub">رابعًا — إعداد الحساب <span class="muted">(اتركه كما هو إن كنت لأول مرة)</span></h4>
     <div class="exec-form-grid">
@@ -123,11 +123,16 @@ export async function executionObligationDialog(app, executionId, {obligation = 
     ${field('المستحق (اختياري)', `<select name="beneficiaryPartyId">${options(parties.filter(row => !row.isDeleted && row.isActive !== false && row.side !== 'debtor').map(row => [row.id, `${row.name} — ${row.role || 'مستحق'}`]), obligation?.beneficiaryPartyId || '', '— غير محدد —')}</select>`, 'إن لم يُحدَّد طرف، لا يُخمن النظام مستفيدًا.', 'beneficiaryPartyId')}
     ${field('الدورية (اختيار صريح)', `<select name="frequency">${options(FEAS_FREQUENCIES, obligation?.frequency || '', 'اختر الدورية')}</select>`, 'تكرار الالتزام: شهري، أسبوعي، مخصص… اختر كما في المنطوق.', 'frequency')}
     ${field('العملة — رمز ISO ثلاثي الأحرف', `<input name="currency" value="${esc(obligation?.currency || '')}" maxlength="3" pattern="[A-Za-z]{3}" required placeholder="مثال: EGP">`, 'ثلاث لاتينية فقط: EGP للجنيه المصري. لا يُحوَّل الرمز العربي «جنيه» تلقائيًا.', 'currency')}
-    ${field('تاريخ بداية الالتزام (إن كان محددًا)', `<input name="startDate" type="date" value="${esc(obligation?.startDate || '')}">`, 'يوم بداية الالتزام الأصلي إن كان محددًا في المستند.', 'startDate')}
-    ${field('تاريخ نهاية الالتزام (اختياري)', `<input name="endDate" type="date" value="${esc(obligation?.endDate || '')}">`, 'يوم انتهاء الالتزام إن كان محددًا.', 'endDate')}
-    ${field('التاريخ المرجعي للدورية الأسبوعية/المخصصة', `<input name="anchorDate" type="date" value="${esc(obligation?.anchorDate || '')}">`, 'نقطة انطلاق الدورة: أسبوع المخصص يحتاج يوم بداية معروف (مثال: السبت).', 'anchorDate')}
-    ${field('عدد أيام الدورية المخصصة', `<input name="customDays" type="number" step="1" min="1" max="36500" value="${obligation?.customDays ?? ''}">`, 'يُستخدم فقط عند اختيار الدورية المخصصة (مثال: 30 يومًا).', 'customDays')}
-    ${field('سياسة الجزء من الفترة (اختيار صريح)', `<select name="prorationPolicy">${options(FEAS_PRORATION_POLICIES, obligation?.prorationPolicy || '', 'اختر السياسة')}</select>`, 'هل يُقسَّم الشهر الناقص بالأيام أم يُحتسب كاملًا عند بدايته.', 'prorationPolicy')}
+    ${field('تاريخ بداية الالتزام / الارتكاز الأصلي *', `<input name="startDate" type="date" value="${esc(obligation?.startDate || obligation?.anchorDate || '')}" required>`, 'هذا الارتكاز ثابت لكل الفترات؛ التاريخ الساري التالي لا يعيد ضبطه.', 'startDate')}
+    ${field('تاريخ نهاية الالتزام (اختياري)', `<input name="endDate" type="date" value="${esc(obligation?.endDate || '')}">`, 'إذا انتهى الحكم في منتصف فترة فسيطلب النظام قرارًا صريحًا قبل الاعتراف.', 'endDate')}
+    ${field('التاريخ المرجعي للدورية الأسبوعية/المخصصة', `<input name="anchorDate" type="date" value="${esc(obligation?.anchorDate || obligation?.startDate || '')}">`, 'للأسبوعي والمخصص: يُحفظ الارتكاز مرة واحدة ولا ينجرف مع الفترات اللاحقة.', 'anchorDate')}
+    ${field('عدد أيام الدورية المخصصة', `<input name="customDays" type="number" step="1" min="1" max="36500" value="${obligation?.customDays ?? ''}">`, 'يُستخدم فقط عند اختيار الدورية المخصصة.', 'customDays')}
+    ${field('أساس الشهر', `<select name="periodBasis">${options(FEAS_PERIOD_BASES, obligation?.periodBasis || 'ANNIVERSARY')}</select>`, 'ANNIVERSARY: يوم الارتكاز إلى ما قبل الارتكاز التالي. CALENDAR_MONTH: الشهر التقويمي كاملًا.', 'periodBasis')}
+    ${field('سياسة بداية فترة ناقصة', `<select name="startPolicy">${options(FEAS_PERIOD_START_POLICIES, obligation?.startPolicy || 'ASK')}</select>`, 'تُستخدم فقط إذا اختير شهر تقويمي أو وقعت البداية داخل فترة أخرى؛ ASK يمنع أي افتراض.', 'startPolicy')}
+    ${field('سياسة حكم لاحق يبدأ منتصف فترة', `<select name="midChangePolicy">${options(FEAS_MID_CHANGE_POLICIES, obligation?.midChangePolicy || 'ASK')}</select>`, 'مع ASK تُعرض البدائل ويُحفظ القرار والسبب قبل الاعتراف.', 'midChangePolicy')}
+    ${field('سياسة نهاية الحكم منتصف فترة', `<select name="endPolicy">${options(FEAS_END_POLICIES, obligation?.endPolicy || 'ASK')}</select>`, 'مع ASK لا تُحتسب الفترة الناقصة حتى اختيار صريح.', 'endPolicy')}
+    ${field('توقيت الاستحقاق', `<select name="accrualTiming">${options(FEAS_ACCRUAL_TIMINGS, obligation?.accrualTiming || 'AFTER_PERIOD_END')}</select>`, 'إعداد مكتب موثق، وليس استنتاجًا قانونيًا.', 'accrualTiming')}
+    ${field('سياسة اليوم غير الموجود في الشهر', `<select name="monthEndPolicy">${options(FEAS_MONTH_END_POLICIES, obligation?.monthEndPolicy || 'CLAMP_TO_LAST_DAY')}</select>`, 'قص تاريخ الفترة إلى آخر يوم بالشهر من دون انجراف.', 'monthEndPolicy')}
     ${field('ملاحظات تعريفية', `<textarea name="notes" rows="2">${esc(obligation?.notes || '')}</textarea>`, 'أي ملاحظة عن التعريف.', 'notes')}
   </form>
   <div class="form-actions"><button type="button" class="primary" data-save>${obligation ? 'حفظ تعريف الالتزام' : 'تعريف الالتزام'}</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
@@ -142,32 +147,93 @@ export async function executionObligationDialog(app, executionId, {obligation = 
 
 export async function recognitionDialog(app, executionId, obligations = []) {
   const active = obligations.filter(row => !row.isDeleted && row.status !== 'inactive');
-  const card = modal(`<h2 class="modal-title">معاينة / اعتراف صريح بفترة</h2>
-  <p class="muted small">المعاينة لا تكتب دينًا. لا تُحفظ لقطة إلا بعد قرارك الصريح، ثم لا يُعاد بناؤها تلقائيًا.</p>
+  const choiceLabels = {
+    KEEP_OLD_VALUE: 'القيمة القديمة للفترة كاملة', USE_NEW_VALUE: 'القيمة الجديدة للفترة كاملة',
+    INCLUDE_FULL: 'احتساب الفترة كاملة', EXCLUDE: 'استبعاد الفترة', MANUAL: 'مبلغ يدوي كامل',
+    RANGE_START: 'قرار حد بداية النطاق', RANGE_END: 'قرار حد نهاية النطاق'
+  };
+  const kindLabels = {
+    RANGE_START: 'الفترة تتقاطع مع بداية النطاق', RANGE_END: 'الفترة تتقاطع مع نهاية النطاق', RANGE_BOUNDARY: 'الفترة تتقاطع مع حدود النطاق',
+    START_DATE: 'بداية الالتزام داخل فترة', MID_CHANGE: 'حكم لاحق في منتصف فترة', END_DATE: 'نهاية الحكم في منتصف فترة'
+  };
+  const card = modal(`<h2 class="modal-title">معاينة / اعتراف صريح بالفترات</h2>
+  <p class="muted small">المعاينة لا تكتب دينًا. يُعرض كل خيار للفترة الناقصة، ولا يُحتسب شيء بصمت أو بتناسب يومي. كل فترة كاملة تُحفظ بلقطة مستقلة.</p>
   <form class="exec-form exec-form-grid">
-    ${field('الالتزام', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.frequency} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`, 'أي التزام تريد الاعتراف بفتراته (نفقة شهرية مثلًا).', 'obligationId')}
-    ${field('من تاريخ', `<input name="fromDate" type="date" required>`, 'بداية الفترة التي تُعترف بها (يوم مدني واضح: 2025-01-01).', 'fromDate')}
-    ${field('إلى تاريخ', `<input name="toDate" type="date" required>`, 'نهاية الفترة — لا يتجاوزها الاعتراف.', 'toDate')}
+    ${field('الالتزام', `<select name="obligationId" required>${options(active.map(row => [row.id, `${row.obligationType} · ${row.frequency} · ${row.currency}`]), '', 'اختر الالتزام')}</select>`, 'أي التزام تريد معاينة فتراته.', 'obligationId')}
+    ${field('من تاريخ', `<input name="fromDate" type="date" required>`, 'يوم بداية نطاق المعاينة.', 'fromDate')}
+    ${field('إلى تاريخ', `<input name="toDate" type="date" required>`, 'يوم نهاية نطاق المعاينة.', 'toDate')}
     ${field('حالة الفترة بعد الاعتراف', `<select name="status">${options([['RECOGNIZED', 'معترف بها'], ['CLOSED', 'معترف بها ومغلقة']], 'RECOGNIZED')}</select>`, '«مغلقة» إذا انتهت نهائيًا ولا تتغير بعد الاعتراف.', 'status')}
-    ${field('سبب / مرجع الاعتراف', `<textarea name="reason" rows="2" placeholder="اختياري — لا تكتب استنتاجًا قانونيًا آليًا"></textarea>`, 'مرجع قرارك (محضر، خطاب…) — اختياري ويُحفظ في السجل.', 'reason')}
+    ${field('سبب / مرجع الاعتراف', `<textarea name="reason" rows="2" placeholder="مرجع القرار أو المستند"></textarea>`, 'سبب الاعتراف العام — وتُسجَّل أسباب القرارات الفردية لكل فترة.', 'reason')}
   </form>
-  <div class="exec-actions-row"><button type="button" class="ghost" data-preview>معاينة دون كتابة</button><button type="button" class="primary" data-recognize disabled>حفظ لقطة الاعتراف</button><button type="button" class="ghost" data-close>إلغاء</button></div>
+  <div class="exec-actions-row"><button type="button" class="ghost" data-preview>معاينة دون كتابة</button><button type="button" class="primary" data-recognize disabled>حفظ لقطات الاعتراف</button><button type="button" class="ghost" data-close>إلغاء</button></div>
   <div class="exec-feas-preview" data-preview-output><p class="muted small">أدخل الالتزام والنطاق ثم اطلب المعاينة.</p></div>`);
   let preview = null;
+  let pendingDecisions = [];
+  const output = card.querySelector('[data-preview-output]');
+  const recognizeButton = card.querySelector('[data-recognize]');
+  const upsertDecision = (list, item) => {
+    const index = list.findIndex(row => row.periodKey === item.periodKey && row.kind === item.kind);
+    if (index >= 0) list[index] = {...list[index], ...item}; else list.push(item);
+  };
+  const collectDecisionDraft = () => {
+    const next = pendingDecisions.map(row => ({...row}));
+    const get = (periodKey, kind) => next.find(row => row.periodKey === periodKey && row.kind === kind);
+    for (const control of output.querySelectorAll('[data-decision-choice]')) {
+      const current = get(control.dataset.periodKey, control.dataset.kind) || {periodKey: control.dataset.periodKey, kind: control.dataset.kind};
+      upsertDecision(next, {...current, choice: control.value});
+    }
+    for (const reason of output.querySelectorAll('[data-decision-reason]')) {
+      const current = get(reason.dataset.decisionReason, reason.dataset.kind) || {periodKey: reason.dataset.decisionReason, kind: reason.dataset.kind};
+      upsertDecision(next, {...current, reason: reason.value.trim()});
+    }
+    for (const amount of output.querySelectorAll('[data-decision-amount]')) {
+      const current = get(amount.dataset.decisionAmount, amount.dataset.kind) || {periodKey: amount.dataset.decisionAmount, kind: amount.dataset.kind};
+      const obligation = active.find(row => row.id === card.querySelector('[name="obligationId"]').value);
+      upsertDecision(next, {...current, ...(amount.value ? {amountMinor: toMinorUnits(amount.value, obligation?.currency || 'EGP')} : {})});
+    }
+    return next;
+  };
+  const labelChoice = value => choiceLabels[value] || value;
+  const renderPreview = out => {
+    const unresolved = out.decisions || [];
+    const scenarioHtml = (out.sideBySideScenarios || []).length
+      ? `<h4>مقارنة خيارات الفترة الناقصة</h4><div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الفترة</th><th>نوع القرار</th><th>الخيار</th><th>قيمة الفترة كاملة</th><th>المعادلة</th></tr></thead><tbody>${out.sideBySideScenarios.map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(kindLabels[row.kind] || row.kind)}</td><td>${esc(labelChoice(row.choice))}</td><td>${row.amountMinor === null ? 'يلزم إدخال مبلغ يدوي' : `${esc(String(row.amountMinor))} وحدة صغرى`}</td><td>${esc(row.equation)}</td></tr>`).join('')}</tbody></table></div>` : '';
+    const decisionHtml = unresolved.length
+      ? `<h4>قرارات مطلوبة قبل الاعتراف</h4><div class="exec-decision-list">${unresolved.map((decision, index) => {
+        const existing = pendingDecisions.find(row => row.periodKey === decision.periodKey && row.kind === decision.kind) || {};
+        const choices = (decision.options || []).filter(value => !['MANUAL_AMOUNT', 'REASON'].includes(value));
+        const select = choices.length ? `<label class="exec-field"><span>الاختيار</span><select required data-decision-choice data-period-key="${esc(decision.periodKey)}" data-kind="${esc(decision.kind)}">${options(choices.map(value => [value, labelChoice(value)]), existing.choice || '', 'اختر قرارًا')}</select></label>` : '';
+        const reason = `<label class="exec-field"><span>سبب القرار</span><textarea rows="2" required data-decision-reason="${esc(decision.periodKey)}" data-kind="${esc(decision.kind)}">${esc(existing.reason || '')}</textarea></label>`;
+        const manual = (existing.choice === 'MANUAL' || (decision.options || []).includes('MANUAL_AMOUNT'))
+          ? `<label class="exec-field"><span>المبلغ اليدوي الكامل بوحدات العملة الصغرى/العملة</span><input type="number" step="any" min="0" data-decision-amount="${esc(decision.periodKey)}" data-kind="${esc(decision.kind)}" value="${existing.amountMinor != null ? esc(String(fromMinorUnits(existing.amountMinor, active.find(row => row.id === card.querySelector('[name="obligationId"]').value)?.currency || 'EGP'))) : ''}"></label>` : '';
+        return `<section class="exec-decision-card"><b>${esc(kindLabels[decision.kind] || decision.kind)}: ${esc(decision.fromDate)} → ${esc(decision.toDate)}</b><p>${esc(decision.reason)}</p>${select}${reason}${manual}</section>`;
+      }).join('')}</div>` : '';
+    const unitRows = (out.periods || []).map(period => `<tr><td>${esc(period.fromDate)} → ${esc(period.toDate)}</td><td>${esc(period.periodKey)}</td><td>${esc(String(period.amountMinor))}</td><td>${esc(period.equation)}</td></tr>`).join('');
+    const partialNote = (out.partials || []).length ? `<p class="warning">توجد حدود نطاق غير مكتملة؛ لن تُعترف قبل قرار صريح.</p>` : '';
+    const futureNote = (out.notYetCompletePeriods || []).length ? `<p class="warning">الفترات الجارية/المستقبلية معلوماتية فقط؛ لا يُحفظ الاعتراف قبل اكتمال الفترة بعد ${esc(out.asOf || '')}.</p>` : '';
+    output.innerHTML = `<div class="exec-kv"><span>نطاق المعاينة</span><b>${esc(out.fromDate)} → ${esc(out.toDate)}</b><span>العملة</span><b>${esc(out.currency)}</b><span>المبلغ من الفترات المحسومة</span><b>${money(fromMinorUnits(out.recognizedAmountMinor, out.currency))}</b><span>الوحدات الصغرى</span><b>${esc(String(out.recognizedAmountMinor))}</b><span>الفترات الكاملة</span><b>${(out.periods || []).length}</b></div><p class="muted small">${esc(out.equation || '')}</p>${scenarioHtml}${decisionHtml}${partialNote}${futureNote}<h4>الفترات الكاملة ولقطاتها المقترحة</h4><div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الحدود</th><th>المعرّف الثابت</th><th>المبلغ بوحدات صغرى</th><th>المعادلة</th></tr></thead><tbody>${unitRows || '<tr><td colspan="4" class="muted">لا توجد فترة كاملة محسومة بالقيمة الحالية.</td></tr>'}</tbody></table></div>`;
+    recognizeButton.disabled = !out.periods?.length || Boolean(out.decisions?.length) || Boolean(out.partials?.length) || Boolean(out.notYetCompletePeriods?.length) || !out.fingerprint;
+    for (const input of output.querySelectorAll('[data-decision-choice], [data-decision-reason], [data-decision-amount]')) {
+      input.addEventListener('input', () => { preview = null; recognizeButton.disabled = true; });
+      input.addEventListener('change', () => { preview = null; recognizeButton.disabled = true; });
+    }
+  };
   card.querySelector('[data-close]').onclick = closeModal;
   card.querySelector('[data-preview]').onclick = async () => {
+    pendingDecisions = collectDecisionDraft();
     const data = formData(card.querySelector('form'));
-    const out = await run(() => FEAS.projectExecutionPeriod(app.office, {executionId, obligationId: data.obligationId, fromDate: data.fromDate, toDate: data.toDate}));
+    const out = await run(() => FEAS.projectExecutionPeriod(app.office, {executionId, obligationId: data.obligationId, fromDate: data.fromDate, toDate: data.toDate, periodDecisions: pendingDecisions}));
     preview = out;
-    const output = card.querySelector('[data-preview-output]');
-    if (!out) { card.querySelector('[data-recognize]').disabled = true; return; }
-    output.innerHTML = `<div class="exec-kv"><span>الفترة الصريحة</span><b>${esc(out.fromDate)} → ${esc(out.toDate)}</b><span>العملة</span><b>${esc(out.currency)}</b><span>قيمة المعاينة</span><b>${money(fromMinorUnits(out.recognizedAmountMinor, out.currency))}</b><span>الوحدات الصغرى</span><b>${esc(String(out.recognizedAmountMinor))}</b><span>عدد المقاطع</span><b>${out.segments.length}</b></div><p class="muted small">${esc(out.equation || '')}</p><div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>الوحدة</th><th>مصدر القيمة</th><th>الحكم</th><th>المبلغ بوحدات صغرى</th><th>المعادلة</th></tr></thead><tbody>${out.segments.map(row => `<tr><td>${esc(row.unitStart)} → ${esc(row.unitEnd)}</td><td>${esc(row.valuePeriodId)}</td><td>${esc(row.judgmentId || '—')}</td><td>${esc(String(row.amountMinor))}</td><td>${esc(row.equation)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">لا توجد مصادر تغطي النطاق.</td></tr>'}</tbody></table></div>`;
-    card.querySelector('[data-recognize]').disabled = !out.segments.length || !out.fingerprint;
+    if (!out) { recognizeButton.disabled = true; return; }
+    renderPreview(out);
   };
   card.querySelector('[data-recognize]').onclick = async () => {
     if (!preview?.fingerprint) return toast('أعد المعاينة قبل الاعتراف', 'error');
     const data = formData(card.querySelector('form'));
-    const out = await run(() => FEAS.recognizeExecutionPeriod(app.office, {executionId, obligationId: data.obligationId, fromDate: data.fromDate, toDate: data.toDate, status: data.status, reason: data.reason, expectedFingerprint: preview.fingerprint}), result => result.reused ? 'الفترة معترف بها مسبقًا؛ أُعيدت اللقطة نفسها دون تكرار' : 'حُفظت لقطة الاعتراف الصريحة');
+    const out = await run(() => FEAS.recognizeExecutionPeriod(app.office, {
+      executionId, obligationId: data.obligationId, fromDate: data.fromDate, toDate: data.toDate,
+      status: data.status, reason: data.reason, periodDecisions: pendingDecisions, expectedFingerprint: preview.fingerprint
+    }), result => result.reused ? 'كل الفترات معترف بها مسبقًا؛ أُعيدت اللقطات نفسها دون تكرار' : `حُفظت ${result.rows?.length || 1} لقطة اعتراف مستقلة`);
     if (out) { closeModal(); await app.refresh(); }
   };
   return card;

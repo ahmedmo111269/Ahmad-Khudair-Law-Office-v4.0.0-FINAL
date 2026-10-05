@@ -9,10 +9,11 @@
 import {STORE} from '../db/schema.js';
 import {Clock, localDate} from '../core/clock.js';
 import {AppError, ERR} from '../core/errors.js';
-import {num, round2, isIsoDate, todayIso, DEFAULT_PRORATION, IN_REVIEW_DIFFERENCE_STATUSES, LEDGER_TYPE_LABELS, EXECUTION_TYPE_LABELS} from '../domain/execution.js';
+import {num, round2, isIsoDate, todayIso, IN_REVIEW_DIFFERENCE_STATUSES, LEDGER_TYPE_LABELS, EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import {balanceAsOf, balanceTrace, buildEntitlementPeriods, analyzeSliceImpact, executionAlerts, slicesOfEntitlement, eligibleSlices} from '../domain/entitlement-engine.js';
 import {executionBundle, executionSlices, executionAllocations, executionLedgerRows, executionDifferences, summarizeExecution} from './execution.js';
 import {FEAS_MODEL, previewExecutionDifference} from './execution-feas.js';
+import {executionSettings} from './execution-settings.js';
 
 const TIMELINE_KINDS = {
   [STORE.execution]: {label: 'التنفيذ', route: id => `exc:${id}`},
@@ -61,8 +62,9 @@ export async function balanceSnapshot(office, executionId, date) {
   ]);
   // نهاية الاستحقاق المعلنة في التنفيذ تحدّ الفترات: لا تُمدَّد الفترات بعد التاريخ المحدد للاستحقاق.
   const through = execution.entitlementThroughDate && execution.entitlementThroughDate < date ? execution.entitlementThroughDate : date;
-  const summary = balanceAsOf({slices, allocations, ledger, differences, asOf: date, throughDate: through, policy: execution.prorationPolicy || DEFAULT_PRORATION, mode: 'effective'});
-  const build = buildEntitlementPeriods({slices, to: through, asOf: date, mode: 'effective', policy: execution.prorationPolicy || DEFAULT_PRORATION});
+  const settings = executionSettings(office).schedule;
+  const summary = balanceAsOf({slices, allocations, ledger, differences, asOf: date, throughDate: through, settings, mode: 'effective'});
+  const build = buildEntitlementPeriods({slices, to: through, asOf: date, mode: 'effective', settings});
   return {
     date, summary, periods: build.periods,
     ledgerAtDate: ledger.filter(row => !row.date || row.date <= date),
@@ -87,7 +89,7 @@ export async function compareJudgments(office, executionId, firstId, secondId) {
   let impact = {rows: [], totals: {difference: 0}};
   if (execution?.accountingModel === FEAS_MODEL) {
     if (secondSlice) impact = (await previewExecutionDifference(office, {executionId, sliceId: secondSlice.id})).impact;
-  } else if (secondSlice) impact = analyzeSliceImpact({slices, newSlice: secondSlice, allocations, throughDate, policy: execution?.prorationPolicy});
+  } else if (secondSlice) impact = analyzeSliceImpact({slices, newSlice: secondSlice, allocations, throughDate, settings: executionSettings(office).schedule});
   return {
     entitlementType,
     first, second,
@@ -123,9 +125,10 @@ export async function simulateValueChange(office, {executionId, entitlementType,
     startDate: effectiveFrom, endDate: isIsoDate(endDate) ? endDate : '', judgmentId: '__simulation__', status: 'active',
     createdAt: `${todayIso()}T23:59:59.999Z`, isDeleted: false, simulation: true
   };
-  const impact = analyzeSliceImpact({slices, newSlice: hypothetical, allocations, throughDate: throughDate || execution.entitlementThroughDate || '', policy: execution.prorationPolicy});
-  const beforeBuild = buildEntitlementPeriods({slices, to: throughDate || execution.entitlementThroughDate || '', policy: execution.prorationPolicy});
-  const afterBuild = buildEntitlementPeriods({slices: [...slices, hypothetical], to: throughDate || execution.entitlementThroughDate || '', policy: execution.prorationPolicy});
+  const settings = executionSettings(office).schedule;
+  const impact = analyzeSliceImpact({slices, newSlice: hypothetical, allocations, throughDate: throughDate || execution.entitlementThroughDate || '', settings});
+  const beforeBuild = buildEntitlementPeriods({slices, to: throughDate || execution.entitlementThroughDate || '', settings});
+  const afterBuild = buildEntitlementPeriods({slices: [...slices, hypothetical], to: throughDate || execution.entitlementThroughDate || '', settings});
   const beforeTotal = round2(beforeBuild.periods.reduce((sum, period) => sum + period.finalAmount, 0));
   const afterTotal = round2(afterBuild.periods.reduce((sum, period) => sum + period.finalAmount, 0));
   return {

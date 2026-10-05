@@ -21,6 +21,7 @@ import {analyzeSliceImpact, netLedger} from '../domain/entitlement-engine.js';
 import {executionSlices, executionAllocations, executionLedgerRows, executionDifferences, executionJudgments} from './execution.js';
 import {FEAS_MODEL} from '../domain/execution-feas.js';
 import {createExecutionSettlement, previewExecutionDifference, readExecutionSettlement, reviewExecutionSettlement, decideExecutionSettlement, postExecutionSettlement, recomputeExecutionSettlement} from './execution-feas.js';
+import {executionSettings} from './execution-settings.js';
 
 const logRow = (office, entityType, entityId, action, summary, {fileId = null, metadata = {}} = {}) => {
   const row = {id: uid(), entityType, entityId, action, timestamp: Clock.now(), summary, metadata};
@@ -49,7 +50,7 @@ export async function previewImpact(office, {executionId, sliceId = '', judgment
   const impact = analyzeSliceImpact({
     slices, newSlice: slice, allocations,
     throughDate: throughDate || execution.entitlementThroughDate || '',
-    policy: execution.prorationPolicy
+    settings: executionSettings(office).schedule
   });
   return {slice, impact};
 }

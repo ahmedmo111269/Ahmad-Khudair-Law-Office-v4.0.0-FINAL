@@ -13,6 +13,7 @@ import * as SIMPLE from '../services/execution-simple.js';
 import * as D from '../domain/execution-schedule.js';
 import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
 import {addExecutionJudgment, saveValueSlice} from '../services/execution.js';
+import * as BALANCE from '../services/execution-balance.js';
 import {validateValueSlice} from '../domain/execution.js';
 import {executionSettings, saveExecutionSettings, resetExecutionSettings} from '../services/execution-settings.js';
 import * as PRINT from '../services/print-paginate.js';
@@ -186,12 +187,17 @@ export async function runExecutionSimpleTests(test, expect) {
     expect(preview.rows.filter(row => row.differenceMinor !== 0).length).toBe(6);
     expect(preview.rows.every(row => row.differenceMinor === 0 || money(row.differenceMinor) === 1000)).toBe(true);
   });
-  test('الإعدادات: احتساب الشهر من تاريخ السريان يقسّم الشهر الأول بالأيام الفعلية', () => {
-    const midMonth = [{id: 'm1', entitlementType: 'نفقة', valueType: 'periodic', amount: 3000, startDate: '2025-01-16', status: 'active', periodicity: 'monthly'}];
-    const prorated = D.buildExecutionSchedule({slices: midMonth, receipts: [], allocations: [], asOf: '2025-01-31'});
-    expect(money(prorated.totals.dueMinor)).toBe(Math.round(toMinorUnits(3000) * 16 / 31 / 1) / 100);
-    const full = D.buildExecutionSchedule({slices: midMonth, receipts: [], allocations: [], asOf: '2025-01-31', settings: {firstMonthPolicy: 'fullMonth'}});
-    expect(money(full.totals.dueMinor)).toBe(3000);
+  test('الإعدادات: الحد الجزئي يحتاج قرارًا صريحًا؛ القيمة الكاملة لا تتغير بعدد الأيام', () => {
+    const midMonth = [{id: 'm1', itemId: 'legacy-monthly-item', anchorDate: '2025-01-01', entitlementType: 'نفقة', valueType: 'periodic',
+      amount: 3000, startDate: '2025-01-16', status: 'active', periodicity: 'monthly', prorationPolicy: 'days'}];
+    const ask = D.buildExecutionSchedule({slices: midMonth, receipts: [], allocations: [], asOf: '2025-01-31'});
+    expect(ask.totals.dueMinor).toBe(0);
+    expect(ask.totals.decisionPeriods).toBe(1);
+    expect(ask.decisions[0].choiceOptions.includes('INCLUDE_FULL')).toBe(true);
+    const full = D.buildExecutionSchedule({slices: midMonth, receipts: [], allocations: [], asOf: '2025-01-31', settings: {startPolicy: 'INCLUDE_FULL'}});
+    expect(full.totals.dueMinor).toBe(toMinorUnits(3000));
+    expect(full.totals.periodCount).toBe(1);
+    expect(full.periodThroughDate).toBe('2025-01-31');
   });
 
   /* ============================ الخصائص ============================ */
@@ -312,6 +318,53 @@ export async function runExecutionSimpleTests(test, expect) {
     } finally { closeEnv(e); }
   });
 
+  test('احسب مدة/قرار حدّ صريح: حفظ السبب والفاعل والتاريخ واستخدامه في الكشف والتوكيل والطباعة', async () => {
+    const e = await goldenFixture({withReceipt: false, withExpense: false});
+    try {
+      const executionId = e.created.execution.id;
+      const fromDate = '2025-04-01', toDate = '2025-04-15';
+      const pending = await SIMPLE.simpleDurationClaim(e.office, executionId, {fromDate, toDate});
+      expect(pending.partials.length).toBe(1);
+      expect(pending.totals.dueMinor).toBe(0);
+      expect(pending.sideBySideScenarios.find(row => row.choice === 'INCLUDE_FULL').amountMinor).toBe(300000);
+      expect(pending.sideBySideScenarios.find(row => row.choice === 'EXCLUDE').amountMinor).toBe(0);
+      const boundary = pending.partialAtEnd;
+      const invalid = await rejects(() => SIMPLE.recordSimpleDurationDecisions(e.office, executionId, {fromDate, toDate,
+        decisions: [{...boundary, choice: 'INCLUDE_FULL', reason: ''}]}));
+      expect(invalid.code).toBe(ERR.VALIDATION);
+      const stored = await SIMPLE.recordSimpleDurationDecisions(e.office, executionId, {fromDate, toDate,
+        decisions: [{...boundary, choice: 'INCLUDE_FULL', reason: 'اعتماد الفترة الكاملة لاختيار نطاق المطالبة'}]});
+      expect(stored.recorded).toBe(1);
+      expect(stored.decisions[0].decidedBy).toBe('tester');
+      expect(Boolean(stored.decisions[0].decidedAt)).toBe(true);
+      const claim = await SIMPLE.simpleDurationClaim(e.office, executionId, {fromDate, toDate, rangeDecisions: stored.decisions});
+      expect(claim.partials.length).toBe(0);
+      expect(claim.totals.dueMinor).toBe(300000);
+      expect(claim.decisions[0].reason).toBe('اعتماد الفترة الكاملة لاختيار نطاق المطالبة');
+      expect(claim.decisions[0].decidedBy).toBe('tester');
+      const activity = await e.office.r.activityLog.byIndex('entityId', executionId, 100);
+      expect(activity.some(row => row.action === 'range-decision' && row.metadata?.trace?.decidedBy === 'tester')).toBe(true);
+
+      const statement = await SIMPLE.simpleStatementDocument(e.office, executionId, {mode: 'range', fromDate, toDate,
+        asOf: '2026-10-05', rangeDecisions: stored.decisions});
+      expect(statement.html.includes('قرار INCLUDE_FULL')).toBe(true);
+      expect(statement.html.includes(stored.decisions[0].decidedAt)).toBe(true);
+      expect(statement.html.includes('tester')).toBe(true);
+
+      const draft = await SIMPLE.simplePoaDraft(e.office, executionId, {fromDate, toDate, includePreviousBalance: false,
+        rangeDecisions: stored.decisions});
+      expect(draft.partials.length).toBe(0);
+      expect(draft.periodDueMinor).toBe(300000);
+      expect(draft.rangeDecisions[0].reason).toBe('اعتماد الفترة الكاملة لاختيار نطاق المطالبة');
+      const poa = await SIMPLE.saveSimplePoa(e.office, executionId, draft, {printNow: false});
+      expect(poa.rangeDecisionsSnapshot[0].decidedBy).toBe('tester');
+      expect(poa.rangeDecisionsSnapshot[0].reason).toBe('اعتماد الفترة الكاملة لاختيار نطاق المطالبة');
+      const poaPrint = await import('../services/execution-print.js');
+      const poaDoc = await poaPrint.buildPoaDocument(e.office, poa.id);
+      expect(poaDoc.html.includes('قرار INCLUDE_FULL')).toBe(true);
+      expect(poaDoc.html.includes('اعتماد الفترة الكاملة لاختيار نطاق المطالبة')).toBe(true);
+    } finally { closeEnv(e); }
+  });
   test('G12 (خدمة) — تحصيل قبل إدخال القيمة يُحفظ غير مخصص ثم يُخصَّص تلقائيًا', async () => {
     const e = await env();
     try {
@@ -579,6 +632,74 @@ export async function runExecutionCardTests(test, expect) {
       const slicesAfter = await e.office.r.executionValuePeriods.byIndex('executionId', e.created.execution.id, 100).catch(() => []);
       expect(judgmentsAfter.length).toBe(judgmentsBefore.length);
       expect(slicesAfter.length).toBe(slicesBefore.length);
+    } finally { closeEnv(e); }
+  });
+
+  test('الحكم اللاحق يحفظ قراري MID_CHANGE وEND_DATE وسببهما وفاعلهما وتاريخهما في Trace بلا افتراض ASK', async () => {
+    const e = await goldenFixture({withReceipt: false, withExpense: false});
+    const executionId = e.created.execution.id;
+    const traceDecision = async kind => {
+      const balance = await BALANCE.executionBalance(e.office, executionId);
+      const flatten = nodes => (nodes || []).flatMap(node => [node, ...flatten(node.children)]);
+      const nodes = flatten([balance.trace]);
+      return nodes.map(node => node.meta?.decision).find(decision => decision?.kind === kind)
+        || nodes.flatMap(node => node.meta?.decisions || []).find(decision => decision?.kind === kind);
+    };
+    try {
+      const before = await e.office.r.judgments.byIndex('executionId', executionId, 100);
+      const manualPreview = await SIMPLE.previewSubsequentJudgment(e.office, executionId, {
+        amount: 5000, effectiveFrom: '2025-08-15', entitlementType: 'نفقة شهرية', asOf: '2025-12-31', manualPeriodAmount: '3500'
+      });
+      expect(manualPreview.midPeriod?.fromDate).toBe('2025-08-01');
+      expect(manualPreview.manualPeriodAmountMinor).toBe(350_000);
+      expect(manualPreview.scenarios.MANUAL.newDueMinor).toBe(4_550_000);
+      const missingMid = await rejects(() => SIMPLE.recordSubsequentJudgment(e.office, {
+        executionId, entitlementType: 'نفقة شهرية', amount: 5000, effectiveFrom: '2025-08-15'
+      }));
+      expect(missingMid.code).toBe(ERR.VALIDATION);
+      expect((await e.office.r.judgments.byIndex('executionId', executionId, 100)).length).toBe(before.length);
+
+      const mid = await SIMPLE.recordSubsequentJudgment(e.office, {
+        executionId, entitlementType: 'نفقة شهرية', amount: 5000, effectiveFrom: '2025-08-15',
+        midPeriodChoice: 'USE_NEW_VALUE', midPeriodReason: 'اتباع منطوق الحكم اللاحق عن شهر أغسطس'
+      });
+      const midDecision = mid.slice.periodDecisionsSnapshot.find(row => row.kind === 'MID_CHANGE');
+      expect(midDecision.choice).toBe('USE_NEW_VALUE');
+      expect(midDecision.reason).toBe('اتباع منطوق الحكم اللاحق عن شهر أغسطس');
+      expect(midDecision.decidedBy).toBe('tester');
+      expect(Boolean(midDecision.decidedAt)).toBe(true);
+      expect(mid.slice.midPeriodChoice).toBe('USE_NEW_VALUE');
+      const afterMid = await SIMPLE.simpleSchedule(e.office, executionId, {asOf: '2025-12-31'});
+      expect(afterMid.schedule.rows.find(row => row.fromDate === '2025-08-01').dueMinor).toBe(500_000);
+      const tracedMid = await traceDecision('MID_CHANGE');
+      expect(tracedMid?.choice).toBe('USE_NEW_VALUE');
+      expect(tracedMid?.reason).toBe(midDecision.reason);
+      expect(tracedMid?.decidedBy).toBe('tester');
+      expect(tracedMid?.decidedAt).toBe(midDecision.decidedAt);
+
+      const missingEnd = await rejects(() => SIMPLE.recordSubsequentJudgment(e.office, {
+        executionId, entitlementType: 'نفقة شهرية', amount: 6000, effectiveFrom: '2025-10-01', effectiveTo: '2025-10-15'
+      }));
+      expect(missingEnd.code).toBe(ERR.VALIDATION);
+      const end = await SIMPLE.recordSubsequentJudgment(e.office, {
+        executionId, entitlementType: 'نفقة شهرية', amount: 6000, effectiveFrom: '2025-10-01', effectiveTo: '2025-10-15',
+        endPeriodChoice: 'INCLUDE_FULL', endPeriodReason: 'يشمل الحكم اللاحق كامل شهر أكتوبر'
+      });
+      const endDecision = end.slice.periodDecisionsSnapshot.find(row => row.kind === 'END_DATE');
+      expect(endDecision.choice).toBe('INCLUDE_FULL');
+      expect(endDecision.reason).toBe('يشمل الحكم اللاحق كامل شهر أكتوبر');
+      expect(endDecision.decidedBy).toBe('tester');
+      expect(Boolean(endDecision.decidedAt)).toBe(true);
+      expect(end.slice.endPeriodChoice).toBe('INCLUDE_FULL');
+      const afterEnd = await SIMPLE.simpleSchedule(e.office, executionId, {asOf: '2025-12-31'});
+      expect(afterEnd.schedule.rows.find(row => row.fromDate === '2025-10-01').dueMinor).toBe(600_000);
+      const tracedEnd = await traceDecision('END_DATE');
+      expect(tracedEnd?.choice).toBe('INCLUDE_FULL');
+      expect(tracedEnd?.reason).toBe(endDecision.reason);
+      expect(tracedEnd?.decidedBy).toBe('tester');
+      expect(tracedEnd?.decidedAt).toBe(endDecision.decidedAt);
+      const activities = await e.office.r.activityLog.byIndex('entityId', end.slice.id, 100);
+      expect(activities.some(row => row.metadata?.periodDecisionsSnapshot?.some(decision => decision.kind === 'END_DATE' && decision.decidedBy === 'tester'))).toBe(true);
     } finally { closeEnv(e); }
   });
 }

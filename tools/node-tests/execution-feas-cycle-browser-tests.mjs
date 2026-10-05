@@ -218,15 +218,16 @@ const recognized = await page.evaluate(async () => {
     accountRows: document.querySelectorAll('.account-table tbody tr').length,
     accountHead: document.querySelector('.exec-tab-panel h3')?.textContent.trim() || '',
     dialogOpen: Boolean(document.querySelector('#modal-root [data-recognize]')),
-    periods: periods.length, status: periods[0]?.status, amountMinor: periods[0]?.recognizedAmountMinor,
+    periods: periods.length, recognizedPeriods: periods.filter(row => ['RECOGNIZED', 'CLOSED'].includes(String(row.status || ''))).length,
+    status: periods[0]?.status, amountMinor: periods.reduce((sum, row) => sum + (Number.isSafeInteger(row.recognizedAmountMinor) ? row.recognizedAmountMinor : 0), 0),
     feasRemaining: balance.summary?.remaining, feasCollected: balance.summary?.collected, feasFinal: balance.summary?.finalEntitlement,
     cardNumbers: numbers, hint: hint || ''
   };
 });
 report.recognized = recognized;
-check('الاعتراف الصريح يكتب لقطة واحدة بقيمة النطاق كاملًا (6 أشهر × 2,000 = 12,000)',
-  recognized.periods === 1 && recognized.status === 'RECOGNIZED' && recognized.amountMinor === 1_200_000,
-  JSON.stringify({periods: recognized.periods, status: recognized.status, amountMinor: recognized.amountMinor}));
+check('الاعتراف الصريح يكتب ست لقطات شهرية كاملة للنطاق (6 × 2,000 = 12,000)',
+  recognized.periods === 6 && recognized.recognizedPeriods === 6 && recognized.status === 'RECOGNIZED' && recognized.amountMinor === 1_200_000,
+  JSON.stringify({periods: recognized.periods, recognizedPeriods: recognized.recognizedPeriods, status: recognized.status, amountMinor: recognized.amountMinor}));
 check('البطاقة الموحّدة تعرض أرقام FEAS نفسها مع تنبيه النموذج (لا رقمين متناقضين)',
   recognized.cardNumbers.includes('12,000') && recognized.hint.includes('اعتراف الفترات') && Number(recognized.feasFinal) === 12000 && Number(recognized.feasRemaining) === 12000,
   JSON.stringify({cardNumbers: recognized.cardNumbers, feasFinal: recognized.feasFinal, feasRemaining: recognized.feasRemaining, hint: recognized.hint.slice(0, 80)}));
