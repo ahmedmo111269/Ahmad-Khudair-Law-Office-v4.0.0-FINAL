@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.13.1-execution-accrual-and-data-admin';
+const CACHE='ahmad-khudair-law-office-v5.14.0-execution-center-fixes-and-enhancements';
 const ASSETS=[
   "./",
   "./index.html",
@@ -21,6 +21,7 @@ const ASSETS=[
   "./css/component-style.css",
   "./css/work-center.css",
   "./css/execution.css",
+  "./css/execution-enhancements.css",
   "./css/sync.css",
   "./css/quick-notes.css",
   "./css/topnav.css",
@@ -121,6 +122,20 @@ const ASSETS=[
   "./js/services/execution-demo.js",
   "./js/services/execution-balance.js",
   "./js/services/execution-print.js",
+  "./js/services/execution-attention.js",
+  "./js/services/execution-beneficiaries.js",
+  "./js/services/execution-export.js",
+  "./js/services/execution-manual-periods.js",
+  "./js/services/execution-actual-file.js",
+  "./js/ui/execution-attention.js",
+  "./js/ui/execution-summary-card.js",
+  "./js/ui/execution-horizon-picker.js",
+  "./js/ui/execution-poa-wizard.js",
+  "./js/ui/execution-timeline.js",
+  "./js/ui/execution-period-engine.js",
+  "./js/ui/execution-carryover.js",
+  "./js/ui/execution-beneficiaries.js",
+  "./js/ui/execution-extras.js",
   "./js/services/execution-migration.js",
   "./js/services/execution-period-migration.js",
   "./js/services/execution-simple.js",

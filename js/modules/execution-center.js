@@ -19,7 +19,7 @@ import {formatFileNumber} from '../core/file-number.js';
 import {localDate} from '../core/clock.js';
 import {userError} from '../core/errors.js';
 import {fromMinorUnits} from '../domain/execution-money.js';
-import {isCivilDate} from '../domain/execution-calendar.js';
+import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import * as S from '../services/execution-simple.js';
@@ -35,6 +35,28 @@ import {
   executionDialog, executionObligationDialog, recognitionDialog, partyDialog, judgmentDialog,
   settlementReviewDialog, snapshotDialog, simulatorDialog, comparisonDialog, printBalanceDialog
 } from '../ui/execution-forms.js';
+/* ---- وحدات مركز التنفيذ المضافة (كل واحدة مستقلة وقابلة للتعطيل) ---- */
+import {acquirePrintWindow} from '../services/execution-print.js';
+import {executionSettings, saveExecutionSettings, normalizeUiMode} from '../services/execution-settings.js';
+import {scanAttention, attentionThresholds, ATTENTION_DISCLAIMER} from '../services/execution-attention.js';
+import {attentionBarMarkup, renderAttentionBar, attentionListModal, attentionThresholdsModal} from '../ui/execution-attention.js';
+import {executionSummaryCardMarkup, bindExecutionSummaryCard, summaryEquation} from '../ui/execution-summary-card.js';
+import {openHorizonPicker, anchorOf, horizonBarMarkup, horizonShortcuts, horizonPreview} from '../ui/execution-horizon-picker.js';
+import {poaWizard} from '../ui/execution-poa-wizard.js';
+import {executionTimelineMarkup, bindExecutionTimeline, buildStageNodes} from '../ui/execution-timeline.js';
+import {manualPeriodDialog, nextPeriodDialog, manualPeriodsDialog, periodEquationLine, periodSourceNote, periodLinkedReceipts, confirmPeriodEdit, editLinkedReceipt} from '../ui/execution-period-engine.js';
+import {carryOverFlow} from '../ui/execution-carryover.js';
+import {receiptBeneficiaryDialog, sliceBeneficiaryDialog, beneficiaryMigrationDialog} from '../ui/execution-beneficiaries.js';
+import {
+  quickCalcMarkup, bindQuickCalc, quickNotesMarkup, bindQuickNotes, loadExecutionNotes,
+  installExecutionShortcuts, showExecutionShortcutsPanel, effectiveUiMode, toggleUiMode, applyUiMode
+} from '../ui/execution-extras.js';
+import {buildStatementCsv, downloadTextFile, statementFileName, exportStatementPdf} from '../services/execution-export.js';
+
+/* حدود العرض: الفترات والسجل لا يُحمَّلان كلهما في DOM (أداء على الملفات الكبيرة). */
+const PERIODS_PAGE_SIZE = 24;
+const PERIODS_SHOW_ALL_WARN = 120;
+const LOG_PAGE_SIZE = 50;
 
 const TAB_KEY = 'ui:exec:tab:v1';
 const ASOF_KEY = 'ui:exec:asof:v1';
@@ -48,6 +70,15 @@ const money = (minor, currency = 'EGP') => `${fromMinorUnits(minor || 0, currenc
 const moneyShort = (minor, currency = 'EGP') => fromMinorUnits(minor || 0, currency).toLocaleString('en-US', {maximumFractionDigits: 0});
 const dateText = iso => (isCivilDate(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
 const STATUS_TEXT = {paid: '✔ مسدد', partial: '◐ جزئي', unpaid: '✗ لم يُدفع', nothing_due: '· لا استحقاق'};
+/** شريحة فترة يدوية: مقطوعة ومعرّف بند يحمل علامة الفترة اليدوية. */
+const isManualSliceRow = slice => Boolean(slice) && slice.valueType === 'fixed'
+  && (String(slice.itemId || '').includes('::MANUAL_PERIOD::') || String(slice.sourceReference || '').startsWith('MANUAL_PERIOD'));
+/** صف فترة يدوية في الجدول: أي وحدة فيه مرجعها شريحة يدوية. */
+const isManualRow = (row, bundle) => {
+  const sliceIds = new Set((row?.units || []).flatMap(unit => (unit.parts || []).map(part => part.sliceId).filter(Boolean)));
+  if (!sliceIds.size) return false;
+  return (bundle?.slices || []).some(slice => sliceIds.has(slice.id) && isManualSliceRow(slice));
+};
 const statusChip = status => `<span class="pstatus pstatus-${esc(status)}">${esc(STATUS_TEXT[status] || '')}</span>`;
 const TAB_LABELS = {account: 'الحساب', log: 'السجل', data: 'الحكم والبيانات', poa: 'التوكيل والطباعة'};
 
@@ -118,7 +149,9 @@ const counterMatches = (key, row) => {
 };
 
 const listState = app => (app.__execCenter = app.__execCenter || {
-  count: prefs.get(COUNT_KEY, 'all'), search: prefs.get('ui:exec:q', ''), counts: null, counted: 0, scannedAll: false, ready: false
+  count: prefs.get(COUNT_KEY, 'all'), search: prefs.get('ui:exec:q', ''), counts: null, counted: 0, scannedAll: false, ready: false,
+  // فلتر «يحتاج انتباهي»: مجموعة معرفات تنفيذ لفئة واحدة (لا إعادة مسح للجدول).
+  attentionKey: '', attentionIds: null, attentionReport: null
 });
 const cardState = app => (app.__execSimple = app.__execSimple || {});
 
@@ -127,12 +160,15 @@ export function executionCenterPage(app) {
   registerPageLayout({
     pageId: 'executionCenter', title: 'مركز التنفيذ',
     sections: [
+      {id: 'attention', title: 'يحتاج انتباهي'},
       {id: 'numbers', title: 'عدّادات سريعة'},
       {id: 'filters', title: 'بحث'},
       {id: 'grid', title: 'جدول التنفيذات', canHide: false}
     ]
   });
   const st = listState(app);
+  const settings = executionSettings(app.office);
+  const attentionEnabled = attentionThresholds(settings).enabled;
   return `<div class="page-head exec-head"><div><h2>مركز التنفيذ</h2>
     <p class="muted small">كل شيء في مكان واحد: أنشئ تنفيذًا، سجّل ما تم (تحصيل · إجراء · مصروف · حكم لاحق)، واقرأ المطلوب والمدفوع والمتبقي فورًا.</p></div>
     <div class="head-actions">
@@ -141,10 +177,12 @@ export function executionCenterPage(app) {
       <button class="ghost" data-customize-page>⚙ تخصيص الصفحة</button>
       <button class="ghost" data-exec-trash>🗑 سلة التنفيذ</button>
       <button class="ghost" data-demo-example>🧪 مثال عملي جاهز</button>
+      <button class="ghost" data-actual-file title="ملف تنفيذ فعلي مسجَّل في كل التبويبات — لفحص ما يعمل وما لا يعمل">📂 ملف تنفيذ فعلي (كل التبويبات)</button>
       <button class="ghost" data-exec-demo>📁 ملفات تنفيذ تجريبية</button>
       <button class="ghost danger" data-exec-clear>🗑 مسح بيانات التنفيذ</button>
       <button class="primary" data-new-execution>+ تنفيذ جديد</button>
     </div></div>
+  ${attentionEnabled ? attentionBarMarkup({report: null}) : ''}
   <section class="panel exec-counters" data-section-id="numbers">
     <div class="counter-grid" data-counters><div class="muted small">جارٍ الحساب…</div></div>
     <p class="muted small" data-counter-note></p>
@@ -191,7 +229,10 @@ export async function bindExecutionCenter(app) {
     resolveScope: () => ({
       index: 'openedDate', direction: 'prev',
       filter: row => !row.isDeleted,
-      preparedFilter: row => counterMatches(st.count, row) && (!st.search || searchableText(row).includes(String(st.search).trim().toLowerCase()))
+      preparedFilter: row => counterMatches(st.count, row)
+        && (!st.search || searchableText(row).includes(String(st.search).trim().toLowerCase()))
+        // «عرض (N)» من بطاقة انتباه يفتح نفس الجدول مفلترًا على معرفات الفئة.
+        && (!st.attentionKey || (st.attentionIds instanceof Set ? st.attentionIds.has(row.id) : true))
     }),
     prepareRows: async rows => {
       const [hydrated, legacy] = await Promise.all([
@@ -335,6 +376,25 @@ export async function bindExecutionCenter(app) {
     }
   }));
   // querySelector المفرد لا يكفي عند تكرار الـ hook — استخدم querySelectorAll دائمًا.
+  // ملف تنفيذ فعلي كامل: يُنشئ تنفيذًا ويسجّل فيه كل الأنواع (تحصيل · إجراء ·
+  // مصروف · فترة يدوية · حكم لاحق · توزيع مستحقين · توكيل · ملاحظة) ثم يفتح بطاقته.
+  root.querySelectorAll('[data-actual-file]').forEach(el => el.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'جارٍ إنشاء الملف…';
+    try {
+      const SEED = await import('../services/execution-actual-file.js');
+      const out = await SEED.seedActualExecutionFile(app.office);
+      if (out.reused) toast('ملف التنفيذ الفعلي موجود بالفعل — نفتح بطاقته', 'info');
+      else toast(`أُنشئ ملف تنفيذ فعلي وسُجِّلت ${out.created.length} وقائع في كل التبويبات`, 'ok', {duration: 8000});
+      await app.go(`exc:${out.executionId}`);
+    } catch (error) {
+      toast(userError(error), 'error');
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }));
   root.querySelectorAll('[data-help]').forEach(b => b.addEventListener('click', () => openHelp(app)));
   root.querySelectorAll('[data-settings]').forEach(b => b.addEventListener('click', () => executionSettingsDialog(app)));
   root.querySelectorAll('[data-customize-page]').forEach(b => b.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root})));
@@ -410,10 +470,73 @@ export async function bindExecutionCenter(app) {
     }
   };
 
+  /* -------- مركز «يحتاج انتباهي»: مسح محدود غير حاجز لرسم الصفحة -------- */
+  const attentionHost = root.querySelector('.exec-attention');
+  const clearAttentionFilter = async () => {
+    if (!st.attentionKey) return;
+    st.attentionKey = ''; st.attentionIds = null;
+    root.querySelectorAll('[data-attention-card]').forEach(button => button.classList.remove('is-active'));
+    await reload();
+  };
+  const refreshAttention = async () => {
+    if (!attentionHost) return;
+    try {
+      const report = await scanAttention(app.office, {limit: 200, batchSize: 25});
+      if (!root.isConnected) return;
+      st.attentionReport = report;
+      renderAttentionBar(attentionHost, report);
+      bindAttentionCards();
+      // الفلتر النشط يبقى صالحًا فقط إن كانت فئته ما زالت موجودة.
+      if (st.attentionKey) {
+        const category = report.categories.find(row => row.key === st.attentionKey);
+        st.attentionIds = new Set((category?.items || []).map(item => item.executionId));
+        if (!category?.count) await clearAttentionFilter();
+      }
+    } catch {
+      if (!root.isConnected) return;
+      const note = attentionHost.querySelector('[data-attention-note]');
+      if (note) note.textContent = 'تعذر فحص «يحتاج انتباهي» — الجدول والعدّادات يعملان.';
+    }
+  };
+  const bindAttentionCards = () => {
+    if (!attentionHost) return;
+    attentionHost.querySelectorAll('[data-attention-card]').forEach(button => button.addEventListener('click', async () => {
+      const key = button.dataset.attentionCard;
+      const report = st.attentionReport;
+      const category = report?.categories?.find(row => row.key === key);
+      if (!report || !category) return;
+      if (st.attentionKey === key) { await clearAttentionFilter(); return; }
+      st.attentionKey = key;
+      st.attentionIds = new Set(category.items.map(item => item.executionId));
+      attentionHost.querySelectorAll('[data-attention-card]').forEach(other => other.classList.toggle('is-active', other === button));
+      await reload();
+      toast(`الجدول مفلتر على «${category.title}» — ${category.count} عنصر`, 'info', {duration: 5000});
+    }));
+  };
+  root.querySelectorAll('[data-attention-refresh]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    await refreshAttention();
+    button.disabled = false;
+  }));
+  root.querySelectorAll('[data-attention-thresholds]').forEach(button => button.addEventListener('click', () => {
+    attentionThresholdsModal(st.attentionReport || {thresholds: attentionThresholds(executionSettings(app.office))}, {
+      onSave: async values => {
+        try {
+          const settings = executionSettings(app.office);
+          await saveExecutionSettings(app.office, {lists: {...settings.lists, followUpThresholds: values}});
+          toast(values.enabled ? 'حُفظت حدود «يحتاج انتباهي»' : 'أُوقف مركز «يحتاج انتباهي»', 'ok');
+          closeModal();
+          await app.refresh();
+        } catch (error) { toast(userError(error), 'error'); }
+      }
+    });
+  }));
+
   renderCounters();
   await reload();
   await maybeSeedExecutionDemo(app, reload).catch(() => null);
   refreshCounters();
+  refreshAttention();
   return true;
 }
 
@@ -469,8 +592,11 @@ export async function executionDetailPage(app, executionId) {
   registerPageLayout({
     pageId: 'execution:card', title: 'بطاقة التنفيذ',
     sections: [
+      {id: 'quickCalc', title: 'الحساب السريع'},
+      {id: 'quickCard', title: 'الملخص السريع'},
       {id: 'toolbar', title: 'شريط الأزرار', canHide: false},
       {id: 'summary', title: 'الأرقام الثلاثة', canHide: false},
+      {id: 'quickNotes', title: 'ملاحظات سريعة'},
       {id: 'tabs', title: 'التبويبات', canHide: false},
       {id: 'panel', title: 'محتوى التبويب', canHide: false}
     ]
@@ -489,6 +615,11 @@ export async function executionDetailPage(app, executionId) {
   const title = execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم';
   const parties = `${esc(creditor?.name || client?.fullName || 'بلا موكل')} <span class="muted">ضد</span> ${esc(debtor?.name || 'بلا منفذ ضده')}`;
   const tab = TAB_LABELS[prefs.get(TAB_KEY, 'account')] ? prefs.get(TAB_KEY, 'account') : 'account';
+  // وضع العرض: مبسّط (افتراضي) يخفي الأدوات المتقدمة والـLedger والفروق والمحاكاة
+  // والمقارنة واعتراف FEAS — ومتقدّم يعرض كل شيء. يُحفظ لكل تنفيذ.
+  const uiMode = normalizeUiMode(effectiveUiMode({executionId, settings: bundle.settings}), 'simple');
+  const anchor = anchorOf(bundle);
+  const notes = await loadExecutionNotes(app.office, executionId, {limit: 3}).catch(() => []);
   return `<div class="page-head exec-head"><div>
       <h2>${esc(title)} · ${parties}${file ? ` · ملف ${esc(formatFileNumber(file.fileNumber))}` : ''} <span class="exec-status exec-status-${esc(status.key)}">${esc(status.label)}</span></h2>
       <p class="muted small">${esc(EXECUTION_TYPE_LABELS[execution.executionType] || 'نوع غير محدد')}${execution.authority ? ` · ${esc(execution.authority)}` : ''} · فُتح في ${esc(dateText(execution.openedDate))}</p>
@@ -496,9 +627,12 @@ export async function executionDetailPage(app, executionId) {
       <button class="ghost" data-route="executionCenter">↩ المركز</button>
       <button class="ghost" data-help>؟ مساعدة</button>
       <button class="ghost" data-settings>⚙ إعدادات</button>
+      <button class="ghost" data-shortcuts-help title="Alt+؟">⌨ الاختصارات</button>
       ${file ? `<button class="ghost" data-route="file:${esc(file.id)}">الملف القانوني</button>` : ''}
       <button class="ghost danger" data-delete-execution>حذف ملف التنفيذ</button>
     </div></div>
+  ${quickCalcMarkup({asOf: bundle.schedule.requestedAsOf || bundle.schedule.asOf || '', anchor, enabled: true})}
+  ${executionSummaryCardMarkup(bundle, {uiMode})}
   <section class="panel exec-toolbar" data-section-id="toolbar">
     <div class="exec-actions">
       <button class="primary" data-record>+ تسجيل</button>
@@ -507,19 +641,27 @@ export async function executionDetailPage(app, executionId) {
       <button class="ghost" data-more aria-haspopup="true" aria-expanded="false">⋮ المزيد</button>
     </div>
     <div class="exec-more-menu" data-more-menu hidden>
+      <button type="button" data-action="action">⚡ تسجيل إجراء</button>
+      <button type="button" data-action="collection">💰 تسجيل تحصيل</button>
       <button type="button" data-action="edit">تعديل بيانات التنفيذ</button>
       <button type="button" data-action="party">إضافة/تعديل طرف</button>
       <button type="button" data-action="value">قيمة النفقة (البند والدورية)</button>
       <button type="button" data-action="later-judgment">حكم لاحق</button>
       <button type="button" data-action="expense">تسجيل مصروف/رسم</button>
+      <button type="button" data-action="manual-period">➕ فترة يدوية</button>
+      <button type="button" data-action="next-period">💡 اقتراح الفترة التالية</button>
+      <button type="button" data-action="manual-periods">🗂 الفترات اليدوية المسجلة</button>
       <button type="button" data-action="poa">توكيل جديد</button>
-      <button type="button" data-action="lifecycle">إيقاف/إغلاق (بسبب)</button>
-      <button type="button" data-action="advanced">أدوات متقدمة (اختيارية)…</button>
+      <button type="button" data-action="export-csv">⬇ تصدير CSV (Excel)</button>
+      <button type="button" data-action="export-pdf">⬇ تصدير PDF (طباعة)</button>
+      <button type="button" data-action="lifecycle">${String(execution.lifecycleOverride || '') === 'suspended' || String(execution.lifecycleOverride || '') === 'closed' ? 'استئناف التنفيذ' : 'إيقاف/إغلاق (بسبب)'}</button>
+      <button type="button" data-action="advanced" data-advanced-only>أدوات متقدمة (اختيارية)…</button>
     </div>
   </section>
   ${summarySectionMarkup(bundle)}
+  ${quickNotesMarkup(notes)}
   ${tabsMarkup(tab)}
-  <div class="exec-tab-panel" data-tab-panel>${renderTab(bundle, tab)}</div>`;
+  <div class="exec-tab-panel" data-tab-panel>${renderTab(bundle, tab, {uiMode})}</div>`;
 }
 
 /** تنبيه للتنفيذ المسجَّل بنموذج FEAS القديم: نعرض رقمًا واحدًا متوافقًا مع آخر فترة معترف بها. */
@@ -607,14 +749,14 @@ function tabsMarkup(active) {
 }
 
 /* ============================ محتوى التبويبات ============================ */
-function renderTab(bundle, tab) {
-  if (tab === 'log') return logTabMarkup(bundle);
-  if (tab === 'data') return dataTabMarkup(bundle);
-  if (tab === 'poa') return poaTabMarkup(bundle);
-  return accountTabMarkup(bundle);
+function renderTab(bundle, tab, options = {}) {
+  if (tab === 'log') return logTabMarkup(bundle, options);
+  if (tab === 'data') return dataTabMarkup(bundle, options);
+  if (tab === 'poa') return poaTabMarkup(bundle, options);
+  return accountTabMarkup(bundle, options);
 }
 
-function accountTabMarkup(bundle) {
+function accountTabMarkup(bundle, {pageSize = PERIODS_PAGE_SIZE, page = 0} = {}) {
   const {schedule, execution} = bundle;
   const currency = schedule.currency;
   const filter = prefs.get(accountFilterKey(execution.id), 'all');
@@ -627,7 +769,13 @@ function accountTabMarkup(bundle) {
       <p class="muted">لا توجد فترات محسوبة بعد. أدخل القيمة والدورية وتاريخ السريان ليُبنى الجدول تلقائيًا — بلا أي خطوة إضافية.</p>
       <div class="form-actions"><button class="primary" data-action="value">أدخل القيمة والدورية</button><button class="ghost" data-open-duration>🧮 احسب مدة</button></div></section>`;
   }
-  const rows = schedule.rows.filter(row => (filter === 'unpaid' ? row.status !== PERIOD_STATUS.PAID : filter === 'paid' ? row.status === PERIOD_STATUS.PAID : true));
+  const allRows = schedule.rows.filter(row => (filter === 'unpaid' ? row.status !== PERIOD_STATUS.PAID : filter === 'paid' ? row.status === PERIOD_STATUS.PAID : true));
+  // الأداء: لا تُرسم كل الفترات في DOM. صفحة 24 فترة + «تحميل المزيد» +
+  // «عرض الكل» مع تحذير صريح فوق 120 فترة.
+  const showAll = pageSize === 0;
+  const start = showAll ? 0 : page * pageSize;
+  const rows = showAll ? allRows : allRows.slice(start, start + pageSize);
+  const hasMore = !showAll && allRows.length > start + rows.length;
   const years = new Map();
   for (const row of rows) {
     const year = row.fromDate.slice(0, 4);
@@ -640,7 +788,8 @@ function accountTabMarkup(bundle) {
       <div class="exec-table-wrap"><table class="exec-table account-table">
         <thead><tr><th>الفترة</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th><th></th></tr></thead>
         <tbody>${list.map(row => `<tr class="${row.status === PERIOD_STATUS.PAID ? 'is-paid' : row.status === PERIOD_STATUS.PARTIAL ? 'is-partial' : 'is-unpaid'}">
-          <td>${esc(row.label)}${row.valueChanges.length ? '<button type="button" class="info-dot" data-change="' + esc(row.fromDate) + '" title="تغيّرت القيمة بحكم لاحق">ⓘ</button>' : ''}${row.overpaidMinor > 0 ? '<span class="badge warn">دفعة زائدة</span>' : ''}</td>
+          <td><button type="button" class="link period-link" data-row-info="${esc(row.fromDate)}" title="اضغط لعرض تفاصيل الفترة ومصدر قيمتها وما خُصّص عليها">${esc(row.label)}</button>${row.valueChanges.length ? '<button type="button" class="info-dot" data-change="' + esc(row.fromDate) + '" title="تغيّرت القيمة بحكم لاحق">ⓘ</button>' : ''}${row.overpaidMinor > 0 ? '<span class="badge warn">دفعة زائدة</span>' : ''}${isManualRow(row, bundle) ? '<span class="badge">يدوية</span>' : ''}
+            <span class="period-equation"><b>المعادلة:</b> ${esc(periodEquationLine(row, currency) || row.trace?.equation || '—')}${periodSourceNote(row, bundle) ? `<br><b>المصدر:</b> ${esc(periodSourceNote(row, bundle))}` : ''}</span></td>
           <td>${money(row.dueMinor, currency)}</td>
           <td>${money(row.paidMinor, currency)}</td>
           <td><b>${money(row.remainingMinor, currency)}</b></td>
@@ -658,23 +807,38 @@ function accountTabMarkup(bundle) {
     ${feasRecognitionHint(bundle)}
     <p class="muted small">الجدول مشتق وقت العرض من قيمة الحكم ومن التحصيلات؛ لا فترات مستقبلية مخزّنة، والتوزيع التلقائي «الأقدم أولًا» قابل للتغيير من الإعدادات.</p>
     ${yearMarkup}
-    <p class="muted small">المعروض: مستحق ${money(rows.reduce((sum, row) => sum + row.dueMinor, 0), currency)} · مدفوع ${money(rows.reduce((sum, row) => sum + row.paidMinor, 0), currency)} · متبقٍ <b>${money(rows.reduce((sum, row) => sum + row.remainingMinor, 0), currency)}</b></p>
-    <div class="form-actions"><button type="button" class="ghost" data-open-duration>🧮 احسب مدة</button><button type="button" class="ghost" data-trace="remaining">كيف حُسب المتبقي؟</button></div>
+    <p class="muted small">المعروض (${rows.length} من ${allRows.length} فترة): مستحق ${money(allRows.reduce((sum, row) => sum + row.dueMinor, 0), currency)} · مدفوع ${money(allRows.reduce((sum, row) => sum + row.paidMinor, 0), currency)} · متبقٍ <b>${money(allRows.reduce((sum, row) => sum + row.remainingMinor, 0), currency)}</b></p>
+    <div class="form-actions" data-periods-pager>
+      ${hasMore ? `<button type="button" class="ghost" data-periods-more="${page + 1}" data-periods-page-size="${pageSize}">تحميل المزيد (${Math.min(pageSize, allRows.length - start - rows.length)})</button>` : ''}
+      ${!showAll && allRows.length > pageSize ? `<button type="button" class="ghost" data-periods-all="${allRows.length}">عرض الكل</button>` : ''}
+      ${showAll && allRows.length > PERIODS_SHOW_ALL_WARN ? `<span class="hint hint-warn small">⚠ تعرض ${allRows.length} فترة دفعة واحدة — قد يبطؤ الرسم على الأجهزة الضعيفة.</span><button type="button" class="ghost" data-periods-page="0" data-periods-page-size="${PERIODS_PAGE_SIZE}">رجوع إلى الصفحات</button>` : ''}
+      ${showAll && allRows.length <= PERIODS_SHOW_ALL_WARN && allRows.length > pageSize ? `<button type="button" class="ghost" data-periods-page="0" data-periods-page-size="${PERIODS_PAGE_SIZE}">رجوع إلى الصفحات</button>` : ''}
+    </div>
+    <div class="form-actions"><button type="button" class="ghost" data-open-duration>🧮 احسب مدة</button><button type="button" class="ghost" data-trace="remaining">كيف حُسب المتبقي؟</button><button type="button" class="ghost" data-action="manual-period">➕ فترة يدوية</button><button type="button" class="ghost" data-action="next-period">💡 اقتراح الفترة التالية</button></div>
   </section>`;
 }
 
-function logTabMarkup(bundle) {
+function logTabMarkup(bundle, {pageSize = LOG_PAGE_SIZE, page = 0} = {}) {
   const items = timelineItems(bundle);
   const types = [...new Set(items.map(item => item.group))];
-  return `<section class="panel" data-collapse-default="open">
-    <div class="panel-head"><h3>السجل — كل ما حدث على هذا التنفيذ</h3><span class="badge">${items.length} واقعة</span></div>
+  // الأداء: السجل يُعرض 50 واقعة في الصفحة (الأحدث أولًا) مع «تحميل المزيد».
+  const start = page * pageSize;
+  const shown = items.slice(start, start + pageSize);
+  const hasMore = items.length > start + shown.length;
+  return `${executionTimelineMarkup(items, {today: bundle.today || localDate()})}
+  <section class="panel" data-collapse-default="open">
+    <div class="panel-head"><h3>السجل — كل ما حدث على هذا التنفيذ</h3><span class="badge">${items.length} واقعة</span>
+      ${hasMore ? `<span class="muted small">المعروض ${shown.length}</span>` : ''}</div>
     <div class="exec-controls">
       <select data-log-type aria-label="تصفية النوع"><option value="">كل الأنواع</option>${types.map(type => `<option value="${esc(type)}">${esc(type)}</option>`).join('')}</select>
       <input type="date" data-log-from aria-label="من تاريخ"><input type="date" data-log-to aria-label="إلى تاريخ">
       <input type="search" data-log-q placeholder="بحث في السجل" aria-label="بحث في السجل">
       <label class="check-line"><input type="checkbox" data-log-voided> إظهار الملغى</label>
     </div>
-    <ol class="exec-log" data-log-list>${items.map(logItemMarkup).join('') || '<li class="muted">لا توجد وقائع بعد. ابدأ من «+ تسجيل».</li>'}</ol>
+    <div data-tl-details class="tl-details-host"></div>
+    <ol class="exec-log" data-log-list>${shown.map(logItemMarkup).join('') || '<li class="muted">لا توجد وقائع بعد. ابدأ من «+ تسجيل».</li>'}</ol>
+    ${hasMore ? `<div class="form-actions"><button type="button" class="ghost" data-log-more="${page + 1}">تحميل المزيد (${Math.min(pageSize, items.length - start - shown.length)})</button>
+      <button type="button" class="ghost" data-log-all>عرض كل السجل (${items.length})</button></div>` : ''}
     <p class="muted small">الإلغاء لا يحذف: السجل يبقى مشطوبًا مع السبب، وتعديل أي سجل يحفظ نسخته السابقة.</p>
   </section>`;
 }
@@ -689,7 +853,8 @@ function timelineItems(bundle) {
       title: `${judgment.judgmentKind === 'later' ? 'حكم لاحق' : 'حكم'}${judgment.judgmentNumber ? ` — ${judgment.judgmentNumber}` : ''}`,
       subtitle: [judgment.court, judgment.effectiveFrom ? `يسري من ${dateText(judgment.effectiveFrom)}` : '', judgment.amount ? `القيمة ${Number(judgment.amount).toLocaleString('en-US')}` : ''].filter(Boolean).join(' · '),
       amountMinor: judgment.amount ? Math.round(Number(judgment.amount) * 100) : 0, currency,
-      voided: Boolean(judgment.isDeleted), canEdit: !judgment.isDeleted, canVoid: !judgment.isDeleted
+      voided: Boolean(judgment.isDeleted), canEdit: !judgment.isDeleted, canVoid: !judgment.isDeleted,
+      referenceNumber: judgment.judgmentNumber || '', documentNumber: judgment.judgmentNumber || ''
     });
   }
   for (const slice of bundle.slices || []) {
@@ -709,6 +874,7 @@ function timelineItems(bundle) {
       title: `تحصيل ${Number(receipt.amount || 0).toLocaleString('en-US')} ج.م${receipt.receiptNumber ? ` — ${receipt.receiptNumber}` : ''}`,
       subtitle: [receipt.paymentMethod, receipt.reference, receipt.allocationMethod === 'DIRECT' ? 'مخصص لشهر محدد' : 'توزيع تلقائي (الأقدم أولًا)', receipt.notes].filter(Boolean).join(' · '),
       amountMinor: Math.round(Number(receipt.amount || 0) * 100), currency, voided,
+      referenceNumber: receipt.receiptNumber || receipt.reference || '', documentNumber: receipt.reference || '',
       canEdit: !voided, canVoid: !voided, canReallocate: !voided, revisions: (receipt.revisions || []).length
     });
   }
@@ -727,7 +893,8 @@ function timelineItems(bundle) {
       id: action.id, kind: 'action', group: 'إجراءات', icon: '📄', date: action.date,
       title: `${action.kindLabel || action.kind || 'إجراء'}`,
       subtitle: [action.referenceNumber, action.authority, action.nextActionDate ? `التالي: ${action.nextAction} — ${dateText(action.nextActionDate)}` : '', action.notes].filter(Boolean).join(' · '),
-      amountMinor: 0, currency, voided, canEdit: !voided, canVoid: !voided
+      amountMinor: 0, currency, voided, canEdit: !voided, canVoid: !voided,
+      kindCode: action.kind || '', referenceNumber: action.referenceNumber || '', documentNumber: action.referenceNumber || ''
     });
   }
   for (const poa of bundle.poas || []) {
@@ -736,7 +903,8 @@ function timelineItems(bundle) {
       id: poa.id, kind: 'poa', group: 'توكيلات', icon: '🖨', date: poa.date,
       title: `توكيل${poa.poaNumber ? ` ${poa.poaNumber}` : ''} — ${Number(poa.total || 0).toLocaleString('en-US')} ج.م`,
       subtitle: `عن ${dateText(poa.fromDate)} ← ${dateText(poa.toDate)}`,
-      amountMinor: Math.round(Number(poa.total || 0) * 100), currency, voided: cancelled, canPrint: true, canVoid: !cancelled, canReissue: true
+      amountMinor: Math.round(Number(poa.total || 0) * 100), currency, voided: cancelled, canPrint: true, canVoid: !cancelled, canReissue: true,
+      poaNumber: poa.poaNumber || '', referenceNumber: poa.poaNumber || '', documentNumber: poa.poaNumber || ''
     });
   }
   return items.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
@@ -759,13 +927,18 @@ function logItemMarkup(item) {
   </li>`;
 }
 
-function dataTabMarkup(bundle) {
+function dataTabMarkup(bundle, {uiMode = 'simple'} = {}) {
   const {execution, client, file, creditor, debtor, slices, judgments, parties, periods} = bundle;
+  const simple = normalizeUiMode(uiMode, 'simple') !== 'advanced';
   const valueLines = (slices || []).filter(slice => !slice.isDeleted).map(slice => {
     const judgment = (judgments || []).find(row => row.id === (slice.judgmentId || slice.linkedJudgmentId));
     const state = String(slice.status || '');
     const badge = ['cancelled', 'superseded'].includes(state) ? ` <span class="badge danger">${state === 'cancelled' ? 'ملغاة' : 'استُبدلت'}</span>` : '';
-    return `<li><b>${esc(slice.entitlementType)}</b>: ${Number(slice.amount || 0).toLocaleString('en-US')} ج.م ${slice.valueType === 'fixed' ? 'مبلغ مقطوع' : slice.periodicity === 'monthly' ? 'شهريًا' : esc(slice.periodicity || '')} من ${esc(dateText(slice.startDate))}${slice.endDate ? ` حتى ${esc(dateText(slice.endDate))}` : ''}${judgment ? ` — ${judgment.judgmentKind === 'later' ? 'حكم لاحق' : 'حكم'}${judgment.judgmentNumber ? ` رقم ${esc(judgment.judgmentNumber)}` : ''}` : ''}${badge}</li>`;
+    const beneficiaries = Array.isArray(slice.beneficiaries) ? slice.beneficiaries : [];
+    const manual = isManualSliceRow(slice);
+    return `<li><b>${esc(slice.entitlementType)}</b>: ${Number(slice.amount || 0).toLocaleString('en-US')} ج.م ${slice.valueType === 'fixed' ? 'مبلغ مقطوع' : slice.periodicity === 'monthly' ? 'شهريًا' : esc(slice.periodicity || '')} من ${esc(dateText(slice.startDate))}${slice.endDate ? ` حتى ${esc(dateText(slice.endDate))}` : ''}${judgment ? ` — ${judgment.judgmentKind === 'later' ? 'حكم لاحق' : 'حكم'}${judgment.judgmentNumber ? ` رقم ${esc(judgment.judgmentNumber)}` : ''}` : ''}${manual ? ' <span class="badge">فترة يدوية</span>' : ''}${badge}
+      ${beneficiaries.length ? `<br><small class="muted">المستحقون: ${beneficiaries.map(row => `${esc(row.beneficiaryName)} ${Number(row.beneficiaryShare || 0).toFixed(2)}% (${money(Math.round(Number(row.amountMinor || 0)), bundle.schedule.currency)})`).join(' · ')}</small>` : ''}
+      <button type="button" class="ghost small" data-slice-beneficiaries="${esc(slice.id)}">توزيع المستحقين</button></li>`;
   }).join('');
   const snapshotRows = (periods || []).filter(period => !period.isDeleted).map(period => `<li>مطالبة مثبتة ${esc(dateText(period.fromDate))} → ${esc(dateText(period.toDate))} بمبلغ ${money(Math.round(Number(period.recognizedAmount ?? 0) * 100) || Number(period.recognizedAmountMinor || 0))} <span class="muted">(لقطة محفوظة لا تتغير)</span></li>`).join('');
   const partyLines = (parties || []).filter(party => !party.isDeleted).map(party => `<li><b>${party.side === 'debtor' ? 'منفذ ضده' : 'من يستحق'}:</b> ${esc(party.name)}${party.role ? ` <span class="muted">(${esc(party.role)})</span>` : ''}</li>`).join('');
@@ -792,7 +965,7 @@ function dataTabMarkup(bundle) {
     <ul class="plain-list">${partyLines || '<li class="muted">لا أطراف مسجلة بعد.</li>'}</ul>
   </section>
   ${snapshotRows ? `<section class="panel"><div class="panel-head"><h3>مطالبات مثبتة (لقطات محفوظة)</h3></div><ul class="plain-list">${snapshotRows}</ul></section>` : ''}
-  <section class="panel advanced-anchor">
+  <section class="panel advanced-anchor" data-advanced-only ${simple ? 'hidden' : ''}>
     <div class="panel-head"><h3>أدوات متقدمة (اختيارية)</h3></div>
     ${String(bundle.execution?.accountingModel || '') === 'feas-v1'
       ? '<p class="muted small">هذا التنفيذ على نموذج FEAS (اعتراف صريح بفترات): لا يدخل الرصيد إلا ما اعتُرف به، والقرار يمرّ بمراجعتك. لا تُحذف أي بيانات ولا يتغيّر أي رقم ظاهر.</p>'
@@ -810,11 +983,13 @@ function dataTabMarkup(bundle) {
   </section>`;
 }
 
-function poaTabMarkup(bundle) {
+function poaTabMarkup(bundle, {uiMode = 'simple'} = {}) {
   const {poas, schedule} = bundle;
   const currency = schedule.currency;
+  const simple = normalizeUiMode(uiMode, 'simple') !== 'advanced';
+  void simple;
   return `<section class="panel" data-collapse-default="open">
-    <div class="panel-head"><h3>التوكيلات المحفوظة</h3><button type="button" class="ghost small" data-action="poa">+ توكيل جديد</button></div>
+    <div class="panel-head"><h3>التوكيلات المحفوظة</h3><button type="button" class="ghost small" data-action="poa">+ توكيل جديد (3 خطوات)</button></div>
     ${poas.length ? `<div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>التاريخ</th><th>الرقم</th><th>المدة</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>
       ${poas.map(poa => `<tr><td>${esc(dateText(poa.date))}</td><td>${esc(poa.poaNumber || '—')}</td><td>${esc(dateText(poa.fromDate))} ← ${esc(dateText(poa.toDate))}</td><td>${money(Math.round(Number(poa.total || 0) * 100), currency)}</td><td>${String(poa.status || '') === 'cancelled' ? 'ملغى' : 'محفوظ (نسخة ثابتة)'}</td>
         <td class="exec-cell-actions"><button type="button" class="ghost small" data-print-poa="${esc(poa.id)}">طباعة</button><button type="button" class="ghost small" data-reissue-poa="${esc(poa.id)}">توكيل جديد</button>${String(poa.status || '') === 'cancelled' ? '' : `<button type="button" class="ghost small danger" data-void="${esc(poa.id)}" data-kind="poa">إلغاء</button>`}</td></tr>`).join('')}
@@ -829,7 +1004,13 @@ function poaTabMarkup(bundle) {
       <button type="button" class="ghost" data-statement-mode="range">كشف عن مدة</button>
       <button type="button" class="ghost" data-open-duration>🧮 احسب مدة</button>
     </div>
-    <p class="muted small">الطباعة تمر عبر نظام PrintContext القائم (نفس التنسيق والترويسة)، والأرقام بفواصل آلاف والعملة ظاهرة.</p>
+    <div class="form-actions">
+      <button type="button" class="ghost" data-export="csv">⬇ تصدير CSV (يفتح في Excel)</button>
+      <button type="button" class="ghost" data-export="pdf">⬇ تصدير PDF (نافذة الطباعة)</button>
+      <button type="button" class="ghost" data-beneficiary-migration>🧭 ترحيل توزيع المستحقين</button>
+    </div>
+    <p class="muted small">الطباعة تمر عبر نظام PrintContext القائم (نفس التنسيق والترويسة)، والأرقام بفواصل آلاف والعملة ظاهرة.
+      التصدير CSV بترميز UTF-8 مع BOM فيفتح صحيحًا في Excel، وبلا أي مكتبة خارجية.</p>
   </section>`;
 }
 
@@ -840,16 +1021,55 @@ export async function bindExecutionDetail(app, executionId) {
   if (!root || !bundle) return false;
   const panel = root.querySelector('[data-tab-panel]');
   const guard = fn => (...args) => Promise.resolve().then(() => fn(...args)).catch(error => toast(userError(error), 'error'));
+  const uiMode = normalizeUiMode(effectiveUiMode({executionId, settings: bundle.settings}), 'simple');
 
   const openRecord = () => recordSheet(app, executionId, {bundle});
-  const openCollection = (receipt = null, periodKey = '') => simpleCollectionDialog(app, executionId, {bundle, receipt, periodKey});
+  const openCollection = (receipt = null, periodKey = '', reason = '') => simpleCollectionDialog(app, executionId, {bundle, receipt, periodKey, reason});
   const openAction = action => simpleActionDialog(app, executionId, {action});
   const openValue = () => valueSetupDialog(app, executionId, {bundle});
   const openLaterJudgment = () => subsequentJudgmentDialog(app, executionId, {bundle});
-  const openPoa = (fromDate = '', toDate = '') => simplePoaDialog(app, executionId, {bundle, fromDate, toDate});
+  /**
+   * التوكيل الجديد يمر بالمعالج من 3 خطوات، ويسأل صراحةً عن الرصيد السابق
+   * (carry-over) قبل فتحه — لا إدراج بلا موافقة، وكل قرار في Activity Log.
+   */
+  const openPoa = async (fromDate = '', toDate = '', previousPoaId = '') => {
+    const carry = await carryOverFlow(app, executionId, {bundle, fromDate}).catch(() => null);
+    // أغلق سؤال الرصيد السابق بلا قرار ⇒ إلغاء التدفق كله (لا يُفتح المعالج بعده
+    // صامتًا فتتكدس نافذتان). القرار الصريح «تجاهل» وحده يكمل بلا رصيد سابق.
+    if (carry?.candidate && carry.decided === false) {
+      toast('أُلغي إنشاء التوكيل — لم يُتخذ قرار في الرصيد السابق', 'info');
+      return undefined;
+    }
+    return poaWizard(app, executionId, {bundle, fromDate, toDate, previousPoaId, carryOver: carry || null});
+  };
   const openStatement = () => statementDialog(app, executionId);
+  /** الطباعة تحجز النافذة داخل النقرة أولًا (وإلا منعها المتصفح بعد الـawait). */
+  const printStatement = async (mode, extra = {}) => {
+    const printWindow = acquirePrintWindow('كشف حساب تنفيذ');
+    try {
+      await S.printSimpleStatement(app.office, executionId, {mode, asOf: bundle.schedule.asOf, window: printWindow, ...extra});
+      toast('فُتح الكشف للطباعة — اختر «حفظ كـPDF» من نافذة الطباعة لتصدير PDF', 'ok', {duration: 6000});
+    } catch (error) {
+      if (printWindow) { try { printWindow.close(); } catch { /* تجاهل */ } }
+      throw error;
+    }
+  };
+  const exportCsv = async () => {
+    const {csv} = await buildStatementCsv(app.office, executionId, {mode: 'monthly', asOf: bundle.schedule.asOf});
+    const name = `${statementFileName(bundle.execution.internalNumber || bundle.execution.officialNumber || '', 'كشف-حساب')}.csv`;
+    const ok = downloadTextFile({filename: name, text: csv});
+    if (ok) toast(`صُدِّر الكشف إلى ${name} — UTF-8 مع BOM فيفتح صحيحًا في Excel`, 'ok', {duration: 6000});
+    else toast('تعذر تنزيل الملف في هذه البيئة', 'error');
+  };
 
   const runAction = {
+    action: () => openAction(null),
+    'manual-period': () => manualPeriodDialog(app, executionId, {bundle}),
+    'next-period': () => nextPeriodDialog(app, executionId, {bundle}),
+    'manual-periods': () => manualPeriodsDialog(app, executionId, {bundle}),
+    'export-csv': exportCsv,
+    'export-pdf': () => printStatement('monthly'),
+    'beneficiary-migration': () => beneficiaryMigrationDialog(app),
     edit: () => executionDialog(app, {execution: bundle.execution}),
     party: async () => {
       const [clients, opponents] = await Promise.all([
@@ -864,6 +1084,9 @@ export async function bindExecutionDetail(app, executionId) {
     poa: () => openPoa(),
     collection: () => openCollection(),
     lifecycle: async () => {
+      // كانت القائمة تعرض «إيقاف» فقط حتى على تنفيذ موقوف فعلًا — الآن تعكس الحالة.
+      const current = String(bundle.execution?.lifecycleOverride || '');
+      if (current === 'suspended' || current === 'closed') return runAction.resume();
       const answer = await confirmBox('إيقاف هذا التنفيذ مؤقتًا؟ اكتب السبب ليُحفظ في السجل (الحالة الوحيدة التي تضبطها بنفسك).', {okText: 'إيقاف', input: true, label: 'سبب الإيقاف'});
       if (!answer?.ok) return undefined;
       if (!String(answer.value || '').trim()) { toast('السبب مطلوب', 'error'); return undefined; }
@@ -913,14 +1136,15 @@ export async function bindExecutionDetail(app, executionId) {
     'print-balance': () => printBalanceDialog(app, executionId)
   };
 
+  const tabView = {accountPage: 0, accountPageSize: PERIODS_PAGE_SIZE, logPage: 0, logPageSize: LOG_PAGE_SIZE};
   const showTab = async (tab, {scrollTo = ''} = {}) => {
     prefs.set(TAB_KEY, tab);
-    root.querySelectorAll('[data-tab]').forEach(button => {
+    root.querySelectorAll('.exec-tabs [data-tab]').forEach(button => {
       const active = button.dataset.tab === tab;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-selected', String(active));
     });
-    panel.innerHTML = renderTab(bundle, tab);
+    panel.innerHTML = renderTab(bundle, tab, {uiMode, page: tab === 'log' ? tabView.logPage : tabView.accountPage, pageSize: tab === 'log' ? tabView.logPageSize : tabView.accountPageSize});
     bindContainer(panel);
     if (scrollTo) panel.querySelector(scrollTo)?.scrollIntoView?.({block: 'start'});
   };
@@ -933,10 +1157,60 @@ export async function bindExecutionDetail(app, executionId) {
     container.querySelectorAll('[data-trace]').forEach(button => button.addEventListener('click', () => traceDialog(bundle, button.dataset.trace)));
     container.querySelectorAll('[data-open-duration]').forEach(button => button.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true, bundle}))));
     container.querySelectorAll('[data-statement-mode]').forEach(button => button.addEventListener('click', guard(async () => {
-      await S.printSimpleStatement(app.office, executionId, {mode: button.dataset.statementMode, asOf: bundle.schedule.asOf});
-      toast('فُتح الكشف للطباعة');
+      const mode = button.dataset.statementMode;
+      // «كشف عن مدة» بلا تاريخين كان يطبع الجدول كاملًا صامتًا — الآن يفتح نافذة
+      // المدة نفسها (نفس المسار القائم) ليختار المستخدم نطاقه صراحةً.
+      if (mode === 'range') return statementDialog(app, executionId, {mode: 'range'});
+      await printStatement(mode);
       return undefined;
     })));
+    container.querySelectorAll('[data-export]').forEach(button => button.addEventListener('click', guard(async () => {
+      if (button.dataset.export === 'csv') return exportCsv();
+      return printStatement('monthly');
+    })));
+    container.querySelectorAll('[data-slice-beneficiaries]').forEach(button => button.addEventListener('click', guard(() => {
+      const slice = (bundle.slices || []).find(row => row.id === button.dataset.sliceBeneficiaries);
+      return slice ? sliceBeneficiaryDialog(app, slice) : undefined;
+    })));
+    container.querySelectorAll('[data-beneficiary-migration]').forEach(button => button.addEventListener('click', guard(() => beneficiaryMigrationDialog(app))));
+    container.querySelectorAll('[data-receipt-beneficiaries]').forEach(button => button.addEventListener('click', guard(() => {
+      const receipt = (bundle.receipts || []).find(row => row.id === button.dataset.receiptBeneficiaries);
+      return receipt ? receiptBeneficiaryDialog(app, receipt, {fallbackName: bundle.creditor?.name || bundle.client?.fullName || ''}) : undefined;
+    })));
+    // ترقيم صفحات الفترات (24/صفحة + تحميل المزيد + عرض الكل مع تحذير)
+    container.querySelectorAll('[data-periods-more]').forEach(button => button.addEventListener('click', () => {
+      tabView.accountPage = Number(button.dataset.periodsMore || 0);
+      tabView.accountPageSize = Number(button.dataset.periodsPageSize || PERIODS_PAGE_SIZE);
+      panel.innerHTML = renderTab(bundle, 'account', {uiMode, page: tabView.accountPage, pageSize: tabView.accountPageSize});
+      bindContainer(panel);
+    }));
+    container.querySelectorAll('[data-periods-all]').forEach(button => button.addEventListener('click', async () => {
+      const total = Number(button.dataset.periodsAll || 0);
+      if (total > PERIODS_SHOW_ALL_WARN) {
+        const ok = await confirmBox(`عرض ${total} فترة دفعة واحدة؟ قد يبطؤ الرسم على الأجهزة الضعيفة.`, {okText: 'عرض الكل'});
+        if (!ok) return;
+      }
+      tabView.accountPage = 0; tabView.accountPageSize = 0;
+      panel.innerHTML = renderTab(bundle, 'account', {uiMode, page: 0, pageSize: 0});
+      bindContainer(panel);
+    }));
+    container.querySelectorAll('[data-periods-page]').forEach(button => button.addEventListener('click', () => {
+      tabView.accountPage = Number(button.dataset.periodsPage || 0);
+      tabView.accountPageSize = Number(button.dataset.periodsPageSize || PERIODS_PAGE_SIZE);
+      panel.innerHTML = renderTab(bundle, 'account', {uiMode, page: tabView.accountPage, pageSize: tabView.accountPageSize});
+      bindContainer(panel);
+    }));
+    // ترقيم صفحات السجل (50/صفحة)
+    container.querySelectorAll('[data-log-more]').forEach(button => button.addEventListener('click', () => {
+      tabView.logPage = Number(button.dataset.logMore || 0);
+      panel.innerHTML = renderTab(bundle, 'log', {uiMode, page: tabView.logPage, pageSize: tabView.logPageSize});
+      bindContainer(panel);
+    }));
+    container.querySelectorAll('[data-log-all]').forEach(button => button.addEventListener('click', () => {
+      tabView.logPage = 0; tabView.logPageSize = 0;
+      panel.innerHTML = renderTab(bundle, 'log', {uiMode, page: 0, pageSize: 0});
+      bindContainer(panel);
+    }));
     container.querySelectorAll('[data-hint-action]').forEach(button => button.addEventListener('click', guard(() => (button.dataset.hintAction === 'judgment' ? runAction.edit() : openValue()))));
     container.querySelectorAll('[data-row-info]').forEach(button => button.addEventListener('click', () => periodDetailsDialog(app, bundle, button.dataset.rowInfo)));
     container.querySelectorAll('[data-change]').forEach(button => button.addEventListener('click', () => {
@@ -946,12 +1220,22 @@ export async function bindExecutionDetail(app, executionId) {
     container.querySelectorAll('[data-pin-collection]').forEach(button => button.addEventListener('click', guard(() => openCollection(null, button.dataset.pinCollection))));
     container.querySelectorAll('[data-account-filter]').forEach(button => button.addEventListener('click', async () => {
       prefs.set(accountFilterKey(bundle.execution.id), button.dataset.accountFilter);
-      panel.innerHTML = renderTab(bundle, 'account');
+      tabView.accountPage = 0;
+      panel.innerHTML = renderTab(bundle, 'account', {uiMode, page: 0, pageSize: tabView.accountPageSize});
       bindContainer(panel);
     }));
-    container.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', guard(() => {
+    container.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', guard(async () => {
       const {kind, edit} = button.dataset;
-      if (kind === 'receipt') return openCollection((bundle.receipts || []).find(row => row.id === edit));
+      if (kind === 'receipt') {
+        const receipt = (bundle.receipts || []).find(row => row.id === edit);
+        if (!receipt) return undefined;
+        // تأكيد قبل تعديل سجل مرتبط بفترة: الافتراضي تصحيح جديد ولا يلمس الأصل.
+        const linkedRow = (bundle.schedule.rows || []).find(row => (row.lines || []).some(line => line.receiptId === receipt.id));
+        if (linkedRow && periodLinkedReceipts(linkedRow, bundle).length) {
+          return editLinkedReceipt(app, bundle, linkedRow, receipt, {openEdit: (row, reason) => openCollection(row, '', reason)});
+        }
+        return openCollection(receipt);
+      }
       if (kind === 'action') return openAction((bundle.actions || []).find(row => row.id === edit));
       if (kind === 'judgment') return judgmentDialog(app, executionId, {judgment: (bundle.judgments || []).find(row => row.id === edit), slices: bundle.slices, obligations: [], accountingModel: bundle.execution.accountingModel});
       toast('هذا السجل يُصحَّح بحكم لاحق أو بالإلغاء', 'error');
@@ -976,11 +1260,23 @@ export async function bindExecutionDetail(app, executionId) {
     })));
     container.querySelectorAll('[data-print-poa]').forEach(button => button.addEventListener('click', guard(async () => {
       // نفس مسار الطباعة القائم، مع ترقيم صفحات مقيس (كشف/توكيل متعدد الصفحات).
-      await S.printSimplePoa(app.office, button.dataset.printPoa);
-      toast('فُتح التوكيل للطباعة بترقيم الصفحات');
+      // النافذة تُحجز داخل النقرة قبل القراءة — وإلا منعها المتصفح صامتًا.
+      const printWindow = acquirePrintWindow('توكيل بالتنفيذ');
+      try {
+        await S.printSimplePoa(app.office, button.dataset.printPoa, {window: printWindow});
+        toast('فُتح التوكيل للطباعة بترقيم الصفحات', 'ok');
+      } catch (error) {
+        if (printWindow) { try { printWindow.close(); } catch { /* تجاهل */ } }
+        throw error;
+      }
       return undefined;
     })));
-    container.querySelectorAll('[data-reissue-poa]').forEach(button => button.addEventListener('click', guard(() => openPoa())));
+    // «توكيل جديد» من توكيل محفوظ = إعادة إصدار تبدأ بعد نهايته (كانت تفتح فارغة).
+    container.querySelectorAll('[data-reissue-poa]').forEach(button => button.addEventListener('click', guard(() => {
+      const previous = (bundle.poas || []).find(row => row.id === button.dataset.reissuePoa) || null;
+      const fromDate = previous?.toDate ? addCivilDays(previous.toDate, 1) : '';
+      return openPoa(fromDate, localDate(), previous?.id || '');
+    })));
     const logList = container.querySelector('[data-log-list]');
     if (logList) {
       const applyLogFilters = () => {
@@ -1001,6 +1297,19 @@ export async function bindExecutionDetail(app, executionId) {
       container.querySelectorAll('[data-log-type],[data-log-from],[data-log-to],[data-log-q],[data-log-voided]').forEach(input => input.addEventListener('input', applyLogFilters));
       applyLogFilters();
     }
+    // Timeline الأفقي أعلى السجل: النقر على مرحلة يعرض وقائعها ويعيد استخدام أزرار السجل.
+    const timelineHost = container.querySelector('.exec-cycle');
+    if (timelineHost) {
+      bindExecutionTimeline(timelineHost, {
+        getNodes: () => buildStageNodes(timelineItems(bundle)).nodes,
+        onOpenItem: (id, kind) => {
+          const button = panel.querySelector(`[data-${kind === 'poa' ? 'print-poa' : 'edit'}="${CSS.escape ? CSS.escape(id) : id}"]`)
+            || panel.querySelector(`[data-edit="${id}"]`);
+          if (button) button.click();
+          else periodDetailsDialog(app, bundle, id);
+        }
+      });
+    }
   };
 
   root.querySelectorAll('.exec-toolbar [data-action]').forEach(button => button.addEventListener('click', guard(() => {
@@ -1008,12 +1317,13 @@ export async function bindExecutionDetail(app, executionId) {
     if (moreMenu) { moreMenu.hidden = true; root.querySelectorAll('[data-more]').forEach(b => b.setAttribute('aria-expanded', 'false')); }
     return runAction[button.dataset.action]?.();
   })));
-  root.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab).catch(error => app.fail(error))));
+  root.querySelectorAll('.exec-tabs [data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab).catch(error => app.fail(error))));
   root.querySelectorAll('[data-record]').forEach(el => el.addEventListener('click', openRecord));
   root.querySelectorAll('[data-open-duration]').forEach(el => el.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true, bundle}))));
   root.querySelectorAll('[data-open-statement]').forEach(el => el.addEventListener('click', openStatement));
   root.querySelectorAll('[data-help]').forEach(el => el.addEventListener('click', () => openHelp(app)));
   root.querySelectorAll('[data-settings]').forEach(el => el.addEventListener('click', () => executionSettingsDialog(app)));
+  root.querySelectorAll('[data-shortcuts-help]').forEach(el => el.addEventListener('click', () => showExecutionShortcutsPanel()));
   // [data-more] قد يتكرر — نربط كل الأزرار
   const moreMenu = root.querySelector('[data-more-menu]');
   root.querySelectorAll('[data-more]').forEach(moreButton => moreButton.addEventListener('click', () => {
@@ -1021,14 +1331,20 @@ export async function bindExecutionDetail(app, executionId) {
     moreMenu.hidden = !moreMenu.hidden;
     moreButton.setAttribute('aria-expanded', String(!moreMenu.hidden));
   }));
-  // Close more menu when clicking outside it
-  document.addEventListener('click', (event) => {
-    if (!moreMenu || moreMenu.hidden) return;
-    if (!moreMenu.contains(event.target) && !event.target.closest('[data-more]')) {
-      moreMenu.hidden = true;
-      root.querySelectorAll('[data-more]').forEach(b => b.setAttribute('aria-expanded', 'false'));
-    }
-  });
+  // إغلاق قائمة «المزيد» بالنقر خارجها: المستمع كان يُضاف على document عند كل
+  // دخول للبطاقة ولا يُزال أبدًا (تسريب + مراجع DOM ميتة). الآن يُزال عند
+  // انفصال البطاقة أو عند إغلاق القائمة نفسها.
+  const closeMoreMenu = () => {
+    if (!moreMenu) return;
+    moreMenu.hidden = true;
+    root.querySelectorAll('[data-more]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  };
+  const onDocumentClick = event => {
+    if (!root.isConnected || !moreMenu.isConnected) { document.removeEventListener('click', onDocumentClick); return; }
+    if (moreMenu.hidden) return;
+    if (!moreMenu.contains(event.target) && !event.target.closest?.('[data-more]')) closeMoreMenu();
+  };
+  document.addEventListener('click', onDocumentClick);
   root.querySelectorAll('[data-delete-execution]').forEach(el => el.addEventListener('click', async () => {
     if (!await confirmBox('حذف ملف التنفيذ بالكامل منطقيًا؟ يُحفظ كل شيء ويمكن استعادته من سلة التنفيذ.', {okText: 'حذف الملف'})) return;
     try {
@@ -1075,6 +1391,69 @@ export async function bindExecutionDetail(app, executionId) {
   }
   bindContainer(root.querySelector('.exec-summary') || root);
   bindContainer(panel);
+
+  /* ---------- بطاقة الملخص السريع: نفس النوافذ القائمة، بلا مسارات موازية ---------- */
+  const quickCard = root.querySelector('[data-execution-card]');
+  if (quickCard) {
+    bindExecutionSummaryCard(quickCard, {
+      trace: event => traceDialog(bundle, event?.currentTarget?.dataset?.trace || 'due'),
+      duration: () => durationDialog(app, executionId, {lockExecution: true, bundle}),
+      poa: () => openPoa(),
+      collection: () => openCollection(),
+      action: () => openAction(null),
+      expense: () => simpleExpenseDialog(app, executionId),
+      print: () => statementDialog(app, executionId),
+      horizon: () => openHorizonPicker(app, executionId, {bundle}),
+      uiMode: async () => {
+        const next = await toggleUiMode({executionId, settings: bundle.settings, office: app.office});
+        await app.refresh();
+        toast(next === 'simple' ? 'العرض المبسّط — الأدوات المتقدمة مخفية' : 'العرض المتقدّم — كل الأدوات ظاهرة', 'ok');
+      }
+    });
+  }
+
+  /* ---------- وضع الحساب السريع: النتيجة في مكانها، debounce 250ms ---------- */
+  bindQuickCalc(root, {
+    office: app.office, executionId,
+    getAnchor: () => anchorOf(bundle),
+    onApplied: async asOf => {
+      await prefs.set(`ui:exec:asof:${executionId}`, asOf);
+      const mode = prefs.get(ASOF_MODE_KEY, 'per');
+      if (mode === 'global') await prefs.set(ASOF_KEY, asOf);
+      await app.refresh();
+    }
+  });
+
+  /* ---------- ملاحظات سريعة: مربع دائم أسفل الملخص ---------- */
+  bindQuickNotes(root, {
+    app, executionId,
+    onSaved: async () => {
+      const host = root.querySelector('[data-quicknotes-list]');
+      if (!host) return;
+      const notes = await loadExecutionNotes(app.office, executionId, {limit: 3}).catch(() => []);
+      const list = notes.map(note => `<li class="qn-row"><span class="qn-body">${esc(String(note.body || note.text || '').slice(0, 220))}</span>
+        <small class="muted">${esc(dateText(String(note.updatedAt || note.createdAt || '').slice(0, 10)))}</small></li>`).join('');
+      if (host.tagName === 'UL') host.innerHTML = list || '<li class="muted small">لا ملاحظات بعد.</li>';
+      else host.outerHTML = list ? `<ul class="plain-list qn-list" data-quicknotes-list>${list}</ul>` : host.outerHTML;
+    }
+  });
+
+  /* ---------- اختصارات Alt داخل البطاقة ---------- */
+  installExecutionShortcuts({
+    root, executionId,
+    handlers: {
+      collection: () => openCollection(),
+      action: () => openAction(null),
+      expense: () => simpleExpenseDialog(app, executionId),
+      poa: () => openPoa(),
+      duration: () => durationDialog(app, executionId, {lockExecution: true, bundle}),
+      print: () => statementDialog(app, executionId),
+      horizon: () => openHorizonPicker(app, executionId, {bundle})
+    }
+  });
+
+  /* ---------- تطبيق وضع العرض (مبسّط/متقدّم) ---------- */
+  applyUiMode(root, uiMode);
   // اختصار Ctrl+Shift+T من التطبيق: يفتح ورقة التسجيل على بطاقة التنفيذ.
   const onRecordShortcut = () => {
     if (!root.isConnected) { document.removeEventListener('exec:record', onRecordShortcut); return; }
@@ -1090,12 +1469,15 @@ function traceDialog(bundle, which) {
   const currency = schedule.currency;
   const totals = schedule.totals;
   const title = {due: 'المطلوب حتى اليوم', paid: 'المدفوع', remaining: 'المتبقي'}[which] || 'الأرقام';
+  // الشفافية المطلقة: أول سطر في التفسير هو المعادلة المختصرة دائمًا.
+  const equationFirst = `المعادلة: ${summaryEquation(bundle)}`;
   const equations = which === 'due'
     ? [`مجموع استحقاق الفترات حتى ${dateText(schedule.asOf)} = ${money(totals.dueMinor, currency)}`, ...schedule.rows.slice(0, 12).map(row => `${row.label}: ${row.trace?.equation || `${money(row.dueMinor, currency)}`}`)]
     : which === 'paid'
       ? [`مجموع المحاضر المسجلة = ${money(totals.paidMinor, currency)}`, `المخصّص على الفترات = ${money(totals.allocatedMinor, currency)}`, `رصيد دائن غير مخصص = ${money(totals.creditMinor, currency)}`, ...(schedule.receipts || []).map(receipt => `${receipt.receiptNumber || 'محضر'} ${dateText(receipt.date)}: ${money(receipt.amountMinor, currency)} (مخصص ${money(receipt.allocatedMinor, currency)}${receipt.creditMinor ? ` · دائن ${money(receipt.creditMinor, currency)}` : ''})`)]
       : [`المتبقي = المطلوب − المخصّص = ${money(totals.remainingMinor, currency)}`, ...schedule.rows.filter(row => row.remainingMinor > 0).slice(0, 12).map(row => `${row.label}: ${money(row.dueMinor, currency)} − ${money(row.paidMinor, currency)} = ${money(row.remainingMinor, currency)}`), ...(totals.overpaidMinor > 0 ? [`دفعة زائدة ظاهرة: ${money(totals.overpaidMinor, currency)} (بلا رد تلقائي)`] : [])];
   return modal(`<h2 class="modal-title">كيف حُسب: ${esc(title)}</h2>
+    <p class="hint hint-info"><b>${esc(equationFirst)}</b></p>
     <p class="muted small">كل رقم مبني على سجلات المكتب: بنود القيمة (الأحكام) ثم التوزيع (المحدد أولًا ثم الأقدم أولًا).</p>
     <ul class="plain-list">${equations.map(line => `<li>${esc(line)}</li>`).join('')}</ul>
     <div class="form-actions"><button type="button" class="ghost" data-close>إغلاق</button></div>`);
@@ -1113,19 +1495,45 @@ function periodDetailsDialog(app, bundle, fromDate) {
   if (!row) return undefined;
   const currency = bundle.schedule.currency;
   const receiptById = new Map((bundle.receipts || []).map(receipt => [receipt.id, receipt]));
-  const card = modal(`<h2 class="modal-title">${esc(row.label)} — تفاصيل الفترة</h2>
+  const sourceNote = periodSourceNote(row, bundle);
+  const linked = periodLinkedReceipts(row, bundle);
+  const isManual = isManualRow(row, bundle);
+  const card = modal(`<h2 class="modal-title">${esc(row.label)} — تفاصيل الفترة${isManual ? ' <span class="badge">يدوية</span>' : ''}</h2>
+    <p class="hint hint-info"><b>المعادلة:</b> ${esc(periodEquationLine(row, currency) || row.trace?.equation || '—')}</p>
     <div class="exec-numbers small">
       <div class="num"><span>المستحق</span><b>${moneyShort(row.dueMinor, currency)}</b></div>
       <div class="num"><span>المدفوع</span><b>${moneyShort(row.paidMinor, currency)}</b></div>
       <div class="num num-primary"><span>المتبقي</span><b>${moneyShort(row.remainingMinor, currency)}</b></div>
     </div>
     <h3 class="exec-sub">مصدر القيمة</h3>
-    <ul class="plain-list">${(row.units || []).flatMap(unit => (unit.parts || []).map(part => `<li>${esc(unit.entitlementType || '')}: ${esc(part.equation || '')} (${esc(dateText(part.coveredStart))} → ${esc(dateText(part.coveredEnd))})</li>`)).join('') || '<li class="muted">—</li>'}</ul>
+    ${sourceNote ? `<p class="muted small"><b>الحالة:</b> ${esc(sourceNote)}</p>` : ''}
+    <ul class="plain-list">${(row.units || []).flatMap(unit => (unit.parts || []).map(part => `<li>${esc(unit.entitlementType || '')}: ${esc(part.equation || '')}${part.sourceReference ? ` <span class="muted">(${esc(part.sourceReference)})</span>` : ''}</li>`)).join('') || '<li class="muted">—</li>'}</ul>
+    ${row.valueChanges?.length ? `<p class="muted small">تغيّرت القيمة بحكم لاحق داخل هذه الفترة — <button type="button" class="link" data-change="${esc(row.fromDate)}">عرض الفرق</button></p>` : ''}
     <h3 class="exec-sub">ما خُصّص على هذه الفترة</h3>
-    ${(row.lines || []).length ? `<ul class="plain-list">${row.lines.map(line => `<li>${line.receiptId ? `محضر ${esc(receiptById.get(line.receiptId)?.receiptNumber || '')} ${esc(dateText(receiptById.get(line.receiptId)?.date || ''))}` : 'توزيع تلقائي'} — ${money(line.amountMinor, currency)} <span class="muted">(${line.mode === 'direct' ? 'محدد' : 'الأقدم أولًا'})</span></li>`).join('')}</ul>` : '<p class="muted">لم يُخصَّص شيء على هذه الفترة بعد.</p>'}
+    ${(row.lines || []).length ? `<ul class="plain-list">${row.lines.map(line => {
+      const receipt = receiptById.get(line.receiptId);
+      const beneficiaries = Array.isArray(receipt?.beneficiaries) ? receipt.beneficiaries : [];
+      return `<li>${receipt ? `محضر ${esc(receipt.receiptNumber || '')} ${esc(dateText(receipt.date || ''))}` : 'توزيع تلقائي'} — ${money(line.amountMinor, currency)} <span class="muted">(${line.mode === 'direct' ? 'محدد' : 'الأقدم أولًا'})</span>
+        ${receipt ? `<button type="button" class="ghost small" data-edit="${esc(receipt.id)}" data-kind="receipt">تعديل</button><button type="button" class="ghost small" data-receipt-beneficiaries="${esc(receipt.id)}">توزيع المستحقين</button>` : ''}
+        ${beneficiaries.length ? `<br><small class="muted">المستحقون: ${beneficiaries.map(item => `${esc(item.beneficiaryName)} ${Number(item.beneficiaryShare || 0).toFixed(2)}% (${money(Math.round(Number(item.amountMinor || 0)), currency)})`).join(' · ')}</small>` : ''}</li>`;
+    }).join('')}</ul>` : '<p class="muted">لم يُخصَّص شيء على هذه الفترة بعد.</p>'}
+    ${linked.length ? `<p class="hint hint-warn small">⚠ هذه الفترة مرتبطة بحركة سابقة (${linked.map(item => `${esc(item.receipt.receiptNumber || 'محضر')} بتاريخ ${esc(dateText(item.receipt.date || ''))}`).join(' · ')}). التعديل المباشر يغيّر السجل الأصلي — يُقترح تسجيل تصحيح جديد بدل التعديل.</p>` : ''}
     ${row.overpaidMinor > 0 ? `<p class="warn-line">دفعة زائدة ${money(row.overpaidMinor, currency)} — لا رد تلقائي ولا تسوية صامتة.</p>` : ''}
-    <div class="form-actions"><button type="button" class="ghost" data-duration-here>احسب مدة تشمل هذه الفترة</button><button type="button" class="ghost" data-close>إغلاق</button></div>`);
+    ${row.status === PERIOD_STATUS.RUNNING ? `<p class="hint hint-info small">⏳ فترة جارية: قيمتها المتوقعة ${money(row.projectedMinor, currency)} — لا تدخل في «المطلوب» إلا باكتمالها (أو بتغيير توقيت الاستحقاق في الإعدادات).</p>` : ''}
+    <div class="form-actions">
+      <button type="button" class="ghost" data-duration-here>احسب مدة تشمل هذه الفترة</button>
+      <button type="button" class="ghost" data-pin-collection="${esc(row.fromDate)}">تحصيل هنا</button>
+      ${linked.length ? '<button type="button" class="ghost" data-period-correction>تسجيل تصحيح بدل التعديل</button>' : ''}
+      <button type="button" class="ghost" data-close>إغلاق</button>
+    </div>`);
   card.querySelector('[data-duration-here]')?.addEventListener('click', () => { closeModal(); durationDialog(app, bundle.execution.id, {lockExecution: true, bundle, fromDate: row.fromDate, toDate: row.toDate}); });
+  // تأكيد قبل تعديل فترة مرتبطة بمحضر: الافتراضي تصحيح جديد ولا يلمس الأصل.
+  card.querySelector('[data-period-correction]')?.addEventListener('click', async () => {
+    const target = linked[0]?.receipt || null;
+    closeModal();
+    if (!target) return;
+    await editLinkedReceipt(app, bundle, row, target, {openEdit: (receipt, reason) => openCollection(receipt, '', reason)});
+  });
   return card;
 }
 

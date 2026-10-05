@@ -38,11 +38,32 @@ export const DEFAULT_LISTS = Object.freeze({
   ],
   borneBy: [['debtor', 'المنفذ ضده'], ['client', 'الموكل'], ['office', 'المكتب']],
   laterJudgmentKinds: [['appeal', 'استئناف'], ['modification', 'حكم معدِّل'], ['correction', 'تصحيح'], ['other', 'أخرى']],
-  templates: {statement: 'كشف حساب التنفيذ', poa: 'توكيل بالتنفيذ', balanceSlip: 'بيان رصيد', followUp: 'ورقة متابعة'}
+  templates: {statement: 'كشف حساب التنفيذ', poa: 'توكيل بالتنفيذ', balanceSlip: 'بيان رصيد', followUp: 'ورقة متابعة',
+    // نص توكيل قابل للتحرير من الإعدادات. المتغيرات: {{client}} {{debtor}} {{periods}} {{total}} {{fees}}
+    // {{stamps}} {{expenses}} {{previousBalance}} {{fromDate}} {{toDate}} {{poaNumber}} {{judgments}} {{equation}}
+    // فارغ افتراضيًا ⇒ يُستخدم قالب executionTemplates المخزّن. لا يُطبع مبلغ غير مسجل.
+    poaBody: ''},
+  // حدود «يحتاج انتباهي» بالأيام — قابلة للتعديل من إعدادات التنفيذ.
+  // تنبيه تنظيمي لإدارة المكتب، وليس تقييمًا قانونيًا للموقف.
+  followUpThresholds: {
+    unpaidWithoutActionDays: 60,
+    poaWithoutResultDays: 30,
+    periodEndedWithoutPositionDays: 0,
+    petitionWithoutJudicialNumber: true,
+    judgmentWithoutEffectiveDate: true,
+    enabled: true
+  }
 });
+
+/** وضع العرض: مبسّط (افتراضي) يخفي الأدوات المتقدمة، أو متقدّم يعرض كل شيء. */
+export const UI_MODES = Object.freeze(['simple', 'advanced']);
+export function normalizeUiMode(value, fallback = 'simple') {
+  return UI_MODES.includes(String(value || '')) ? String(value) : (UI_MODES.includes(String(fallback)) ? String(fallback) : 'simple');
+}
 
 const defaults = () => ({
   version: EXECUTION_SETTINGS_VERSION,
+  uiMode: 'simple',
   ruleVersion: 2,
   engineVersion: EXECUTION_ENGINE_VERSION,
   effectiveFrom: DEFAULT_SCHEDULE_SETTINGS.effectiveFrom,
@@ -62,6 +83,13 @@ const defaults = () => ({
 function structuredCloneSafe(value) {
   return JSON.parse(JSON.stringify(value));
 }
+/** دمج عميق لقوائم الإعدادات: إعدادات محفوظة قبل إضافة poaBody/followUpThresholds لا تفقد الافتراضي. */
+function mergeLists(base, stored) {
+  const out = {...base, ...(stored || {})};
+  out.templates = {...(base.templates || {}), ...((stored || {}).templates || {})};
+  out.followUpThresholds = {...(base.followUpThresholds || {}), ...((stored || {}).followUpThresholds || {})};
+  return out;
+}
 const keyFor = office => `${KEY_BASE}:${office?.ctx?.profile?.id || 'default'}`;
 const legacyKeyFor = office => `${LEGACY_KEY_BASE}:${office?.ctx?.profile?.id || 'default'}`;
 function readStored(office) { return prefs.get(keyFor(office), null); }
@@ -76,7 +104,7 @@ export function executionSettings(office) {
     return {
       ...base,
       laterJudgmentApproval: Boolean(legacy.laterJudgmentApproval),
-      lists: {...base.lists, ...(legacy.lists || {})},
+      lists: mergeLists(base.lists, legacy.lists),
       schedule: {
         ...base.schedule,
         allocationOrder: ['fifo', 'lifo', 'proportional'].includes(legacy.schedule?.allocationOrder) ? legacy.schedule.allocationOrder : base.schedule.allocationOrder,
@@ -91,8 +119,9 @@ export function executionSettings(office) {
     ruleVersion: Number(stored.ruleVersion || 2),
     engineVersion: Number(stored.engineVersion || EXECUTION_ENGINE_VERSION),
     schedule: cleanSchedule({...base.schedule, ...(stored.schedule || {})}),
-    lists: {...base.lists, ...(stored.lists || {})},
-    ruleHistory: Array.isArray(stored.ruleHistory) ? stored.ruleHistory : base.ruleHistory
+    lists: mergeLists(base.lists, stored.lists),
+    ruleHistory: Array.isArray(stored.ruleHistory) ? stored.ruleHistory : base.ruleHistory,
+    uiMode: normalizeUiMode(stored.uiMode, base.uiMode)
   };
 }
 
@@ -157,8 +186,9 @@ export async function saveExecutionSettings(office, patch = {}) {
   const before = executionSettings(office);
   const next = {
     ...before, ...patch, version: EXECUTION_SETTINGS_VERSION,
+    uiMode: normalizeUiMode(patch.uiMode ?? before.uiMode, 'simple'),
     schedule: cleanSchedule({...before.schedule, ...(patch.schedule || {})}),
-    lists: {...before.lists, ...(patch.lists || {})},
+    lists: mergeLists(before.lists, patch.lists),
     updatedAt: Clock.now()
   };
   const changedRules = rulesChanged(before, next);

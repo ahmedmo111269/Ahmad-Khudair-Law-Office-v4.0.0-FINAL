@@ -48,6 +48,13 @@ await page.waitForFunction(() => window.__LAW_OFFICE_APP__ && !window.__LAW_OFFI
 const seed = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__, office = app.office;
   const S = await import('/js/services/execution-simple.js');
+  // هذا الفحص مبني على توقيت استحقاق «بعد اكتمال الفترة» وعلى أفق محافظ (بلا مستقبل):
+  // كان يعتمد على افتراضيات المكتب التي تغيّرت في v5.13.1 (AT_PERIOD_START وallowFuture
+  // للبطاقة) فأصبح يفشل بلا علاقة بالطباعة. هنا نُثبّت مسبقات الاختبار صراحةً.
+  const SETTINGS = await import('/js/services/execution-settings.js');
+  const current = SETTINGS.executionSettings(office);
+  await SETTINGS.saveExecutionSettings(office, {schedule: {...current.schedule, accrualTiming: 'AFTER_PERIOD_END'},
+    source: 'تثبيت مسبقات فحص الطباعة — توقيت الاستحقاق بعد اكتمال الفترة'});
   const created = await S.createSimpleExecution(office, {
     newClientName: 'طباعة — موكل كشف متعدد السنوات', opponentName: 'طباعة — منفذ ضده',
     entitlementType: 'نفقة شهرية', valueType: 'periodic', amount: 2500, periodicity: 'monthly',
@@ -60,7 +67,7 @@ const seed = await page.evaluate(async () => {
   await S.recordSimpleExpense(office, {executionId: id, typeLabel: 'رسوم تنفيذ', amount: 750, date: '2024-02-05', includeInPoa: true, label: 'رسوم تنفيذ'});
   const draft = await S.simplePoaDraft(office, id, {fromDate: '2024-01-01', toDate: '2026-12-31', includePreviousBalance: true});
   const poa = await S.saveSimplePoa(office, id, draft, {date: '2026-01-05', notes: 'توكيل طباعة', printNow: false});
-  const bundle = await S.simpleCardBundle(office, id, {asOf: '2026-12-31'});
+  const bundle = await S.simpleCardBundle(office, id, {asOf: '2026-12-31', allowFuture: false});
   return {
     executionId: id, poaId: poa.poa?.id || poa.id || '',
     totals: {due: bundle.schedule.totals.dueMinor, paid: bundle.schedule.totals.paidMinor, remaining: bundle.schedule.totals.remainingMinor, periods: bundle.schedule.totals.periodCount}

@@ -86,7 +86,8 @@ const center = await page.evaluate(() => ({
   rows: document.querySelectorAll('#exec-grid tbody tr[data-i]').length,
   sections: [...document.querySelectorAll('[data-section-id]')].map(node => node.dataset.sectionId),
   hasTrash: Boolean(document.querySelector('[data-exec-trash]')),
-  hasNew: Boolean(document.querySelector('[data-new-execution]'))
+  hasNew: Boolean(document.querySelector('[data-new-execution]')),
+  attentionDisclaimer: (document.querySelector('.exec-attention')?.textContent || '').includes('تنبيه تنظيمي — ليس تقييمًا قانونيًا')
 }));
 report.center = center;
 check('مركز التنفيذ يُفتح من مسار التنقل', center.title === 'مركز التنفيذ', center.title);
@@ -94,7 +95,8 @@ for (const header of ['رقم التنفيذ', 'الموكل', 'المنفذ ض�
   check(`عمود الجدول العام: ${header}`, center.headers.includes(header), center.headers.join(' | '));
 }
 check('أربعة عدّادات قابلة للنقر (جارٍ · متأخرات · يحتاج متابعة · مكتمل السداد)', center.counters.length === 4, center.counters.join(' ، '));
-check('أقسام الصفحة ثلاث فقط: عدّادات · بحث · جدول', JSON.stringify(center.sections.slice(0, 3)) === JSON.stringify(['numbers', 'filters', 'grid']), center.sections.join('،'));
+check('أقسام الصفحة: يحتاج انتباهي · عدّادات · بحث · جدول', JSON.stringify(center.sections.slice(0, 4)) === JSON.stringify(['attention', 'numbers', 'filters', 'grid']), center.sections.join('،'));
+check('شريط «يحتاج انتباهي» يحمل التسمية الإلزامية (تنبيه تنظيمي — ليس تقييمًا قانونيًا)', center.attentionDisclaimer === true, String(center.attentionDisclaimer));
 check('مركز التنفيذ يعرض مدخل سلة الحذف المنطقي وزر التنفيذ الجديد', center.hasTrash && center.hasNew, JSON.stringify({trash: center.hasTrash, add: center.hasNew}));
 await page.screenshot({path: path.join(artifactDir, 'execution-center.png'), fullPage: true});
 
@@ -203,7 +205,8 @@ await page.waitForSelector('#modal-root [data-form="statement"]', {timeout: 1500
 await page.locator('#modal-root [data-form="statement"] button[type="submit"]').evaluate(node => node.click());
 const popup = await printPopup.catch(() => null);
 if (popup) {
-  await popup.waitForFunction(() => (document.body?.innerText || '').includes('كشف حساب'), null, {timeout: 20000}).catch(() => {});
+  // انتظار حتمي لاكتمال كتابة المستند (كان النص المؤقت «جارٍ التجهيز» يُقرأ كمستند).
+  await popup.waitForFunction(() => document.documentElement?.getAttribute('data-print-written') === '1', null, {timeout: 20000}).catch(() => {});
   const text = (await popup.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ');
   report.printDocument = text.slice(0, 400);
   check('مستند كشف الحساب يُبنى ويُفتح للطباعة بالأرقام نفسها', /42,000/.test(text) && /40,000/.test(text), report.printDocument.slice(0, 200));

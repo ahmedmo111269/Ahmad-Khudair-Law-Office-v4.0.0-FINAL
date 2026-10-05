@@ -172,8 +172,11 @@ class App{
    if(e.key==='Escape'&&!document.querySelector('.dg-pop')){
     if(!isDesktop()&&closeMobile())return; // إغلاق لوحة تنقل الهاتف المفتوحة إن وُجدت
     if(paletteOpen()){closePalette();return}closeModal();return}
+   // بطاقة التنفيذ تستهلك Alt+1..6 لإجراءاتها (تحصيل/إجراء/مصروف/توكيل/مدة/طباعة).
+   // مستمعها مسجَّل بعد هذا المستمع، فلا يمكنه اعتراضه — لذلك نفوّض إليه صراحةً.
+   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-6]$/.test(e.key)&&window.__execCardShortcuts?.handle?.(e))return;
    if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
-   if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
+   if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){if(window.__execCardShortcuts?.handleKey?.(e))return;e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
   });
  }
  showShortcutsHelp(){

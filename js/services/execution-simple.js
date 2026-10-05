@@ -14,6 +14,9 @@ import {uid} from '../core/id.js';
 import {Clock, localDate} from '../core/clock.js';
 import {AppError, ERR} from '../core/errors.js';
 import {events} from '../core/events.js';
+import {APP_NAME} from '../core/constants.js';
+import {esc} from '../ui/dom.js';
+import {EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {buildExecutionSchedule, claimForRange, previewValueChange, buildPoaFigures, currencyCode, minorFromRow, monthLabel, PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {addMinor, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
@@ -651,6 +654,24 @@ export async function recordSimpleCollection(office, input = {}) {
   return {...out, preview};
 }
 
+/**
+ * تسجيل قرار تشغيلي في Activity Log (بلا أي كتابة مالية).
+ * يُستخدم لقرارات تحتاج أثرًا قابلًا للتدقيق: إدراج/تجاهل رصيد سابق،
+ * تصحيح بدل تعديل فترة مرتبطة بمحضر، تغيير وضع العرض… إلخ.
+ * لا تُوضع بيانات شخصية خام في metadata (قاعدة المشروع).
+ */
+export async function logExecutionDecision(office, {executionId, action = 'decision', summary = '', metadata = {}} = {}) {
+  office.ctx.assert();
+  const execution = await requireExecution(office, executionId);
+  const row = activityRow(office, STORE.execution, execution.id, action, String(summary || 'قرار مسجَّل'), execution.fileId || '', {
+    decidedBy: office.ctx?.profile?.id || 'user', decidedAt: now(), ...metadata
+  });
+  await transaction(office.ctx, [STORE.activityLog], async tx => {
+    await request(tx.objectStore(STORE.activityLog).add(row));
+  });
+  return row;
+}
+
 /** إجراء تنفيذ: الإلزامي النوع والتاريخ. «الإجراء التالي» اختياري ولا ترتيب إلزامي. */
 export async function recordSimpleAction(office, input = {}) {
   office.ctx.assert();
@@ -900,6 +921,42 @@ export async function updateSimpleReceipt(office, {receiptId, amount, date, paym
     }
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionReceipts, receiptId, 'update',
       `تعديل تحصيل ${receipt.receiptNumber}: ${previous.amount} → ${row.amount}${reason ? ` — ${reason}` : ''}`, execution.fileId || '', {before: previous.amount, after: row.amount})));
+  });
+  executionCache.clearExecution(receipt.executionId);
+  emitChanged(STORE.executionReceipts, receiptId);
+  return row;
+}
+
+/**
+ * تعديل وصفي مباشر على محضر تحصيل (مرجع/ملاحظات/طريقة/تاريخ) **بلا تغيير المبلغ**.
+ * يُستخدم حين يختار المستخدم «عدّل الأصلي مع تسجيل السبب» بدل تسجيل تصحيح:
+ * الدفتر يبقى Append-Only (لا حركة عكسية لأن المبلغ لم يتغير)، والسبب يُسجَّل
+ * في نسخة المحضر وفي Activity Log. تغيير المبلغ ممنوع هنا — مساره التصحيح.
+ */
+export async function editReceiptDescriptive(office, {receiptId, reference, notes, paymentMethod, date, reason = ''} = {}) {
+  office.ctx.assert();
+  const receipt = await office.r.executionReceipts.get(receiptId);
+  if (!receipt || receipt.isDeleted) throw new AppError(ERR.NOT_FOUND, 'محضر التحصيل غير موجود.');
+  if (String(receipt.status || '') === 'voided') throw new AppError(ERR.CONFLICT, 'المحضر ملغى؛ لا يُعدَّل.');
+  const reasonText = String(reason || '').trim();
+  if (!reasonText) throw new AppError(ERR.VALIDATION, 'سبب تعديل السجل الأصلي مطلوب.', {reason: 'مطلوب'});
+  const nextDate = isCivilDate(date) ? date : receipt.date;
+  const previous = {date: receipt.date, paymentMethod: receipt.paymentMethod, reference: receipt.reference, notes: receipt.notes};
+  const row = {
+    ...receipt, date: nextDate,
+    paymentMethod: paymentMethod === undefined ? receipt.paymentMethod : String(paymentMethod || '').trim(),
+    reference: reference === undefined ? receipt.reference : String(reference || '').trim(),
+    notes: notes === undefined ? receipt.notes : String(notes || '').trim(),
+    revisions: [...(receipt.revisions || []), {at: now(), by: office.ctx?.profile?.id || 'user', reason: reasonText, before: previous, mode: 'direct-descriptive'}],
+    directEditReason: reasonText, directEditedAt: now(),
+    updatedAt: now(), version: (receipt.version || 0) + 1
+  };
+  const execution = await requireExecution(office, receipt.executionId);
+  await transaction(office.ctx, [STORE.executionReceipts, STORE.activityLog], async tx => {
+    await request(tx.objectStore(STORE.executionReceipts).put(row));
+    await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionReceipts, receiptId, 'direct-edit',
+      `تعديل وصفي مباشر على المحضر ${receipt.receiptNumber || ''} (بلا تغيير مبلغ) — ${reasonText}`, execution.fileId || '',
+      {decidedBy: office.ctx?.profile?.id || 'user', reason: reasonText, mode: 'direct-descriptive'})));
   });
   executionCache.clearExecution(receipt.executionId);
   emitChanged(STORE.executionReceipts, receiptId);
@@ -1188,7 +1245,7 @@ export async function recordSimpleDurationDecisions(office, executionId, {fromDa
 }
 
 /** مسودة توكيل: رصيد سابق + فترة جديدة + فروق مضمّنة (بلا ازدواج) + مصروفات مختارة. */
-export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = [], allowFuture = true, fees = 0, stamps = 0} = {}) {
+export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = [], allowFuture = true, fees = 0, stamps = 0, previousBalanceOverride = null} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
@@ -1229,7 +1286,9 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
   };
   const feesMinor = toMinor(fees);
   const stampsMinor = toMinor(stamps);
-  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions, feesMinor, stampsMinor, previousAction: lastDissipation});
+  const overrideMinor = previousBalanceOverride === null || previousBalanceOverride === undefined || previousBalanceOverride === ''
+    ? null : (() => { try { return toMinorUnits(previousBalanceOverride, currency); } catch { return null; } })();
+  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions, feesMinor, stampsMinor, previousAction: lastDissipation, previousOverrideMinor: overrideMinor});
   draft.rangeDecisions = draft.rangeDecisions || [];
   draft.partials = draft.partials || [];
   draft.requestedToDate = toDate;
@@ -1241,7 +1300,7 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
 }
 
 /** حفظ التوكيل موقّعًا كنسخة غير قابلة للتعديل (Snapshot) + طبعه عبر PrintContext. */
-export async function saveSimplePoa(office, executionId, draft = {}, {date = '', notes = '', printNow = true} = {}) {
+export async function saveSimplePoa(office, executionId, draft = {}, {date = '', notes = '', printNow = true, printWindow = null} = {}) {
   const POA = await import('./execution-poa.js');
   const execution = await requireExecution(office, executionId);
   if (String(execution.accountingModel || '') === 'feas-v1') {
@@ -1254,30 +1313,41 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
     emitChanged(STORE.executionPOAs, poa.id);
     if (printNow) {
       const PR = await import('./execution-print.js');
-      await PR.printPoa(office, poa.id).catch(() => null);
+      await PR.printPoa(office, poa.id, {window: printWindow || null}).catch(() => null);
     }
     return poa;
   }
   const lines = (draft.lines || []).map(line => ({
     key: line.periodKey || line.kind, label: line.label, fromDate: line.fromDate || '', toDate: line.toDate || '',
-    amount: fromMinorUnits(line.amountMinor, draft.currency), amountMinor: line.amountMinor, included: true, note: line.note || '', detail: line.note || ''
+    amount: fromMinorUnits(line.amountMinor, draft.currency), amountMinor: line.amountMinor, included: true,
+    sourceType: line.kind || '', note: line.note || '', detail: line.note || ''
   }));
+  const poaNotes = String(notes || draft.notes || '').trim();
   const poa = await POA.saveExecutionPoa(office, {
     executionId, previousPoaId: draft.previousPoaId || '', poaNumber: String(draft.poaNumber || '').trim(),
     date: isCivilDate(date) ? date : localDate(),
     fromDate: draft.fromDate, toDate: draft.toDate, currency: draft.currency,
-    baseAmount: fromMinorUnits(draft.periodDueMinor, draft.currency),
+    // المبلغ المطالب به داخل المدة = المستحق − المحصّل فيها (بلا ازدواج مع محاضر التحصيل).
+    baseAmount: fromMinorUnits(Number.isSafeInteger(draft.periodClaimMinor) ? draft.periodClaimMinor : draft.periodDueMinor, draft.currency),
     previousBalance: fromMinorUnits(draft.previousAppliedMinor, draft.currency),
     differencesAmount: fromMinorUnits(draft.differencesMinor, draft.currency),
     expensesAmount: fromMinorUnits(draft.expensesMinor, draft.currency),
-    stampAmount: 0, total: fromMinorUnits(draft.totalMinor, draft.currency),
-    lines, judgmentIds: [], rangeDecisionsSnapshot: draft.rangeDecisions || [], notes: String(notes || '').trim()
+    // الرسوم والدمغة كانت تُحفظ صفرًا بينما الإجمالي يشملها — فيخرج مستند مطبوع
+    // بنوده لا تجمع إلى إجماليه. الآن تُحفظ وتُطبع في سطرين مستقلين.
+    feesAmount: fromMinorUnits(draft.feesMinor || 0, draft.currency),
+    stampAmount: fromMinorUnits(draft.stampsMinor || 0, draft.currency),
+    total: fromMinorUnits(draft.totalMinor, draft.currency),
+    grossPeriodAmount: fromMinorUnits(draft.periodDueMinor, draft.currency),
+    paidInsidePeriod: fromMinorUnits(draft.periodPaidMinor || 0, draft.currency),
+    equation: String(draft.equation || ''),
+    previousNote: String(draft.previousNote || ''),
+    lines, judgmentIds: [], rangeDecisionsSnapshot: draft.rangeDecisions || [], notes: poaNotes
   });
   executionCache.clearExecution(executionId);
   emitChanged(STORE.executionPOAs, poa.id);
   if (printNow) {
     const PR = await import('./execution-print.js');
-    await PR.printPoa(office, poa.id).catch(() => null);
+    await PR.printPoa(office, poa.id, {window: printWindow || null}).catch(() => null);
   }
   void execution;
   return poa;
@@ -1311,25 +1381,46 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
   const currency = schedule.currency;
   const money = minor => `${fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
   const date = iso => (isCivilDate(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
-  const scope = mode === 'range' && isCivilDate(fromDate) && isCivilDate(toDate) ? {fromDate, toDate: toDate > schedule.periodThroughDate ? schedule.periodThroughDate : toDate} : null;
+  // «كشف عن مدة» بلا تاريخين كان يطبع الجدول كاملًا صامتًا (المستخدم يختار مدة
+  // فيحصل على كشف مختلف عمّا طلب). الآن: نطاق صريح دائمًا + سبب ظاهر في المستند.
+  const firstPeriodStart = (schedule.rows[0]?.fromDate) || execution.openedDate || calculationAsOf;
+  const explicitRange = mode === 'range' && isCivilDate(fromDate) && isCivilDate(toDate);
+  const derivedRange = mode === 'range' && !explicitRange;
+  const rawFrom = explicitRange ? fromDate : (derivedRange ? firstPeriodStart : '');
+  const rawTo = explicitRange ? toDate : (derivedRange ? calculationAsOf : '');
+  const scope = (explicitRange || derivedRange) && isCivilDate(rawFrom) && isCivilDate(rawTo) && rawTo >= rawFrom
+    ? {fromDate: rawFrom, toDate: rawTo > schedule.periodThroughDate ? schedule.periodThroughDate : rawTo} : null;
+  const rangeNote = derivedRange && scope
+    ? `لم يُحدد نطاق صريح — طُبع الكشف من أول فترة (${date(scope.fromDate)}) حتى تاريخ الحساب (${date(scope.toDate)}).`
+    : '';
   const claim = scope ? claimForRange({schedule, slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, settings: settings.schedule, fromDate: scope.fromDate, toDate: scope.toDate, asOf: schedule.asOf, rangeDecisions}) : null;
   const rows = (claim ? claim.rows : schedule.rows);
   const expenses = expensesFrom(inputs.ledger, settings);
+  const debtorName = inputs.parties.find(party => party.side === 'debtor')?.name || '';
+  const creditorName = client?.fullName || inputs.parties.find(party => party.side === 'creditor')?.name || '';
+  const dueTotal = claim ? claim.totals.dueMinor : schedule.totals.dueMinor;
+  const paidTotal = claim ? claim.totals.paidMinor : schedule.totals.paidMinor;
+  const remainingTotal = claim ? claim.totals.remainingMinor : schedule.totals.remainingMinor;
   const parts = [];
-  parts.push(`<header><h1>كشف حساب تنفيذ</h1><p class="muted">${execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم'} — تاريخ الحساب الفعلي: ${date(schedule.asOf)} — أفق الفترات: ${date(schedule.periodThroughDate || schedule.asOf)}</p></header>`);
+  parts.push(`<header><p class="office">${esc(APP_NAME.replace(/^⚖️\s*/, ''))}</p><h1>كشف حساب تنفيذ${scope ? ' عن مدة' : (mode === 'summary' ? ' — ملخص' : ' — تفصيلي شهري')}</h1>
+    <p class="muted">${esc(execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم')} — تاريخ الحساب الفعلي: ${date(schedule.asOf)} — أفق الفترات: ${date(schedule.periodThroughDate || schedule.asOf)}${scope ? ` — المدة: ${date(scope.fromDate)} ← ${date(scope.toDate)}` : ''}</p></header>`);
+  if (rangeNote) parts.push(`<p class="note">${esc(rangeNote)}</p>`);
   parts.push(`<section class="grid2">
-    <div><b>الموكل:</b> ${client?.fullName || '—'}</div>
-    <div><b>المنفذ ضده:</b> ${inputs.parties.find(party => party.side === 'debtor')?.name || '—'}</div>
-    <div><b>رقم الملف:</b> ${file?.fileNumber || '—'}</div>
-    <div><b>الرقم القضائي:</b> ${execution.officialNumber || '—'}</div>
-    <div><b>الحكم:</b> ${inputs.judgments.map(judgment => judgment.judgmentNumber).filter(Boolean).join(' · ') || '—'}</div>
-    <div><b>جهة التنفيذ:</b> ${execution.authority || '—'}</div>
+    <div><b>الموكل (المستحق):</b> ${esc(creditorName || '—')}</div>
+    <div><b>المنفذ ضده:</b> ${esc(debtorName || '—')}</div>
+    <div><b>رقم الملف:</b> ${esc(file?.fileNumber ? String(file.fileNumber) : '—')}${file?.title ? ` — ${esc(file.title)}` : ''}</div>
+    <div><b>الرقم القضائي:</b> ${esc(execution.officialNumber || '—')}</div>
+    <div><b>الحكم:</b> ${esc(inputs.judgments.map(judgment => judgment.judgmentNumber).filter(Boolean).join(' · ') || '—')}</div>
+    <div><b>جهة التنفيذ:</b> ${esc(execution.authority || '—')}</div>
+    <div><b>نوع التنفيذ:</b> ${esc(EXECUTION_TYPE_LABELS[execution.executionType] || '—')}</div>
+    <div><b>طريقة التنفيذ:</b> ${esc(execution.executionMethod || '—')}</div>
   </section>`);
   parts.push(`<section class="numbers">
-    <div><span>المطلوب حتى أفق الفترات ${date(schedule.periodThroughDate || schedule.asOf)}</span><b>${money(claim ? claim.totals.dueMinor : schedule.totals.dueMinor)}</b></div>
-    <div><span>المدفوع</span><b>${money(claim ? claim.totals.paidMinor : schedule.totals.paidMinor)}</b></div>
-    <div><span>المتبقي</span><b>${money(claim ? claim.totals.remainingMinor : schedule.totals.remainingMinor)}</b></div>
-  </section>`);
+    <div><span>المطلوب ${scope ? `عن المدة ${date(scope.fromDate)} ← ${date(scope.toDate)}` : `حتى أفق الفترات ${date(schedule.periodThroughDate || schedule.asOf)}`}</span><b>${money(dueTotal)}</b></div>
+    <div><span>المدفوع</span><b>${money(paidTotal)}</b></div>
+    <div><span>المتبقي</span><b>${money(remainingTotal)}</b></div>
+  </section>
+  <p class="equation"><b>المعادلة:</b> المطلوب ${money(dueTotal)} − المخصّص ${money(paidTotal)} = المتبقي ${money(remainingTotal)}${schedule.totals.creditMinor > 0 ? ` · رصيد دائن غير مخصّص ${money(schedule.totals.creditMinor)}` : ''}</p>`);
   if (mode !== 'summary') {
     parts.push(`<table><thead><tr><th>الفترة</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
       ${rows.map(row => `<tr><td>${date(row.fromDate)}${row.fromDate !== row.toDate ? ` – ${date(row.toDate)}` : ''}</td><td>${money(row.dueMinor)}</td><td>${money(row.paidMinor)}</td><td>${money(row.remainingMinor)}</td><td>${periodStatusLabel(row.status)}</td></tr>`).join('')}
@@ -1341,8 +1432,23 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
       ${expenses.map(expense => `<tr><td>${expense.label}</td><td>${date(expense.date)}</td><td>${money(expense.amountMinor)}</td><td>${expense.includeInPoa ? 'نعم' : 'لا'}</td></tr>`).join('')}
     </tbody></table></section>`);
   }
-  if (claim) parts.push(`<section><h3>تفصيل المدة</h3><ul>${claim.equations.map(line => `<li>${line}</li>`).join('')}</ul></section>`);
-  parts.push(`<footer>طُبع في ${date(localDate())} — الأرقام مشتقة من سجلات المكتب (المطلوب − المخصّص = المتبقي).</footer>`);
+  if (claim) parts.push(`<section><h3>تفصيل المدة</h3><ul>${claim.equations.map(line => `<li>${esc(line)}</li>`).join('')}</ul></section>`);
+  const actionRows = (inputs.actions || []).filter(action => !action.isDeleted && String(action.status || '') !== 'voided'
+    && (!scope || (isCivilDate(action.date) && action.date >= scope.fromDate && action.date <= scope.toDate)));
+  if (actionRows.length) {
+    parts.push(`<section><h3>الإجراءات المسجلة${scope ? ' داخل المدة' : ''}</h3><table><thead><tr><th>التاريخ</th><th>الإجراء</th><th>الرقم</th><th>الجهة</th><th>النتيجة</th></tr></thead><tbody>
+      ${actionRows.map(action => `<tr><td>${date(action.date)}</td><td>${esc(action.kindLabel || action.kind || '')}</td><td>${esc(action.referenceNumber || '—')}</td><td>${esc(action.authority || '—')}</td><td>${esc(action.result || '—')}</td></tr>`).join('')}
+    </tbody></table></section>`);
+  }
+  const receiptRows = (inputs.receipts || []).filter(receipt => !receipt.isDeleted && String(receipt.status || '') !== 'voided'
+    && (!scope || (isCivilDate(receipt.date) && receipt.date >= scope.fromDate && receipt.date <= scope.toDate)));
+  if (receiptRows.length) {
+    parts.push(`<section><h3>محاضر التحصيل${scope ? ' داخل المدة' : ''}</h3><table><thead><tr><th>المحضر</th><th>التاريخ</th><th>المبلغ</th><th>طريقة التحصيل</th><th>المرجع</th></tr></thead><tbody>
+      ${receiptRows.map(receipt => `<tr><td>${esc(receipt.receiptNumber || '—')}</td><td>${date(receipt.date)}</td><td>${money(Math.round(Number(receipt.amountMinor ?? Math.round(Number(receipt.amount || 0) * 100))))}</td><td>${esc(receipt.paymentMethod || '—')}</td><td>${esc(receipt.reference || '—')}</td></tr>`).join('')}
+    </tbody></table></section>`);
+  }
+  parts.push(`<div class="sign-row"><div><span class="muted">المحامي</span><div class="sign-line"></div><p>${esc(APP_NAME.replace(/^⚖️\s*/, ''))}</p></div><div><span class="muted">الموكل</span><div class="sign-line"></div><p>${esc(creditorName || '……………………………')}</p></div></div>`);
+  parts.push(`<footer>طُبع في ${date(localDate())} — الأرقام مشتقة من سجلات المكتب (المطلوب − المخصّص = المتبقي). هذا الكشف بيان حسابي من واقع السجلات ولا يُعد تقييمًا قانونيًا.</footer>`);
   return {html: `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>كشف حساب</title>
     <style>
       body{font-family:'Segoe UI',Tahoma,sans-serif;padding:24px;color:#111}
@@ -1355,27 +1461,51 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
       .numbers>div{border:1px solid #bbb;border-radius:8px;padding:8px 14px;min-width:150px;text-align:center}
       .numbers span{display:block;font-size:12px;color:#555} .numbers b{font-size:17px}
       footer{margin-top:18px;font-size:11px;color:#666} .muted{color:#666;font-size:12px}
+      header .office{font-size:17px;font-weight:700;color:#26364b;margin:0 0 4px}
+      header{border-bottom:2px solid #26364b;padding-bottom:8px;margin-bottom:10px}
+      .equation{margin:8px 0;padding:6px 10px;border:1px dashed #999;background:#fafafa;font-size:12px}
+      .note{margin:6px 0;padding:6px 10px;background:#fff6e0;border:1px solid #e0b36a;color:#8a4b00;font-size:12px}
+      .sign-row{display:flex;gap:34px;margin-top:26px}
+      .sign-row>div{flex:1} .sign-line{border-bottom:1px solid #333;height:26px;margin-bottom:4px}
+      ul{font-size:12px} li{margin-bottom:3px}
       @media print{body{padding:0}}
-    </style></head><body>${parts.join('')}</body></html>`, totals: schedule.totals, currency, rows};
+    </style></head><body>${parts.join('')}</body></html>`, totals: schedule.totals, currency, rows,
+    // حقول التصدير (CSV/PDF) — نفس المستند، لا حساب ثانٍ.
+    schedule, execution, clientName: creditorName, debtorName, scope, mode, asOf: schedule.asOf};
 }
 
 /**
  * طباعة كشف الحساب عبر PrintContext القائم (بلا نظام طباعة ثانٍ)، مع ترقيم صفحات
  * مقيس على مقاس A4: كل صفحة تحمل «صفحة N من M» ورؤوس الجدول تتكرر في كل صفحة.
+ *
+ * `options.window`: نافذة طباعة محجوزة داخل نقرة المستخدم (acquirePrintWindow).
+ * بدونه تُفتح النافذة **بعد** القراءة من IndexedDB فيمنعها المتصفح صامتًا —
+ * وهذا كان سبب «الطباعة لا تعمل» في مركز التنفيذ.
  */
 export async function printSimpleStatement(office, executionId, options = {}) {
   const PR = await import('./execution-print.js');
-  const doc = await simpleStatementDocument(office, executionId, options);
-  PR.openDocumentForPrint(doc.html); // الترقيم موحّد داخل خدمة الطباعة
-  return doc;
+  const target = options.window || null;
+  try {
+    const doc = await simpleStatementDocument(office, executionId, options);
+    PR.openDocumentForPrint(doc.html, {window: target, label: 'كشف حساب تنفيذ'});
+    return doc;
+  } catch (error) {
+    PR.releasePrintWindow(target, error?.message || String(error));
+    throw error;
+  }
 }
 
 /** طباعة توكيل محفوظ عبر نفس مسار الطباعة والترقيم (يُعيد استخدام مُنشئ مستند التوكيل القائم). */
-export async function printSimplePoa(office, poaId) {
+export async function printSimplePoa(office, poaId, {window: target = null} = {}) {
   const PR = await import('./execution-print.js');
-  const doc = await PR.buildPoaDocument(office, poaId);
-  PR.openDocumentForPrint(doc.html); // نفس المسار ونفس الترقيم
-  return doc;
+  try {
+    const doc = await PR.buildPoaDocument(office, poaId);
+    PR.openDocumentForPrint(doc.html, {window: target, label: 'توكيل بالتنفيذ'});
+    return doc;
+  } catch (error) {
+    PR.releasePrintWindow(target, error?.message || String(error));
+    throw error;
+  }
 }
 
 /* ========================= الهجرة غير المدمرة ========================= */
