@@ -139,6 +139,8 @@ export function executionCenterPage(app) {
       <button class="ghost" data-customize-page>⚙ تخصيص الصفحة</button>
       <button class="ghost" data-exec-trash>🗑 سلة التنفيذ</button>
       <button class="ghost" data-demo-example>🧪 مثال عملي جاهز</button>
+      <button class="ghost" data-exec-demo>📁 ملفات تنفيذ تجريبية</button>
+      <button class="ghost danger" data-exec-clear>🗑 مسح بيانات التنفيذ</button>
       <button class="primary" data-new-execution>+ تنفيذ جديد</button>
     </div></div>
   <section class="panel exec-counters" data-section-id="numbers">
@@ -152,6 +154,29 @@ export function executionCenterPage(app) {
     </div>
   </section>
   <section data-section-id="grid"><div id="exec-grid"></div></section>`;
+}
+
+/**
+ * زرع ملفات تنفيذ تجريبية مرة واحدة لكل قاعدة بيانات **فارغة التنفيذات**:
+ * بعد مسح البيانات يفتح المكتب مركز التنفيذ فيجد أربعة ملفات جاهزة للمعاينة
+ * بدل شاشة فارغة — ولا يُزرع شيء فوق أي بيانات حقيقية، ولا بعد حذف متعمَّد.
+ */
+async function maybeSeedExecutionDemo(app, reload) {
+  const guard = listState(app);
+  if (guard.demoSeedAttempted) return;
+  guard.demoSeedAttempted = true;
+  try {
+    const meta = await app.office.r.meta.get('executionDemoSeed').catch(() => null);
+    if (meta?.seeded || meta?.removedAt) return;
+    const count = await app.office.r.execution.count().catch(() => 0);
+    if (Number(count || 0) > 0) return;
+    const admin = await import('../services/data-admin.js');
+    const out = await admin.seedExecutionDemoFiles(app.office);
+    toast(`حُمِّل ${out.count} ملفات تنفيذ تجريبية للمعاينة — احذفها من زر «ملفات تنفيذ تجريبية»`, 'ok', {duration: 7000});
+    await reload();
+  } catch (error) {
+    console.info('execution demo seed skipped', error);
+  }
 }
 
 export async function bindExecutionCenter(app) {
@@ -311,6 +336,46 @@ export async function bindExecutionCenter(app) {
   root.querySelector('[data-settings]')?.addEventListener('click', () => executionSettingsDialog(app));
   root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root}));
   root.querySelector('[data-exec-trash]')?.addEventListener('click', () => openExecutionTrash(app));
+  root.querySelector('[data-exec-demo]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const admin = await import('../services/data-admin.js');
+      const existing = await admin.executionDemoStatus(app.office);
+      if (existing.count) {
+        if (!await confirmBox(`موجود ${existing.count} ملف تنفيذ تجريبي موسوم 〔تجريبي〕. تريد حذفها؟ (اختر «إلغاء» لتحميل ملفات جديدة فوقها)`, {okText: 'حذف الملفات التجريبية'})) {
+          const out = await admin.seedExecutionDemoFiles(app.office);
+          toast(`حُمِّل ${out.count} ملف تنفيذ تجريبي إضافي`);
+          button.disabled = false;
+          await reload();
+          return;
+        }
+        const removed = await admin.removeExecutionDemoFiles(app.office);
+        toast(`حُذف ${removed.removed} ملف تنفيذ تجريبي`, 'ok');
+        button.disabled = false;
+        await reload();
+        return;
+      }
+      const out = await admin.seedExecutionDemoFiles(app.office);
+      toast(`حُمِّل ${out.count} ملفات تنفيذ تجريبية جاهزة للمعاينة`, 'ok', {duration: 6000});
+      await app.go(`exc:${out.created[0].execution.id}`);
+    } catch (error) {
+      toast(userError(error), 'error');
+      button.disabled = false;
+    }
+  });
+  root.querySelector('[data-exec-clear]')?.addEventListener('click', async () => {
+    const answer = await confirmBox('مسح كل بيانات قسم التنفيذ؟ تُمسح التنفيذات وأحكامها وشرائح القيمة ومحاضر التحصيل والتوكيلات والفروق. بقية أقسام المكتب تبقى كما هي. اكتب سبب المسح ليُحفظ في السجل.', {okText: 'مسح قسم التنفيذ', input: true, label: 'سبب المسح'});
+    if (!answer?.ok) return;
+    if (!String(answer.value || '').trim()) { toast('السبب مطلوب', 'error'); return; }
+    try {
+      const admin = await import('../services/data-admin.js');
+      const out = await admin.clearExecutionData(app.office, {reason: answer.value});
+      const total = Object.values(out.counts).reduce((sum, value) => sum + Number(value || 0), 0);
+      toast(`تم مسح ${total} سجلًا من قسم التنفيذ`, 'ok');
+      await app.refresh();
+    } catch (error) { toast(userError(error), 'error'); }
+  });
   let searchTimer = 0;
   root.querySelector('[data-search]')?.addEventListener('input', event => {
     st.search = event.target.value;
@@ -325,20 +390,27 @@ export async function bindExecutionCenter(app) {
     await reload();
   });
 
-  renderCounters();
-  await reload();
-  if (!st.ready) {
-    st.ready = true;
-    scanCounters().then(out => {
-      st.counts = out.counts; st.counted = out.counted; st.scannedAll = out.scannedAll;
+  // العدّادات تُحسب عند كل دخول للصفحة: كانت تُحسب مرة واحدة لكل جلسة (st.ready)
+  // فتظل تعرض أصفارًا قديمة بعد أي إضافة أو حذف أو إلغاء حتى إعادة تحميل التطبيق.
+  const refreshCounters = async () => {
+    try {
+      const out = await scanCounters();
+      st.counts = out.counts; st.counted = out.counted; st.scannedAll = out.scannedAll; st.ready = true;
+      if (!root.isConnected) return;
       renderCounters();
       const note = root.querySelector('[data-counter-note]');
       if (note) note.textContent = `العدّادات محسوبة على ${out.counted.toLocaleString('en-US')} ${out.scannedAll ? 'تنفيذ (كل السجل)' : 'تنفيذ (الأحدث)'} — والكتابة في الجدول تعرض كل الصفحات بالبحث.`;
-    }).catch(() => {
+    } catch {
+      if (!root.isConnected) return;
       const note = root.querySelector('[data-counter-note]');
       if (note) note.textContent = 'تعذر حساب العدّادات — الجدول يعمل والبحث متاح.';
-    });
-  }
+    }
+  };
+
+  renderCounters();
+  await reload();
+  await maybeSeedExecutionDemo(app, reload).catch(() => null);
+  refreshCounters();
   return true;
 }
 
@@ -468,6 +540,21 @@ function cappedNote(bundle) {
   return `<p class="hint hint-info">الاستحقاق متوقف عند <b>${esc(dateText(through))}</b> لأن «تاريخ الاستحقاق حتى» مسجَّل على التنفيذ — والتحصيل بعد هذا التاريخ يُخصم من المتبقي ولا يُنشئ فترات جديدة. عدّله من <button type="button" class="link" data-action="edit">تعديل بيانات التنفيذ</button> إذا استمر الاستحقاق بعده.</p>`;
 }
 
+/**
+ * سطر الفترة الجارية: لا يظهر أي رقم في «المطلوب» قبل اكتمال الفترة (قاعدة
+ * مكتب قابلة للتغيير من الإعدادات)، لكننا لا نترك البطاقة بلا رقم ولا سبب —
+ * نعرض مبلغ الفترة الجارية المتوقع وتاريخ استحقاقه صراحةً بدل أصفار غامضة.
+ */
+function runningPeriodNote(bundle) {
+  const rows = (bundle.schedule?.rows || []).filter(row => row.status === PERIOD_STATUS.RUNNING);
+  if (!rows.length) return '';
+  const currency = bundle.schedule.currency;
+  const projected = rows.reduce((sum, row) => sum + Number(row.projectedMinor || 0), 0);
+  const dueOn = rows.map(row => row.toDate).filter(Boolean).sort().at(-1) || '';
+  const list = rows.slice(0, 4).map(row => `${esc(dateText(row.fromDate))} – ${esc(dateText(row.toDate))}`).join(' · ');
+  return `<p class="hint hint-info">⏳ <b>فترة جارية لم تكتمل:</b> ${list} — قيمتها المتوقعة <b>${money(projected, currency)}</b>${dueOn ? ` وتُستحق في <b>${esc(dateText(dueOn))}</b>` : ''}. لا تدخل في «المطلوب» أعلاه إلا باكتمالها؛ ويمكن احتسابها من بدايتها بتغيير «توقيت الاستحقاق» في <button type="button" class="link" data-settings>إعدادات التنفيذ</button>.</p>`;
+}
+
 function summarySectionMarkup(bundle) {
   const {schedule, expenses, hints, lastAction, nextAction} = bundle;
   const totals = schedule.totals;
@@ -477,6 +564,7 @@ function summarySectionMarkup(bundle) {
   return `<section class="panel exec-summary" data-section-id="summary">
     <div class="asof-row">
       <label>المطلوب حتى <input type="date" data-asof value="${esc(schedule.asOf)}" aria-label="تاريخ الحساب"></label>
+      ${schedule.asOf && schedule.asOf !== localDate() ? `<button type="button" class="ghost small" data-asof-today>↺ ارجع إلى اليوم</button><span class="hint hint-warn small">الحساب موقوف عند تاريخ قديم — هذا يخفي الأرقام عن كل التنفيذات حتى تعيده إلى اليوم.</span>` : ''}
       <span class="muted small">غيّر التاريخ تغيّر الأرقام والجدول فورًا — بلا أي خطوة أخرى.</span>
     </div>
     ${cappedNote(bundle)}
@@ -486,6 +574,7 @@ function summarySectionMarkup(bundle) {
       <button type="button" class="num num-primary" data-trace="remaining"><span>المتبقي</span><b>${moneyShort(totals.remainingMinor, currency)}</b><small>ج.م · اضغط للتفسير</small></button>
     </div>
     <div class="progress" role="progressbar" aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100" aria-label="نسبة المسدد"><span style="width:${progress}%"></span></div>
+    ${runningPeriodNote(bundle)}
     <p class="muted small">مسدد ${progress}%${totals.unpaidPeriods ? ` · فترات غير مسددة: ${totals.unpaidPeriods}` : ''}${totals.partialPeriods ? ` · جزئية: ${totals.partialPeriods}` : ''}${expensesMinor ? ` · <b>مصروفات ${money(expensesMinor, currency)}</b> (سطر مستقل — لا تزيد أصل الدين)` : ''}${totals.overpaidMinor > 0 ? ` · دفعة زائدة ${money(totals.overpaidMinor, currency)} (بلا رد تلقائي)` : ''}</p>
     <p class="exec-lines">آخر إجراء: <b>${esc(lastAction ? `${lastAction.kindLabel || lastAction.kind} — ${dateText(lastAction.date)}` : 'لا يوجد بعد')}</b> · الإجراء التالي: <b>${esc(nextAction ? `${nextAction.nextAction || 'إجراء'} — ${dateText(nextAction.nextActionDate)}` : 'غير محدد')}</b></p>
     ${hints.length ? `<div class="completion-bar">${hints.map(hint => `<span class="hint hint-${esc(hint.severity)}">${esc(hint.message)} <button type="button" class="link" data-hint-action="${esc(hint.action)}">${esc(hint.actionLabel)}</button></span>`).join('')}</div>` : ''}
@@ -915,6 +1004,12 @@ export async function bindExecutionDetail(app, executionId) {
   const asofInput = root.querySelector('[data-asof]');
   asofInput?.addEventListener('change', async () => {
     prefs.set(ASOF_KEY, asofInput.value || '');
+    await app.refresh();
+  });
+  // زر الرجوع إلى اليوم: تاريخ الحساب محفوظ عالميًا، وتاريخ قديم يخفي الحسابات
+  // عن كل التنفيذات (وينشأ تنفيذ جديد يبدو بلا أرقام) — فنجعل الرجوع بنقرة واحدة.
+  root.querySelector('[data-asof-today]')?.addEventListener('click', async () => {
+    prefs.set(ASOF_KEY, '');
     await app.refresh();
   });
   // الجوال: نفس شريط الأزرار مثبَّت أسفل الشاشة.

@@ -1,7 +1,7 @@
 // إعدادات التنفيذ المؤرخة: القواعد المالية إعداد ممارسة للمكتب، وليست ثوابت قانونية.
 // الإعداد القديم v1 يُحفظ كما هو؛ الإصدار v2 يطبّق افتراضيًا على البنود القائمة.
 import {prefs} from '../core/preferences.js';
-import {DEFAULT_SCHEDULE_SETTINGS, EXECUTION_ENGINE_VERSION} from '../domain/execution-schedule.js';
+import {DEFAULT_SCHEDULE_SETTINGS, EXECUTION_ENGINE_VERSION, ACCRUAL_TIMINGS} from '../domain/execution-schedule.js';
 import {STORE} from '../db/schema.js';
 import {transaction, request} from '../db/unit-of-work.js';
 import {uid} from '../core/id.js';
@@ -16,7 +16,9 @@ const RETIRED_SCHEDULE_KEYS = Object.freeze(['prorationPolicy', 'firstMonthPolic
 function cleanSchedule(schedule) {
   const result = {...schedule};
   for (const key of RETIRED_SCHEDULE_KEYS) delete result[key];
-  result.accrualTiming = 'AFTER_PERIOD_END';
+  // توقيت الاستحقاق اختيار مكتب صحيح (بداية الفترة / بعد اكتمالها) — كان يُفرض
+  // برمجيًا فيُفرغ أي تنفيذ جديد يبدأ من اليوم من كل حساب حتى نهاية الشهر.
+  if (!ACCRUAL_TIMINGS.includes(result.accrualTiming)) result.accrualTiming = DEFAULT_SCHEDULE_SETTINGS.accrualTiming;
   result.monthEndPolicy = 'CLAMP_TO_LAST_DAY';
   return result;
 }

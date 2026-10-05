@@ -12,7 +12,8 @@
   "test:offline-sync-browser": "node offline-sync-browser-tests.mjs",
   "test:quick-notes-browser": "node quick-notes-browser-tests.mjs",
   "test:execution-print-browser": "node execution-print-browser-tests.mjs",
-  "test:execution-feas-cycle-browser": "node execution-feas-cycle-browser-tests.mjs"
+  "test:execution-feas-cycle-browser": "node execution-feas-cycle-browser-tests.mjs",
+  "test:execution-practical": "node execution-practical-tests.mjs"
  },
  "keywords": [],
  "author": "",

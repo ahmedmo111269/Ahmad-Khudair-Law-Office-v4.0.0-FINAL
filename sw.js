@@ -1,7 +1,7 @@
 // Cache-first install of the complete local ES-module graph, followed by network-first updates.
 // Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
 // so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.13.0-execution-calendar-v2';
+const CACHE='ahmad-khudair-law-office-v5.13.1-execution-accrual-and-data-admin';
 const ASSETS=[
   "./",
   "./index.html",
@@ -30,6 +30,9 @@ const ASSETS=[
   "./js/app.js",
   "./js/core/clock.js",
   "./js/core/constants.js",
+  "./js/core/feature-flags.js",
+  "./js/ui/loading.js",
+  "./js/ui/status.js",
   "./js/core/errors.js",
   "./js/core/events.js",
   "./js/core/file-number.js",
@@ -122,9 +125,12 @@ const ASSETS=[
   "./js/services/execution-period-migration.js",
   "./js/services/execution-simple.js",
   "./js/services/execution-settings.js",
+  "./js/services/data-admin.js",
   "./js/services/print-paginate.js",
   "./js/services/lookups.js",
   "./js/services/maintenance.js",
+  "./js/services/index-audit.js",
+  "./js/services/performance.js",
   "./js/services/office.js",
   "./js/services/operations.js",
   "./js/services/pwa-updates.js",

@@ -85,7 +85,16 @@ async function renderGeneral(app){
  <section class="panel"><h3>صيانة (لا تحذف أي بيانات)</h3><div class="action-stack"><button class="ghost" data-maint="preV12">⬇ تنزيل نسخة الأمان التلقائية (قبل ترقية ملف الموكل)</button><button class="ghost" data-maint="index">إعادة بناء فهرس البحث للملفات</button><button class="ghost" data-maint="parties">ترحيل روابط الموكلين القديمة إلى أطراف الملفات</button><button class="ghost" data-maint="seed">استكمال القوائم الافتراضية الناقصة</button></div><p class="muted small" id="maint-status"></p></section>
  <section class="panel"><h3>الخصوصية</h3><p>البيانات مخزنة محليًا في متصفح الجهاز. لا توجد خدمة تحليل أو API خارجية في النسخة الأساسية.</p></section>
  <section class="panel"><h3>شريط التنقل العلوي</h3><p class="muted small">التبويبات أعلى البرنامج بعرض الشاشة كاملًا: يمكنك طيّ الشريط ليصبح قصيرًا جدًا (ويُحفظ الطي لهذا المستخدم)، وتخصيص التبويبات نفسها — إظهار وإخفاء وترتيب التبويبات وعناصرها.</p><div class="action-stack"><button type="button" class="ghost" data-sidebar-toggle>طي / توسيع الشريط</button><button type="button" class="ghost" data-nav-cust>تخصيص التبويبات وترتيبها</button></div></section>
- <section class="panel"><h3>البيانات التجريبية</h3><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا معلَّمة بـ〔تجريبي〕 (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية، ومحاكم من بينها قليوب وطوخ وبنها وشبرا. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم، ولا تُمسح تلقائيًا بعد الاختبار.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button></div><p class="muted small" id="demo-status"></p></section></div>`;
+ <section class="panel"><h3>البيانات التجريبية</h3><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا معلَّمة بـ〔تجريبي〕 (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية، ومحاكم من بينها قليوب وطوخ وبنها وشبرا. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم، ولا تُمسح تلقائيًا بعد الاختبار.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button></div><p class="muted small" id="demo-status"></p></section>
+ <section class="panel danger-zone"><h3>🗑 مسح البيانات</h3>
+   <p class="muted small">يمسح <b>كل</b> سجلات المكتب داخل قاعدة البيانات النشطة (<b>${esc(app.registry.active?.displayName || '')}</b>): الموكلون، الملفات، القضايا، الجلسات، الأعمال، الأحكام، التنفيذ، الأتعاب، الإعلانات، الملاحظات، ومركز العمل. القوائم والإعدادات والقوالب تبقى سليمة، وترقيم الملفات يبدأ من جديد. القاعدة نفسها لا تُحذف — ولن يُعاد زرع البيانات التجريبية تلقائيًا بعدها.</p>
+   <div class="action-stack">
+     <button type="button" class="ghost" data-backup-then-clear>⬇ تنزيل نسخة احتياطية أولًا</button>
+     <button type="button" class="ghost danger" data-clear-execution>مسح قسم التنفيذ فقط</button>
+     <button type="button" class="ghost danger" data-clear-all>مسح كل البيانات…</button>
+   </div>
+   <p class="muted small" id="clear-status"></p>
+ </section></div>`;
 }
 function renderCollapseSettings(){
  const config=getCollapsePreferences();
@@ -180,5 +189,51 @@ export function bindSettings(app){
    toast(`تم تحميل ${rep.files} ملفًا تجريبيًا بنجاح`,'ok',{duration:5000});
   }catch(err){toast(userError(err),'error');if(ds)ds.textContent='تعذر زرع البيانات: '+userError(err)}
   finally{btn.disabled=false}
+ });
+ bindDangerZone(app,root);
+}
+
+/** منطقة المسح: تأكيد مزدوج + سبب مسجَّل + نسخة اختيارية قبل التنفيذ. */
+function bindDangerZone(app,root){
+ const status=root.querySelector('#clear-status');
+ const say=text=>{if(status)status.textContent=text};
+ root.querySelector('[data-backup-then-clear]')?.addEventListener('click',async()=>{
+  try{
+   const {exportDatabase,downloadJSON}=await import('../services/backup.js');
+   const payload=await exportDatabase(app.office.ctx);
+   downloadJSON(payload,`backup-${String(localDate()).replace(/-/g,'')}.json`);
+   say('نُزّلت نسخة احتياطية كاملة. استعدها من صفحة النسخ الاحتياطي متى شئت.');
+  }catch(err){toast(userError(err),'error')}
+ });
+ root.querySelector('[data-clear-execution]')?.addEventListener('click',async()=>{
+  const answer=await confirmBox('مسح كل بيانات قسم التنفيذ (التنفيذات وأحكامها وشرائح القيمة ومحاضر التحصيل والتوكيلات)؟ بقية أقسام المكتب تبقى كما هي. اكتب سبب المسح ليُحفظ في السجل.',{okText:'مسح قسم التنفيذ',input:true,label:'سبب المسح'});
+  if(!answer?.ok)return;
+  if(!String(answer.value||'').trim()){toast('السبب مطلوب','error');return}
+  try{
+   const {clearExecutionData}=await import('../services/data-admin.js');
+   const out=await clearExecutionData(app.office,{reason:answer.value});
+   const total=Object.values(out.counts).reduce((sum,value)=>sum+Number(value||0),0);
+   say(`تم مسح ${total} سجلًا من قسم التنفيذ.`);
+   toast('تم مسح قسم التنفيذ','ok');
+   await app.refresh();
+  }catch(err){toast(userError(err),'error')}
+ });
+ root.querySelector('[data-clear-all]')?.addEventListener('click',async()=>{
+  const dbName=String(app.registry.active?.displayName||app.registry.active?.name||'').trim();
+  const warning=await confirmBox(`سياسة المسح: سيُمسح كل سجلات المكتب داخل «${dbName}» نهائيًا من هذا الجهاز. لا تراجع بعد التنفيذ إلا باستعادة نسخة احتياطية. أكّد أولًا.`,{okText:'فهمت — تابع',danger:true});
+  if(!warning)return;
+  const answer=await confirmBox(`اكتب اسم قاعدة البيانات بالضبط للتأكيد: ${dbName}`,{okText:'متابعة',input:true,label:'اسم قاعدة البيانات',danger:true});
+  if(!answer?.ok)return;
+  if(String(answer.value||'').trim()!==dbName){toast('الاسم غير مطابق — لم يُمسح شيء','error');return}
+  const reason=await confirmBox('اكتب سبب المسح ليُحفظ في سجل النشاط (اختياري).',{okText:'تنفيذ المسح',input:true,label:'سبب المسح',danger:true});
+  if(!reason?.ok)return;
+  try{
+   const {clearAllData}=await import('../services/data-admin.js');
+   const out=await clearAllData(app.office,{reason:reason.value,confirmName:dbName});
+   const total=Object.values(out.counts).reduce((sum,value)=>sum+Number(value||0),0);
+   say(`تم مسح ${total} سجلًا من كل الأقسام.`);
+   toast(`تم مسح كل البيانات (${total} سجلًا)`,'ok',{duration:5000});
+   await app.refresh();
+  }catch(err){toast(userError(err),'error')}
  });
 }

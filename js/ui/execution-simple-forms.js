@@ -51,13 +51,20 @@ export async function newExecutionDialog(app, {preset = {}} = {}) {
   const settings = executionSettings(app.office);
   const clientsPage = await app.office.r.clients.page({index: 'createdAt', direction: 'prev', limit: 100}).catch(() => ({items: []}));
   const clients = clientsPage.items || [];
+  // عند التوجيه من مدخل عام (ملف/موكل محدد): نضمن ظهور الموكل المقصود في القائمة
+  // حتى لو لم يكن ضمن أحدث 100 موكل.
+  const presetClientId = String(preset?.clientId || '').trim();
+  if (presetClientId && !clients.some(client => client.id === presetClientId)) {
+    const presetClient = await app.office.r.clients.get(presetClientId).catch(() => null);
+    if (presetClient && !presetClient.isDeleted) clients.unshift(presetClient);
+  }
   const card = modal(`<h2 class="modal-title">تنفيذ جديد</h2>
     <p class="muted small">الأسفار المعلَّمة بـ<span class="req">*</span> فقط. بعد الحفظ تُفتح البطاقة والجدول الشهري جاهزًا.</p>
     <form class="simple-form" data-form="new-execution">
       <fieldset><legend>1) لصالح من؟</legend>
         <div class="form-grid">
           <label class="field">الموكل <b class="req">*</b>
-            <select name="clientId">${clientPickerOptions(clients)}</select>
+            <select name="clientId">${clientPickerOptions(clients, presetClientId)}</select>
           </label>
           <label class="field">أو اسم موكل جديد
             <input name="newClientName" placeholder="اكتب الاسم ليُضاف فورًا">
@@ -710,7 +717,7 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
       const sideBySideHtml = claim.sideBySideScenarios.length ? `<details><summary>مقارنة الخيارات بلا تناسب</summary><table class="mini-table"><thead><tr><th>الفترة</th><th>الخيار</th><th>قيمة الفترة</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>${claim.sideBySideScenarios.map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(row.choice)}</td><td>${row.amountMinor === null ? '—' : amount(row.amountMinor)}</td><td>${row.paidMinor === null ? '—' : amount(row.paidMinor)}</td><td>${row.remainingMinor === null ? '—' : amount(row.remainingMinor)}</td></tr>`).join('')}</tbody></table></details>` : '';
       const statusNotes = [
         ...claim.decisionRows.map(row => `تحتاج الفترة ${displayDate(row.fromDate)} – ${displayDate(row.toDate)} قرارًا مستقلًا بشأن القيمة: ${row.reason}`),
-        ...claim.notYetComplete.map(row => `فترة جارية معلوماتية فقط وليست مستحقة: ${displayDate(row.fromDate)} – ${displayDate(row.toDate)}`),
+        ...claim.notYetComplete.map(row => `فترة جارية ${displayDate(row.fromDate)} – ${displayDate(row.toDate)} بمبلغ متوقع ${amount(row.projectedMinor || 0)} تُستحق في ${displayDate(row.toDate)} — معلوماتية ولا تدخل في المستحق.`),
         claim.horizonCapped ? `قُصّ أفق الحساب إلى ${displayDate(claim.toDate)}؛ تاريخ الحساب الفعلي ${displayDate(claim.asOf)}.` : ''
       ].filter(Boolean);
       resultHost.innerHTML = `<div class="result-numbers">
@@ -718,11 +725,13 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
           <div><span>المدفوع عنها</span><b>${amount(claim.totals.paidMinor)}</b></div>
           <div><span>المتبقي عنها</span><b>${amount(claim.totals.remainingMinor)}</b></div>
           <div><span>رصيد سابق للمدة</span><b>${amount(claim.totals.beforeMinor)}</b></div>
+          ${claim.totals.runningProjectedMinor ? `<div><span>متوقع فترات جارية (غير مستحق)</span><b>${amount(claim.totals.runningProjectedMinor)}</b></div>` : ''}
           <div class="total"><span>الإجمالي المطلوب</span><b>${amount(claim.totals.totalRequiredMinor)}</b></div>
         </div>
         ${boundaryHtml}${statusNotes.length ? `<ul class="hint hint-info small">${statusNotes.map(note => `<li>${esc(note)}</li>`).join('')}</ul>` : ''}
         <table class="mini-table"><thead><tr><th>الفترة</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
         ${claim.rows.map(row => `<tr><td>${esc(row.label)}</td><td>${amount(row.dueMinor)}</td><td>${amount(row.paidMinor)}</td><td>${amount(row.remainingMinor)}</td><td>${statusLabel(row.status)}</td></tr>`).join('')}
+        ${claim.notYetComplete?.length ? claim.notYetComplete.map(row => `<tr class="is-running"><td>${esc(row.label || `${displayDate(row.fromDate)} – ${displayDate(row.toDate)}`)}</td><td>${amount(row.projectedMinor || 0)} <span class="muted">(متوقع)</span></td><td>${amount(row.paidMinor || 0)}</td><td>${amount(Math.max(0, (row.projectedMinor || 0) - (row.paidMinor || 0)))}</td><td>${statusLabel(row.status || 'RUNNING')}</td></tr>`).join('') : ''}
         </tbody></table>${sideBySideHtml}<ol class="small">${claim.equations.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
       resultHost.querySelectorAll('[data-range-choice]').forEach(select => select.addEventListener('change', () => {
         const manual = select.value === 'MANUAL';
@@ -809,6 +818,7 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
           <div><span>مصروفات مختارة</span><b>${amount(draft.expensesMinor)}</b></div>
           <div class="total"><span>إجمالي التوكيل</span><b>${amount(draft.totalMinor)}</b></div>
         </div>
+        ${(draft.runningPeriods?.length) ? `<p class="hint hint-info small">فترات جارية ظاهرة بمبلغها المتوقع <b>ولا تدخل في الإجمالي</b>: ${draft.runningPeriods.map(row => `${esc(row.label || `${displayDate(row.fromDate)} – ${displayDate(row.toDate)}`)} = ${amount(row.projectedMinor || 0)}`).join(' · ')}</p>` : ''}
         ${scenarioHtml}<p class="muted small">${esc(draft.equations.join(' — '))}</p>
         <p class="muted small">إصدار التوكيل لا يغيّر المتبقي: ${amount(draft.periodRemainingMinor)} متبقٍ داخل الفترة.</p>`;
       previewHost.querySelectorAll('[data-poa-choice]').forEach(select => select.addEventListener('change', () => {
@@ -1012,8 +1022,10 @@ export function executionSettingsDialog(app) {
           </label>
           <label class="field">توقيت الاستحقاق
             <select name="accrualTiming">
-              <option value="AFTER_PERIOD_END" selected>بعد اكتمال الفترة</option>
+              <option value="AT_PERIOD_START"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? '' : ' selected'}>من بداية الفترة (تُستحق مقدَّمًا)</option>
+              <option value="AFTER_PERIOD_END"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? ' selected' : ''}>بعد اكتمال الفترة</option>
             </select>
+            <small class="hint">«من بداية الفترة»: الفترة الجارية تُحسب فورًا فيظهر المطلوب من أول يوم. «بعد اكتمالها»: لا تُحسب الفترة إلا بعد انتهائها (مطالبة بالمدة المنقضية). في الحالتين تظهر الفترة الجارية بمبلغها المتوقع ولا تختفي.</small>
           </label>
           <label class="field">قص اليوم في نهاية الشهر
             <select name="monthEndPolicy">

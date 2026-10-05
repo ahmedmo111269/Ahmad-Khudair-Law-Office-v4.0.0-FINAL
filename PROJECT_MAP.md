@@ -1,3 +1,23 @@
+# v5.13.1 — خريطة إصلاح حساب التنفيذ وإدارة البيانات
+
+**2026-10-05 — إصلاح محدود: توقيت الاستحقاق صار خيارًا، وقاعدة «لا شاشة فارغة»، وأدوات مسح البيانات والملفات التجريبية. لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/domain/execution-schedule.js` | `ACCRUAL_TIMINGS` و`ACCRUAL_TIMING_LABELS` جديدان؛ `DEFAULT_SCHEDULE_SETTINGS.accrualTiming = AT_PERIOD_START`؛ `settingsWith()` يتحقق من القيمة بدل تثبيتها. `claimForRange` يضيف صفوف الفترات الجارية بمبالغها المتوقعة (`notYetComplete` موسَّع بـ`label`/`paidMinor`/`status`) ومجموع `runningProjectedMinor`، ويفصل المطالبة (ما انقضى) عن الاستحقاق (توقيت المكتب). `buildPoaFigures` يخرج `runningPeriods` معلوماتية لا تدخل الإجمالي. |
+| `js/services/execution-settings.js` | `cleanSchedule()` يحترم `accrualTiming` المحفوظ بدل إجباره؛ القيمة تدخل نسخة القواعد المؤرخة (`RULE_KEYS`) وتُبطل cache عند تغييرها. |
+| `js/ui/execution-simple-forms.js` | نافذة الإعدادات: خياران حقيقيان لتوقيت الاستحقاق مع شرح. نافذة «احسب مدة»: صفوف الفترات الجارية بمبالغها + بند «متوقع فترات جارية». نافذة التوكيل: سطر الفترات الجارية المعلوماتي. |
+| `js/modules/execution-center.js` | `runningPeriodNote()` سطر الفترة الجارية أعلى الأرقام الثلاثة؛ إنذار تاريخ الحساب القديم وزر `↺ ارجع إلى اليوم`؛ `refreshCounters()` تُحسب عند كل دخول للصفحة (كانت مرة واحدة لكل جلسة)؛ زرّا «📁 ملفات تنفيذ تجريبية» و«🗑 مسح بيانات التنفيذ»؛ `maybeSeedExecutionDemo()` يزرع مرة واحدة في قاعدة فارغة التنفيذات. |
+| `js/ui/form.js` | إنشاء `execution` من أي مدخل عام يُوجَّه إلى `newExecutionDialog` (لا تنفيذ بلا حكم ولا بند قيمة). |
+| `js/services/data-admin.js` (جديد) | `clearAllData` (تأكيد مزدوج + سبب + معاملة واحدة + سطر شاهد) · `clearExecutionData` · `seedExecutionDemoFiles` (4 ملفات 〔تجريبي〕) · `removeExecutionDemoFiles` · `executionDemoStatus`. المسح بـ`captureChanges:false` موثَّق. |
+| `js/modules/settings.js` | منطقة «🗑 مسح البيانات»: نسخة احتياطية أولًا · مسح قسم التنفيذ فقط · مسح شامل بتأكيد مزدوج واسم القاعدة. |
+| `tools/node-tests/execution-practical-tests.mjs` (جديد) | 29 فحصًا عمليًا يقود التطبيق الحقيقي: النوافذ، النماذج، التبويبات الأربعة، كل رحلات التسجيل، المسح، والملفات التجريبية. `npm run test:execution-practical`. |
+| `tools/node-tests/dom-forms.mjs` (جديد) | تكملة بيئة الاختبار: `FormData` لـlinkedom وأصناف العناصر الناقصة + `mountAppShell()`. |
+| `sw.js` | `CACHE=…-v5.13.1-execution-accrual-and-data-admin`، وإضافة `data-admin.js` والوحدات الناقصة (`feature-flags`, `loading`, `status`, `index-audit`, `performance`) إلى precache. |
+| `js/core/constants.js` | `APP_VERSION = 5.13.1`. |
+
+**التحقق المنفذ فعليًا:** `node tools/node-tests/run-tests.mjs` = **470/470**؛ `node tools/node-tests/execution-practical-tests.mjs` = **29/29**. **NOT VERIFIED:** الطباعة الورقية، متصفحات غير Chromium.
+
 # v5.13.0 — خريطة تقويم التنفيذ والاستحقاق الثابت
 
 **2026-10-05 — تحديث محدود لطبقة التقويم والاستحقاق والتخصيص فوق تجربة v5.12.0 أدناه؛ لا إعادة بناء لقسم التنفيذ ولا تغيير Schema 18/المخازن.** الافتراضات ممارسة مكتب مؤرخة بحسب إفادة المستخدم، وليست قاعدة قانونية مضمّنة.
