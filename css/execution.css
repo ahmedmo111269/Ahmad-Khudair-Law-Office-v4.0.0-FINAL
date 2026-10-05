@@ -308,3 +308,10 @@
 /* خطوة FEAS التالية: تنبيه بارز بزر واحد بلا حجب أي شيء آخر */
 .feas-next-step { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .feas-next-step .link { background: transparent; text-decoration: underline; cursor: pointer; font: inherit; color: inherit; padding: 0; }
+
+/* ===== الحساب اليدوي في احسب مدة ===== */
+fieldset[data-manual-calc] { border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 10px; padding: 14px 12px 10px; margin: 12px 0; background: var(--surface-2, rgba(255,255,255,.03)); }
+fieldset[data-manual-calc] > legend { font-weight: 700; padding: 0 8px; font-size: .95rem; }
+fieldset[data-manual-calc] .form-grid { margin-top: 8px; }
+fieldset[data-manual-calc] .check-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 0; font-size: .88rem; }
+fieldset[data-manual-calc] .check-line input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; }

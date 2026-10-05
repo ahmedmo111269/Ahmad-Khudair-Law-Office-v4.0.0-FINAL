@@ -931,7 +931,7 @@ export async function bindExecutionDetail(app, executionId) {
     container.querySelectorAll('[data-help]').forEach(b => b.addEventListener('click', () => openHelp(app)));
     container.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', guard(() => runAction[button.dataset.action]?.())));
     container.querySelectorAll('[data-trace]').forEach(button => button.addEventListener('click', () => traceDialog(bundle, button.dataset.trace)));
-    container.querySelectorAll('[data-open-duration]').forEach(button => button.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true}))));
+    container.querySelectorAll('[data-open-duration]').forEach(button => button.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true, bundle}))));
     container.querySelectorAll('[data-statement-mode]').forEach(button => button.addEventListener('click', guard(async () => {
       await S.printSimpleStatement(app.office, executionId, {mode: button.dataset.statementMode, asOf: bundle.schedule.asOf});
       toast('فُتح الكشف للطباعة');
@@ -1003,10 +1003,14 @@ export async function bindExecutionDetail(app, executionId) {
     }
   };
 
-  root.querySelectorAll('.exec-toolbar [data-action]').forEach(button => button.addEventListener('click', guard(() => runAction[button.dataset.action]?.())));
+  root.querySelectorAll('.exec-toolbar [data-action]').forEach(button => button.addEventListener('click', guard(() => {
+    // Close more menu after clicking an action
+    if (moreMenu) { moreMenu.hidden = true; root.querySelectorAll('[data-more]').forEach(b => b.setAttribute('aria-expanded', 'false')); }
+    return runAction[button.dataset.action]?.();
+  })));
   root.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab).catch(error => app.fail(error))));
   root.querySelectorAll('[data-record]').forEach(el => el.addEventListener('click', openRecord));
-  root.querySelectorAll('[data-open-duration]').forEach(el => el.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true}))));
+  root.querySelectorAll('[data-open-duration]').forEach(el => el.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true, bundle}))));
   root.querySelectorAll('[data-open-statement]').forEach(el => el.addEventListener('click', openStatement));
   root.querySelectorAll('[data-help]').forEach(el => el.addEventListener('click', () => openHelp(app)));
   root.querySelectorAll('[data-settings]').forEach(el => el.addEventListener('click', () => executionSettingsDialog(app)));
@@ -1017,6 +1021,14 @@ export async function bindExecutionDetail(app, executionId) {
     moreMenu.hidden = !moreMenu.hidden;
     moreButton.setAttribute('aria-expanded', String(!moreMenu.hidden));
   }));
+  // Close more menu when clicking outside it
+  document.addEventListener('click', (event) => {
+    if (!moreMenu || moreMenu.hidden) return;
+    if (!moreMenu.contains(event.target) && !event.target.closest('[data-more]')) {
+      moreMenu.hidden = true;
+      root.querySelectorAll('[data-more]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+    }
+  });
   root.querySelectorAll('[data-delete-execution]').forEach(el => el.addEventListener('click', async () => {
     if (!await confirmBox('حذف ملف التنفيذ بالكامل منطقيًا؟ يُحفظ كل شيء ويمكن استعادته من سلة التنفيذ.', {okText: 'حذف الملف'})) return;
     try {
@@ -1113,7 +1125,7 @@ function periodDetailsDialog(app, bundle, fromDate) {
     ${(row.lines || []).length ? `<ul class="plain-list">${row.lines.map(line => `<li>${line.receiptId ? `محضر ${esc(receiptById.get(line.receiptId)?.receiptNumber || '')} ${esc(dateText(receiptById.get(line.receiptId)?.date || ''))}` : 'توزيع تلقائي'} — ${money(line.amountMinor, currency)} <span class="muted">(${line.mode === 'direct' ? 'محدد' : 'الأقدم أولًا'})</span></li>`).join('')}</ul>` : '<p class="muted">لم يُخصَّص شيء على هذه الفترة بعد.</p>'}
     ${row.overpaidMinor > 0 ? `<p class="warn-line">دفعة زائدة ${money(row.overpaidMinor, currency)} — لا رد تلقائي ولا تسوية صامتة.</p>` : ''}
     <div class="form-actions"><button type="button" class="ghost" data-duration-here>احسب مدة تشمل هذه الفترة</button><button type="button" class="ghost" data-close>إغلاق</button></div>`);
-  card.querySelector('[data-duration-here]')?.addEventListener('click', () => { closeModal(); durationDialog(app, bundle.execution.id, {lockExecution: true, fromDate: row.fromDate, toDate: row.toDate}); });
+  card.querySelector('[data-duration-here]')?.addEventListener('click', () => { closeModal(); durationDialog(app, bundle.execution.id, {lockExecution: true, bundle, fromDate: row.fromDate, toDate: row.toDate}); });
   return card;
 }
 
