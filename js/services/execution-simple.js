@@ -18,6 +18,7 @@ import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {buildExecutionSchedule, claimForRange, previewValueChange, buildPoaFigures, currencyCode, minorFromRow, monthLabel, PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {addMinor, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
 import {executionSettings} from './execution-settings.js';
+import {executionCache} from './execution-cache.js';
 import {addExecutionJudgment, saveValueSlice, createExecution, saveExecutionParty, cancelValueSlice, deleteExecutionJudgment, refreshExecutionSearchText} from './execution.js';
 import {saveEntity} from './entity-save.js';
 import {createLegalFile} from './legal-files.js';
@@ -71,11 +72,19 @@ export async function executionSimpleInputs(office, executionId, {includeDeleted
 }
 
 /** الجدول المشتق + الأرقام الثلاثة (كتابة صفر). */
-export async function simpleSchedule(office, executionId, {asOf = '', fromDate = ''} = {}) {
-  const inputs = await executionSimpleInputs(office, executionId);
+export async function simpleSchedule(office, executionId, {asOf = '', fromDate = '', allowFuture = false} = {}) {
   const settings = executionSettings(office);
-  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
-  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  const today = localDate();
+  const requestedAsOf = isCivilDate(asOf) ? asOf : today;
+  const cacheKey = executionCache.key({executionId, asOf: requestedAsOf, allowFuture, ruleVersion: settings.ruleVersion || 0, engineVersion: settings.engineVersion || 0});
+  const cached = executionCache.get(cacheKey);
+  if (cached && !fromDate) {
+    // نعيد نفس الشكل مع inputs من الـ cache إن وجد
+    return cached;
+  }
+  const inputs = await executionSimpleInputs(office, executionId);
+  const calculationAsOf = requestedAsOf;
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf, {allowFuture});
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
     const FEAS = await import('./execution-feas.js');
@@ -88,7 +97,18 @@ export async function simpleSchedule(office, executionId, {asOf = '', fromDate =
     });
   }
   schedule.expenses = expensesFrom(inputs.ledger, settings);
-  return {...inputs, schedule, settings};
+  // حقول شفافية إلزامية للجدول المُعاد — مبدأ ملزم: ممنوع عرض رقم بجانب تاريخ لم يُحسب عنده
+  const effectiveAsOf = periodThroughDate || calculationAsOf;
+  const horizonCapped = requestedAsOf !== effectiveAsOf;
+  const horizonNote = horizonCapped ? `أفق الحساب موقوف عند ${effectiveAsOf} — ${requestedAsOf > today ? 'التواريخ المستقبلية تحتاج تفعيل «احسب حتى تاريخ مستقبلي»' : 'تاريخ الاستحقاق حتى مسجل'} ` : '';
+  schedule.requestedAsOf = requestedAsOf;
+  schedule.effectiveAsOf = effectiveAsOf;
+  schedule.horizonCapped = horizonCapped;
+  schedule.horizonNote = horizonNote;
+  schedule.allowFuture = allowFuture;
+  const result = {...inputs, schedule, settings};
+  if (!fromDate) executionCache.set(cacheKey, result);
+  return result;
 }
 
 /**
@@ -96,10 +116,11 @@ export async function simpleSchedule(office, executionId, {asOf = '', fromDate =
  * التنفيذ فلا يتجاوزه أي حساب (لا فترات وهمية بعد نهاية المدة المسجلة).
  * يُستخدم في كل مسارات الحساب: الجدول، صفوف القائمة، المدة، والتوكيل.
  */
-export function claimHorizon(execution, asOf = '') {
+export function claimHorizon(execution, asOf = '', {allowFuture = false} = {}) {
   const today = localDate();
   const requestedDate = isCivilDate(asOf) ? asOf : today;
-  const requested = requestedDate > today ? today : requestedDate;
+  // القاعدة: حقل «المطلوب حتى تاريخ» في بطاقة التنفيذ ⇒ allowFuture = true دائمًا. القائمة وصفوف التنفيذات ⇒ false.
+  const requested = allowFuture ? requestedDate : (requestedDate > today ? today : requestedDate);
   const through = isCivilDate(execution?.entitlementThroughDate) ? execution.entitlementThroughDate : '';
   return through && through < requested ? through : requested;
 }
@@ -139,8 +160,8 @@ export function feasRecognizedThrough(periods = []) {
   return ends.at(-1) || '';
 }
 
-export function simpleScheduleHorizon(execution, periods = [], requested = '') {
-  let horizon = claimHorizon(execution, requested);
+export function simpleScheduleHorizon(execution, periods = [], requested = '', {allowFuture = false} = {}) {
+  let horizon = claimHorizon(execution, requested, {allowFuture});
   if (String(execution?.accountingModel || '') === 'feas-v1') {
     const recognized = feasRecognizedThrough(periods);
     if (!recognized) return horizon;
@@ -283,8 +304,16 @@ export async function hydrateSimpleRows(office, executions = []) {
 }
 
 /** حزمة البطاقة: كل ما تحتاجه شاشة واحدة (بلا أي قراءة داخل الواجهة). */
-export async function simpleCardBundle(office, executionId, {asOf = ''} = {}) {
-  const data = await simpleSchedule(office, executionId, {asOf});
+export async function simpleCardBundle(office, executionId, {asOf = '', allowFuture = true} = {}) {
+  // بطاقة التنفيذ: المطلوب حتى تاريخ ⇒ allowFuture = true دائمًا
+  // استخدم الـ cache المفتاحي الذي يتضمن ruleVersion — وإلا لن تنعكس تغييرات الإعدادات
+  const settings = executionSettings(office);
+  const today = localDate();
+  const requestedAsOf = isCivilDate(asOf) ? asOf : today;
+  const bundleKey = executionCache.key({executionId, asOf: `bundle:${requestedAsOf}`, allowFuture, ruleVersion: settings.ruleVersion || 0, engineVersion: settings.engineVersion || 0});
+  const cachedBundle = executionCache.get(bundleKey);
+  if (cachedBundle) return cachedBundle;
+  const data = await simpleSchedule(office, executionId, {asOf, allowFuture});
   const execution = data.execution;
   const [client, file] = await Promise.all([
     execution.clientId ? office.r.clients.get(execution.clientId).catch(() => null) : null,
@@ -294,18 +323,19 @@ export async function simpleCardBundle(office, executionId, {asOf = ''} = {}) {
   const creditor = activeParties.find(party => party.side === 'creditor') || null;
   const debtor = activeParties.find(party => party.side === 'debtor') || null;
   const actions = [...data.actions].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-  const today = localDate();
   const planned = data.actions.filter(action => action.nextActionDate).sort((a, b) => String(a.nextActionDate).localeCompare(String(b.nextActionDate)));
   const nextAction = planned.find(action => String(action.nextActionDate) >= today) || planned.at(-1) || null;
   const lastAction = actions.find(action => String(action.date || '') <= today) || actions[0] || null;
   const poas = [...data.poas].sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).reverse();
-  return {
+  const bundleResult = {
     ...data, client, file, creditor, debtor, actions, lastAction, nextAction, poas,
     expenses: expensesFrom(data.ledger, data.settings),
     status: derivedStatus(execution, data.schedule, today),
     hints: completionHints(data.schedule, {execution, judgments: data.judgments, slices: data.slices}),
     today
   };
+  executionCache.set(bundleKey, bundleResult);
+  return bundleResult;
 }
 
 /** كتابة حالة يدوية (متوقف/مغلق) مع سبب — وهي الوحيدة التي يضبطها المستخدم بنفسه. */
@@ -320,6 +350,7 @@ export async function setExecutionLifecycle(office, executionId, {state = 'runni
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.execution, executionId, value ? 'close' : 'reopen',
       value === 'closed' ? `إغلاق ملف التنفيذ — ${reason}` : value === 'suspended' ? `إيقاف التنفيذ — ${reason}` : 'إعادة التنفيذ إلى «جارٍ»', execution.fileId || '')));
   });
+  executionCache.clearExecution(executionId);
   emitChanged(STORE.execution, executionId);
   return row;
 }
@@ -614,6 +645,7 @@ export async function recordSimpleCollection(office, input = {}) {
       `تحصيل ${receipt.amount} ${currency} (${receiptNumber}) بتاريخ ${date} — تخصيص: ${input.target === 'period' ? `شهر ${input.periodKey}` : 'تلقائي الأقدم أولًا'}`, execution.fileId || '')));
     return {receipt, ledger: ledgerRow, allocations: allocationRows};
   });
+  executionCache.clearExecution(execution.id);
   emitChanged(STORE.executionReceipts, receiptId);
   emitChanged(STORE.execution, execution.id);
   return {...out, preview};
@@ -644,6 +676,7 @@ export async function recordSimpleAction(office, input = {}) {
     await request(tx.objectStore(STORE.executionActions).add(row));
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, row.id, 'create', `إجراء تنفيذ: ${kindLabel} بتاريخ ${row.date}${row.referenceNumber ? ` — ${row.referenceNumber}` : ''}`, execution.fileId || '')));
   });
+  executionCache.clearExecution(execution.id);
   emitChanged(STORE.executionActions, row.id);
   emitChanged(STORE.execution, execution.id);
   let workItem = null;
@@ -686,6 +719,7 @@ export async function recordSimpleExpense(office, input = {}) {
     await request(tx.objectStore(STORE.executionLedger).add(row));
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionLedger, row.id, 'create', `مصروف/رسم: ${label} ${row.amount} ${currency} بتاريخ ${date}${row.includeInPoa ? ' — يدخل التوكيل' : ''}`, execution.fileId || '')));
   });
+  executionCache.clearExecution(execution.id);
   emitChanged(STORE.executionLedger, row.id);
   return row;
 }
@@ -799,6 +833,7 @@ export async function recordSubsequentJudgment(office, input = {}) {
       execution.fileId || '', {periodDecisionsSnapshot})));
   });
   await refreshExecutionSearchText(office, execution.id).catch(() => null);
+  executionCache.clearExecution(execution.id);
   emitChanged(STORE.executionValuePeriods, storedSlice.id);
   return {judgment, slice: storedSlice};
 }
@@ -866,6 +901,7 @@ export async function updateSimpleReceipt(office, {receiptId, amount, date, paym
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionReceipts, receiptId, 'update',
       `تعديل تحصيل ${receipt.receiptNumber}: ${previous.amount} → ${row.amount}${reason ? ` — ${reason}` : ''}`, execution.fileId || '', {before: previous.amount, after: row.amount})));
   });
+  executionCache.clearExecution(receipt.executionId);
   emitChanged(STORE.executionReceipts, receiptId);
   return row;
 }
@@ -900,6 +936,7 @@ export async function reallocateSimpleReceipt(office, {receiptId, target = 'auto
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionAllocations, receiptId, 'reallocate',
       target === 'period' ? `إعادة تخصيص ${receipt.receiptNumber} إلى ${periodKey}` : `إعادة تخصيص ${receipt.receiptNumber} إلى التلقائي (الأقدم أولًا)`, execution.fileId || '')));
   });
+  executionCache.clearExecution(receipt.executionId);
   emitChanged(STORE.executionAllocations, receiptId);
   return true;
 }
@@ -937,6 +974,7 @@ export async function voidSimpleRecord(office, {kind, id, reason = ''} = {}) {
       }
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionReceipts, id, 'void', `إلغاء تحصيل ${receipt.receiptNumber} (${receipt.amount}) — ${why}`, execution.fileId || '')));
     });
+    executionCache.clearExecution(receipt.executionId);
     emitChanged(STORE.executionReceipts, id);
     return {kind, id, undone: true};
   }
@@ -956,6 +994,7 @@ export async function voidSimpleRecord(office, {kind, id, reason = ''} = {}) {
       await request(tx.objectStore(STORE.executionLedger).put({...entry, status: 'voided', voidedAt: stamp, voidReason: why, updatedAt: stamp, version: (entry.version || 0) + 1}));
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionLedger, id, 'void', `إلغاء مصروف ${entry.label || entry.type} (${entry.amount}) — ${why}`, execution.fileId || '')));
     });
+    executionCache.clearExecution(entry.executionId);
     emitChanged(STORE.executionLedger, id);
     return {kind, id, undone: true};
   }
@@ -967,6 +1006,7 @@ export async function voidSimpleRecord(office, {kind, id, reason = ''} = {}) {
       await request(tx.objectStore(STORE.executionActions).put({...row, status: 'voided', voidedAt: stamp, voidReason: why, isDeleted: false, deletedAt: stamp, deletionReason: why, updatedAt: stamp, version: (row.version || 0) + 1}));
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, id, 'void', `إلغاء إجراء ${row.kindLabel || row.kind} — ${why}`, execution.fileId || '')));
     });
+    executionCache.clearExecution(row.executionId);
     emitChanged(STORE.executionActions, id);
     return {kind, id, undone: true};
   }
@@ -986,6 +1026,7 @@ export async function voidSimpleRecord(office, {kind, id, reason = ''} = {}) {
       await request(tx.objectStore(STORE.executionPOAs).put({...poa, status: 'cancelled', voidedAt: stamp, voidReason: why, updatedAt: stamp, version: (poa.version || 0) + 1}));
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionPOAs, id, 'void', `إلغاء توكيل ${poa.poaNumber || ''} — ${why}`, execution.fileId || '')));
     });
+    executionCache.clearExecution(poa.executionId);
     emitChanged(STORE.executionPOAs, id);
     return {kind, id, undone: true};
   }
@@ -1015,6 +1056,7 @@ export async function updateSimpleAction(office, {actionId, patch = {}, reason =
     await request(tx.objectStore(STORE.executionActions).put(next));
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, actionId, 'update', `تعديل إجراء ${next.kindLabel}${reason ? ` — ${reason}` : ''}`, next.fileId || '')));
   });
+  executionCache.clearExecution(next.executionId);
   emitChanged(STORE.executionActions, actionId);
   return next;
 }
@@ -1030,6 +1072,7 @@ export async function undoVoidSimpleRecord(office, {kind, id} = {}) {
       await request(tx.objectStore(STORE.executionReceipts).put({...receipt, status: 'posted', voidedAt: null, voidReason: '', updatedAt: stamp, version: (receipt.version || 0) + 1}));
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionReceipts, id, 'restore', `تراجع عن إلغاء تحصيل ${receipt.receiptNumber}`, receipt.fileId || '')));
     });
+    executionCache.clearExecution(receipt.executionId);
     emitChanged(STORE.executionReceipts, id);
     return true;
   }
@@ -1040,6 +1083,7 @@ export async function undoVoidSimpleRecord(office, {kind, id} = {}) {
       await request(tx.objectStore(STORE.executionLedger).put({...entry, status: 'posted', voidedAt: null, voidReason: '', updatedAt: stamp, version: (entry.version || 0) + 1}));
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionLedger, id, 'restore', `تراجع عن إلغاء مصروف ${entry.label || entry.type}`, entry.fileId || '')));
     });
+    executionCache.clearExecution(entry.executionId);
     emitChanged(STORE.executionLedger, id);
     return true;
   }
@@ -1050,6 +1094,7 @@ export async function undoVoidSimpleRecord(office, {kind, id} = {}) {
       await request(tx.objectStore(STORE.executionActions).put({...row, status: 'posted', voidedAt: null, voidReason: '', isDeleted: false, deletedAt: null, deletionReason: '', updatedAt: stamp, version: (row.version || 0) + 1}));
       await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, id, 'restore', `تراجع عن إلغاء إجراء ${row.kindLabel || row.kind}`, row.fileId || '')));
     });
+    executionCache.clearExecution(row.executionId);
     emitChanged(STORE.executionActions, id);
     return true;
   }
@@ -1084,12 +1129,13 @@ export async function previewSubsequentJudgment(office, executionId, {amount, ef
 }
 
 /** «احسب مدة»: المستحق/المدفوع/المتبقي عن مدة + رصيد سابق + الإجمالي. */
-export async function simpleDurationClaim(office, executionId, {fromDate, toDate, rangeDecisions = []} = {}) {
+export async function simpleDurationClaim(office, executionId, {fromDate, toDate, rangeDecisions = [], allowFuture = true} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
   const asOf = localDate();
-  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, asOf);
-  const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate);
+  // «احسب مدة» للنطاق يجب أن يحسب المستقبل إن طُلب — لا يظهر «قُصّ أفق الحساب» عند اختيار مستقبل
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, asOf, {allowFuture: true});
+  const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate, {allowFuture});
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
     const FEAS = await import('./execution-feas.js');
@@ -1142,7 +1188,7 @@ export async function recordSimpleDurationDecisions(office, executionId, {fromDa
 }
 
 /** مسودة توكيل: رصيد سابق + فترة جديدة + فروق مضمّنة (بلا ازدواج) + مصروفات مختارة. */
-export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = []} = {}) {
+export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = [], allowFuture = true, fees = 0, stamps = 0} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
@@ -1154,13 +1200,13 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
     return {...feasDraft, previousAppliedMinor: feasDraft.totals.previousBalanceMinor, periodDueMinor: feasDraft.totals.periodsMinor,
       periodPaidMinor, periodRemainingMinor: Math.max(0, feasDraft.totals.periodsMinor - periodPaidMinor), expensesMinor: feasDraft.totals.expensesMinor,
       totalMinor: feasDraft.totals.totalMinor, rangeDecisions: feasDraft.rangeDecisionsSnapshot || [], partials: feasDraft.partials || [],
-      requestedToDate: toDate, horizonCapped: Boolean(toDate && feasDraft.toDate && feasDraft.toDate < toDate), suggestedFrom: feasDraft.fromDate};
+      requestedToDate: toDate, horizonCapped: Boolean(toDate && feasDraft.toDate && feasDraft.toDate < toDate), suggestedFrom: feasDraft.fromDate, feesMinor: 0, stampsMinor: 0};
   }
   const calculationAsOf = localDate();
-  const cappedTo = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate || calculationAsOf);
+  const cappedTo = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate || calculationAsOf, {allowFuture});
   // Keep the selected duration boundary separate from the unit-calculation horizon:
   // an explicit boundary choice may include the full period even when `toDate` falls inside it.
-  const unitAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  const unitAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf, {allowFuture: true});
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
     const FEAS = await import('./execution-feas.js');
@@ -1173,7 +1219,17 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
     });
   }
   const expenses = expensesFrom(inputs.ledger, settings);
-  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions});
+  // ربط الرصيد السابق بمحضر: ابحث في bundle.actions عن آخر dissipation/seizure
+  const dissipationKinds = new Set(['dissipation', 'seizure', 'sale_notice', 'sale_session']);
+  const lastDissipation = [...(inputs.actions || [])].filter(a => !a.isDeleted && String(a.status || '') !== 'voided' && dissipationKinds.has(String(a.kind || ''))).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
+  // تحويل الرسوم والدمغة اليدوية إلى وحدات صغرى
+  const currency = schedule.currency || settings.schedule.defaultCurrency || 'EGP';
+  const toMinor = v => {
+    try { return toMinorUnits(v, currency); } catch { return 0; }
+  };
+  const feesMinor = toMinor(fees);
+  const stampsMinor = toMinor(stamps);
+  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions, feesMinor, stampsMinor, previousAction: lastDissipation});
   draft.rangeDecisions = draft.rangeDecisions || [];
   draft.partials = draft.partials || [];
   draft.requestedToDate = toDate;
@@ -1194,6 +1250,7 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
       poaNumber: String(draft.poaNumber || '').trim(), notes: String(notes || '').trim(),
       rangeDecisionsSnapshot: draft.rangeDecisionsSnapshot || draft.rangeDecisions || [],
       lines: (draft.lines || []).filter(line => line.included && Number.isSafeInteger(line.amountMinor) && line.amountMinor > 0)});
+    executionCache.clearExecution(executionId);
     emitChanged(STORE.executionPOAs, poa.id);
     if (printNow) {
       const PR = await import('./execution-print.js');
@@ -1216,6 +1273,7 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
     stampAmount: 0, total: fromMinorUnits(draft.totalMinor, draft.currency),
     lines, judgmentIds: [], rangeDecisionsSnapshot: draft.rangeDecisions || [], notes: String(notes || '').trim()
   });
+  executionCache.clearExecution(executionId);
   emitChanged(STORE.executionPOAs, poa.id);
   if (printNow) {
     const PR = await import('./execution-print.js');
@@ -1429,6 +1487,7 @@ export async function enableFeasModel(office, executionId, {reason = ''} = {}) {
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.execution, row.id, 'update',
       `تفعيل نموذج FEAS على تنفيذ فارغ من الأثر المالي${String(reason || '').trim() ? ` — ${String(reason).trim()}` : ''}`, row.fileId || '')));
   });
+  executionCache.clearExecution(row.id);
   emitChanged(STORE.execution, row.id);
   return {execution: row, reused: false, footprint};
 }

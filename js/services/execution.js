@@ -13,6 +13,7 @@ import {uid} from '../core/id.js';
 import {Clock, localDate} from '../core/clock.js';
 import {AppError, ERR} from '../core/errors.js';
 import {events} from '../core/events.js';
+import {executionCache} from './execution-cache.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {assertExpectedVersion} from './consistency.js';
 import {
@@ -527,6 +528,7 @@ export async function saveValueSlice(office, input) {
     });
     row = promoted;
   }
+  executionCache.clearExecution(row.executionId);
   events.emit('entity:changed', {entityType: STORE.executionValuePeriods, id: row.id});
   return {...row, __impact: impact};
 }
@@ -564,6 +566,7 @@ export async function cancelValueSlice(office, id, reason = '') {
     await request(tx.objectStore(STORE.executionValuePeriods).put(row));
     await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.executionValuePeriods, id, 'cancel', `إلغاء شريحة قيمة ${row.entitlementType} (${row.amount} من ${row.startDate})${row.cancelReason ? ' — السبب: ' + row.cancelReason : ''}`, {fileId: row.fileId})));
   });
+  executionCache.clearExecution(row.executionId);
   events.emit('entity:changed', {entityType: STORE.executionValuePeriods, id});
   return row;
 }

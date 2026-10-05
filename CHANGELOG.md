@@ -1,3 +1,34 @@
+# v5.13.1 — إصلاح مركز التنفيذ فقط (BUG-1..7) — تراكمي فوق إصلاح «لا يُحسب أي شيء»
+
+**2026-10-05 — النطاق: مركز التنفيذ فقط، المحرك سليم — إصلاح واجهة + سياسة أفق + توكيل.**
+
+## BUG-1 — روابط الإعدادات/المساعدة داخل السطر الجاري لا تعمل
+- كل ربطات مركز التنفيذ تحوّلت من `querySelector` إلى `querySelectorAll.forEach`: `data-new-execution, data-demo-example, data-help, data-settings, data-customize-page, data-exec-trash, data-exec-demo, data-exec-clear, data-search, data-clear-search` و`data-record, data-open-duration, data-open-statement, data-help, data-settings, data-more, data-delete-execution, data-asof, data-asof-today`. زر `data-settings` و`data-more` داخل `runningPeriodNote` مربوط عبر `bindContainer`.
+
+## BUG-2/3 — أفق الحساب يقصّ المستقبل صامتًا
+- `claimHorizon(execution,asOf,{allowFuture})` و`simpleScheduleHorizon(...{allowFuture})` — إذا `allowFuture:true` لا قصّ. بطاقة التنفيذ `allowFuture:true` (تقديري)، القائمة `allowFuture:false`. `simpleSchedule` يعيد `requestedAsOf, effectiveAsOf, horizonCapped, horizonNote, allowFuture`، والواجهة تعرض تنبيهًا أصفر عند القصّ وشارة «تقديري» عند المستقبل.
+- قبول: `asOf 2026-11-04 allowFuture:true => 1 فترة 3000`، `asOf 2027-01-04 allowFuture:true => 4 فترات 12000 (CALENDAR_MONTH) / 3 فترات 9000 (ANNIVERSARY)` بلا قصّ صامت، `allowFuture:false => مقصوص + note`.
+
+## BUG-4 — تاريخ «المطلوب حتى» موحّد
+- مفتاح لكل تنفيذ `ui:exec:asof:${id}` + عام احتياطي + وضع `ui:exec:asof-mode:v1` = `per|global`. اليوم يمسح المحلي فقط. واجهة الإعدادات تتيح اختيار الوضع يدويًا.
+
+## BUG-5 — فشل حفظ الإعدادات صامت
+- `executionSettingsDialog` بمعالجة `try/catch` كاملة، زر معطّل + «جارٍ الحفظ…» + سطر خطأ `data-error` + `toast`. تقرير الترحيل والاستعادة بنفس النمط. يستخدم `app.refresh()` لا `location.reload`.
+
+## BUG-6 — أحداث `execution:cache-invalidated` بلا مستمع
+- `js/services/execution-cache.js` جديد — LRU 200، مفتاح `${executionId}|${asOf}|${allowFuture}|${ruleVersion}|${engineVersion}`، يستمع لحدثي الإبطال. كل كتابة في `execution-simple.js` تمسح cache التنفيذ، و`simpleSchedule` و`simpleCardBundle` تستخدمانه مع `ruleVersion`.
+
+## BUG-7 — التوكيل بلا معادلة ولا رسوم/دمغة ولا ربط بمحضر
+- `buildPoaFigures` يضيف `feesMinor, stampsMinor, previousAction` → `feesLine/stampsLine` مع تلميح «النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.»، و`periodEquations` (9×3000=27000، 3×3000+6×3500)، و`previousNote` مرتبط بمحضر تبديد/حجز برقم وتاريخ، و`total = previous + period + expenses + fees + stamps` ومعادلات تشمل التفصيل.
+- `simplePoaDraft({fees,stamps})` يلتقط آخر تبديد/حجز ويحوّل عبر `toMinorUnits`. واجهة `simplePoaDialog` أضافت حقلين رسوم/دمغة ومعاينة بالربط والمعادلة.
+
+## التحقق
+- `tools/node-tests/run-tests.mjs` يبقى 470/470 بعد الإصلاح (التخزين المؤقت يراعي `ruleVersion`).
+- `execution-practical-tests.mjs` 29/29 مع per-card asOf وتقديري مستقبلي.
+- لا تغيير `SCHEMA_VERSION` (18)، لا bundler، مسارات نسبية، لا `location.reload`.
+
+---
+
 # v5.13.1 — إصلاح «لا يُحسب أي شيء» في التنفيذ + أدوات إدارة البيانات
 
 **2026-10-05** — الشكوى: «أنشئ تنفيذًا جديدًا وأدخل بياناته وأضغط ‹حفظ وفتح البطاقة›… بعدها لا يُحسب أي شيء إطلاقًا؛ لا توجد حسابات في أي نافذة ولا في أي تبويب».

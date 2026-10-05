@@ -1,3 +1,21 @@
+# v5.13.1 — إصلاح مركز التنفيذ فقط (BUG-1..7) تراكمي
+
+**2026-10-05 — النطاق: Execution Center فقط، المحرك سليم — إصلاح واجهة + أفق + توكيل.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/modules/execution-center.js` | كل الروابط `querySelectorAll.forEach` (مركز + بطاقة + runningPeriodNote)، ثوابت `ASOF_MODE_KEY` و`asOfKeyFor(id)`، قراءة `localAsOf/globalAsOf/effectiveAsOf` مع `allowFuture:true`، `summarySectionMarkup` يعرض `requestedAsOf/effectiveAsOf` وتنبيه `horizonCapped` وشارة «تقديري»، و`bindContainer` يربط `data-settings/data-help` داخل الملاحظة الجارية. |
+| `js/services/execution-simple.js` | `claimHorizon(...,{allowFuture})` و`simpleScheduleHorizon` — قصّ فقط إذا `allowFuture:false`، `simpleSchedule({allowFuture})` يعيد حقول شفافية + `horizonNote`، `simpleCardBundle` افتراضي `allowFuture:true` ويستخدم `executionCache` بمفتاح يشمل `ruleVersion`، وكل كتابات (تحصيل/إجراء/مصروف/حكم لاحق/توكيل/إلغاء/تعديل/حالة) تمسح `executionCache.clearExecution(id)`، و`simplePoaDraft({fees,stamps,allowFuture})` يلتقط آخر تبديد/حجز ويحوّل الرسوم عبر `toMinorUnits`. |
+| `js/domain/execution-schedule.js` | `buildPoaFigures({schedule,fromDate,toDate,feesMinor,stampsMinor,previousAction,...})` — يضيف `feesLine/stampsLine` بتلميح «النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت»، و`periodEquations` (متساوية/مختلفة/جزئية)، و`previousNote` مرتبط بمحضر برقم وتاريخ، و`totalMinor = previous+period+expenses+fees+stamps` ومعادلات تشمل التفصيل. |
+| `js/ui/execution-simple-forms.js` | `executionSettingsDialog` بمعالجة `try/catch` كاملة + تعطيل زر + `data-error` + `toast` + اختيار وضع `asofMode per/global` وقوائم قابلة للتعديل يدويًا (بما فيها `borneBy, laterJudgmentKinds, templates, followUpThresholds`) + يستخدم `app.refresh()`، و`simplePoaDialog` يضيف حقلي `fees/stamps` ومعاينة بالربط والمعادلة والرسوم. |
+| `js/services/execution-cache.js` (جديد) | LRU 200 مدخل، مفتاح `${executionId}|${asOf}|${allowFuture}|${ruleVersion}|${engineVersion}`، يستمع لـ `execution:cache-invalidated` و`execution:configuration-changed`، `get/set/clear/clearExecution/key`. |
+| `docs/EXECUTION.md` | قسم 7 يوثق BUG-1..7 وقبول `allowFuture`. |
+| `CHANGELOG.md` | إدخال تراكمي يوثق كل إصلاح وقبول 1 فترة/4 فترات/مقصوص. |
+
+**التحقق:** `claimHorizon` allowTrue لا يقصّ، allowFalse يقصّ إلى اليوم؛ `simpleSchedule` 2026-11-04 ⇒ 1 فترة 3000، 2027-01-04 ⇒ 3 فترات ANNIVERSARY / 4 فترات CALENDAR_MONTH بلا قصّ صامت؛ `execution-cache` LRU ويُبطل عند تغيير الإعدادات؛ `buildPoaFigures` يظهر معادلة ورسوم يدوية وربط بمحضر. لا `SCHEMA_VERSION` جديد، لا bundler، مسارات نسبية، لا `location.reload`.
+
+---
+
 # v5.13.1 — خريطة إصلاح حساب التنفيذ وإدارة البيانات
 
 **2026-10-05 — إصلاح محدود: توقيت الاستحقاق صار خيارًا، وقاعدة «لا شاشة فارغة»، وأدوات مسح البيانات والملفات التجريبية. لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن.**
