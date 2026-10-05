@@ -263,10 +263,15 @@ async function verifyOffline(){
   const isMigrationLog=row=>row.entityType==='meta'&&row.entityId==='executionSimpleMigration'&&row.action==='execution_simple_migration';
   const priorLog=(prior.activityLog||[]).filter(isMigrationLog);
   const newLog=(normalized.activityLog||[]).filter(isMigrationLog);
-  assert.equal(priorLog.length,0,'fixture must start without an execution migration log entry');
+  assert.ok(priorLog.length<=1,`fixture has duplicate execution migration logs: ${priorLog.length}`);
   assert.ok(newLog.length<=1,`one-time migration must log at most once, got ${newLog.length}`);
-  if(newLog.length)bootChanges.push({store:'activityLog',action:'execution_simple_migration',field:'(one-time additive entry)',before:0,after:newLog.length});
+  if(priorLog.length){
+   assert.deepEqual(newLog,priorLog,'an already-recorded execution migration log must remain unchanged on offline reload');
+  }else if(newLog.length){
+   bootChanges.push({store:'activityLog',action:'execution_simple_migration',field:'(one-time additive entry)',before:0,after:newLog.length});
+  }
   normalized.activityLog=(normalized.activityLog||[]).filter(row=>!isMigrationLog(row));
+  prior.activityLog=(prior.activityLog||[]).filter(row=>!isMigrationLog(row));
   await verify(`Offline reload: app boots from the controlled cache with the same office/Schema ${SCHEMA_VERSION} and only the existing maintenance timestamp update`,async()=>{
    assert.equal(navigation.fromServiceWorker(),true);assert.equal(await page.evaluate(()=>navigator.onLine),false);
    assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.ctx.profile.id),profile.id);

@@ -55,9 +55,9 @@ const serviceWorker = await page.evaluate(async () => {
   const paths = cache ? (await cache.keys()).map(request => new URL(request.url).pathname) : [];
   return {controlled: Boolean(navigator.serviceWorker.controller), cacheName, paths};
 });
-report.serviceWorker = {controlled: serviceWorker.controlled, cacheName: serviceWorker.cacheName, feasAssets: serviceWorker.paths.filter(path => /execution-(?:calendar|money|feas|schedule)\.js$/.test(path))};
+report.serviceWorker = {controlled: serviceWorker.controlled, cacheName: serviceWorker.cacheName, feasAssets: serviceWorker.paths.filter(path => /execution-(?:calendar|period-calendar|money|feas|schedule|period-migration)\.js$/.test(path))};
 check('Service Worker controls the FEAS app and precaches its module graph', serviceWorker.controlled && Boolean(serviceWorker.cacheName)
-  && ['/js/domain/execution-calendar.js', '/js/domain/execution-money.js', '/js/domain/execution-feas.js', '/js/domain/execution-schedule.js', '/js/services/execution-feas.js', '/js/services/execution-simple.js', '/js/services/execution-settings.js', '/js/ui/execution-simple-forms.js'].every(path => serviceWorker.paths.includes(path)), JSON.stringify(report.serviceWorker));
+  && ['/js/domain/execution-calendar.js', '/js/domain/execution-period-calendar.js', '/js/domain/execution-money.js', '/js/domain/execution-feas.js', '/js/domain/execution-schedule.js', '/js/services/execution-feas.js', '/js/services/execution-period-migration.js', '/js/services/execution-simple.js', '/js/services/execution-settings.js', '/js/ui/execution-simple-forms.js'].every(path => serviceWorker.paths.includes(path)), JSON.stringify(report.serviceWorker));
 
 const seed = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
@@ -129,10 +129,10 @@ check('بطاقة التنفيذ الموحّدة تفتح تنفيذ FEAS ال�
 check('الأرقام المعروضة تطابق الرصيد المعترف به: مطلوب 9,000 · مدفوع 1,000 · متبقي 8,000',
   card.numbers['المدفوع'] === '1,000' && card.numbers['المتبقي'] === '8,000' && Object.keys(card.numbers).some(key => key.startsWith('المطلوب') && card.numbers[key] === '9,000'),
   JSON.stringify(card.numbers));
-check('الحساب يقف عند آخر فترة معترف بها (يناير–مارس 2025) ولا يُنشئ فترات بعدها', card.periodRows === 3 && /مارس 2025/.test(card.lastPeriodText), `${card.periodRows} صفوف · ${card.lastPeriodText}`);
+check('الحساب يقف عند آخر فترة معترف بها (يناير–مارس 2025) ولا يُنشئ فترات بعدها', card.periodRows === 3 && /31\/03\/2025/.test(card.lastPeriodText), `${card.periodRows} صفوف · ${card.lastPeriodText}`);
 check('تنبيه صريح يشرح نموذج الاعتراف ويحيل إلى الأدوات المتقدمة', card.feasHint === true, String(card.feasHint));
-check('بيانات FEAS لم تُمس: التزام واحد وفترة معترف بها واحدة وشريحة واحدة', card.obligations === 1 && card.recognizedPeriods === 1 && card.slices === 1, JSON.stringify({obligations: card.obligations, recognized: card.recognizedPeriods, slices: card.slices}));
-check('رصيد FEAS المعترف به ما زال 9,000/1,000/8,000 من محرك FEAS نفسه', !card.feasError && Number(card.feasSummary?.finalEntitlement) === 9000 && Number(card.feasSummary?.collected) === 1000 && Number(card.feasSummary?.remaining) === 8000 && card.feasSummary?.periodCount === 1, JSON.stringify({summary: card.feasSummary, error: card.feasError}));
+check('بيانات FEAS لم تُمس: التزام واحد وثلاث فترات شهرية معترف بها وشريحة واحدة', card.obligations === 1 && card.recognizedPeriods === 3 && card.slices === 1, JSON.stringify({obligations: card.obligations, recognized: card.recognizedPeriods, slices: card.slices}));
+check('رصيد FEAS المعترف به ما زال 9,000/1,000/8,000 من محرك FEAS نفسه', !card.feasError && Number(card.feasSummary?.finalEntitlement) === 9000 && Number(card.feasSummary?.collected) === 1000 && Number(card.feasSummary?.remaining) === 8000 && card.feasSummary?.periodCount === 3, JSON.stringify({summary: card.feasSummary, error: card.feasError}));
 await page.screenshot({path: path.join(artifactDir, 'execution-feas-card.png'), fullPage: true});
 
 // ===== الأدوات المتقدمة (مسار FEAS القديم) تبقى متاحة من البطاقة الجديدة =====

@@ -345,6 +345,75 @@ await closeAllModals();
   assert.ok(rows.length >= 3, `صفوف الربع الأخير: ${rows.join(', ')}`);
 });
 
+await verify('S6b — قرار منتصف الفترة ونهايتها في المتصفح: مقارنة جانبية ثم حفظ السبب والفاعل والتاريخ وظهورها في Trace', async () => {
+  await closeAllModals();
+  await page.locator('.exec-toolbar [data-record]').first().click();
+  await page.waitForSelector('#modal-root .record-tile', {timeout: 10000});
+  await modal().locator('.record-tile[data-record="judgment"]').click();
+  await page.waitForSelector('#modal-root [data-form="later-judgment"]', {timeout: 10000});
+  await modal().locator('[name="entitlementType"]').fill('نفقة شهرية');
+  await modal().locator('[name="amount"]').fill('6000');
+  await modal().locator('[name="effectiveFrom"]').fill('2025-11-15');
+  await modal().locator('[name="judgmentNumber"]').fill('701/2025');
+  await page.waitForTimeout(900);
+  const midCompare = await modal().locator('[data-preview]').textContent();
+  assert.ok(midCompare.includes('مقارنة خيارات الحدود'), 'مقارنة منتصف الفترة غير ظاهرة');
+  assert.ok(midCompare.includes('القيمة القديمة كاملة') && midCompare.includes('القيمة الجديدة كاملة'), 'خيارات منتصف الفترة ليست جنبًا إلى جنب');
+  assert.equal(await modal().locator('[data-period-decision]').count(), 1, 'نموذج القرار الصريح لمنتصف الفترة مفقود');
+  await modal().locator('[name="midPeriodChoice"]').selectOption('USE_NEW_VALUE');
+  await modal().locator('[name="midPeriodReason"]').fill('منطوق الحكم يحدد القيمة الجديدة عن كامل الفترة');
+  await modal().locator('[data-save]').click();
+  await page.waitForSelector('#modal-root [data-form="later-judgment"]', {state: 'detached', timeout: 15000});
+
+  await page.locator('.exec-toolbar [data-record]').first().click();
+  await page.waitForSelector('#modal-root .record-tile', {timeout: 10000});
+  await modal().locator('.record-tile[data-record="judgment"]').click();
+  await page.waitForSelector('#modal-root [data-form="later-judgment"]', {timeout: 10000});
+  await modal().locator('[name="entitlementType"]').fill('نفقة شهرية');
+  await modal().locator('[name="amount"]').fill('7000');
+  await modal().locator('[name="effectiveFrom"]').fill('2025-12-01');
+  await modal().locator('[name="effectiveTo"]').fill('2025-12-15');
+  await modal().locator('[name="judgmentNumber"]').fill('702/2025');
+  await page.waitForTimeout(900);
+  const endCompare = await modal().locator('[data-preview]').textContent();
+  assert.ok(endCompare.includes('مقارنة خيارات الحدود'), 'مقارنة نهاية السريان غير ظاهرة');
+  assert.ok(endCompare.includes('الفترة كاملة') && endCompare.includes('استبعاد الفترة'), 'خيارات نهاية السريان ليست جنبًا إلى جنب');
+  assert.equal(await modal().locator('[data-period-decision]').count(), 1, 'نموذج القرار الصريح لنهاية الفترة مفقود');
+  await modal().locator('[name="endPeriodChoice"]').selectOption('INCLUDE_FULL');
+  await modal().locator('[name="endPeriodReason"]').fill('منطوق الحكم يشمل كامل شهر ديسمبر');
+  await modal().locator('[data-save]').click();
+  await page.waitForSelector('#modal-root [data-form="later-judgment"]', {state: 'detached', timeout: 15000});
+
+  const stored = await page.evaluate(async id => {
+    const app = window.__LAW_OFFICE_APP__;
+    const rows = await app.office.r.executionValuePeriods.byIndex('executionId', id, 100);
+    const decisions = rows.flatMap(slice => slice.periodDecisionsSnapshot || []);
+    const B = await import('./js/services/execution-balance.js');
+    const balance = await B.executionBalance(app.office, id);
+    const flatten = nodes => (nodes || []).flatMap(node => [node, ...flatten(node.children)]);
+    const traceDecisions = flatten([balance.trace]).flatMap(node => [node.meta?.decision, ...(node.meta?.decisions || [])]).filter(Boolean);
+    const S = await import('./js/services/execution-simple.js');
+    const schedule = await S.simpleSchedule(app.office, id, {asOf: '2025-12-31'});
+    return {
+      actor: app.office.ctx.profile?.id || 'user',
+      mid: decisions.find(row => row.kind === 'MID_CHANGE'), end: decisions.find(row => row.kind === 'END_DATE'),
+      trace: traceDecisions,
+      decemberDue: schedule.schedule.rows.find(row => row.fromDate === '2025-12-01')?.dueMinor
+    };
+  }, exampleId);
+  assert.equal(stored.mid?.choice, 'USE_NEW_VALUE');
+  assert.equal(stored.mid?.reason, 'منطوق الحكم يحدد القيمة الجديدة عن كامل الفترة');
+  assert.equal(stored.mid?.decidedBy, stored.actor);
+  assert.ok(stored.mid?.decidedAt, 'تاريخ قرار MID_CHANGE غير محفوظ');
+  assert.equal(stored.end?.choice, 'INCLUDE_FULL');
+  assert.equal(stored.end?.reason, 'منطوق الحكم يشمل كامل شهر ديسمبر');
+  assert.equal(stored.end?.decidedBy, stored.actor);
+  assert.ok(stored.end?.decidedAt, 'تاريخ قرار END_DATE غير محفوظ');
+  assert.ok(stored.trace.some(row => row.kind === 'MID_CHANGE' && row.choice === stored.mid.choice && row.reason === stored.mid.reason), 'قرار MID_CHANGE غير ظاهر في Trace');
+  assert.ok(stored.trace.some(row => row.kind === 'END_DATE' && row.choice === stored.end.choice && row.reason === stored.end.reason), 'قرار END_DATE غير ظاهر في Trace');
+  assert.equal(stored.decemberDue, 700_000, 'خيار INCLUDE_FULL لم يثبت كامل قيمة ديسمبر');
+});
+
 /* ---------------------------------------------------------------- S7 */
 await verify('S7 — توكيل بمدة: نصاب الأرقام ظاهر والمعادلة مكتوبة، وإصداره لا يغيّر المتبقي', async () => {
   await closeAllModals();

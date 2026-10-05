@@ -16,13 +16,15 @@ import {events} from '../core/events.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {assertExpectedVersion} from './consistency.js';
 import {
-  num, round2, isIsoDate, todayIso, DEFAULT_PRORATION, ACTION_KIND_LABELS,
+  num, round2, isIsoDate, todayIso, ACTION_KIND_LABELS,
   validateExecution, validateValueSlice, EXECUTION_TYPE_LABELS, EXECUTION_STATUS_LABELS, PERIODICITY_LABELS
 } from '../domain/execution.js';
 import {buildEntitlementPeriods, analyzeSliceImpact, balanceSummary, executionAlerts, eligibleSlices} from '../domain/entitlement-engine.js';
+import {buildScheduleUnits} from '../domain/execution-schedule.js';
 import {FEAS_MODEL, analyzeFeasValueChange, calculateFeasBalance} from '../domain/execution-feas.js';
 import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
 import {executionIntegrityReport} from './execution-feas.js';
+import {executionSettings} from './execution-settings.js';
 
 const MAX_CHILD_ROWS = 2000;
 const FEAS_BLOCKED_FIELDS = [
@@ -72,7 +74,6 @@ export async function saveExecution(office, input, id = null, expectedVersion = 
     accountingModel: old?.accountingModel || (requestedModel === FEAS_MODEL ? FEAS_MODEL : 'legacy-v1'),
     executionMethod: input.executionMethod || old?.executionMethod || '',
     status: input.status || old?.status || 'active',
-    prorationPolicy: input.prorationPolicy || old?.prorationPolicy || DEFAULT_PRORATION,
     entitlementThroughDate: isIsoDate(input.entitlementThroughDate) ? input.entitlementThroughDate : (old?.entitlementThroughDate || ''),
     createdAt: old?.createdAt || now,
     updatedAt: now,
@@ -226,16 +227,28 @@ export async function deleteExecutionValueSlice(office, id, {expectedVersion = n
   // If the execution has no explicit horizon, a previous implementation stopped at
   // today and could miss an already-persisted future allocation. Extend the read-only
   // calculation to every dated child reference before deciding whether deletion is safe.
+  const periodStartFromKey = key => {
+    const parts = String(key || '').split('::');
+    const last = parts.at(-1) || '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(last)) return last; // legacy: type::startDate
+    const anchor = parts.at(-2) || '';
+    return /^\d{4}-\d{2}-\d{2}$/.test(anchor) ? anchor : ''; // stable: itemId::anchorDate::k
+  };
   const childDates = [
-    ...allocations.map(item => String(item.periodKey || '').split('::').at(-1)),
-    ...differences.map(item => String(item.periodKey || '').split('::').at(-1)),
+    ...allocations.map(item => periodStartFromKey(item.periodKey)),
+    ...differences.map(item => periodStartFromKey(item.periodKey)),
     ...periods.flatMap(item => [item.fromDate, item.toDate])
   ].filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value));
   const referencedThrough = [todayIso(), ...childDates].sort().at(-1);
-  const generatedBuild = buildEntitlementPeriods({slices: allSlices, to: referencedThrough || execution?.entitlementThroughDate || ''});
+  const generatedBuild = buildScheduleUnits({slices: allSlices, asOf: referencedThrough || execution?.entitlementThroughDate || '', settings: executionSettings(office).schedule});
   if (generatedBuild.truncated) throw new AppError(ERR.CONFLICT, 'تعذر التحقق من جميع الفترات المولدة؛ لم يُنفّذ حذف على نطاق جزئي.');
-  const generated = generatedBuild.periods;
-  const periodKeys = new Set(generated.filter(period => period.sliceId === id).map(period => period.key));
+  const generated = generatedBuild.units;
+  const targetItemId = String(row.itemId || row.obligationId || `legacy:${String(row.entitlementType || 'بند').trim()}`);
+  const targetFixed = String(row.valueType || 'periodic') === 'fixed';
+  const periodKeys = new Set(generated.filter(period => period.parts?.some(part => part.sliceId === id)
+    || (period.itemId === targetItemId && Boolean(period.fixed) === targetFixed
+      && [row.startDate, row.endDate].some(boundary => boundary && boundary >= period.fromDate && boundary <= period.toDate)))
+    .flatMap(period => [period.unitKey, period.legacyPeriodKey].filter(Boolean)));
   const referenced = item => !item.isDeleted && (
     item.sliceId === id || item.valuePeriodId === id || item.sourceValuePeriodId === id || item.previousSliceId === id || item.newSliceId === id ||
     (Array.isArray(item.sourceValuePeriodIds) && item.sourceValuePeriodIds.includes(id)) || periodKeys.has(item.periodKey)
@@ -448,6 +461,11 @@ export async function saveValueSlice(office, input) {
   const existingRows = await executionSlices(office, normalized.executionId, {limit: MAX_CHILD_ROWS + 1});
   if (existingRows.length > MAX_CHILD_ROWS) throw new AppError(ERR.CONFLICT, 'تجاوزت شرائح التنفيذ حد القراءة الآمن؛ لم تُنشأ شريحة على بيانات جزئية.');
   const existing = existingRows.filter(slice => slice.id !== normalized.id);
+  const itemId = String(normalized.itemId || (feas ? obligation.id : `${execution.id}::${String(normalized.entitlementType).trim()}`));
+  const itemSlices = existing.filter(slice => String(slice.itemId || (slice.obligationId || `${execution.id}::${String(slice.entitlementType || '').trim()}`)) === itemId).sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || Number(a.sequence || 0) - Number(b.sequence || 0));
+  const existingAnchor = itemSlices.map(slice => slice.anchorDate || slice.anchor || slice.startDate).find(isIsoDate) || '';
+  if (existingAnchor && isIsoDate(normalized.anchorDate) && normalized.anchorDate !== existingAnchor) throw new AppError(ERR.CONFLICT, 'ارتكاز البند ثابت منذ أول قيمة؛ لا يُعاد ضبطه عند إضافة شريحة حكم لاحق.');
+  const itemAnchorDate = existingAnchor || (isIsoDate(normalized.anchorDate) ? normalized.anchorDate : (isIsoDate(normalized.anchor) ? normalized.anchor : normalized.startDate));
   const obligationSlices = feas ? existing.filter(slice => slice.obligationId === obligation.id) : existing;
   if (feas && obligationSlices.some(slice => slice.status === 'needs_review')) throw new AppError(ERR.CONFLICT, 'توجد شريحة قيمة أخرى تنتظر قرار مراجعة؛ احسمها قبل إنشاء شريحة جديدة.');
   const recognizedForObligation = feas ? await office.r.executionPeriods.byIndex('executionId', normalized.executionId, MAX_CHILD_ROWS + 1) : [];
@@ -470,6 +488,7 @@ export async function saveValueSlice(office, input) {
     fileId: execution.fileId || '', clientId: execution.clientId || '',
     sequence: existing.reduce((max, slice) => Math.max(max, Number(slice.sequence || 0)), 0) + 1,
     entitlementType: String(normalized.entitlementType).trim(), partyId: normalized.partyId || '',
+    itemId,
     judgmentId: normalized.judgmentId, linkedJudgmentId: normalized.judgmentId,
     valueType: normalized.valueType === 'fixed' ? 'fixed' : 'periodic',
     amount: round2(num(normalized.amount)),
@@ -477,9 +496,16 @@ export async function saveValueSlice(office, input) {
     currency: normalized.currency || 'جنيه',
     periodicity: normalized.valueType === 'fixed' ? 'fixed' : (normalized.periodicity || (feas ? obligation.frequency : 'monthly')),
     customDays: normalized.periodicity === 'custom' ? Math.max(1, Math.floor(num(normalized.customDays) || 1)) : null,
-    anchor: normalized.anchor || normalized.startDate || '', startDate: normalized.startDate,
+    anchor: itemAnchorDate,
+    anchorDate: itemAnchorDate, startDate: normalized.startDate,
     endDate: isIsoDate(normalized.endDate) ? normalized.endDate : '',
-    proration: feas ? obligation.prorationPolicy : (normalized.proration || execution.prorationPolicy || DEFAULT_PRORATION),
+    startPeriodChoice: normalized.startPeriodChoice || '', startChoiceReason: String(normalized.startChoiceReason || ''),
+    midPeriodChoice: normalized.midPeriodChoice || '', midPeriodReason: String(normalized.midPeriodReason || ''),
+    endPeriodChoice: normalized.endPeriodChoice || '', endPeriodReason: String(normalized.endPeriodReason || ''),
+    manualStartAmountMinor: Number.isSafeInteger(normalized.manualStartAmountMinor) ? normalized.manualStartAmountMinor : null,
+    manualPeriodAmountMinor: Number.isSafeInteger(normalized.manualPeriodAmountMinor) ? normalized.manualPeriodAmountMinor : null,
+    manualEndAmountMinor: Number.isSafeInteger(normalized.manualEndAmountMinor) ? normalized.manualEndAmountMinor : null,
+    periodDecisionsSnapshot: Array.isArray(normalized.periodDecisionsSnapshot) ? normalized.periodDecisionsSnapshot.map(row => ({...row})) : [],
     status: feas ? (hasRecognizedForObligation ? 'needs_review' : 'active') : (normalized.status || 'active'),
     sourceReference: String(normalized.sourceReference || '').trim(), notes: String(normalized.notes || '').trim(),
     needsReview: Boolean(normalized.needsReview || (feas && hasRecognizedForObligation)),
@@ -524,7 +550,7 @@ export async function previewSliceImpact(office, executionId, slice) {
     return {rows: impact.rows, totals: impact.totals, totalsMinor: impact.totalsMinor, range: impact.range};
   }
   const through = execution?.entitlementThroughDate || '';
-  return analyzeSliceImpact({slices, newSlice: slice, allocations, throughDate: through, policy: execution?.prorationPolicy || DEFAULT_PRORATION});
+  return analyzeSliceImpact({slices, newSlice: slice, allocations, throughDate: through, settings: executionSettings(office).schedule});
 }
 
 /** إلغاء شريحة قيمة: حالة مسجلة بسبب — الشريحة تبقى في السجل التاريخي ولا تُحذف. */
@@ -695,8 +721,9 @@ async function executionAccountingView(office, execution, {asOf = '', throughDat
     };
   }
   const through = throughDate || execution.entitlementThroughDate || '';
-  const build = buildEntitlementPeriods({slices, asOf, to: through, maxPeriods: 1200, policy: execution.prorationPolicy || DEFAULT_PRORATION});
-  const summary = balanceSummary({periods: build.periods, allocations: scoped.allocations, ledger: scoped.ledger, differences: scoped.differences, asOf});
+  const build = buildEntitlementPeriods({slices, asOf, to: through, maxPeriods: 1200, settings: executionSettings(office).schedule});
+  const settings = executionSettings(office).schedule;
+  const summary = balanceSummary({periods: build.periods, slices, allocations: scoped.allocations, ledger: scoped.ledger, differences: scoped.differences, asOf, throughDate: through, settings});
   const current = slices.slice().sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || ''))).at(-1) || null;
   const latestLedger = scoped.ledger.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
   return {

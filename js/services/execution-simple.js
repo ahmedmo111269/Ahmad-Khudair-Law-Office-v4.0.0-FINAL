@@ -27,10 +27,6 @@ const RAW_LIMIT = 5000;
 const IDB = () => globalThis.IDBKeyRange;
 const now = () => Clock.now();
 
-/** سياسة الجزء من الفترة: من التنفيذ نفسه ثم الافتراضي 'days' — بلا ثابت قانوني في الكود. */
-function startDatePolicy(settings, execution) {
-  return execution?.prorationPolicy || settings?.schedule?.prorationPolicy || 'days';
-}
 const only = key => IDB().only(key);
 const emitChanged = (entityType, id) => events.emit('entity:changed', {entityType, id});
 
@@ -78,10 +74,19 @@ export async function executionSimpleInputs(office, executionId, {includeDeleted
 export async function simpleSchedule(office, executionId, {asOf = '', fromDate = ''} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const schedule = buildExecutionSchedule({
-    slices: feasScheduleSlices(inputs.execution, inputs.slices, inputs.periods), receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-    settings: settings.schedule, asOf: isCivilDate(asOf) ? asOf : localDate(), fromDate
-  });
+  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  let schedule;
+  if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    const FEAS = await import('./execution-feas.js');
+    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: calculationAsOf, periodThroughDate});
+    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: calculationAsOf, periodThroughDate, settings});
+  } else {
+    schedule = buildExecutionSchedule({
+      slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
+      settings: settings.schedule, asOf: calculationAsOf, periodThroughDate, fromDate
+    });
+  }
   schedule.expenses = expensesFrom(inputs.ledger, settings);
   return {...inputs, schedule, settings};
 }
@@ -92,7 +97,9 @@ export async function simpleSchedule(office, executionId, {asOf = '', fromDate =
  * يُستخدم في كل مسارات الحساب: الجدول، صفوف القائمة، المدة، والتوكيل.
  */
 export function claimHorizon(execution, asOf = '') {
-  const requested = isCivilDate(asOf) ? asOf : localDate();
+  const today = localDate();
+  const requestedDate = isCivilDate(asOf) ? asOf : today;
+  const requested = requestedDate > today ? today : requestedDate;
   const through = isCivilDate(execution?.entitlementThroughDate) ? execution.entitlementThroughDate : '';
   return through && through < requested ? through : requested;
 }
@@ -102,16 +109,9 @@ export function claimHorizon(execution, asOf = '') {
  * تحصيل متأخر بعده. لذلك نُقصّ نهاية البنود المفتوحة بدل قصّ تاريخ الحساب:
  * التحصيلات تبقى داخلة في التوزيع لأن تاريخ الحساب لم يتغيّر.
  */
-export function capSlicesAtHorizon(execution, slices = [], extraThrough = '') {
-  const declared = isCivilDate(execution?.entitlementThroughDate) ? execution.entitlementThroughDate : '';
-  const extra = isCivilDate(extraThrough) ? extraThrough : '';
-  const through = declared && extra ? (declared < extra ? declared : extra) : (declared || extra);
-  if (!through) return slices;
-  return (slices || []).map(slice => {
-    const end = isCivilDate(slice?.endDate) ? slice.endDate : '';
-    if (end && end <= through) return slice;
-    return {...slice, endDate: through};
-  });
+export function capSlicesAtHorizon(_execution, slices = [], _extraThrough = '') {
+  // A calculation horizon limits generated units; it must never masquerade as a judgment end date.
+  return slices || [];
 }
 
 /**
@@ -121,10 +121,8 @@ export function capSlicesAtHorizon(execution, slices = [], extraThrough = '') {
  * - غير FEAS ⇒ الشرائح كما هي.
  */
 export function feasScheduleSlices(execution, slices = [], periods = []) {
-  // غير FEAS: سلوكه كما كان بلا تغيير — يُقصّ فقط عند «تاريخ الاستحقاق حتى» المسجَّل.
-  if (String(execution?.accountingModel || '') !== 'feas-v1') return capSlicesAtHorizon(execution, slices);
-  const through = feasRecognizedThrough(periods);
-  return through ? capSlicesAtHorizon(execution, slices, through) : [];
+  if (String(execution?.accountingModel || '') !== 'feas-v1') return slices || [];
+  return feasRecognizedThrough(periods) ? (slices || []) : [];
 }
 
 /**
@@ -141,6 +139,16 @@ export function feasRecognizedThrough(periods = []) {
   return ends.at(-1) || '';
 }
 
+export function simpleScheduleHorizon(execution, periods = [], requested = '') {
+  let horizon = claimHorizon(execution, requested);
+  if (String(execution?.accountingModel || '') === 'feas-v1') {
+    const recognized = feasRecognizedThrough(periods);
+    if (!recognized) return horizon;
+    if (recognized < horizon) horizon = recognized;
+  }
+  return horizon;
+}
+
 /** المصروفات كسطور قابلة للعرض والاختيار في التوكيل (منفصلة عن أصل الدين). */
 export function expensesFrom(ledger = [], settings = null) {
   const borneLabels = Object.fromEntries((settings?.lists?.borneBy) || [['debtor', 'المنفذ ضده'], ['client', 'الموكل'], ['office', 'المكتب']]);
@@ -153,6 +161,67 @@ export function expensesFrom(ledger = [], settings = null) {
       borneBy: row.borneBy || '', borneByLabel: borneLabels[row.borneBy] || '', notes: row.notes || ''
     }))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+/** Build the shared card/print shape from immutable FEAS recognition snapshots. */
+export function feasScheduleFromBalance({inputs, summary, asOf = '', periodThroughDate = '', settings = {}} = {}) {
+  const currency = String(summary?.currency || settings?.schedule?.defaultCurrency || 'EGP').toUpperCase();
+  const allocations = (inputs?.allocations || []).filter(row => !row.isDeleted && row.isActive !== false);
+  const receipts = (inputs?.receipts || []).filter(row => !row.isDeleted && (!asOf || !row.date || row.date <= asOf));
+  const rows = (summary?.periods || []).map(period => {
+    const recognizedAllocationIds = new Set(period.allocationIds || []);
+    const hasAllocationSnapshot = Array.isArray(period.allocationIds);
+    const periodAllocations = allocations.filter(row => row.periodKey === period.periodKey && (!hasAllocationSnapshot || recognizedAllocationIds.has(row.id)));
+    const lines = periodAllocations.map(row => ({
+      receiptId: row.receiptId || null, ledgerId: row.ledgerId || '', amountMinor: Number.isSafeInteger(row.amountMinor) ? row.amountMinor : toMinorUnits(row.amount || 0, currency),
+      mode: row.method === 'FIFO' || row.method === 'AUTO' ? 'auto' : 'direct', method: row.method || 'DIRECT', advance: false
+    }));
+    const dueMinor = Number.isSafeInteger(period.finalAmountMinor) ? period.finalAmountMinor : toMinorUnits(period.finalAmount || 0, currency);
+    const paidMinor = sumMinor(lines, line => line.amountMinor);
+    const remainingMinor = Math.max(0, dueMinor - paidMinor);
+    const status = dueMinor <= 0 ? PERIOD_STATUS.NOTHING_DUE : paidMinor >= dueMinor ? PERIOD_STATUS.PAID : paidMinor > 0 ? PERIOD_STATUS.PARTIAL : PERIOD_STATUS.UNPAID;
+    const unit = {
+      periodKey: period.periodKey, unitKey: period.periodKey, itemId: period.obligationId || '',
+      anchorDate: period.anchorDateSnapshot || '', k: Number.isSafeInteger(Number(period.k)) ? Number(period.k) : Number(String(period.periodKey || '').split('::').at(-1) || 0),
+      entitlementType: period.entitlementType || period.obligationTypeSnapshot || '',
+      fromDate: period.fromDate, toDate: period.toDate, dueOn: period.toDate, isComplete: true, needsDecision: false,
+      dueMinor, projectedMinor: dueMinor, parts: period.segmentsSnapshot || [], decisionsSnapshot: period.decisionsSnapshot || []
+    };
+    return {
+      fromDate: period.fromDate, toDate: period.toDate, label: monthLabel(period.fromDate, period.toDate),
+      dueOn: period.toDate, dueMinor, paidMinor, advanceMinor: 0, projectedMinor: dueMinor, remainingMinor,
+      isComplete: true, needsDecision: false, status, periodKey: period.periodKey, periodKeys: [period.periodKey],
+      periodNumber: unit.k + 1, units: [unit], lines: lines.map(line => ({...line, periodKey: period.periodKey, unitKey: unit.unitKey,
+        entitlementType: unit.entitlementType, fromDate: period.fromDate, toDate: period.toDate})),
+      valueChanges: [], trace: {equation: period.equation || period.equationSnapshot || '', decisions: period.decisionsSnapshot || [], sources: period.sourceValuePeriodIds || []}
+    };
+  }).sort((a, b) => String(a.fromDate).localeCompare(String(b.fromDate)) || String(a.toDate).localeCompare(String(b.toDate)));
+  const periodKeys = new Set(rows.map(row => row.periodKey));
+  const allocatedByReceipt = new Map();
+  for (const line of rows.flatMap(row => row.lines)) if (line.receiptId && periodKeys.has(line.periodKey)) allocatedByReceipt.set(line.receiptId, (allocatedByReceipt.get(line.receiptId) || 0) + line.amountMinor);
+  const receiptRows = receipts.map(row => {
+    const amountMinor = Number.isSafeInteger(row.amountMinor) ? row.amountMinor : toMinorUnits(row.amount || 0, currency);
+    const allocatedMinor = allocatedByReceipt.get(row.id) || 0;
+    return {...row, amountMinor, allocatedMinor, creditMinor: Math.max(0, amountMinor - allocatedMinor)};
+  });
+  const periodCount = rows.filter(row => row.dueMinor > 0).length;
+  return {
+    asOf, periodThroughDate: periodThroughDate || summary?.periodThroughDate || asOf, settings: settings?.schedule || {}, engineVersion: settings?.engineVersion || 2,
+    currency, rows, units: rows.flatMap(row => row.units), decisions: rows.flatMap(row => row.trace.decisions),
+    runningRows: [], truncated: false, receipts: receiptRows,
+    totals: {
+      dueMinor: Number(summary?.finalEntitlementMinor || 0), paidMinor: Number(summary?.collectedMinor || 0),
+      allocatedMinor: Number(summary?.allocatedMinor || 0), advanceMinor: 0,
+      creditMinor: Number(summary?.creditMinor || 0), unallocatedCreditMinor: Number(summary?.unallocatedMinor || 0),
+      remainingMinor: Number(summary?.remainingMinor || 0), overpaidMinor: Number(summary?.overAllocatedMinor || 0),
+      expenseMinor: Number(summary?.expensesMinor || 0), expenseInPoaMinor: Number(summary?.expensesInPoaMinor || 0),
+      periodCount, paidPeriods: rows.filter(row => row.status === PERIOD_STATUS.PAID).length,
+      partialPeriods: rows.filter(row => row.status === PERIOD_STATUS.PARTIAL).length,
+      unpaidPeriods: rows.filter(row => row.status === PERIOD_STATUS.UNPAID).length, runningPeriods: 0, decisionPeriods: 0
+    },
+    warnings: Number(summary?.overAllocatedMinor || 0) > 0 ? [{code: 'over-allocation', amountMinor: summary.overAllocatedMinor}] : [],
+    equations: summary?.equations || []
+  };
 }
 
 export function periodStatusLabel(status) {
@@ -187,7 +256,15 @@ export async function hydrateSimpleRows(office, executions = []) {
       office.r.executionActions.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
       office.r.executionPeriods.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => [])
     ]);
-    const schedule = buildExecutionSchedule({slices: feasScheduleSlices(execution, slices, periods), receipts, allocations, ledger, settings: settings.schedule, asOf: today});
+    const horizon = simpleScheduleHorizon(execution, periods, today);
+    let schedule;
+    if (String(execution.accountingModel || '') === 'feas-v1') {
+      const FEAS = await import('./execution-feas.js');
+      const balance = await FEAS.executionFeasBalanceData(office, execution.id, {asOf: today, periodThroughDate: horizon});
+      schedule = feasScheduleFromBalance({inputs: {receipts, allocations}, summary: balance.summary, asOf: today, periodThroughDate: horizon, settings});
+    } else {
+      schedule = buildExecutionSchedule({slices, receipts, allocations, ledger, settings: settings.schedule, asOf: today, periodThroughDate: horizon});
+    }
     const status = derivedStatus(execution, schedule, today);
     const creditor = parties.find(party => party.side === 'creditor') || null;
     const debtor = parties.find(party => party.side === 'debtor') || null;
@@ -309,7 +386,8 @@ export async function createSimpleExecution(office, input = {}) {
     authority: String(input.authority || '').trim(),
     executionMethod: String(input.executionMethod || '').trim(),
     entitlementThroughDate: effectiveTo,
-    prorationPolicy: 'days',
+    engineVersion: settings.engineVersion,
+    periodBasis: settings.schedule.periodBasis,
     status: 'active',
     notes: String(input.notes || '').trim()
   });
@@ -337,7 +415,10 @@ export async function createSimpleExecution(office, input = {}) {
       executionId: execution.id, obligationType: entitlementType, description: 'أُنشئ مع التنفيذ (نموذج FEAS)',
       frequency: valueType === 'fixed' ? 'custom' : (input.periodicity || 'monthly'),
       customDays: valueType === 'fixed' ? 1 : null, currency,
-      startDate: effectiveFrom, endDate: effectiveTo, prorationPolicy: startDatePolicy(settings, execution)
+      startDate: effectiveFrom, anchorDate: effectiveFrom, endDate: effectiveTo,
+      periodBasis: settings.schedule.periodBasis, startPolicy: settings.schedule.startPolicy,
+      midChangePolicy: settings.schedule.midChangePolicy, endPolicy: settings.schedule.endPolicy,
+      accrualTiming: settings.schedule.accrualTiming, monthEndPolicy: settings.schedule.monthEndPolicy
     });
   }
   const slice = await saveValueSlice(office, {
@@ -367,19 +448,41 @@ export async function createSimpleExecution(office, input = {}) {
 export async function previewSimpleCollection(office, {executionId, amount, date = '', target = 'auto', periodKey = '', asOf = ''} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  // أفق المعاينة = الأبعد بين تاريخ التحصيل واليوم: يرى المحامي أثر المبلغ على كل المتبقي.
+  // asOf يظل تاريخ الحساب الفعلي؛ أفق الفترات منفصل، وتاريخ التحصيل يقطع الإيصالات فقط.
   const receiptDate = isCivilDate(date) ? date : localDate();
-  const horizon = isCivilDate(asOf) ? asOf : (receiptDate > localDate() ? receiptDate : localDate());
-  const currency = currencyCode(inputs.slices.find(slice => slice.currency)?.currency, settings.schedule.defaultCurrency);
+  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
+  const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  const isFeas = String(inputs.execution.accountingModel || '') === 'feas-v1';
+  let currencyValue = inputs.slices.find(slice => slice.currency)?.currency;
+  if (isFeas && !currencyValue) currencyValue = (await office.r.executionObligations.byIndex('executionId', executionId, MAX_CHILD_ROWS).catch(() => [])).find(row => !row.isDeleted && row.status !== 'inactive')?.currency;
+  const currency = currencyCode(currencyValue, settings.schedule.defaultCurrency);
   const amountMinor = requireAmount(amount, currency, {label: 'مبلغ التحصيل'});
+  if (isFeas) {
+    const plan = await planFeasCollectionTargets(office, {executionId, amountMinor, currency, date: isCivilDate(date) ? date : localDate(), target, periodKey});
+    const summary = plan.balance.summary;
+    const assignedMinor = sumMinor(plan.rows, row => row.amountMinor);
+    const lines = plan.rows.map(row => ({label: row.label, fromDate: row.fromDate, amountMinor: row.amountMinor, amount: fromMinorUnits(row.amountMinor, currency)}));
+    const creditMinor = Math.max(0, amountMinor - assignedMinor);
+    return {
+      currency: summary.currency || currency, amountMinor, lines, creditMinor,
+      remainingBeforeMinor: summary.remainingMinor,
+      remainingAfterMinor: Math.max(0, summary.remainingMinor - assignedMinor),
+      allocationsAfter: (summary.periods || []).filter(row => row.allocatedMinor > 0).map(row => ({label: `${row.fromDate} – ${row.toDate}`, fromDate: row.fromDate, paidMinor: row.allocatedMinor, status: 'recognized'})),
+      equations: [
+        `سيُخصَّص FIFO على الفترات المعترف بها: ${lines.length ? lines.map(line => `${line.label} ${fromMinorUnits(line.amountMinor, currency)}`).join(' · ') : 'لا يوجد استحقاق معترف به — يُحفظ التحصيل منفصلًا كرصيد دائن'}`,
+        `المتبقي بعد التحصيل = max(0, ${summary.remainingMinor} − ${assignedMinor}) = ${Math.max(0, summary.remainingMinor - assignedMinor)} ${currency}`,
+        creditMinor ? `رصيد دائن/غير مخصص = ${fromMinorUnits(creditMinor, currency)} ${currency}` : ''
+      ].filter(Boolean)
+    };
+  }
   const candidate = {id: '__preview__', date: isCivilDate(date) ? date : localDate(), amountMinor, amount: fromMinorUnits(amountMinor, currency)};
   const candidateAllocation = target === 'period' && periodKey
     ? [{id: '__preview_pin__', receiptId: '__preview__', periodKey, amountMinor, method: 'DIRECT', isActive: true}]
     : [];
-  const base = buildExecutionSchedule({slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger, settings: settings.schedule, asOf: horizon});
+  const base = buildExecutionSchedule({slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger, settings: settings.schedule, asOf: calculationAsOf, periodThroughDate: horizon, receiptAsOf: receiptDate});
   const withNew = buildExecutionSchedule({
     slices: inputs.slices, receipts: [...inputs.receipts, candidate],
-    allocations: [...inputs.allocations, ...candidateAllocation], ledger: inputs.ledger, settings: settings.schedule, asOf: horizon
+    allocations: [...inputs.allocations, ...candidateAllocation], ledger: inputs.ledger, settings: settings.schedule, asOf: calculationAsOf, periodThroughDate: horizon, receiptAsOf: receiptDate
   });
   const lines = [];
   for (const row of withNew.rows) {
@@ -413,7 +516,8 @@ export async function previewSimpleCollection(office, {executionId, amount, date
  */
 async function planFeasCollectionTargets(office, {executionId, amountMinor, currency, date, target = 'auto', periodKey = '', method = 'FIFO'}) {
   const FEAS = await import('./execution-feas.js');
-  const balance = await FEAS.executionFeasBalanceData(office, executionId);
+  const calculationAsOf = localDate();
+  const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: calculationAsOf, periodThroughDate: calculationAsOf});
   const open = (balance.summary?.periods || []).filter(row => Number(row.remainingMinor || 0) > 0)
     .sort((a, b) => String(a.fromDate).localeCompare(String(b.fromDate)));
   if (!open.length) return {rows: [], open: [], currency: balance.summary?.currency || currency, balance};
@@ -499,7 +603,7 @@ export async function recordSimpleCollection(office, input = {}) {
     for (const pin of pins) {
       const row = {
         id: uid(), executionId: execution.id, ledgerId, receiptId, periodKey: pin.periodKey,
-        amount: fromMinorUnits(pin.amountMinor, currency), amountMinor, currency,
+        amount: fromMinorUnits(pin.amountMinor, currency), amountMinor: pin.amountMinor, currency,
         method: input.target === 'period' ? 'DIRECT' : (isFeas ? 'FIFO' : 'AUTO'), mode: input.target === 'period' ? 'direct' : 'auto', isActive: true, createdBy: receipt.createdBy,
         createdAt: now(), updatedAt: now(), version: 1, isDeleted: false
       };
@@ -607,6 +711,41 @@ export async function recordSubsequentJudgment(office, input = {}) {
   const previousAmountMinor = previousSlice ? minorFromRow(previousSlice, previousSlice.currency || currency) : 0;
   const isDecrease = previousAmountMinor > 0 && amountMinor < previousAmountMinor;
   if (isDecrease && !input.confirmedDecrease) throw new AppError(ERR.VALIDATION, 'هذا الحكم يخفض القيمة. راجع الأثر ثم أكّد الحفظ صراحةً.', {confirm: 'مطلوب تأكيد التخفيض'});
+  const stamp = now(), actorId = office.ctx?.profile?.id || 'user';
+  const periodPreview = execution.accountingModel === 'feas-v1' ? null : await previewSubsequentJudgment(office, execution.id, {
+    amount: fromMinorUnits(amountMinor, currency), effectiveFrom: input.effectiveFrom,
+    effectiveTo: isCivilDate(input.effectiveTo) ? input.effectiveTo : '', entitlementType: type,
+    asOf: localDate()
+  });
+  const captureDecision = ({period, kind, choiceField, reasonField, amountField, policy, allowed}) => {
+    if (!period) return null;
+    const choice = String(input[choiceField] || '').trim();
+    if (!choice) {
+      if (policy === 'ASK' || policy === 'MANUAL') throw new AppError(ERR.VALIDATION,
+        `${kind === 'MID_CHANGE' ? 'اختر قرار الفترة التي يبدأ فيها الحكم اللاحق منتصفها' : 'اختر قرار الفترة التي ينتهي فيها الحكم منتصفها'} مع السبب قبل الحفظ.`,
+        {[choiceField]: 'قرار صريح مطلوب'});
+      return null;
+    }
+    if (!allowed.includes(choice)) throw new AppError(ERR.VALIDATION, 'اختيار قرار الفترة غير معروف.', {[choiceField]: 'اختيار غير معروف'});
+    const reason = String(input[reasonField] || '').trim();
+    if (!reason) throw new AppError(ERR.VALIDATION, 'سبب قرار الفترة مطلوب.', {[reasonField]: 'مطلوب'});
+    let manualAmountMinor = null;
+    if (choice === 'MANUAL') {
+      const raw = String(input[amountField] ?? '').trim();
+      if (!raw) throw new AppError(ERR.VALIDATION, 'أدخل مبلغًا كاملًا يدويًا؛ لا يُحسب مبلغ باليوم.', {[amountField]: 'مطلوب'});
+      try { manualAmountMinor = toMinorUnits(raw, currency); }
+      catch (error) { throw new AppError(ERR.VALIDATION, error.message || 'المبلغ اليدوي غير صحيح.', {[amountField]: error.message || 'غير صحيح'}); }
+      if (!Number.isSafeInteger(manualAmountMinor) || manualAmountMinor < 0) throw new AppError(ERR.VALIDATION, 'المبلغ اليدوي يجب ألا يكون سالبًا.', {[amountField]: 'قيمة غير صحيحة'});
+    }
+    return {...period, kind, choice, reason, amountMinor: manualAmountMinor, decidedAt: stamp, decidedBy: actorId};
+  };
+  const midDecision = periodPreview ? captureDecision({period: periodPreview.midPeriod, kind: 'MID_CHANGE',
+    choiceField: 'midPeriodChoice', reasonField: 'midPeriodReason', amountField: 'manualPeriodAmount',
+    policy: settings.schedule.midChangePolicy, allowed: ['KEEP_OLD_VALUE', 'USE_NEW_VALUE', 'MANUAL']}) : null;
+  const endDecision = periodPreview ? captureDecision({period: periodPreview.midEndPeriod, kind: 'END_DATE',
+    choiceField: 'endPeriodChoice', reasonField: 'endPeriodReason', amountField: 'manualEndAmount',
+    policy: settings.schedule.endPolicy, allowed: ['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']}) : null;
+  const periodDecisionsSnapshot = [midDecision, endDecision].filter(Boolean);
   const judgment = await addExecutionJudgment(office, {
     executionId: execution.id, entitlementType: type, judgmentKind: 'later',
     previousJudgmentId: inputs.judgments.slice().sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0)).at(-1)?.id || '',
@@ -640,13 +779,24 @@ export async function recordSubsequentJudgment(office, input = {}) {
     amount: fromMinorUnits(amountMinor, currency), currency, startDate: input.effectiveFrom,
     endDate: isCivilDate(input.effectiveTo) ? input.effectiveTo : '',
     ...(obligationId ? {obligationId} : {}),
+    ...(midDecision ? {midPeriodChoice: midDecision.choice, midPeriodReason: midDecision.reason,
+      manualPeriodAmountMinor: midDecision.choice === 'MANUAL' ? midDecision.amountMinor : null} : {}),
+    ...(endDecision ? {endPeriodChoice: endDecision.choice, endPeriodReason: endDecision.reason,
+      manualEndAmountMinor: endDecision.choice === 'MANUAL' ? endDecision.amountMinor : null} : {}),
+    ...(periodDecisionsSnapshot.length ? {periodDecisionsSnapshot} : {}),
     sourceReference: judgment.judgmentNumber ? `الحكم ${judgment.judgmentNumber}` : 'حكم لاحق'
   });
-  const storedSlice = {...slice, amountMinor, currency};
+  const storedSlice = {...slice, amountMinor, currency,
+    ...(midDecision ? {midPeriodChoice: midDecision.choice, midPeriodReason: midDecision.reason,
+      manualPeriodAmountMinor: midDecision.choice === 'MANUAL' ? midDecision.amountMinor : null} : {}),
+    ...(endDecision ? {endPeriodChoice: endDecision.choice, endPeriodReason: endDecision.reason,
+      manualEndAmountMinor: endDecision.choice === 'MANUAL' ? endDecision.amountMinor : null} : {}),
+    ...(periodDecisionsSnapshot.length ? {periodDecisionsSnapshot} : {})};
   await transaction(office.ctx, [STORE.executionValuePeriods, STORE.activityLog], async tx => {
     await request(tx.objectStore(STORE.executionValuePeriods).put(storedSlice));
     await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionValuePeriods, storedSlice.id, 'create',
-      `حكم لاحق: ${type} ${fromMinorUnits(amountMinor, currency)} ${currency} من ${input.effectiveFrom}${isDecrease ? ' (تخفيض)' : ''}`, execution.fileId || '')));
+      `حكم لاحق: ${type} ${fromMinorUnits(amountMinor, currency)} ${currency} من ${input.effectiveFrom}${isDecrease ? ' (تخفيض)' : ''}${periodDecisionsSnapshot.length ? ` — قرار الفترة: ${periodDecisionsSnapshot.map(row => `${row.kind} ${row.choice}: ${row.reason}`).join('؛ ')}` : ''}`,
+      execution.fileId || '', {periodDecisionsSnapshot})));
   });
   await refreshExecutionSearchText(office, execution.id).catch(() => null);
   emitChanged(STORE.executionValuePeriods, storedSlice.id);
@@ -909,29 +1059,49 @@ export async function undoVoidSimpleRecord(office, {kind, id} = {}) {
 /* ========================= آلة المدة والطباعة ========================= */
 
 /** معاينة أثر حكم لاحق قبل الحفظ (What-If بلا كتابة). */
-export async function previewSubsequentJudgment(office, executionId, {amount, effectiveFrom, effectiveTo = '', entitlementType = '', previousSliceId = '', asOf = ''} = {}) {
+export async function previewSubsequentJudgment(office, executionId, {amount, effectiveFrom, effectiveTo = '', entitlementType = '', previousSliceId = '', asOf = '', manualPeriodAmount = '', manualEndAmount = ''} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const horizon = isCivilDate(asOf) ? asOf : localDate();
+  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
   const type = String(entitlementType || '').trim()
     || inputs.slices.slice().sort((a, b) => String(a.startDate).localeCompare(String(b.startDate))).at(-1)?.entitlementType || '';
+  const currency = currencyCode(inputs.slices.find(slice => String(slice.entitlementType || '') === type)?.currency, settings.schedule.defaultCurrency);
+  const parseOptionalManual = value => {
+    if (String(value ?? '').trim() === '') return null;
+    try {
+      const minor = toMinorUnits(value, currency);
+      return Number.isSafeInteger(minor) && minor >= 0 ? minor : null;
+    } catch { return null; }
+  };
   const preview = previewValueChange({
     slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations,
-    settings: settings.schedule, asOf: horizon,
+    settings: settings.schedule, asOf: calculationAsOf, periodThroughDate,
     candidate: {entitlementType: type, amount, startDate: effectiveFrom, endDate: isCivilDate(effectiveTo) ? effectiveTo : '', valueType: 'periodic', periodicity: 'monthly'},
-    previousSliceId
+    previousSliceId, manualPeriodAmountMinor: parseOptionalManual(manualPeriodAmount), manualEndAmountMinor: parseOptionalManual(manualEndAmount)
   });
   return preview;
 }
 
 /** «احسب مدة»: المستحق/المدفوع/المتبقي عن مدة + رصيد سابق + الإجمالي. */
-export async function simpleDurationClaim(office, executionId, {fromDate, toDate} = {}) {
+export async function simpleDurationClaim(office, executionId, {fromDate, toDate, rangeDecisions = []} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const horizon = claimHorizon(inputs.execution, toDate);
+  const asOf = localDate();
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, asOf);
+  const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate);
+  let schedule;
+  if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    const FEAS = await import('./execution-feas.js');
+    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf, periodThroughDate});
+    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf, periodThroughDate, settings});
+  } else {
+    schedule = buildExecutionSchedule({slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
+      settings: settings.schedule, asOf, periodThroughDate});
+  }
   const claim = claimForRange({
-    slices: capSlicesAtHorizon(inputs.execution, inputs.slices), receipts: inputs.receipts, allocations: inputs.allocations,
-    settings: settings.schedule, fromDate, toDate: horizon, asOf: claimHorizon(inputs.execution, '')
+    slices: feasScheduleSlices(inputs.execution, inputs.slices, inputs.periods), receipts: inputs.receipts, allocations: inputs.allocations,
+    settings: settings.schedule, schedule, fromDate, toDate: horizon, asOf, rangeDecisions
   });
   claim.currencyLabel = claim.totals.currency;
   claim.requestedToDate = toDate;
@@ -939,17 +1109,73 @@ export async function simpleDurationClaim(office, executionId, {fromDate, toDate
   return claim;
 }
 
+/** Persist explicit, non-prorated boundary choices for a duration claim and attach audit metadata. */
+export async function recordSimpleDurationDecisions(office, executionId, {fromDate, toDate, decisions = []} = {}) {
+  office.ctx.assert();
+  const execution = await requireExecution(office, executionId);
+  if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new AppError(ERR.VALIDATION, 'نطاق المدة غير صحيح.');
+  const actorId = office.ctx?.profile?.id || 'user';
+  const stamp = now();
+  const allowedKinds = new Set(['RANGE_START', 'RANGE_END', 'RANGE_BOUNDARY']);
+  const allowedChoices = new Set(['INCLUDE_FULL', 'EXCLUDE', 'MANUAL']);
+  const rows = (decisions || []).map(decision => {
+    if (!String(decision.periodKey || '').trim() || !allowedKinds.has(decision.kind) || !allowedChoices.has(decision.choice)) throw new AppError(ERR.VALIDATION, 'قرار حد الفترة غير مكتمل أو غير معروف.');
+    const reason = String(decision.reason || '').trim();
+    if (!reason) throw new AppError(ERR.VALIDATION, `سبب القرار مطلوب للفترة ${decision.fromDate || decision.periodKey}.`);
+    if (decision.choice === 'MANUAL' && (!Number.isSafeInteger(decision.amountMinor) || decision.amountMinor < 0)) throw new AppError(ERR.VALIDATION, 'أدخل قيمة كاملة يدوية بوحدات صغرى؛ لا يُحسب مبلغ باليوم.');
+    const saved = {...decision, reason, decidedAt: stamp, decidedBy: actorId, range: {fromDate, toDate}};
+    return {
+      id: uid(), entityType: 'executionDurationClaim', entityId: executionId, action: 'range-decision',
+      timestamp: stamp, actorId, fileId: execution.fileId || '',
+      summary: `قرار صريح لحساب مدة ${decision.kind}: ${decision.choice} للفترة ${decision.fromDate} → ${decision.toDate} — ${reason}`,
+      metadata: {executionId, fromDate, toDate, periodKey: decision.periodKey, itemId: decision.itemId || '', anchorDate: decision.anchorDate || '', k: decision.k,
+        kind: decision.kind, choice: decision.choice, reason, amountMinor: decision.amountMinor ?? null,
+        decidedAt: stamp, decidedBy: actorId, trace: saved}
+    };
+  });
+  if (!rows.length) return {decisions: [], recorded: 0};
+  await transaction(office.ctx, [STORE.activityLog], async tx => {
+    const store = tx.objectStore(STORE.activityLog);
+    for (const row of rows) await request(store.add(row));
+  });
+  return {decisions: rows.map(row => row.metadata.trace), recorded: rows.length};
+}
+
 /** مسودة توكيل: رصيد سابق + فترة جديدة + فروق مضمّنة (بلا ازدواج) + مصروفات مختارة. */
-export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = []} = {}) {
+export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = []} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const cappedTo = claimHorizon(inputs.execution, toDate);
-  const schedule = buildExecutionSchedule({
-    slices: capSlicesAtHorizon(inputs.execution, inputs.slices), receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-    settings: settings.schedule, asOf: cappedTo || localDate()
-  });
+  if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    const POA = await import('./execution-poa.js');
+    const selectedExpenses = Array.isArray(expenseIds) ? expenseIds : [];
+    const feasDraft = await POA.buildPoaDraft(office, {executionId, fromDate, toDate, includePreviousBalance, includeExpenses: selectedExpenses.length > 0,
+      expenseIds: selectedExpenses, rangeDecisions});
+    const periodPaidMinor = sumMinor(feasDraft.periodRows || [], row => row.allocatedMinor || 0);
+    return {...feasDraft, previousAppliedMinor: feasDraft.totals.previousBalanceMinor, periodDueMinor: feasDraft.totals.periodsMinor,
+      periodPaidMinor, periodRemainingMinor: Math.max(0, feasDraft.totals.periodsMinor - periodPaidMinor), expensesMinor: feasDraft.totals.expensesMinor,
+      totalMinor: feasDraft.totals.totalMinor, rangeDecisions: feasDraft.rangeDecisionsSnapshot || [], partials: feasDraft.partials || [],
+      requestedToDate: toDate, horizonCapped: Boolean(toDate && feasDraft.toDate && feasDraft.toDate < toDate), suggestedFrom: feasDraft.fromDate};
+  }
+  const calculationAsOf = localDate();
+  const cappedTo = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate || calculationAsOf);
+  // Keep the selected duration boundary separate from the unit-calculation horizon:
+  // an explicit boundary choice may include the full period even when `toDate` falls inside it.
+  const unitAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  let schedule;
+  if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    const FEAS = await import('./execution-feas.js');
+    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: calculationAsOf, periodThroughDate: unitAsOf});
+    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: calculationAsOf, periodThroughDate: unitAsOf, settings});
+  } else {
+    schedule = buildExecutionSchedule({
+      slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
+      settings: settings.schedule, asOf: calculationAsOf, periodThroughDate: unitAsOf
+    });
+  }
   const expenses = expensesFrom(inputs.ledger, settings);
-  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds});
+  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions});
+  draft.rangeDecisions = draft.rangeDecisions || [];
+  draft.partials = draft.partials || [];
   draft.requestedToDate = toDate;
   draft.horizonCapped = Boolean(toDate && cappedTo && cappedTo < toDate);
   const suggestedFrom = inputs.slices.length
@@ -962,9 +1188,22 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
 export async function saveSimplePoa(office, executionId, draft = {}, {date = '', notes = '', printNow = true} = {}) {
   const POA = await import('./execution-poa.js');
   const execution = await requireExecution(office, executionId);
+  if (String(execution.accountingModel || '') === 'feas-v1') {
+    if (draft.partials?.length) throw new AppError(ERR.VALIDATION, 'يجب حسم كل فترة حدّية بقرار صريح وسبب قبل إصدار التوكيل.');
+    const poa = await POA.saveExecutionPoa(office, {...draft, executionId, date: isCivilDate(date) ? date : localDate(),
+      poaNumber: String(draft.poaNumber || '').trim(), notes: String(notes || '').trim(),
+      rangeDecisionsSnapshot: draft.rangeDecisionsSnapshot || draft.rangeDecisions || [],
+      lines: (draft.lines || []).filter(line => line.included && Number.isSafeInteger(line.amountMinor) && line.amountMinor > 0)});
+    emitChanged(STORE.executionPOAs, poa.id);
+    if (printNow) {
+      const PR = await import('./execution-print.js');
+      await PR.printPoa(office, poa.id).catch(() => null);
+    }
+    return poa;
+  }
   const lines = (draft.lines || []).map(line => ({
-    kind: line.kind, label: line.label, fromDate: line.fromDate || '', toDate: line.toDate || '',
-    amount: fromMinorUnits(line.amountMinor, draft.currency), amountMinor: line.amountMinor, included: true, note: line.note || ''
+    key: line.periodKey || line.kind, label: line.label, fromDate: line.fromDate || '', toDate: line.toDate || '',
+    amount: fromMinorUnits(line.amountMinor, draft.currency), amountMinor: line.amountMinor, included: true, note: line.note || '', detail: line.note || ''
   }));
   const poa = await POA.saveExecutionPoa(office, {
     executionId, previousPoaId: draft.previousPoaId || '', poaNumber: String(draft.poaNumber || '').trim(),
@@ -975,7 +1214,7 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
     differencesAmount: fromMinorUnits(draft.differencesMinor, draft.currency),
     expensesAmount: fromMinorUnits(draft.expensesMinor, draft.currency),
     stampAmount: 0, total: fromMinorUnits(draft.totalMinor, draft.currency),
-    lines, judgmentIds: [], notes: String(notes || '').trim()
+    lines, judgmentIds: [], rangeDecisionsSnapshot: draft.rangeDecisions || [], notes: String(notes || '').trim()
   });
   emitChanged(STORE.executionPOAs, poa.id);
   if (printNow) {
@@ -990,13 +1229,22 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
  * كشف حساب بسيط (ملخص/تفصيلي شهري/عن مدة) → HTML يُطبع عبر PrintContext القائم.
  * التواريخ DD/MM/YYYY والأرقام بفواصل آلاف والعملة ظاهرة.
  */
-export async function simpleStatementDocument(office, executionId, {mode = 'monthly', fromDate = '', toDate = '', asOf = ''} = {}) {
+export async function simpleStatementDocument(office, executionId, {mode = 'monthly', fromDate = '', toDate = '', asOf = '', rangeDecisions = []} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const schedule = buildExecutionSchedule({
-    slices: capSlicesAtHorizon(inputs.execution, inputs.slices), receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-    settings: settings.schedule, asOf: isCivilDate(asOf) ? asOf : localDate()
-  });
+  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
+  const statementAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  let schedule;
+  if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    const FEAS = await import('./execution-feas.js');
+    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: calculationAsOf, periodThroughDate: statementAsOf});
+    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: calculationAsOf, periodThroughDate: statementAsOf, settings});
+  } else {
+    schedule = buildExecutionSchedule({
+      slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
+      settings: settings.schedule, asOf: calculationAsOf, periodThroughDate: statementAsOf
+    });
+  }
   const execution = inputs.execution;
   const [client, file] = await Promise.all([
     execution.clientId ? office.r.clients.get(execution.clientId).catch(() => null) : null,
@@ -1005,12 +1253,12 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
   const currency = schedule.currency;
   const money = minor => `${fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
   const date = iso => (isCivilDate(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
-  const scope = mode === 'range' && isCivilDate(fromDate) && isCivilDate(toDate) ? {fromDate, toDate} : null;
-  const claim = scope ? claimForRange({slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, settings: settings.schedule, fromDate: scope.fromDate, toDate: scope.toDate, asOf: schedule.asOf}) : null;
+  const scope = mode === 'range' && isCivilDate(fromDate) && isCivilDate(toDate) ? {fromDate, toDate: toDate > schedule.periodThroughDate ? schedule.periodThroughDate : toDate} : null;
+  const claim = scope ? claimForRange({schedule, slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, settings: settings.schedule, fromDate: scope.fromDate, toDate: scope.toDate, asOf: schedule.asOf, rangeDecisions}) : null;
   const rows = (claim ? claim.rows : schedule.rows);
   const expenses = expensesFrom(inputs.ledger, settings);
   const parts = [];
-  parts.push(`<header><h1>كشف حساب تنفيذ</h1><p class="muted">${execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم'} — ${date(schedule.asOf)}</p></header>`);
+  parts.push(`<header><h1>كشف حساب تنفيذ</h1><p class="muted">${execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم'} — تاريخ الحساب الفعلي: ${date(schedule.asOf)} — أفق الفترات: ${date(schedule.periodThroughDate || schedule.asOf)}</p></header>`);
   parts.push(`<section class="grid2">
     <div><b>الموكل:</b> ${client?.fullName || '—'}</div>
     <div><b>المنفذ ضده:</b> ${inputs.parties.find(party => party.side === 'debtor')?.name || '—'}</div>
@@ -1020,7 +1268,7 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
     <div><b>جهة التنفيذ:</b> ${execution.authority || '—'}</div>
   </section>`);
   parts.push(`<section class="numbers">
-    <div><span>المطلوب حتى ${date(schedule.asOf)}</span><b>${money(claim ? claim.totals.dueMinor : schedule.totals.dueMinor)}</b></div>
+    <div><span>المطلوب حتى أفق الفترات ${date(schedule.periodThroughDate || schedule.asOf)}</span><b>${money(claim ? claim.totals.dueMinor : schedule.totals.dueMinor)}</b></div>
     <div><span>المدفوع</span><b>${money(claim ? claim.totals.paidMinor : schedule.totals.paidMinor)}</b></div>
     <div><span>المتبقي</span><b>${money(claim ? claim.totals.remainingMinor : schedule.totals.remainingMinor)}</b></div>
   </section>`);
@@ -1102,14 +1350,23 @@ export async function migrateSimpleExecutionData(office, {limit = 300} = {}) {
   const today = localDate();
   const report = [];
   for (const execution of executions) {
-    const [slices, receipts, allocations, ledger, judgments] = await Promise.all([
+    const [slices, receipts, allocations, ledger, judgments, periods] = await Promise.all([
       office.r.executionValuePeriods.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
       office.r.executionReceipts.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
       office.r.executionAllocations.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
       office.r.executionLedger.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
-      office.r.judgments.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => [])
+      office.r.judgments.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => []),
+      office.r.executionPeriods.byIndex('executionId', execution.id, MAX_CHILD_ROWS).catch(() => [])
     ]);
-    const schedule = buildExecutionSchedule({slices, receipts, allocations, ledger, settings: settings.schedule, asOf: today});
+    const horizon = simpleScheduleHorizon(execution, periods, today);
+    let schedule;
+    if (String(execution.accountingModel || '') === 'feas-v1') {
+      const FEAS = await import('./execution-feas.js');
+      const balance = await FEAS.executionFeasBalanceData(office, execution.id, {asOf: today, periodThroughDate: horizon});
+      schedule = feasScheduleFromBalance({inputs: {receipts, allocations}, summary: balance.summary, asOf: today, periodThroughDate: horizon, settings});
+    } else {
+      schedule = buildExecutionSchedule({slices, receipts, allocations, ledger, settings: settings.schedule, asOf: today, periodThroughDate: horizon});
+    }
     const incomplete = [];
     if (!slices.length) incomplete.push({code: 'no_value', label: 'لا توجد قيمة مسجلة', hints: judgments.filter(row => !row.valueType || !row.amount).map(row => row.judgmentNumber || row.id)});
     else if (!slices.some(slice => slice.periodicity && slice.periodicity !== 'fixed')) incomplete.push({code: 'no_periodicity', label: 'القيمة بلا دورية — حدّد الدورية وتاريخ السريان لتظهر الحسابات', hints: []});

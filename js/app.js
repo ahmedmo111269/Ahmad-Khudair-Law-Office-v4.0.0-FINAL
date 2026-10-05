@@ -88,7 +88,17 @@ function recordRoute(route){
 
 class App{
  constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.maybeSeedDemo();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ /** ترقية قواعد المكتب v2 مع حفظ نسخة v1 وسجل الفاعل/التاريخ وإبطال cache. */
+ async runExecutionSettingsMigration(){
+  try{const {ensureExecutionSettingsV2}=await import('./services/execution-settings.js');return await ensureExecutionSettingsV2(this.office)}
+  catch(error){console.info('execution-settings-v2 skipped',error);return null}
+ }
+ /** ترحيل هوية الفترات والتخصيصات الواضحة؛ اللقطات والإيصالات والتوكيلات لا تُكتب. */
+ async runExecutionPeriodMigration(){
+  try{const {migrateExecutionPeriodV2}=await import('./services/execution-period-migration.js');return await migrateExecutionPeriodV2(this.office)}
+  catch(error){console.info('execution-period-v2 skipped',error);return null}
+ }
  /** ترحيل قسم التنفيذ: غير مدمّر، Idempotent، يعمل في الخلفية مرة واحدة لكل قاعدة بيانات. */
  async runExecutionSimpleMigration(){
   try{
@@ -218,9 +228,9 @@ class App{
   while(this.history.length){const r=this.history.pop();if(r.split('?')[0]!==base)return this.go(r,{replace:true})}
   return this.go('dashboard',{replace:true});
  }
- async switchDb(id,opts={}){const previousId=this.ctx?.profile?.id||this.registry.active?.id;try{const next=await this.manager.switchTo(id);this.setContext(next);return next}catch(e){if(!opts.remote&&previousId&&this.registry.active?.id!==previousId){this.registry.data.activeProfileId=previousId;this.registry.save()}throw e}}
+ async switchDb(id,opts={}){const previousId=this.ctx?.profile?.id||this.registry.active?.id;try{const next=await this.manager.switchTo(id);this.setContext(next);await this.maintenance;await this.runExecutionSettingsMigration();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();return next}catch(e){if(!opts.remote&&previousId&&this.registry.active?.id!==previousId){this.registry.data.activeProfileId=previousId;this.registry.save()}throw e}}
  setContext(ctx){
-  this.ctx=ctx;this.office=new Office(ctx);this.resetViewState();$('#db-badge').textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
+  this.ctx=ctx;this.office=new Office(ctx);this.office.app=this;this.resetViewState();$('#db-badge').textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   const sbDb=document.querySelector('#sb-db-name');if(sbDb)sbDb.textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   // صيانة غير مدمرة بعد فتح القاعدة (زرع القوائم، ترحيل روابط الموكلين، فهرس البحث)
   const office=this.office;this.maintenance=runMaintenance(office).catch(e=>console.error('maintenance',e));

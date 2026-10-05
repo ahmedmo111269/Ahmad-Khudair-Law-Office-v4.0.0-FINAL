@@ -1,10 +1,14 @@
 // =====================================================================
-// قسم التنفيذ — المفردات والحساب الأساسي (نقي، بلا IndexedDB وبلا DOM)
+// قسم التنفيذ — المفردات والحساب الأساسي (بلا IndexedDB وبلا DOM)
 // ---------------------------------------------------------------------
-// هذا الملف لا يقود رأيًا قانونيًا: لا يفترض واجب حجز أو بيع أو تبديد،
-// ولا يستنتج تاريخ سريان من تاريخ حكم، ولا يحوّل اسم نوع استحقاق إلى طريقة
-// حساب. كل ما هنا: تواريخ، دوريات، مبالغ، وحالات — كما أدخلها المستخدم.
+// الحساب الزمني يفوض دائمًا إلى وحدة التقويم المدني النقية.
 // =====================================================================
+import {
+  addCivilDays, addMonths, addMonthsClamped, daysInCivilMonth, daysInclusive,
+  enumerateExecutionUnits, executionPeriodStart as calendarPeriodStart,
+  executionPeriodEnd as calendarPeriodEnd, isCivilDate,
+  periodEnd, periodIndexOf, periodStart, semiMonthlyPeriod, semiMonthlyPeriodIndex
+} from './execution-period-calendar.js';
 
 export const EXECUTION_TYPES = Object.freeze([
   ['civil', 'التنفيذ المدني'],
@@ -67,6 +71,7 @@ export const ALLOCATION_METHODS = Object.freeze([
   ['DIRECT', 'مباشر حسب المستند'],
   ['MANUAL', 'يدوي (مبالغ محددة)'],
   ['FIFO', 'الأقدم فالأحدث'],
+  ['LIFO', 'الأحدث فالأقدم'],
   ['PROPORTIONAL', 'بالتناسب مع المتبقي'],
   ['BY_PARTY', 'حسب المستحق ثم الأقدم']
 ]);
@@ -148,13 +153,6 @@ export const actionKindLabel = value => ACTION_KIND_LABELS[value] || (value ? St
 export const PETITION_KIND = 'petition_number';
 export const JUDICIAL_KIND = 'judicial_number';
 
-export const PRORATION_POLICIES = Object.freeze([
-  ['days', 'تقسيم أيام الفترة عند بداية/نهاية غير كاملة'],
-  ['periodStart', 'الاعتماد على قيمة الفترة كاملة عند بدايتها']
-]);
-export const PRORATION_LABELS = Object.freeze(Object.fromEntries(PRORATION_POLICIES));
-export const DEFAULT_PRORATION = 'days';
-
 export const EXECUTION_REVIEW_REASONS = Object.freeze({
   missing_execution_type: 'نوع التنفيذ غير محدد',
   missing_authority: 'جهة التنفيذ غير مسجلة',
@@ -176,116 +174,106 @@ export const money = value => round2(value).toLocaleString('ar-EG', {minimumFrac
 export function equationText(parts) {
   return parts.filter(part => part !== '' && part !== null && part !== undefined).join(' ');
 }
-// تحقق صارم: الصيغة صحيحة AND اليوم موجود فعلًا في التقويم (2026-02-30 و2025-13-01 مرفوضان).
-export function isIsoDate(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [y, m, d] = value.split('-').map(Number);
-  if (y < 1900 || y > 2200 || m < 1 || m > 12 || d < 1) return false;
-  return d <= daysInMonth(y, m - 1);
-}
+export const isIsoDate = isCivilDate;
 export function isIsoMonth(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}$/.test(value)) return false;
-  const [y, m] = value.split('-').map(Number);
-  return y >= 1900 && y <= 2200 && m >= 1 && m <= 12;
+  const [year, month] = value.split('-').map(Number);
+  return year >= 1 && year <= 9999 && month >= 1 && month <= 12;
 }
 export const monthOf = iso => String(iso || '').slice(0, 7);
-export const utcOf = iso => Date.UTC(Number(String(iso).slice(0, 4)), Number(String(iso).slice(5, 7)) - 1, Number(String(iso).slice(8, 10)));
-export const isoOfUtc = ms => { const d = new Date(ms); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}` };
-export const DAY_MS = 86400000;
 export function daysBetweenInclusive(from, to) {
   if (!isIsoDate(from) || !isIsoDate(to)) return 0;
-  return Math.round((utcOf(to) - utcOf(from)) / DAY_MS) + 1;
+  return daysInclusive(from, to);
 }
-export function daysInMonth(year, monthIndex) { return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate(); }
-export function monthStart(iso) { return `${String(iso).slice(0, 7)}-01`; }
+export function daysInMonth(year, monthIndex) {
+  return daysInCivilMonth(Number(year), Number(monthIndex) + 1);
+}
+export function monthStart(iso) {
+  if (!isIsoDate(iso)) return '';
+  return `${iso.slice(0, 7)}-01`;
+}
 export function monthEnd(iso) {
-  const y = Number(String(iso).slice(0, 4)), m = Number(String(iso).slice(5, 7));
-  return `${String(iso).slice(0, 7)}-${String(daysInMonth(y, m - 1)).padStart(2, '0')}`;
+  if (!isIsoDate(iso)) return '';
+  const [year, month] = iso.slice(0, 7).split('-').map(Number);
+  return `${iso.slice(0, 7)}-${String(daysInCivilMonth(year, month)).padStart(2, '0')}`;
 }
-export function addDaysIso(iso, n) { return isoOfUtc(utcOf(iso) + n * DAY_MS); }
-export function addMonthsIso(iso, n) {
-  const y = Number(String(iso).slice(0, 4)), m = Number(String(iso).slice(5, 7)), d = Number(String(iso).slice(8, 10));
-  const total = (y * 12 + (m - 1)) + n;
-  const ny = Math.floor(total / 12), nm = (total % 12 + 12) % 12;
-  const nd = Math.min(d, daysInMonth(ny, nm));
-  return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(nd).padStart(2, '0')}`;
-}
-export const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` };
+export function addDaysIso(iso, count) { return addCivilDays(iso, count); }
+export function addMonthsIso(iso, count) { return addMonths(iso, count, {monthEndPolicy: 'CLAMP_TO_LAST_DAY'}); }
+// This is a system-clock convenience only; all date arithmetic is delegated to the pure calendar.
+export const todayIso = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 export const maxIso = (a, b) => (!a ? b : !b ? a : a > b ? a : b);
 export const minIso = (a, b) => (!a ? b : !b ? a : a < b ? a : b);
 
-// ===== الدوريات ومفاتيح الفترات =====
-/**
- * بداية الفترة التي تقع فيها `iso` حسب الدورية.
- * anchorIso: مرجع ثابت للدورات المخصصة (وأي دورية تحتاج نقطة انطلاق) — يُسجله المستخدم.
- * يومية: اليوم نفسه. أسبوعية: بداية الأسبوع (السبت، بداية الأسبوع في مصر) من المرجع.
- */
-export function periodStartFor(iso, periodicity, anchorIso = '', customDays = 30) {
-  if (!isIsoDate(iso)) return '';
-  switch (periodicity) {
-    case 'daily': return iso;
-    case 'weekly': {
-      const anchor = isIsoDate(anchorIso) ? anchorIso : '2024-01-06'; // السبت بداية الأسبوع
-      const diff = Math.floor((utcOf(iso) - utcOf(anchor)) / DAY_MS);
-      const offset = ((diff % 7) + 7) % 7;
-      return addDaysIso(iso, -offset);
-    }
-    case 'semiMonthly': return Number(String(iso).slice(8, 10)) >= 16 ? `${String(iso).slice(0, 7)}-16` : `${String(iso).slice(0, 7)}-01`;
-    case 'yearly': return `${String(iso).slice(0, 4)}-01-01`;
-    case 'custom': {
-      const anchor = isIsoDate(anchorIso) ? anchorIso : monthStart(iso);
-      const span = Math.max(1, Math.floor(num(customDays) || 30));
-      if (iso <= anchor) return anchor;
-      const offset = Math.floor((utcOf(iso) - utcOf(anchor)) / DAY_MS);
-      return addDaysIso(anchor, Math.floor(offset / span) * span);
-    }
-    case 'monthly':
-    default: return monthStart(iso);
-  }
-}
-export function nextPeriodStart(startIso, periodicity, customDays = 30) {
-  switch (periodicity) {
-    case 'daily': return addDaysIso(startIso, 1);
-    case 'weekly': return addDaysIso(startIso, 7);
-    case 'semiMonthly': {
-      const day = Number(String(startIso).slice(8, 10));
-      return day <= 1 ? `${String(startIso).slice(0, 7)}-16` : monthStart(addMonthsIso(startIso, 1));
-    }
-    case 'yearly': return `${Number(String(startIso).slice(0, 4)) + 1}-01-01`;
-    case 'custom': return addDaysIso(startIso, Math.max(1, Math.floor(num(customDays) || 1)));
-    case 'monthly':
-    default: return addMonthsIso(startIso, 1);
-  }
-}
-export function periodEndFor(startIso, periodicity, customDays = 30) {
-  const next = nextPeriodStart(startIso, periodicity, customDays);
-  return addDaysIso(next, -1);
-}
-/** مفتاح فترة حتمي: <نوع الاستحقاق>::<بداية الفترة> — لا تُخزَّن الفترات، تُشتق. */
+// ===== مفاتيح الفترات وواجهات توافق قديمة فوق التقويم المدني المشترك =====
 export const periodKeyOf = (entitlementKey, startIso) => `${String(entitlementKey || 'مستحق')}::${startIso}`;
 export function parsePeriodKey(key) {
   const parts = String(key || '').split('::');
   if (parts.length < 2 || !parts.slice(0, -1).join('::').trim() || !isIsoDate(parts.at(-1))) return null;
   return {entitlementKey: parts.slice(0, -1).join('::'), start: parts.at(-1)};
 }
-/**
- * توليد كسول ومحدود للفترات: لا ملايين السجلات مقدمًا، فقط النطاق المطلوب مع سقف صريح.
- * يرجع {periods:[{key,start,end,index}], truncated}
- */
-export function enumeratePeriods({from, to, periodicity = 'monthly', customDays = 30, anchor = '', maxPeriods = 1200} = {}) {
-  const out = [];
-  if (!isIsoDate(from) || !isIsoDate(to) || to < from) return {periods: out, truncated: false};
-  let cursor = periodStartFor(from, periodicity, anchor, customDays);
-  let guard = 0;
-  while (cursor <= to && out.length < maxPeriods) {
-    const end = periodEndFor(cursor, periodicity, customDays);
-    out.push({key: cursor, start: cursor, end, index: out.length});
-    const next = nextPeriodStart(cursor, periodicity, customDays);
-    if (next <= cursor) break; // حماية من حلقة لا نهائية
-    cursor = next;
-    if (++guard > maxPeriods + 10) break;
+
+function legacyCalendarOptions(periodicity, customDays = 30) {
+  switch (periodicity) {
+    case 'daily': return {unit: 'DAY'};
+    case 'weekly': return {unit: 'WEEK'};
+    case 'yearly': return {unit: 'YEAR', monthEndPolicy: 'CLAMP_TO_LAST_DAY'};
+    case 'custom': return {unit: 'DAY', step: Math.max(1, Math.floor(num(customDays) || 30))};
+    default: return {unit: 'MONTH', periodBasis: 'CALENDAR_MONTH', monthEndPolicy: 'CLAMP_TO_LAST_DAY'};
   }
-  return {periods: out, truncated: out.length >= maxPeriods && cursor <= to};
+}
+/**
+ * Compatibility helper only. Accounting code must use anchored calendar units directly.
+ * No Date/time-zone arithmetic is performed here.
+ */
+export function periodStartFor(iso, periodicity, anchorIso = '', customDays = 30) {
+  if (!isIsoDate(iso)) return '';
+  if (periodicity === 'semiMonthly') return semiMonthlyPeriod(anchorIso && isIsoDate(anchorIso) ? anchorIso : iso,
+    semiMonthlyPeriodIndex(anchorIso && isIsoDate(anchorIso) ? anchorIso : iso, iso)).from;
+  const anchor = isIsoDate(anchorIso) ? anchorIso
+    : periodicity === 'weekly' ? '2024-01-06'
+      : periodicity === 'yearly' ? `${iso.slice(0, 4)}-01-01`
+        : periodicity === 'monthly' || !periodicity ? monthStart(iso)
+          : periodicity === 'custom' ? monthStart(iso) : iso;
+  const options = legacyCalendarOptions(periodicity || 'monthly', customDays);
+  return periodStart(anchor, periodIndexOf(anchor, iso, options), options);
+}
+/** Compatibility helper; pass the original anchor/index to preserve clamp-without-drift. */
+export function nextPeriodStart(startIso, periodicity, customDays = 30, {anchorDate = startIso, index = null} = {}) {
+  if (!isIsoDate(startIso)) return '';
+  const frequency = String(periodicity || 'monthly');
+  if (frequency === 'semiMonthly') {
+    const anchor = isIsoDate(anchorDate) ? anchorDate : startIso;
+    return semiMonthlyPeriod(anchor, semiMonthlyPeriodIndex(anchor, startIso) + 1).from;
+  }
+  if (Number.isSafeInteger(index)) {
+    const anchor = isIsoDate(anchorDate) ? anchorDate : startIso;
+    const options = legacyCalendarOptions(frequency, customDays);
+    return periodStart(anchor, index + 1, options);
+  }
+  return calendarPeriodStart(startIso, frequency, {anchorDate: startIso, customDays,
+    periodBasis: frequency === 'monthly' ? 'ANNIVERSARY' : 'CALENDAR_MONTH', monthEndPolicy: 'CLAMP_TO_LAST_DAY'});
+}
+export function periodEndFor(startIso, periodicity, customDays = 30, options = {}) {
+  if (!isIsoDate(startIso)) return '';
+  const anchor = isIsoDate(options.anchorDate) ? options.anchorDate : startIso;
+  const index = Number.isSafeInteger(options.index) ? options.index : periodIndexOf(anchor, startIso, legacyCalendarOptions(periodicity || 'monthly', customDays));
+  if (periodicity === 'semiMonthly') return semiMonthlyPeriod(anchor, index).to;
+  return periodEnd(anchor, index, legacyCalendarOptions(periodicity || 'monthly', customDays));
+}
+/** Lazy bounded enumeration — a compatibility view over the shared calendar. */
+export function enumeratePeriods({from, to, periodicity = 'monthly', customDays = 30, anchor = '', maxPeriods = 1200} = {}) {
+  if (!isIsoDate(from) || !isIsoDate(to) || to < from) return {periods: [], truncated: false};
+  const frequency = String(periodicity || 'monthly');
+  const anchorDate = isIsoDate(anchor) ? anchor
+    : frequency === 'weekly' ? '2024-01-06'
+      : frequency === 'yearly' ? `${from.slice(0, 4)}-01-01`
+        : frequency === 'monthly' || frequency === 'semiMonthly' || frequency === 'custom' ? monthStart(from) : from;
+  const walk = enumerateExecutionUnits({fromDate: from, toDate: to, frequency, anchorDate, customDays,
+    periodBasis: frequency === 'monthly' ? 'CALENDAR_MONTH' : 'ANNIVERSARY', monthEndPolicy: 'CLAMP_TO_LAST_DAY', maxUnits: maxPeriods});
+  return {periods: walk.units.map(unit => ({key: unit.start, start: unit.start, end: unit.end, index: unit.index})), truncated: walk.truncated};
 }
 
 // ===== تحقق الحقول (رسائل عربية مفهومة) =====

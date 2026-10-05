@@ -72,7 +72,6 @@ export async function migrateExecutionData(office, {batchSize = 200} = {}) {
       if (!next.internalNumber) next.internalNumber = next.executionNumber ? String(next.executionNumber) : '';
       if (next.officialNumber === undefined) next.officialNumber = next.executionNumber ? String(next.executionNumber) : '';
       if (next.entitlementThroughDate === undefined) next.entitlementThroughDate = '';
-      if (next.prorationPolicy === undefined) next.prorationPolicy = 'days';
       if (next.clientId === undefined) next.clientId = '';
       if (next.executionMethod === undefined) next.executionMethod = '';
       if (next.nextReviewDate === undefined) next.nextReviewDate = '';

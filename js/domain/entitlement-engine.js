@@ -10,12 +10,13 @@
 //  • كل نتيجة قابلة للتفسير: معادلة + فترة + حكم مصدر + حركات مرتبطة.
 // =====================================================================
 import {
-  num, round2, equationText, isIsoDate, todayIso, maxIso, minIso, addDaysIso,
-  periodStartFor, nextPeriodStart, periodEndFor, periodKeyOf, parsePeriodKey,
-  enumeratePeriods, daysBetweenInclusive, DAY_MS, utcOf, isoOfUtc,
-  LEDGER_CATEGORY, isExpenseType, isCollectionType, DEFAULT_PRORATION,
+  num, round2, equationText, isIsoDate, todayIso, parsePeriodKey, maxIso,
+  LEDGER_CATEGORY, isExpenseType, isCollectionType,
   IN_REVIEW_DIFFERENCE_STATUSES, ACTIVE_DIFFERENCE_STATUSES, PETITION_KIND, JUDICIAL_KIND
 } from './execution.js';
+import {buildExecutionSchedule, buildScheduleUnits, DEFAULT_SCHEDULE_SETTINGS, currencyCode, PERIOD_STATUS} from './execution-schedule.js';
+import {fromMinorUnits, sumMinor, toMinorUnits} from './execution-money.js';
+import {isCivilDate} from './execution-period-calendar.js';
 
 const activeSlice = slice => slice && !slice.isDeleted && slice.status !== 'cancelled';
 const createdRank = slice => `${slice.createdAt || ''}|${String(slice.id || '')}`;
@@ -59,39 +60,31 @@ export function originalSliceForPeriod(slices = [], entitlementType = '', period
   return candidates.sort(byCreated)[0] || null;
 }
 
-/**
- * تغطية شريحة لفترة: أيام التقاطع الكاملة + النسبة + المبلغ ومعادلته.
- * policy='periodStart' (سلوك بديل يختاره المكتب) يعتمد قيمة الفترة كاملة إذا كانت الشريحة سارية في بدايتها.
- */
-export function coverageOfPeriod(slice, periodStart, periodEnd, policy = DEFAULT_PRORATION) {
-  const sliceStart = slice.startDate || periodStart;
-  const sliceEnd = slice.endDate || '9999-12-31';
-  const start = maxIso(periodStart, sliceStart);
-  const end = minIso(periodEnd, sliceEnd);
-  const periodDays = Math.max(1, daysBetweenInclusive(periodStart, periodEnd));
-  if (!isIsoDate(start) || !isIsoDate(end) || end < start) {
-    return {covered: false, coveredDays: 0, periodDays, ratio: 0, amount: 0, prorated: false, start: '', end: ''};
+/** Coverage is binary at the period level. Partial intersections never alter a value. */
+export function coverageOfPeriod(slice, periodStart, periodEnd) {
+  if (!slice || !isCivilDate(periodStart) || !isCivilDate(periodEnd) || periodEnd < periodStart) {
+    return {covered: false, complete: false, needsDecision: false, amount: 0, start: '', end: ''};
   }
-  const coveredDays = daysBetweenInclusive(start, end);
-  const ratio = coveredDays / periodDays;
-  const prorated = ratio < 0.9999;
-  // سياسة «بداية الفترة» خيار يحدده المكتب: إذا كانت الشريحة سارية في بداية الفترة تُحتسب كاملة.
-  const fullPeriod = policy === 'periodStart' && sliceStart <= periodStart;
+  const sliceStart = isCivilDate(slice.startDate) ? slice.startDate : periodStart;
+  const sliceEnd = isCivilDate(slice.endDate) ? slice.endDate : '9999-12-31';
+  const intersects = sliceStart <= periodEnd && periodStart <= sliceEnd;
+  const complete = sliceStart <= periodStart && sliceEnd >= periodEnd;
   return {
-    covered: true, coveredDays, periodDays, ratio, prorated, start, end,
-    amount: fullPeriod ? round2(num(slice.amount)) : round2(num(slice.amount) * ratio)
+    covered: complete, complete, needsDecision: intersects && !complete,
+    amount: complete ? round2(num(slice.amount)) : 0,
+    start: intersects ? (sliceStart > periodStart ? sliceStart : periodStart) : '',
+    end: intersects ? (sliceEnd < periodEnd ? sliceEnd : periodEnd) : ''
   };
 }
 
-/** قيمة شريحة لفترة واحدة (نفس منطق محرك الفترات، مكشوفة للشرح والاختبار). */
-export function sliceValueForPeriod(slice, period = {}, {policy = DEFAULT_PRORATION} = {}) {
-  if (!slice) return {covered: false, amount: 0, prorated: false};
+/** A periodic slice contributes its full amount only when the whole civil period is covered. */
+export function sliceValueForPeriod(slice, period = {}) {
+  if (!slice) return {covered: false, amount: 0, needsDecision: false};
   if (!sliceIsPeriodic(slice)) {
-    const days = daysBetweenInclusive(slice.startDate || period.start, slice.endDate || slice.startDate || period.end);
-    return {covered: true, amount: round2(num(slice.amount)), prorated: false, coveredDays: days, periodDays: days, ratio: 1};
+    const startsInRange = isCivilDate(slice.startDate) && slice.startDate >= period.start && slice.startDate <= period.end;
+    return {covered: startsInRange, amount: startsInRange ? round2(num(slice.amount)) : 0, needsDecision: false};
   }
-  const coverage = coverageOfPeriod(slice, period.start, period.end, policy);
-  return {...coverage, amount: coverage.amount};
+  return coverageOfPeriod(slice, period.start, period.end);
 }
 
 /**
@@ -103,12 +96,13 @@ export function outstandingBreakdown({finalAmount = 0, originalAmount = 0, colle
   const final = round2(num(finalAmount));
   const original = round2(num(originalAmount));
   const paid = round2(num(collected));
-  const remaining = round2(final - paid);
+  const remaining = round2(Math.max(0, final - paid));
+  const credit = round2(Math.max(0, paid - final));
   const originalOutstanding = round2(Math.max(0, original - paid));
   const differencePart = round2(remaining - originalOutstanding);
   return {
-    finalAmount: final, originalAmount: original, collected: paid, remaining, originalOutstanding, differencePart,
-    equation: `${final} − ${paid} = ${remaining} = رصيد أصلي ${originalOutstanding} + فرق ${differencePart}`
+    finalAmount: final, originalAmount: original, collected: paid, remaining, credit, originalOutstanding, differencePart,
+    equation: `${final} − ${Math.min(final, paid)} = ${remaining} = رصيد أصلي ${originalOutstanding} + فرق ${differencePart}${credit ? `؛ رصيد دائن ${credit}` : ''}`
   };
 }
 
@@ -117,139 +111,74 @@ export const sliceIsPeriodic = slice => (slice?.valueType || 'periodic') !== 'fi
 
 const UNIT_LABELS = Object.freeze({daily: 'يوم', weekly: 'أسبوع', semiMonthly: 'نصف شهر', monthly: 'شهر', yearly: 'سنة', custom: 'دورة'});
 /** نهاية الشريحة الفعلية: صريحة إن سُجلت، وإلا اليوم السابق لبداية الشريحة اللاحقة. */
-function effectiveEnds(usable) {
-  // ترتيب: تاريخ السريان ثم الأقدم تسجيلًا. كل شريحة تنتهي فعليًا في اليوم السابق لبداية
-  // الشريحة التالية في الترتيب — حتى لو اتحد تاريخ البداية (حكم لاحق بنفس تاريخ السريان):
-  // عندها تُستبعد الشريحة الأقدم كليًا من ذلك التاريخ ولا يُجمع المبلغان (منع الازدواج).
-  const byStart = usable.slice().sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)) || byCreated(a, b));
-  const map = new Map();
-  byStart.forEach((slice, index) => {
-    const next = byStart[index + 1];
-    const explicit = slice.endDate || '';
-    const derived = next ? addDaysIso(next.startDate, -1) : '';
-    map.set(slice.id, explicit && derived ? minIso(explicit, derived) : (explicit || derived || '9999-12-31'));
-  });
-  return map;
+/** Map the v2 anchored-unit engine to the established legacy accounting view. */
+function legacyPeriodFromUnit(unit, settings = {}) {
+  const currency = currencyCode(unit.currency || unit.parts?.[0]?.currency, settings.defaultCurrency || 'EGP');
+  const finalMinor = unit.isComplete && !unit.needsDecision ? unit.dueMinor : 0;
+  const finalPart = unit.parts?.at(-1) || {};
+  const previousMinor = Number.isSafeInteger(finalPart.valueChange?.previousAmountMinor)
+    ? finalPart.valueChange.previousAmountMinor : (finalMinor || finalPart.amountMinor || 0);
+  const originalSliceId = finalPart.valueChange?.previousSliceId || finalPart.sliceId || '';
+  const originalJudgmentId = finalPart.valueChange?.previousJudgmentId || finalPart.judgmentId || '';
+  const periodicity = unit.fixed ? 'fixed' : (unit.parts?.[0]?.periodicity || unit.periodicity || 'monthly');
+  return {
+    key: unit.unitKey, periodKey: unit.unitKey, unitKey: unit.unitKey,
+    legacyPeriodKey: unit.legacyPeriodKey || `${unit.entitlementType}::${unit.fromDate}`,
+    itemId: unit.itemId, anchorDate: unit.anchorDate, k: unit.k,
+    entitlementType: unit.entitlementType, start: unit.fromDate, end: unit.toDate,
+    fromDate: unit.fromDate, toDate: unit.toDate, dueDate: unit.toDate,
+    isComplete: Boolean(unit.isComplete), needsDecision: Boolean(unit.needsDecision),
+    decisionReason: unit.decisionReason || '', choiceOptions: unit.choiceOptions || [],
+    periodicity, unit: ({daily: 'يوم', weekly: 'أسبوع', semiMonthly: 'نصف شهر', monthly: 'شهر', yearly: 'سنة', custom: 'دورة', fixed: 'مبلغ مقطوع'})[periodicity] || 'فترة',
+    sliceId: finalPart.sliceId || '', judgmentId: finalPart.judgmentId || '', partyId: finalPart.partyId || '',
+    originalSliceId, originalJudgmentId,
+    finalAmount: fromMinorUnits(finalMinor, currency), originalAmount: fromMinorUnits(previousMinor, currency),
+    finalValue: fromMinorUnits(finalPart.rateAmountMinor ?? finalMinor, currency),
+    originalValue: fromMinorUnits(previousMinor, currency),
+    equation: finalPart.equation || unit.decisionReason || '',
+    decisionsSnapshot: [...new Map((unit.parts || []).flatMap(part => part.decisionsSnapshot || [])
+      .map(decision => [`${decision.periodKey || unit.periodKey}::${decision.kind}`, decision])).values()],
+    parts: (unit.parts || []).map(part => ({
+      sliceId: part.sliceId, amount: fromMinorUnits(part.amountMinor || 0, currency),
+      amountMinor: part.amountMinor || 0, judgmentId: part.judgmentId || '',
+      currency: part.currency || currency, valueChange: part.valueChange || null, equation: part.equation || '',
+      decisionsSnapshot: part.decisionsSnapshot || []
+    })),
+    differenceEquation: previousMinor !== finalMinor ? `${finalMinor} − ${previousMinor} = ${finalMinor - previousMinor}` : ''
+  };
 }
 
-/**
- * بناء فترات الاستحقاق لنوع استحقاق واحد:
- * - المبلغ الثابت = فترة واحدة تبدأ بتاريخ سريانه ولا تتكرر.
- * - المبلغ الدوري = فترات متتالية بتوليد كسول ومحدود، ونهاية كل شريحة تُشتق
- *   من الشريحة اللاحقة (لا تُعدَّل الشريحة القديمة)، فحكم يوليو ينهي سريان
- *   شريحة يناير في 30 يونيو دون أي كتابة على السجل القديم.
- */
-export function periodsForEntitlement({slices = [], entitlementType = '', from = '', to = '', asOf = '', maxPeriods = 1200, policy = DEFAULT_PRORATION, mode = 'knowledge'} = {}) {
-  const usable = slicesOfEntitlement(eligibleSlices(slices, asOf, {mode}), entitlementType);
-  if (!usable.length) return {periods: [], truncated: false, range: {from: '', to: ''}};
+function buildV2Periods({slices = [], from = '', to = '', asOf = '', maxPeriods = 1200, settings = {}, mode = 'knowledge'} = {}) {
   const horizon = to || asOf || todayIso();
-  const ends = effectiveEnds(usable);
-  const startDates = usable.map(slice => slice.startDate).filter(isIsoDate).sort();
-  const rangeFrom = from || startDates[0];
-  const rangeTo = horizon;
-  const contributions = [];
-  let truncated = false;
-  for (const raw of usable) {
-    // شريحة «مؤطَّرة»: نهايتها الفعلية هي اليوم السابق لبداية الشريحة اللاحقة، بلا أي كتابة على السجل الأصلي.
-    const slice = {...raw, endDate: minIso(raw.endDate || '9999-12-31', ends.get(raw.id) || '9999-12-31')};
-    const sliceFrom = maxIso(slice.startDate, rangeFrom);
-    const sliceTo = minIso(slice.endDate, rangeTo);
-    if (!isIsoDate(sliceFrom) || !isIsoDate(sliceTo) || sliceTo < sliceFrom) continue;
-    if (!sliceIsPeriodic(slice)) {
-      contributions.push({
-        slice, start: slice.startDate, end: slice.endDate || slice.startDate, periodicity: 'fixed',
-        coveredDays: daysBetweenInclusive(slice.startDate, slice.endDate || slice.startDate),
-        periodDays: daysBetweenInclusive(slice.startDate, slice.endDate || slice.startDate),
-        prorated: false, amount: round2(slice.amount)
-      });
-      continue;
-    }
-    const walk = enumeratePeriods({from: sliceFrom, to: sliceTo, periodicity: slice.periodicity, customDays: slice.customDays, anchor: slice.anchor || slice.startDate, maxPeriods});
-    if (walk.truncated) truncated = true;
-    for (const period of walk.periods) {
-      const coverage = coverageOfPeriod(slice, period.start, period.end, policy);
-      if (!coverage.covered || !(coverage.amount > 0)) continue;
-      contributions.push({
-        slice, start: period.start, end: period.end,
-        periodicity: slice.periodicity || 'monthly',
-        coveredDays: coverage.coveredDays, periodDays: coverage.periodDays,
-        prorated: coverage.prorated, amount: coverage.amount, coverage
-      });
-    }
-  }
-  const grouped = new Map();
-  for (const item of contributions) {
-    const key = periodKeyOf(entitlementType, item.start);
-    const group = grouped.get(key) || {key, entitlementType, start: item.start, end: item.end, items: []};
-    group.items.push(item);
-    group.start = minIso(group.start, item.start);
-    group.end = maxIso(group.end, item.end);
-    grouped.set(key, group);
-  }
-  const list = [...grouped.values()].map(group => {
-    const items = group.items.slice().sort(byCreated.slice ? (a, b) => byCreated(a.slice, b.slice) : undefined);
-    const finalOne = items[items.length - 1];
-    const finalSlice = finalOne.slice;
-    const finalAmount = round2(items.reduce((sum, item) => sum + item.amount, 0));
-    // القيمة الأصلية: ما كانت عليه الفترة قبل أي حكم لاحق (أول شريحة عرفتها الفترة، بتغطيتها الخام)
-    const originals = usable
-      .filter(slice => slice.startDate <= group.end && (slice.endDate || '9999-12-31') >= group.start)
-      .sort(byCreated);
-    const originalSlice = originals[0] || finalSlice;
-    let originalAmount;
-    if (!sliceIsPeriodic(originalSlice)) originalAmount = round2(originalSlice.amount);
-    else {
-      const coverage = coverageOfPeriod(originalSlice, group.start, group.end, policy);
-      originalAmount = coverage.covered ? coverage.amount : round2(num(originalSlice.amount) * (group.start >= originalSlice.startDate ? 1 : 0));
-    }
-    const unit = UNIT_LABELS[finalOne.periodicity] || 'فترة';
-    const itemEquations = items.map(item => item.prorated
-      ? `${item.coveredDays} من ${item.periodDays} يومًا × ${round2(num(item.slice.amount))} = ${item.amount}`
-      : `1 ${UNIT_LABELS[item.periodicity] || 'فترة'} × ${round2(num(item.slice.amount))} = ${item.amount}`);
-    const equation = items.length > 1
-      ? `${itemEquations.join(' + ')} = ${finalAmount}`
-      : itemEquations[0];
-    return {
-      key: group.key,
-      entitlementType,
-      start: group.start,
-      end: group.end,
-      periodicity: finalOne.periodicity || 'monthly',
-      sliceId: finalSlice.id,
-      judgmentId: finalSlice.judgmentId,
-      partyId: finalSlice.partyId || '',
-      originalSliceId: originalSlice.id,
-      originalJudgmentId: originalSlice.judgmentId,
-      finalAmount,
-      originalAmount: round2(originalAmount),
-      finalValue: round2(num(finalSlice.amount)),
-      originalValue: round2(num(originalSlice.amount)),
-      prorated: items.some(item => item.prorated),
-      coveredDays: finalOne.coveredDays,
-      periodDays: finalOne.periodDays,
-      unit,
-      equation,
-      parts: items.map(item => ({sliceId: item.slice.id, amount: item.amount, prorated: item.prorated, coveredDays: item.coveredDays, periodDays: item.periodDays})),
-      differenceEquation: Math.abs(finalAmount - round2(originalAmount)) > 0.004
-        ? `${finalAmount} − ${round2(originalAmount)} = ${round2(finalAmount - round2(originalAmount))}`
-        : ''
-    };
-  }).sort((a, b) => a.start.localeCompare(b.start));
-  return {periods: list, truncated, range: {from: rangeFrom, to: rangeTo}};
+  const usable = eligibleSlices(slices, asOf, {mode});
+  if (!usable.length) return {periods: [], truncated: false, range: {from: '', to: horizon}, decisions: [], entitlementKeys: []};
+  const firstStarts = usable.map(slice => slice.startDate).filter(isCivilDate).sort();
+  const rangeFrom = from || firstStarts[0] || '';
+  const options = {...DEFAULT_SCHEDULE_SETTINGS, ...(settings || {})};
+  const built = buildScheduleUnits({slices: usable, asOf: horizon, fromDate: rangeFrom, settings: options, maxUnits: maxPeriods});
+  const periods = built.units
+    .filter(unit => unit.isComplete || unit.needsDecision)
+    .map(unit => legacyPeriodFromUnit(unit, options))
+    .filter(period => !rangeFrom || period.end >= rangeFrom)
+    .filter(period => !horizon || period.start <= horizon)
+    .sort((a, b) => a.start.localeCompare(b.start) || String(a.key).localeCompare(String(b.key)));
+  return {
+    periods, truncated: built.truncated, range: {from: rangeFrom, to: horizon}, decisions: built.decisions,
+    entitlementKeys: [...new Set(usable.filter(activeSlice).map(slice => String(slice.entitlementType || '')))]
+  };
 }
 
-/** فترات كل أنواع الاستحقاق داخل التنفيذ. */
-export function buildEntitlementPeriods({slices = [], asOf = '', from = '', to = '', maxPeriods = 1200, policy = DEFAULT_PRORATION, mode = 'knowledge'} = {}) {
-  const keys = entitlementKeys(eligibleSlices(slices, asOf, {mode}));
-  const periods = [];
-  let truncated = false;
-  for (const entitlementType of keys) {
-    const build = periodsForEntitlement({slices, entitlementType, from, to, asOf, maxPeriods, policy, mode});
-    periods.push(...build.periods);
-    if (build.truncated) truncated = true;
-  }
-  periods.sort((a, b) => a.start.localeCompare(b.start) || String(a.entitlementType).localeCompare(String(b.entitlementType)));
-  return {periods, truncated, entitlementKeys: keys};
+/** Derived full-period entitlement rows for one displayed obligation label. */
+export function periodsForEntitlement({slices = [], entitlementType = '', from = '', to = '', asOf = '', maxPeriods = 1200, settings = {}, mode = 'knowledge'} = {}) {
+  const built = buildV2Periods({slices, from, to, asOf, maxPeriods, settings, mode});
+  const periods = built.periods.filter(row => String(row.entitlementType || '') === String(entitlementType || ''));
+  return {periods, truncated: built.truncated, range: built.range, decisions: built.decisions.filter(row => String(row.entitlementType || '') === String(entitlementType || ''))};
+}
+
+/** Full-period rows for all items; partial/curr­ent periods never contribute a fractional value. */
+export function buildEntitlementPeriods({slices = [], asOf = '', from = '', to = '', maxPeriods = 1200, settings = {}, mode = 'knowledge'} = {}) {
+  const built = buildV2Periods({slices, asOf, from, to, maxPeriods, settings, mode});
+  return {...built, periods: built.periods, entitlementKeys: built.entitlementKeys};
 }
 
 // ===== الحركات المالية: صافي كل حركة بعد التصحيحات والعكوس =====
@@ -307,27 +236,30 @@ export function ledgerTotals(entries = []) {
 /** المتبقي على كل فترة = النهائي − المخصص لها. */
 export function outstandingPeriods({periods = [], allocations = [], differences = []} = {}) {
   const map = new Map();
+  const aliases = new Map();
   for (const period of periods) {
-    map.set(period.key, {
-      periodKey: period.key,
+    const entry = {
+      periodKey: period.key, legacyPeriodKey: period.legacyPeriodKey || '',
       entitlementType: period.entitlementType,
       start: period.start, end: period.end,
-      dueDate: period.start,
+      dueDate: period.end,
       finalAmount: round2(period.finalAmount),
       originalAmount: round2(period.originalAmount),
       originalValue: period.originalValue,
       finalValue: period.finalValue,
       sliceId: period.sliceId, judgmentId: period.judgmentId,
       originalSliceId: period.originalSliceId, originalJudgmentId: period.originalJudgmentId,
-      equation: period.equation, prorated: period.prorated,
+      equation: period.equation, needsDecision: period.needsDecision, decisionReason: period.decisionReason || '',
       // المستحق المرتبط بالشريحة (إن سُجّل): يجعل التخصيص «حسب المستحق» ممكنًا بلا تخمين
       partyId: period.partyId || '',
       allocated: 0, allocationIds: [], parties: new Set(period.partyId ? [period.partyId] : [])
-    });
+    };
+    map.set(period.key, entry);
+    if (period.legacyPeriodKey && !aliases.has(period.legacyPeriodKey)) aliases.set(period.legacyPeriodKey, entry);
   }
   for (const allocation of allocations) {
     if (allocation.isDeleted || allocation.isActive === false) continue;
-    const entry = map.get(allocation.periodKey);
+    const entry = map.get(allocation.periodKey) || aliases.get(allocation.periodKey);
     if (!entry) continue;
     entry.allocated = round2(entry.allocated + num(allocation.amount));
     entry.allocationIds.push(allocation.id);
@@ -336,9 +268,9 @@ export function outstandingPeriods({periods = [], allocations = [], differences 
   const list = [...map.values()].map(entry => ({
     ...entry,
     parties: [...entry.parties],
-    remaining: round2(entry.finalAmount - entry.allocated),
+    remaining: round2(Math.max(0, entry.finalAmount - entry.allocated)),
     originalOutstanding: round2(Math.max(0, entry.originalAmount - entry.allocated)),
-    differencePart: round2((entry.finalAmount - entry.allocated) - Math.max(0, entry.originalAmount - entry.allocated)),
+    differencePart: round2(Math.max(0, entry.finalAmount - entry.allocated) - Math.max(0, entry.originalAmount - entry.allocated)),
     difference: round2(entry.finalAmount - entry.originalAmount)
   })).sort((a, b) => a.start.localeCompare(b.start));
   const totalFinal = round2(list.reduce((sum, row) => sum + row.finalAmount, 0));
@@ -355,7 +287,7 @@ export function outstandingPeriods({periods = [], allocations = [], differences 
  * خطة تخصيص نقدية على الفترات. لا تفترض FIFO قاعدة: الطريقة يختارها المستخدم،
  * والمستند المحدد للفترة يُخصَّص مباشرة (DIRECT/MANUAL).
  */
-export function allocationPlan({outstanding = [], amount = 0, method = 'DIRECT', targets = [], partyId = ''} = {}) {
+export function allocationPlan({outstanding = [], amount = 0, method = 'FIFO', targets = [], partyId = ''} = {}) {
   const money = round2(num(amount));
   const warnings = [];
   const rows = outstanding.filter(row => row.remaining > 0.001);
@@ -369,9 +301,11 @@ export function allocationPlan({outstanding = [], amount = 0, method = 'DIRECT',
       const wanted = typeof target === 'string' ? entry.remaining : round2(num(target.amount));
       chosen.push({periodKey, amount: wanted, partyId: entry.parties?.[0] || ''});
     }
-  } else if (method === 'FIFO') {
+  } else if (method === 'FIFO' || method === 'LIFO') {
+    const ordered = rows.slice().sort((a, b) => a.start.localeCompare(b.start) || String(a.periodKey).localeCompare(String(b.periodKey)));
+    if (method === 'LIFO') ordered.reverse();
     let left = money;
-    for (const row of rows.slice().sort((a, b) => a.start.localeCompare(b.start))) {
+    for (const row of ordered) {
       if (left <= 0.001) break;
       const take = Math.min(left, row.remaining);
       chosen.push({periodKey: row.periodKey, amount: take, partyId: row.parties?.[0] || ''});
@@ -455,20 +389,29 @@ export function analyticalAllocation({outstanding = [], unallocated = 0} = {}) {
  * يحلل أثر شريحة جديدة على الفترات المعروفة أصلًا:
  * كل صف = فترة | القديم | الجديد | المحصل | الفرق | الرصيد الأصلي | الرصيد النهائي.
  */
-export function analyzeSliceImpact({slices = [], newSlice, allocations = [], ledger = [], asOf = '', throughDate = '', maxPeriods = 1200, policy = DEFAULT_PRORATION} = {}) {
+export function analyzeSliceImpact({slices = [], newSlice, allocations = [], ledger = [], asOf = '', throughDate = '', maxPeriods = 1200, settings = {}} = {}) {
   if (!newSlice) return {rows: [], totals: {oldValue: 0, newValue: 0, collected: 0, difference: 0, originalOutstanding: 0, remaining: 0}};
   const before = slices.filter(slice => slice.id !== newSlice.id);
   const entitlementType = newSlice.entitlementType;
-  const from = (slicesOfEntitlement(before, entitlementType)[0]?.startDate) || newSlice.startDate;
-  const to = newSlice.endDate || throughDate || asOf || maxIso(todayIso(), newSlice.startDate);
-  const beforeBuild = periodsForEntitlement({slices: before, entitlementType, from, to, asOf, maxPeriods, policy});
-  const afterBuild = periodsForEntitlement({slices: [...before, newSlice], entitlementType, from, to, asOf, maxPeriods, policy});
+  const priorSlice = slicesOfEntitlement(before, entitlementType)
+    .filter(slice => !newSlice.startDate || !slice.startDate || slice.startDate <= newSlice.startDate).at(-1) || null;
+  const normalizedNewSlice = {
+    ...newSlice,
+    itemId: newSlice.itemId || priorSlice?.itemId || `legacy:${entitlementType || 'بند'}`,
+    anchorDate: newSlice.anchorDate || priorSlice?.anchorDate || priorSlice?.startDate || newSlice.startDate
+  };
+  const from = (slicesOfEntitlement(before, entitlementType)[0]?.startDate) || normalizedNewSlice.startDate;
+  const to = normalizedNewSlice.endDate || throughDate || asOf || maxIso(todayIso(), normalizedNewSlice.startDate);
+  const beforeBuild = periodsForEntitlement({slices: before, entitlementType, from, to, asOf, maxPeriods, settings});
+  const afterBuild = periodsForEntitlement({slices: [...before, normalizedNewSlice], entitlementType, from, to, asOf, maxPeriods, settings});
   const afterByKey = new Map(afterBuild.periods.map(period => [period.key, period]));
   const beforeByKey = new Map(beforeBuild.periods.map(period => [period.key, period]));
+  const aliases = new Map([...beforeBuild.periods, ...afterBuild.periods].flatMap(period => [[period.key, period.key], [period.legacyPeriodKey, period.key]]));
   const allocationByKey = new Map();
   for (const allocation of allocations) {
     if (allocation.isDeleted || allocation.isActive === false) continue;
-    allocationByKey.set(allocation.periodKey, round2((allocationByKey.get(allocation.periodKey) || 0) + num(allocation.amount)));
+    const key = aliases.get(allocation.periodKey) || allocation.periodKey;
+    allocationByKey.set(key, round2((allocationByKey.get(key) || 0) + num(allocation.amount)));
   }
   const rows = [];
   for (const period of afterBuild.periods) {
@@ -539,34 +482,69 @@ export function analyzeSliceImpact({slices = [], newSlice, allocations = [], led
  *   الرصيد = الاستحقاق النهائي المشتق − المحصل الفعلي
  *   ويُفكَّك إلى: رصيد أصلي + فروق أحكام لاحقة (+ تصحيحات إن وُجدت).
  */
-export function balanceSummary({periods = [], allocations = [], ledger = [], differences = [], asOf = ''} = {}) {
-  const inRange = rows => rows.filter(row => !row.isDeleted && (!asOf || !row.date || String(row.date) <= asOf));
-  const totals = ledgerTotals(inRange(ledger));
-  const outstanding = outstandingPeriods({periods, allocations: allocations.filter(a => !a.isDeleted && a.isActive !== false), differences});
+export function balanceSummary({periods = [], slices = [], allocations = [], ledger = [], differences = [], asOf = '', throughDate = '', settings = {}, mode = 'knowledge'} = {}) {
+  const scheduleDate = isIsoDate(asOf) ? asOf : todayIso();
+  const cutoffTime = `${scheduleDate}T23:59:59.999Z`;
+  const knownByCutoff = row => mode === 'effective' || !row.createdAt || String(row.createdAt) <= cutoffTime;
+  const inRange = rows => rows.filter(row => !row.isDeleted && (!row.date || String(row.date) <= scheduleDate) && knownByCutoff(row));
+  const visibleLedger = inRange(ledger);
+  const totals = ledgerTotals(visibleLedger);
+  const visibleLedgerById = new Map(visibleLedger.map(row => [row.id, row]));
+  const activeAllocations = allocations.filter(row => !row.isDeleted
+    && (row.isActive !== false || (row.supersededAt && String(row.supersededAt) > cutoffTime))
+    && knownByCutoff(row)
+    && (!row.supersededAt || String(row.supersededAt) > cutoffTime)
+    && (!visibleLedgerById.get(row.ledgerId)?.date || visibleLedgerById.get(row.ledgerId).date <= scheduleDate))
+    .map(row => row.isActive === false ? {...row, isActive: true} : row);
+  const outstanding = outstandingPeriods({periods, allocations: activeAllocations, differences});
+  const receipts = totals.collectionRows.filter(row => row.netAmount > 0).map(row => {
+    const currency = currencyCode(row.currency, settings.defaultCurrency || 'EGP');
+    const amountMinor = toMinorUnits(row.netAmount, currency);
+    return {id: row.receiptId || row.id, receiptId: row.receiptId || row.id, date: row.date || '', currency, amountMinor, amount: fromMinorUnits(amountMinor, currency), status: row.status};
+  });
+  const schedule = buildExecutionSchedule({
+    slices, receipts, allocations: activeAllocations, ledger: visibleLedger, settings,
+    asOf: scheduleDate, periodThroughDate: isIsoDate(throughDate) ? throughDate : '', receiptAsOf: scheduleDate
+  });
+  const currency = schedule.currency;
+  const finalEntitlement = fromMinorUnits(schedule.totals.dueMinor, currency);
+  const allocatedOnDue = fromMinorUnits(schedule.totals.allocatedMinor, currency);
+  const remaining = fromMinorUnits(schedule.totals.remainingMinor, currency);
+  const credit = fromMinorUnits(schedule.totals.creditMinor, currency);
+  const advance = fromMinorUnits(schedule.totals.advanceMinor, currency);
+  const unallocatedCredit = fromMinorUnits(schedule.totals.unallocatedCreditMinor, currency);
   const collected = totals.collected;
   const unallocated = round2(collected - outstanding.totals.allocated);
-  const finalEntitlement = outstanding.totals.finalEntitlement;
-  const remaining = round2(finalEntitlement - collected);
-  const analytical = unallocated > 0.001 ? analyticalAllocation({outstanding: outstanding.periods, unallocated}) : {lines: [], remainder: 0, applied: 0};
+  const autoAppliedMinor = sumMinor(schedule.rows.filter(row => row.isComplete && !row.needsDecision), row =>
+    sumMinor(row.lines.filter(line => line.mode === 'auto'), line => line.amountMinor));
+  const autoApplied = fromMinorUnits(autoAppliedMinor, currency);
+  const analytical = autoApplied > 0.001 ? analyticalAllocation({outstanding: outstanding.periods, unallocated: autoApplied}) : {lines: [], remainder: 0, applied: 0};
   const originalOutstanding = round2(outstanding.totals.originalOutstanding + analytical.applied);
   const differencePart = round2(remaining - originalOutstanding);
   const approvedDiff = outstanding.totals.approvedDiff;
   const pendingDiff = outstanding.totals.pendingDiff;
   const postedDiff = round2(inRange(differences).filter(d => d.status === 'POSTED').reduce((sum, d) => sum + num(d.differenceAmount), 0));
   const equations = [
-    `الاستحقاق النهائي: ${finalEntitlement} (${periods.length} فترة)`,
+    `الاستحقاق النهائي للفترات المكتملة: ${finalEntitlement} ${currency} (${schedule.totals.periodCount} فترة)`,
     `المحصل: ${collected}`,
-    `الرصيد: ${finalEntitlement} − ${collected} = ${remaining}`,
+    `المخصص على الفترات المكتملة: ${allocatedOnDue}`,
+    `المتبقي = max(0, المستحق − المخصص على الفترات المكتملة) = ${remaining}`,
     `تفكيك الرصيد: رصيد أصلي ${originalOutstanding} + فروق أحكام ${differencePart} = ${remaining}`
   ];
-  if (unallocated > 0.001) equations.push(`يوجد ${unallocated} محصل لم يُخصَّص لفترة بعد؛ يُعرض تحليليًا على الأقدم ويحتاج تخصيصًا صريحًا.`);
+  if (advance > 0.001) equations.push(`مدفوع مقدمًا على فترة جارية = ${advance} ${currency}؛ لا يخفض المطلوب قبل اكتمالها.`);
+  if (unallocatedCredit > 0.001) equations.push(`رصيد دائن غير مخصص منفصل = ${unallocatedCredit} ${currency}.`);
+  if (unallocated > 0.001) equations.push(`يوجد ${unallocated} محصل غير مخصص فعليًا؛ التوزيع التحليلي للأقدم لا يكتب تخصيصًا.`);
+  if (credit > 0.001) equations.push(`رصيد دائن إجمالي = max(0, المحصل − المستحق المكتمل) = ${credit} ${currency}.`);
   if (pendingDiff) equations.push(`فروق تنتظر المراجعة/الاعتماد: ${pendingDiff} (لا تُعد ملتزمًا معتمدًا قبل قرار المستخدم).`);
   return {
-    asOf: asOf || '',
+    asOf: scheduleDate, periodThroughDate: schedule.periodThroughDate,
     finalEntitlement,
     originalEntitlement: outstanding.totals.originalEntitlement,
     collected,
     remaining,
+    credit,
+    advance,
+    unallocatedCredit,
     originalOutstanding,
     differencePart,
     differences: {approved: approvedDiff, pending: pendingDiff, posted: postedDiff},
@@ -576,8 +554,9 @@ export function balanceSummary({periods = [], allocations = [], ledger = [], dif
     expensesInPoa: totals.expensesInPoa,
     differencesPostedInLedger: totals.differencesPosted,
     periods: outstanding.periods,
-    periodCount: periods.length,
+    periodCount: schedule.totals.periodCount,
     equations,
+    schedule,
     allocationsTotal: outstanding.totals.allocated,
     collectionRows: totals.collectionRows,
     expenseRows: totals.expenseRows
@@ -591,9 +570,17 @@ export function balanceTrace({summary, periods = [], allocations = [], receipts 
   const ledgerById = new Map(ledger.map(row => [row.id, row]));
   const sliceById = new Map(slices.map(row => [row.id, row]));
   const judgmentById = new Map(judgments.map(row => [row.id, row]));
+  const periodAliases = new Map();
+  for (const period of periodRows) {
+    periodAliases.set(period.periodKey, period.periodKey);
+    if (period.legacyPeriodKey && !periodAliases.has(period.legacyPeriodKey)) periodAliases.set(period.legacyPeriodKey, period.periodKey);
+  }
+  const traceAllocations = allocations.filter(allocation => !allocation.isDeleted && allocation.isActive !== false).map(allocation => {
+    const periodKey = periodAliases.get(allocation.periodKey) || allocation.periodKey;
+    return periodKey === allocation.periodKey ? allocation : {...allocation, periodKey, legacyPeriodKey: allocation.periodKey};
+  });
   const allocationsByPeriod = new Map();
-  for (const allocation of allocations) {
-    if (allocation.isDeleted || allocation.isActive === false) continue;
+  for (const allocation of traceAllocations) {
     const list = allocationsByPeriod.get(allocation.periodKey) || [];
     list.push(allocation);
     allocationsByPeriod.set(allocation.periodKey, list);
@@ -604,14 +591,20 @@ export function balanceTrace({summary, periods = [], allocations = [], receipts 
       id: `period:${period.periodKey}`,
       label: `فترة ${period.start} → ${period.end}`.trim(),
       amount: period.finalAmount,
-      detail: period.equation,
+      detail: [period.equation, ...(period.decisionsSnapshot || []).map(decision => `${decision.kind}: ${decision.choice} — ${decision.reason || ''}`)].filter(Boolean).join(' · '),
       meta: {
         periodKey: period.periodKey, entitlementType: period.entitlementType,
         sliceId: period.sliceId, judgmentId: period.judgmentId,
+        decisions: period.decisionsSnapshot || [],
         judgmentLabel: judgmentById.get(period.judgmentId)?.judgmentNumber || '',
         sliceLabel: sliceById.get(period.sliceId) ? `${sliceById.get(period.sliceId).amount} من ${sliceById.get(period.sliceId).startDate}` : ''
       },
       children: [
+        ...(period.decisionsSnapshot || []).map((decision, index) => ({
+          id: `period:${period.periodKey}:decision:${index}`, label: `قرار الفترة: ${decision.kind} — ${decision.choice}`,
+          amount: 0, detail: `${decision.reason || ''} · ${decision.decidedAt || 'قاعدة مكتب'} · ${decision.decidedBy || ''}`,
+          meta: {decision}, children: []
+        })),
         ...(period.originalValue !== period.finalValue ? [{
           id: `period:${period.periodKey}:original`, label: 'القيمة الأصلية قبل الحكم اللاحق',
           amount: period.originalAmount, detail: `الفرق ${period.difference}`, meta: {judgmentId: period.originalJudgmentId}, children: []
@@ -631,13 +624,22 @@ export function balanceTrace({summary, periods = [], allocations = [], receipts 
       ]
     };
   });
+  const tracedDecisionKeys = new Set(periodRows.flatMap(period => period.decisionsSnapshot || [])
+    .map(decision => `${decision.periodKey || ''}::${decision.kind}::${decision.choice}::${decision.decidedAt || ''}`));
+  const savedDecisionNodes = slices.flatMap(slice => (slice.periodDecisionsSnapshot || []).map(decision => ({slice, decision})))
+    .filter(({decision}) => !tracedDecisionKeys.has(`${decision.periodKey || ''}::${decision.kind}::${decision.choice}::${decision.decidedAt || ''}`))
+    .map(({slice, decision}, index) => ({
+      id: `slice:${slice.id}:decision:${index}`, label: `قرار محفوظ: ${decision.kind} — ${decision.choice}`,
+      amount: 0, detail: `${decision.reason || ''} · ${decision.decidedAt || ''} · ${decision.decidedBy || ''}`,
+      meta: {sliceId: slice.id, decision}, children: []
+    }));
   const receiptNodes = receipts.map(receipt => ({
     id: `receipt:${receipt.id}`,
     label: `محضر ${receipt.receiptNumber || ''} — ${receipt.date || ''}`.trim(),
     amount: round2(num(receipt.amount)),
     detail: `${receipt.receiptType || ''} · ${receipt.allocationMethod || ''}`.trim(),
     meta: {receiptId: receipt.id, ledgerId: receipt.ledgerId || ''},
-    children: (allocationsByPeriod.size ? allocations.filter(a => a.receiptId === receipt.id) : []).map(allocation => ({
+    children: (allocationsByPeriod.size ? traceAllocations.filter(a => a.receiptId === receipt.id) : []).map(allocation => ({
       id: `receipt-allocation:${allocation.id}`,
       label: `تخصيص على ${allocation.periodKey}`,
       amount: round2(num(allocation.amount)),
@@ -677,7 +679,8 @@ export function balanceTrace({summary, periods = [], allocations = [], receipts 
         detail: `${periodRows.length} فترة`, meta: {count: periodRows.length},
         children: [
           {id: 'entitlement:original', label: 'الاستحقاق الأصلي (قبل الأحكام اللاحقة)', amount: round2(num(summary?.originalEntitlement)), detail: '', meta: {}, children: []},
-          ...periodNodes
+          ...periodNodes,
+          ...savedDecisionNodes
         ]
       },
       {
@@ -704,15 +707,16 @@ export function balanceTrace({summary, periods = [], allocations = [], receipts 
 }
 
 /** الرصيد في تاريخ معين: يعتمد ما كان مسجلًا فعليًا حتى ذلك التاريخ ولا يقرأ ما بعده. */
-export function balanceAsOf({slices = [], allocations = [], ledger = [], differences = [], asOf = '', maxPeriods = 1200, policy = DEFAULT_PRORATION, throughDate = '', mode = 'knowledge'} = {}) {
+export function balanceAsOf({slices = [], allocations = [], ledger = [], differences = [], asOf = '', maxPeriods = 1200, settings = {}, throughDate = '', mode = 'knowledge'} = {}) {
   const cutoff = asOf || todayIso();
   const end = `${cutoff}T23:59:59.999Z`;
   const effective = mode === 'effective';
   const knownSlices = eligibleSlices(slices, cutoff, {mode: effective ? 'effective' : 'knowledge'});
-  const build = buildEntitlementPeriods({slices: knownSlices, asOf: cutoff, to: throughDate || cutoff, maxPeriods, policy, mode});
+  const build = buildEntitlementPeriods({slices: knownSlices, asOf: cutoff, to: throughDate || cutoff, maxPeriods, settings, mode});
   const ledgerById = new Map(ledger.map(row => [row.id, row]));
   const knownAllocations = allocations.filter(row => {
-    if (row.isDeleted || row.isActive === false) return false;
+    if (row.isDeleted) return false;
+    if (row.isActive === false && (!row.supersededAt || String(row.supersededAt) <= end)) return false;
     const parent = ledgerById.get(row.ledgerId);
     const day = row.date || parent?.date || '';
     if (day && String(day) > cutoff) return false;
@@ -725,7 +729,7 @@ export function balanceAsOf({slices = [], allocations = [], ledger = [], differe
     if (effective && day && String(day) > cutoff) return false;
     return effective || !row.createdAt || String(row.createdAt) <= end;
   });
-  const summary = balanceSummary({periods: build.periods, allocations: knownAllocations, ledger: knownLedger, differences: knownDifferences, asOf: cutoff});
+  const summary = balanceSummary({periods: build.periods, slices: knownSlices, allocations: knownAllocations, ledger: knownLedger, differences: knownDifferences, asOf: cutoff, throughDate: throughDate || cutoff, settings, mode});
   if (effective) {
     summary.recordedLaterSlices = knownSlices.filter(slice => slice.createdAt && String(slice.createdAt) > end).map(slice => ({id: slice.id, entitlementType: slice.entitlementType, amount: slice.amount, startDate: slice.startDate, createdAt: slice.createdAt}));
     summary.dateBasis = 'event-dates';
@@ -757,7 +761,7 @@ export function executionAlerts({execution = null, slices = [], judgments = [], 
   if (summary?.integrityBlocked) push('balance_read_limit', 'error', summary.integrityMessage || 'تعذر إظهار رصيد كامل بسبب حد القراءة الآمن.');
   if (summary && !summary.integrityBlocked) {
     if (summary.remaining > 0.005) push('balance_due', 'info', `رصيد غير مسدد بمقدار ${round2(summary.remaining)}.`, {amount: round2(summary.remaining)});
-    if (summary.remaining < -0.005) push('negative_balance', 'warn', `رصيد سالب (تحصيل يزيد على الاستحقاق المسجل) بمقدار ${round2(-summary.remaining)} — راجع التحصيلات والتخصيص.`, {amount: round2(-summary.remaining)});
+    if (summary.credit > 0.005) push('surplus_credit', 'info', `يوجد رصيد دائن منفصل بمقدار ${round2(summary.credit)}.`, {amount: round2(summary.credit)});
     if (summary.collected > 0 && summary.remaining > 0.005) push('partial_collection', 'info', 'تحصيل جزئي: يوجد محصل مع رصيد متبقٍ.', {collected: summary.collected, remaining: round2(summary.remaining)});
     if (summary.unallocated > 0.005) push('unallocated_collection', 'warn', `يوجد ${round2(summary.unallocated)} محصل لم يُخصَّص لفترة محددة بعد.`, {amount: round2(summary.unallocated)});
     const collectionRows = ledger.filter(row => isCollectionType(row.type) && !row.receiptId && !row.isDeleted);
@@ -782,7 +786,9 @@ export function executionAlerts({execution = null, slices = [], judgments = [], 
   if (openTypes.size && periods.length) {
     const lastPeriod = periods.slice().sort((a, b) => a.start.localeCompare(b.start)).at(-1);
     if (lastPeriod && lastPeriod.start < today) {
-      const monthsLate = Math.round((utcOf(today) - utcOf(lastPeriod.start)) / DAY_MS / 30);
+      const monthsLate = Math.max(0,
+        (Number(today.slice(0, 4)) - Number(lastPeriod.start.slice(0, 4))) * 12
+        + Number(today.slice(5, 7)) - Number(lastPeriod.start.slice(5, 7)));
       if (monthsLate >= 2 && summary && summary.remaining > 0.005) push('stale_follow_up', 'info', `آخر فترة محسوبة بدأت في ${lastPeriod.start} ولم يُسجَّل موقفها منذ نحو ${monthsLate} شهرًا.`, {lastPeriod: lastPeriod.key});
     }
   }
@@ -791,4 +797,4 @@ export function executionAlerts({execution = null, slices = [], judgments = [], 
   return alerts;
 }
 
-export {equationText, isoOfUtc, parsePeriodKey, nextPeriodStart, periodEndFor, periodStartFor, DAY_MS};
+export {equationText, parsePeriodKey};

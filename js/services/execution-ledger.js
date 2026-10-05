@@ -16,14 +16,19 @@ import {AppError, ERR} from '../core/errors.js';
 import {events} from '../core/events.js';
 import {
   num, round2, isIsoDate, validateLedgerEntry, validateAllocationLines, LEDGER_TYPE_LABELS, LEDGER_CATEGORY,
-  isExpenseType, isCollectionType, ALLOCATION_METHOD_LABELS, DEFAULT_PRORATION, money
+  isExpenseType, isCollectionType, ALLOCATION_METHOD_LABELS, money
 } from '../domain/execution.js';
 import {netLedger, outstandingPeriods, allocationPlan, buildEntitlementPeriods} from '../domain/entitlement-engine.js';
 import {FEAS_MODEL, calculateFeasBalance, planFeasAllocation} from '../domain/execution-feas.js';
 import {addMinor, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
 import {executionSlices, executionAllocations, executionLedgerRows} from './execution.js';
+import {executionSettings} from './execution-settings.js';
 
 const MAX_ROWS = 5000;
+const officeAllocationMethod = office => {
+  const order = executionSettings(office).schedule?.allocationOrder;
+  return order === 'lifo' ? 'LIFO' : order === 'proportional' ? 'PROPORTIONAL' : 'FIFO';
+};
 const logRow = (office, entityType, entityId, action, summary, {fileId = null, metadata = {}} = {}) => {
   const row = {id: uid(), entityType, entityId, action, timestamp: Clock.now(), summary, metadata};
   if (fileId) row.fileId = fileId;
@@ -39,6 +44,7 @@ async function requireExecution(office, executionId) {
 /** سياق التخصيص: الفترات المتبقية داخل التنفيذ + الحركة المراد تخصيصها. */
 export async function allocationContext(office, executionId, {asOf = ''} = {}) {
   const execution = await requireExecution(office, executionId);
+  const defaultMethod = officeAllocationMethod(office);
   if (execution.accountingModel === FEAS_MODEL) {
     const [periods, obligations, allocations, ledger, differences] = await Promise.all([
       office.r.executionPeriods.byIndex('executionId', executionId, MAX_ROWS),
@@ -57,15 +63,15 @@ export async function allocationContext(office, executionId, {asOf = ''} = {}) {
     }));
     const outstanding = {periods: rows.filter(period => period.remainingMinor > 0), totals: {allocated: summary.allocated, remaining: summary.remaining}};
     const currency = summary.currency || obligations.find(row => !row.isDeleted && row.status !== 'inactive')?.currency || '';
-    return {execution, slices: [], allocations, ledger, differences, periods: summary.periods, outstanding, summary, obligations, currency};
+    return {execution, slices: [], allocations, ledger, differences, periods: summary.periods, outstanding, summary, obligations, currency, defaultAllocationMethod: defaultMethod};
   }
   const [slices, allocations, ledger, differences] = await Promise.all([
     executionSlices(office, executionId), executionAllocations(office, executionId), executionLedgerRows(office, executionId),
     office.r.differenceRecords.byIndex('executionId', executionId, MAX_ROWS)
   ]);
-  const build = buildEntitlementPeriods({slices, asOf, to: execution.entitlementThroughDate || '', policy: execution.prorationPolicy || DEFAULT_PRORATION});
+  const build = buildEntitlementPeriods({slices, asOf, to: execution.entitlementThroughDate || '', settings: executionSettings(office).schedule});
   const outstanding = outstandingPeriods({periods: build.periods, allocations, differences});
-  return {execution, slices, allocations, ledger, differences, periods: build.periods, outstanding};
+  return {execution, slices, allocations, ledger, differences, periods: build.periods, outstanding, defaultAllocationMethod: defaultMethod};
 }
 
 /**
@@ -231,7 +237,8 @@ export async function recordCollection(office, input) {
     catch (error) { throw new AppError(ERR.VALIDATION, error.message || 'المبلغ لا يطابق دقة العملة.', {amount: error.message || 'مبلغ غير صحيح'}); }
   }
   if (!(amount > 0)) throw new AppError(ERR.VALIDATION, 'مبلغ التحصيل يجب أن يكون أكبر من صفر.', {amount: 'مطلوب'});
-  const plan = planFromInput({context, amount: feas ? input.amount : amount, amountMinor, allocation: {...(input.allocation || {}), currency}});
+  const allocationMethod = input.allocation?.method || context.defaultAllocationMethod || 'FIFO';
+  const plan = planFromInput({context, amount: feas ? input.amount : amount, amountMinor, allocation: {...(input.allocation || {}), method: allocationMethod, currency}});
   const ledgerRow = {
     executionId: input.executionId, type: 'COLLECTION', amount, ...(feas ? {amountMinor, currency} : {currency}), date: input.date,
     paymentMethod: input.paymentMethod || '', receiptId: '', poaId: input.poaId || '', documentReferenceId: input.documentReferenceId || '',
@@ -270,7 +277,7 @@ export async function recordCollection(office, input) {
       paymentMethod: String(input.paymentMethod || '').trim(),
       poaId: input.poaId || '',
       documentReferenceId: input.documentReferenceId || '',
-      allocationMethod: input.allocation?.method || 'DIRECT',
+      allocationMethod,
       reference: String(input.reference || '').trim(),
       notes: String(input.notes || '').trim(),
       hasExpenses: Boolean(input.expenses?.length),
@@ -297,7 +304,7 @@ export async function recordCollection(office, input) {
         entitlementType: line.entitlementType || '',
         amount: round2(line.amount),
         ...(feas ? {amountMinor: line.amountMinor, currency} : {}),
-        method: input.allocation?.method || 'DIRECT',
+        method: allocationMethod,
         isDifference: Boolean(line.isDifference),
         differenceRecordId: line.differenceRecordId || '',
         isActive: true,
@@ -337,7 +344,7 @@ function planFromInput({context, amount, amountMinor = null, allocation = {}}) {
         amountMinor: Number.isSafeInteger(target.amountMinor) ? target.amountMinor : toMinorUnits(target.amount, currency),
         partyId: target.partyId || ''
       }));
-      const plan = planFeasAllocation({periods: context.outstanding.periods, amountMinor: exactAmountMinor, method: allocation.method || 'DIRECT', targets, partyId: allocation.partyId || ''});
+      const plan = planFeasAllocation({periods: context.outstanding.periods, amountMinor: exactAmountMinor, method: allocation.method || context.defaultAllocationMethod || 'FIFO', targets, partyId: allocation.partyId || ''});
       const periodByKey = new Map(context.outstanding.periods.map(period => [period.periodKey, period]));
       const lines = plan.lines.map(line => {
         const period = periodByKey.get(line.periodKey);
@@ -346,16 +353,22 @@ function planFromInput({context, amount, amountMinor = null, allocation = {}}) {
       return {...plan, lines, amountMinor: exactAmountMinor, amount: fromMinorUnits(exactAmountMinor, currency), unallocated: fromMinorUnits(plan.unallocatedMinor, currency), currency};
     } catch (error) { throw new AppError(ERR.VALIDATION, error.message || 'تعذر إعداد التخصيص.', {allocation: error.message || 'تخصيص غير صحيح'}); }
   }
-  const method = allocation.method || 'DIRECT';
-  // أي تخصيص صريح لفترات محددة (مباشر أو يدوي) يُتحقق من مفاتيحه قبل أي كتابة — لا تخصيص لفترة غير موجودة.
+  const method = allocation.method || context.defaultAllocationMethod || 'FIFO';
+  const byLegacyKey = new Map(context.outstanding.periods.filter(period => period.legacyPeriodKey).map(period => [period.legacyPeriodKey, period.periodKey]));
+  const normalizedTargets = (allocation.targets || []).map(target => {
+    const key = typeof target === 'string' ? target : target.periodKey;
+    if (!key || !byLegacyKey.has(key)) return target;
+    return typeof target === 'string' ? byLegacyKey.get(key) : {...target, periodKey: byLegacyKey.get(key)};
+  });
+  // Accept the stable new unit id and the read-only legacy alias used by saved allocations.
   if (Array.isArray(allocation.targets) && allocation.targets.length) {
-    const allowed = new Set(context.outstanding.periods.map(period => period.periodKey));
+    const allowed = new Set(context.outstanding.periods.flatMap(period => [period.periodKey, period.legacyPeriodKey].filter(Boolean)));
     for (const target of allocation.targets) {
       const key = typeof target === 'string' ? target : target.periodKey;
       if (key && !allowed.has(key)) throw new AppError(ERR.VALIDATION, `لا توجد فترة استحقاق بالمفتاح المحدد (${key}) داخل هذا التنفيذ.`, {periodKey: 'فترة غير موجودة'});
     }
   }
-  const plan = allocationPlan({outstanding: context.outstanding.periods, amount, method, targets: allocation.targets || [], partyId: allocation.partyId || ''});
+  const plan = allocationPlan({outstanding: context.outstanding.periods, amount, method, targets: normalizedTargets, partyId: allocation.partyId || ''});
   const periodByKey = new Map(context.outstanding.periods.map(period => [period.periodKey, period]));
   const lines = plan.lines.map(line => {
     const period = periodByKey.get(line.periodKey);
@@ -373,7 +386,8 @@ export async function reallocateReceipt(office, receiptId, allocation = {}) {
   if (!receipt || receipt.isDeleted) throw new AppError(ERR.NOT_FOUND, 'محضر التحصيل غير موجود.');
   const context = await allocationContext(office, receipt.executionId);
   const previous = await allocationsFor(office, {receiptId});
-  const plan = planFromInput({context, amount: receipt.amount, amountMinor: receipt.amountMinor ?? null, allocation});
+  const allocationMethod = allocation.method || context.defaultAllocationMethod || 'FIFO';
+  const plan = planFromInput({context, amount: receipt.amount, amountMinor: receipt.amountMinor ?? null, allocation: {...allocation, method: allocationMethod}});
   const now = Clock.now();
   const rows = [];
   await transaction(office.ctx, [STORE.executionAllocations, STORE.executionReceipts, STORE.activityLog], async tx => {
@@ -384,13 +398,13 @@ export async function reallocateReceipt(office, receiptId, allocation = {}) {
         executionPartyId: line.partyId || '', judgmentId: line.judgmentId || '', entitlementType: line.entitlementType || '',
         amount: round2(line.amount),
         ...(receipt.amountMinor !== undefined ? {amountMinor: line.amountMinor, currency: receipt.currency || context.currency} : {}),
-        method: allocation.method || 'MANUAL', isDifference: false, differenceRecordId: '',
+        method: allocationMethod, isDifference: false, differenceRecordId: '',
         isActive: true, createdBy: office.ctx?.profile?.id || 'user', createdAt: now, version: 1, isDeleted: false
       };
       rows.push(row);
       await request(tx.objectStore(STORE.executionAllocations).put(row));
     }
-    await request(tx.objectStore(STORE.executionReceipts).put({...receipt, allocationMethod: allocation.method || 'MANUAL', updatedAt: now, version: (receipt.version || 0) + 1}));
+    await request(tx.objectStore(STORE.executionReceipts).put({...receipt, allocationMethod, updatedAt: now, version: (receipt.version || 0) + 1}));
     await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.executionReceipts, receiptId, 'update', `إعادة تخصيص محضر ${receipt.receiptNumber || ''} (${rows.length} تخصيص) — التخصيص السابق محفوظ في السجل`, {fileId: receipt.fileId})));
   });
   events.emit('entity:changed', {entityType: STORE.executionReceipts, id: receiptId});
@@ -417,6 +431,7 @@ export async function recordDirectCollection(office, input) {
   const execution = await requireExecution(office, input.executionId);
   if (!isIsoDate(input.date)) throw new AppError(ERR.VALIDATION, 'تاريخ التحصيل مطلوب.', {date: 'مطلوب'});
   const context = await allocationContext(office, input.executionId);
+  const allocationMethod = input.allocation?.method || context.defaultAllocationMethod || 'FIFO';
   if (execution.accountingModel === FEAS_MODEL) {
     const currency = String(input.currency || context.currency || '').toUpperCase();
     if (!currency) throw new AppError(ERR.VALIDATION, 'عملة التحصيل غير محددة؛ عرّف التزام FEAS أو أدخل رمز العملة.');
@@ -452,7 +467,7 @@ export async function recordDirectCollection(office, input) {
         const row = {
           id: uid(), executionId: input.executionId, ledgerId: ledger.id, receiptId: '', periodKey: line.periodKey,
           executionPartyId: line.partyId || '', judgmentId: line.judgmentId || '', entitlementType: line.entitlementType || '',
-          amount: line.amount, amountMinor: line.amountMinor, currency, method: input.allocation?.method || 'DIRECT',
+          amount: line.amount, amountMinor: line.amountMinor, currency, method: allocationMethod,
           isDifference: false, differenceRecordId: '', isActive: true, createdBy: office.ctx?.profile?.id || 'user',
           createdAt: now, version: 1, isDeleted: false
         };
@@ -478,7 +493,7 @@ export async function recordDirectCollection(office, input) {
     const row = {
       id: uid(), executionId: input.executionId, ledgerId: ledger.id, receiptId: '', periodKey: line.periodKey,
       executionPartyId: line.partyId || '', judgmentId: line.judgmentId || '', entitlementType: line.entitlementType || '',
-      amount: round2(line.amount), method: input.allocation?.method || 'DIRECT', isDifference: false, differenceRecordId: '',
+      amount: round2(line.amount), method: allocationMethod, isDifference: false, differenceRecordId: '',
       isActive: true, createdBy: office.ctx?.profile?.id || 'user', createdAt: now, version: 1, isDeleted: false
     };
     rows.push(row);

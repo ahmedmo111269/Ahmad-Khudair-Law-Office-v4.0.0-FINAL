@@ -258,6 +258,11 @@
 .mini-table th, .mini-table td { padding: 5px 6px; border-bottom: 1px solid var(--border, rgba(255,255,255,.1)); text-align: center; }
 .mini-table thead th { background: var(--surface-3, rgba(255,255,255,.06)); }
 .mini-table tfoot td { font-weight: 700; }
+.exec-decision-list { display: grid; gap: 8px; }
+.exec-decision-card { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--primary, #c9a227); border-radius: 12px; background: var(--surface-2, rgba(255,255,255,.03)); }
+.exec-decision-card > b { line-height: 1.7; }
+.exec-decision-card .field { margin: 0; }
+.exec-decision-card [hidden] { display: none !important; }
 .pos { color: #4caf50; }
 .neg { color: #d9534f; }
 .check-line { display: flex; gap: 8px; align-items: flex-start; font-size: .86rem; line-height: 1.7; }

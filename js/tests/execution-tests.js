@@ -15,11 +15,17 @@ import * as POA from '../services/execution-poa.js';
 import * as B from '../services/execution-balance.js';
 import * as PR from '../services/execution-print.js';
 import * as MIG from '../services/execution-migration.js';
+import * as PERIOD_MIGRATION from '../services/execution-period-migration.js';
+import {ensureExecutionSettingsV2} from '../services/execution-settings.js';
+import {prefs} from '../core/preferences.js';
+import {events} from '../core/events.js';
 import {seedFamilyExecutionExample, familyExecutionExampleState} from '../services/execution-demo.js';
 import {searchStore} from '../services/search-engine.js';
 import {deepHealth} from '../services/integrity.js';
 import * as E from '../domain/execution.js';
 import * as EN from '../domain/entitlement-engine.js';
+import * as SCHEDULE from '../domain/execution-schedule.js';
+import * as CIVIL from '../domain/execution-period-calendar.js';
 import {Clock} from '../core/clock.js';
 import * as FEAS from '../domain/execution-feas.js';
 import * as FEASApp from '../services/execution-feas.js';
@@ -28,6 +34,7 @@ import {toMinorUnits} from '../domain/execution-money.js';
 
 const rejects = async fn => { try { await fn(); } catch (error) { return error; } throw Error('Expected promise to reject'); };
 const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const stablePeriodKey = (executionId, entitlementType, anchorDate, k) => `${encodeURIComponent(`${executionId}::${entitlementType}`)}::${anchorDate}::${k}`;
 
 async function openDb(name) {
   return new Promise((resolve, reject) => {
@@ -85,7 +92,7 @@ async function feasFixture({fromDate = '2025-01-01', toDate = '2025-03-31'} = {}
   const {office, execution} = env0;
   const obligation = await FEASApp.saveExecutionObligation(office, {
     executionId: execution.id, obligationType: 'نفقة كما وردت بالمصدر', frequency: 'monthly',
-    prorationPolicy: 'days', currency: 'EGP', startDate: '2025-01-01'
+    currency: 'EGP', startDate: '2025-01-01'
   });
   const judgment = await EX.addExecutionJudgment(office, {
     executionId: execution.id, entitlementType: obligation.obligationType, judgmentKind: 'original',
@@ -111,6 +118,23 @@ export async function runExecutionTests(test, expect) {
     expect(E.parsePeriodKey('نفقة شهرية::2025-07-01').start).toBe('2025-07-01');
     expect(E.parsePeriodKey('مفتاح غير صحيح')).toBe(null);
   });
+  test('تنفيذ/تقويم مدني: ارتكاز ANNIVERSARY ثابت، نهاية الفترة مكتملة، والسنوات الكبيسة بلا انجراف', () => {
+    expect(CIVIL.isCivilDate('2024-02-29')).toBe(true);
+    expect(CIVIL.isCivilDate('1900-02-29')).toBe(false);
+    expect(CIVIL.isCivilDate('2000-02-29')).toBe(true);
+    expect(CIVIL.periodStart('2026-10-05', 0, {unit: 'MONTH', periodBasis: 'ANNIVERSARY'})).toBe('2026-10-05');
+    expect(CIVIL.periodEnd('2026-10-05', 0, {unit: 'MONTH', periodBasis: 'ANNIVERSARY'})).toBe('2026-11-04');
+    expect(CIVIL.periodStart('2026-10-05', 1, {unit: 'MONTH', periodBasis: 'ANNIVERSARY'})).toBe('2026-11-05');
+    expect(CIVIL.periodEnd('2026-10-05', 2, {unit: 'MONTH', periodBasis: 'ANNIVERSARY'})).toBe('2027-01-04');
+    expect(CIVIL.periodStart('2024-01-31', 1, {unit: 'MONTH'})).toBe('2024-02-29');
+    expect(CIVIL.periodStart('2024-01-31', 2, {unit: 'MONTH'})).toBe('2024-03-31');
+    expect(CIVIL.periodStart('2024-02-29', 1, {unit: 'YEAR'})).toBe('2025-02-28');
+    expect(CIVIL.periodStart('2026-10-05', 1, {unit: 'WEEK'})).toBe('2026-10-12');
+    expect(CIVIL.periodEnd('2026-10-05', 1, {unit: 'WEEK'})).toBe('2026-10-18');
+    expect(CIVIL.periodStart('2026-10-05', 3, {unit: 'DAY'})).toBe('2026-10-08');
+    expect(CIVIL.periodStart('2026-10-05', 0, {unit: 'MONTH', periodBasis: 'CALENDAR_MONTH'})).toBe('2026-10-01');
+    expect(CIVIL.periodEnd('2026-10-05', 0, {unit: 'MONTH', periodBasis: 'CALENDAR_MONTH'})).toBe('2026-10-31');
+  });
   test('تنفيذ/مجال: بدايات الفترات الشهرية والنصف شهرية والمخصصة', () => {
     expect(E.periodStartFor('2025-07-15', 'monthly')).toBe('2025-07-01');
     const weekly = E.periodStartFor('2025-07-15', 'weekly');
@@ -129,21 +153,21 @@ export async function runExecutionTests(test, expect) {
     const capped = E.enumeratePeriods({from: '2000-01-01', to: '2025-12-31', periodicity: 'daily', maxPeriods: 30}).periods;
     expect(capped.length).toBe(30);
   });
-  test('تنفيذ/مجال: سياسة احتساب الفترة الجزئية (أيام مقابل قيمة بداية الفترة)', () => {
-    const slice = {id: 's', entitlementType: 'نفقة', valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2025-01-01', status: 'active'};
+  test('تنفيذ/مجال: الفترة الجزئية لا تُناسب بالأيام؛ ASK يوقف الحساب وخيار المكتب يُحتسب فترة كاملة', () => {
+    const slice = {id: 's', itemId: 'item-1', anchorDate: '2025-01-01', entitlementType: 'نفقة', valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2025-01-16', status: 'active'};
     const period = {start: '2025-01-01', end: '2025-01-31', entitlementType: 'نفقة'};
-    const days = EN.sliceValueForPeriod(slice, period, {proration: 'days'});
-    expect(days.amount).toBe(3000);
-    const opening = {...slice, startDate: '2025-01-16'};
-    const partial = EN.sliceValueForPeriod(opening, period, {proration: 'days'});
-    expect(partial.prorated).toBe(true);
-    expect(partial.amount > 0 && partial.amount < 3000).toBe(true);
-    // سياسة «بداية الفترة» تُحتسب كاملة إن كانت الشريحة سارية في بداية الفترة نفسها
-    const asOpening = EN.sliceValueForPeriod({...slice, startDate: '2025-01-01'}, period, {policy: 'periodStart'});
-    expect(asOpening.amount).toBe(3000);
-    const midPeriod = EN.sliceValueForPeriod(opening, period, {policy: 'periodStart'});
-    expect(midPeriod.prorated).toBe(true);
-    expect(midPeriod.amount < 3000).toBe(true);
+    const partial = EN.sliceValueForPeriod(slice, period, {proration: 'days'}); // حقل قديم: يُتجاهل ولا يُنتج تناسبًا.
+    expect(partial.covered).toBe(false);
+    expect(partial.needsDecision).toBe(true);
+    expect(partial.amount).toBe(0);
+    expect(Object.hasOwn(partial, 'prorated')).toBe(false);
+    const pending = EN.buildEntitlementPeriods({slices: [slice], asOf: '2025-01-31', settings: SCHEDULE.DEFAULT_SCHEDULE_SETTINGS});
+    expect(pending.periods[0].needsDecision).toBe(true);
+    expect(pending.periods[0].finalAmount).toBe(0);
+    const selected = EN.buildEntitlementPeriods({slices: [slice], asOf: '2025-01-31', settings: {...SCHEDULE.DEFAULT_SCHEDULE_SETTINGS, startPolicy: 'INCLUDE_FULL'}});
+    expect(selected.periods[0].finalAmount).toBe(3000);
+    expect(selected.periods[0].start).toBe('2025-01-01');
+    expect(selected.periods[0].end).toBe('2025-01-31');
   });
   test('تنفيذ/مجال: رسائل التحقق عربية وواضحة لشرائح القيمة والحركات والتخصيص', () => {
     const sliceErrors = E.validateValueSlice({entitlementType: '', amount: -5, startDate: '2026-02-30'}, {existing: []});
@@ -253,7 +277,8 @@ export async function runExecutionTests(test, expect) {
     const e = await familyFixture();
     try {
       const balance = await B.executionBalance(e.office, e.execution.id);
-      const july = balance.summary.periods.find(p => p.periodKey === 'نفقة شهرية::2025-07-01');
+      const july = balance.summary.periods.find(p => p.legacyPeriodKey === 'نفقة شهرية::2025-07-01');
+      expect(july.periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 6));
       expect(july.finalAmount).toBe(4000);
       expect(july.originalAmount).toBe(3000);
       expect(july.difference).toBe(1000);
@@ -273,7 +298,8 @@ export async function runExecutionTests(test, expect) {
       const j2 = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: 'نفقة شهرية', judgmentKind: 'later', judgmentDate: '2025-02-01', valueType: 'periodic', periodicity: 'monthly', amount: 4000, effectiveFrom: '2025-01-01', previousJudgmentId: j.id});
       const s2 = await EX.saveValueSlice(e.office, {executionId: e.execution.id, judgmentId: j2.id, entitlementType: 'نفقة شهرية', valueType: 'periodic', periodicity: 'monthly', amount: 4000, startDate: '2025-01-01'});
       const impact = await DF.previewImpact(e.office, {executionId: e.execution.id, sliceId: s2.id});
-      const jan = impact.impact.rows.find(row => row.periodKey === 'نفقة شهرية::2025-01-01');
+      const jan = impact.impact.rows.find(row => row.start === '2025-01-01');
+      expect(jan.periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 0));
       expect(jan.oldValue).toBe(3000); expect(jan.newValue).toBe(4000);
       expect(jan.collected).toBe(2000);
       expect(jan.originalOutstanding).toBe(1000);
@@ -455,7 +481,7 @@ export async function runExecutionTests(test, expect) {
       expect(second.receipt.receiptNumber).toBe('RC-2025-0002');
       expect(first.receipt.ledgerId).toBe(first.ledger.id);
       expect(first.allocations.length).toBe(1);
-      expect(first.allocations[0].periodKey).toBe('نفقة شهرية::2025-01-01');
+      expect(first.allocations[0].periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 0));
       expect(first.ledger.type).toBe('COLLECTION');
       const stored = await e.office.r.executionReceipts.get(first.receipt.id);
       expect(stored.amount).toBe(1000);
@@ -503,14 +529,28 @@ export async function runExecutionTests(test, expect) {
       expect(unattributed.warnings.some(w => w.code === 'no_party_periods')).toBe(true);
     } finally { closeEnv(e); }
   });
-  test('تنفيذ/تخصيص: لا افتراض تلقائي لطريقة FIFO في أي حركة', async () => {
+  test('تنفيذ/تخصيص: الطريقة اليدوية الصريحة تظل يدوية حتى مع FIFO الافتراضي', async () => {
     const e = await familyFixture();
     try {
       const out = await L.recordCollection(e.office, {executionId: e.execution.id, amount: 1000, date: '2025-02-13', allocation: {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-05-01', amount: 1000}]}});
       expect(out.allocations[0].method).toBe('MANUAL');
-      expect(out.allocations[0].periodKey).toBe('نفقة شهرية::2025-05-01');
+      expect(out.allocations[0].periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 4));
       expect(E.ALLOCATION_METHOD_LABELS.FIFO).toContain('الأقدم');
+      expect(E.ALLOCATION_METHOD_LABELS.LIFO).toContain('الأحدث');
       expect((await e.office.r.executionReceipts.get(out.receipt.id)).allocationMethod).toBe('MANUAL');
+    } finally { closeEnv(e); }
+  });
+  test('تنفيذ/تخصيص: FIFO هو الافتراضي على الفترات المستحقة فقط', async () => {
+    const e = await familyFixture();
+    try {
+      const out = await L.recordCollection(e.office, {executionId: e.execution.id, amount: 3500, date: '2025-02-13'});
+      expect(out.allocations.length).toBe(2);
+      expect(out.allocations[0].method).toBe('FIFO');
+      expect(out.allocations[0].periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 0));
+      expect(out.allocations[0].amount).toBe(3000);
+      expect(out.allocations[1].periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 1));
+      expect(out.allocations[1].amount).toBe(500);
+      expect(out.receipt.allocationMethod).toBe('FIFO');
     } finally { closeEnv(e); }
   });
   test('تنفيذ/تخصيص: تحصيل زائد أو غير مخصص يظهر رصيدًا سالبًا/غير مخصص مع تنبيه تنظيمي', async () => {
@@ -543,7 +583,7 @@ export async function runExecutionTests(test, expect) {
       const out = await L.recordCollection(e.office, {executionId: e.execution.id, amount: 1000, date: '2025-02-16', allocation: {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-01-01', amount: 1000}]}});
       const moved = await L.reallocateReceipt(e.office, out.receipt.id, {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-02-01', amount: 1000}]});
       expect(moved.allocations.length).toBe(1);
-      expect(moved.allocations[0].periodKey).toBe('نفقة شهرية::2025-02-01');
+      expect(moved.allocations[0].periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 1));
       const stored = await EX.executionAllocations(e.office, e.execution.id);
       expect(stored.filter(row => row.isActive === false).length).toBe(1);
       expect(stored.length).toBe(2);
@@ -569,7 +609,7 @@ export async function runExecutionTests(test, expect) {
       expect(balance.equations.join(' | ').includes('42000')).toBe(true);
       expect(balance.summary.equations.some(line => line.includes('الرصيد:'))).toBe(true);
       expect(balance.summary.currentValue.amount).toBe(4000);
-      expect(balance.summary.lastPeriod.key).toBe('نفقة شهرية::2025-12-01');
+      expect(balance.summary.lastPeriod.key).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 11));
     } finally { closeEnv(e); }
   });
   test('تنفيذ/تتبع: شجرة من الحكم إلى الفترة ثم المحضر ثم التخصيص', async () => {
@@ -582,10 +622,11 @@ export async function runExecutionTests(test, expect) {
       const flat = [];
       const walk = node => { flat.push(node); (node.children || []).forEach(walk); };
       walk(trace);
-      expect(flat.some(node => String(node.label).includes('نفقة شهرية::2025-01-01'))).toBe(true);
+      const janKey = stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 0);
+      expect(flat.some(node => String(node.label).includes('2025-01-01'))).toBe(true);
       expect(flat.some(node => String(node.label).includes(out.receipt.receiptNumber))).toBe(true);
       expect(flat.some(node => String(node.label).includes('تخصيص'))).toBe(true);
-      expect(flat.some(node => node.meta && node.meta.periodKey === 'نفقة شهرية::2025-01-01')).toBe(true);
+      expect(flat.some(node => node.meta && node.meta.periodKey === janKey)).toBe(true);
       expect(flat.some(node => String(node.label).includes('حكم'))).toBe(true);
     } finally { closeEnv(e); }
   });
@@ -746,7 +787,7 @@ export async function runExecutionTests(test, expect) {
       expect(row.fileNumber).toBe(e.file.fileNumber);
       expect(row.executionTypeLabel.includes('الأسرة')).toBe(true);
       expect(round2(row.currentValue)).toBe(4000);
-      expect(row.lastPeriod).toBe('نفقة شهرية::2025-12-01');
+      expect(row.lastPeriod).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 11));
       expect(round2(row.collected)).toBe(0);
       expect(round2(row.balance)).toBe(42000);
       expect(round2(row.judgmentDifference)).toBe(6000);
@@ -817,6 +858,121 @@ export async function runExecutionTests(test, expect) {
       const poa = await POA.saveExecutionPoa(e.office, draft);
       const byPoa = await searchStore(e.office, 'executionPOAs', poa.poaNumber, {limit: 5});
       expect(byPoa.items.length).toBe(1);
+    } finally { closeEnv(e); }
+  });
+  test('تنفيذ/إعدادات: ترقية قواعد المكتب تحفظ v1 وتثبت التاريخ والفاعل وتبطل cache مرة واحدة', async () => {
+    const e = await env();
+    const legacyKey = 'exec:settings:v1:tester', currentKey = 'exec:settings:v2:tester';
+    const legacy = {version: 1, laterJudgmentApproval: true, schedule: {allocationOrder: 'lifo', defaultCurrency: 'EGP', prorationPolicy: 'days', firstMonthPolicy: 'fullMonth'}};
+    let unsubscribe = () => {};
+    try {
+      await prefs.set(currentKey, null);
+      await prefs.set(legacyKey, legacy);
+      e.office.app = {__execLookup: {clients: new Map([['old', {}]]), cases: new Map(), files: new Map()}};
+      let invalidations = 0;
+      unsubscribe = events.on('execution:cache-invalidated', () => { invalidations += 1; });
+      const upgraded = await ensureExecutionSettingsV2(e.office);
+      expect(upgraded.version).toBe(2);
+      expect(upgraded.ruleVersion).toBe(2);
+      expect(upgraded.engineVersion).toBe(SCHEDULE.EXECUTION_ENGINE_VERSION);
+      expect(upgraded.effectiveFrom).toBe('2026-10-05');
+      expect(upgraded.schedule.periodBasis).toBe('ANNIVERSARY');
+      expect(upgraded.schedule.startPolicy).toBe('ASK');
+      expect(upgraded.schedule.midChangePolicy).toBe('ASK');
+      expect(upgraded.schedule.endPolicy).toBe('ASK');
+      expect(upgraded.schedule.accrualTiming).toBe('AFTER_PERIOD_END');
+      expect(upgraded.schedule.monthEndPolicy).toBe('CLAMP_TO_LAST_DAY');
+      expect(upgraded.schedule.allocationOrder).toBe('lifo'); // خيار المكتب القديم محفوظ
+      expect(upgraded.schedule.prorationPolicy === undefined && upgraded.schedule.firstMonthPolicy === undefined).toBe(true);
+      expect(JSON.stringify(prefs.get(legacyKey)).includes('prorationPolicy')).toBe(true);
+      expect(upgraded.ruleHistory.some(row => row.version === 1 && row.preserved)).toBe(true);
+      expect(e.office.app.__execLookup.clients.size).toBe(0);
+      expect(invalidations).toBe(1);
+      const logs = (await e.office.r.activityLog.all(1000)).filter(row => row.entityType === 'executionSettings' && row.action === 'version');
+      expect(logs.length).toBe(1);
+      expect(logs[0].actorId).toBe('tester');
+      expect(logs[0].timestamp.length > 0).toBe(true);
+      expect(logs[0].metadata.source).toBe(upgraded.source);
+      const again = await ensureExecutionSettingsV2(e.office);
+      expect(again.updatedAt).toBe(upgraded.updatedAt);
+      expect((await e.office.r.activityLog.all(1000)).filter(row => row.entityType === 'executionSettings' && row.action === 'version').length).toBe(1);
+    } finally {
+      unsubscribe();
+      await prefs.set(legacyKey, null);
+      await prefs.set(currentKey, null);
+      closeEnv(e);
+    }
+  });
+  test('تنفيذ/ترحيل تقويم v2: ربط فريد idempotent مع بقاء التحصيل واللقطة والتوكيل كما صدرت', async () => {
+    const e = await familyFixture();
+    try {
+      const legacyExecution = {...e.execution, engineVersion: 1};
+      await e.office.r.execution.put(legacyExecution);
+      const oldSlices = await EX.executionSlices(e.office, e.execution.id);
+      for (const slice of oldSlices) {
+        const legacy = {...slice};
+        delete legacy.itemId; delete legacy.anchorDate; delete legacy.periodCalendarVersion;
+        await e.office.r.executionValuePeriods.put(legacy);
+      }
+      const collected = await L.recordCollection(e.office, {executionId: e.execution.id, amount: 500, date: '2025-02-10',
+        allocation: {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-01-01', amount: 500}]}});
+      const oldAllocation = {...collected.allocations[0], periodKey: 'نفقة شهرية::2025-01-01'};
+      await e.office.r.executionAllocations.put(oldAllocation);
+      const snapshot = {id: 'issued-recognition', executionId: e.execution.id, accountingModel: FEAS.FEAS_MODEL,
+        periodKey: 'feas::issued::2025-01-01::0', fromDate: '2025-01-01', toDate: '2025-01-31',
+        status: 'RECOGNIZED', recognizedAmountMinor: 300000, createdAt: '2025-02-01T00:00:00.000Z'};
+      const issuedPoa = {id: 'issued-poa', executionId: e.execution.id, status: 'issued', date: '2025-02-02', total: 1234,
+        lines: [{key: 'issued-line', amount: 1234}], rangeDecisionsSnapshot: [{choice: 'INCLUDE_FULL', reason: 'قرار سابق'}]};
+      await e.office.r.executionPeriods.put(snapshot);
+      await e.office.r.executionPOAs.put(issuedPoa);
+      const beforeReceipt = await e.office.r.executionReceipts.get(collected.receipt.id);
+      const beforeLedger = await e.office.r.executionLedger.get(collected.ledger.id);
+      const first = await PERIOD_MIGRATION.migrateExecutionPeriodV2(e.office);
+      expect(first.reused).toBe(false);
+      expect(first.reboundAllocations).toBe(1);
+      expect(first.taggedSlices).toBe(2);
+      expect(first.conflicts).toBe(0);
+      expect(first.historicalImmutable.receipts).toBe(true);
+      expect(first.historicalImmutable.recognizedSnapshots).toBe(true);
+      expect(first.historicalImmutable.poas).toBe(true);
+      expect(first.actorId).toBe('tester');
+      expect(first.completedAt.length > 0).toBe(true);
+      const rebound = await e.office.r.executionAllocations.get(oldAllocation.id);
+      expect(rebound.periodKey).toBe(stablePeriodKey(e.execution.id, 'نفقة شهرية', '2025-01-01', 0));
+      expect(rebound.periodMigration.fromKey).toBe('نفقة شهرية::2025-01-01');
+      expect(rebound.periodMigration.reason.length > 0).toBe(true);
+      expect((await e.office.r.executionValuePeriods.get(e.s1.id)).anchorDate).toBe('2025-01-01');
+      expect((await e.office.r.executionValuePeriods.get(e.s1.id)).periodCalendarVersion).toBe(2);
+      expect((await e.office.r.execution.get(e.execution.id)).engineVersion).toBe(SCHEDULE.EXECUTION_ENGINE_VERSION);
+      expect(JSON.stringify(await e.office.r.executionReceipts.get(collected.receipt.id))).toBe(JSON.stringify(beforeReceipt));
+      expect(JSON.stringify(await e.office.r.executionLedger.get(collected.ledger.id))).toBe(JSON.stringify(beforeLedger));
+      expect(JSON.stringify(await e.office.r.executionPeriods.get(snapshot.id))).toBe(JSON.stringify(snapshot));
+      expect(JSON.stringify(await e.office.r.executionPOAs.get(issuedPoa.id))).toBe(JSON.stringify(issuedPoa));
+      const again = await PERIOD_MIGRATION.migrateExecutionPeriodV2(e.office);
+      expect(again.reused).toBe(true);
+      expect(JSON.stringify(await e.office.r.executionPeriods.get(snapshot.id))).toBe(JSON.stringify(snapshot));
+    } finally { closeEnv(e); }
+  });
+  test('تنفيذ/ترحيل تقويم v2: مفتاح شهري ملتبس يبقى دون تغيير ويُسجل كتعارض للمراجعة', async () => {
+    const e = await env({through: ''});
+    try {
+      const judgment = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: 'نفقة شهرية',
+        judgmentDate: '2025-01-10', valueType: 'periodic', periodicity: 'monthly', amount: 3000, effectiveFrom: '2025-01-20'});
+      await EX.saveValueSlice(e.office, {executionId: e.execution.id, judgmentId: judgment.id, entitlementType: 'نفقة شهرية',
+        valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2025-01-20', anchorDate: '2025-01-20'});
+      const allocation = {id: 'ambiguous-legacy-allocation', executionId: e.execution.id, periodKey: 'نفقة شهرية::2025-02-01',
+        amount: 100, isActive: true, isDeleted: false, createdAt: '2025-02-01T00:00:00.000Z'};
+      await e.office.r.executionAllocations.put(allocation);
+      const report = await PERIOD_MIGRATION.migrateExecutionPeriodV2(e.office);
+      expect(report.conflicts).toBe(1);
+      expect(report.reboundAllocations).toBe(0);
+      expect(report.conflictIds.length).toBe(1);
+      expect((await e.office.r.executionAllocations.get(allocation.id)).periodKey).toBe(allocation.periodKey);
+      const conflict = await e.office.r.meta.get(report.conflictIds[0]);
+      expect(conflict.status).toBe('OPEN');
+      expect(conflict.candidatePeriodKeys.length).toBe(2);
+      expect(conflict.reason.length > 0).toBe(true);
+      expect((await PERIOD_MIGRATION.executionPeriodMigrationReport(e.office)).conflicts.length).toBe(1);
     } finally { closeEnv(e); }
   });
   test('تنفيذ/ترحيل: حقول إضافية بلا اختراع تواريخ + علامة مراجعة + idempotent', async () => {
@@ -1031,18 +1187,85 @@ export async function runExecutionTests(test, expect) {
     } finally { closeEnv(e); }
   });
 
+  // ===== 2026 Goldens: anchored complete periods, never day-prorated =====
+  test('تنفيذ/Golden 2026: 05/10 = صفر؛ 04/11 = 3,000؛ 04/01 = 9,000 مع asOf فعلي', () => {
+    const slice = {id: 'legacy-2026', itemId: 'item-2026', anchorDate: '2026-10-05', entitlementType: 'نفقة شهرية',
+      valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2026-10-05', status: 'active'};
+    const run = asOf => SCHEDULE.buildExecutionSchedule({slices: [slice], receipts: [], allocations: [],
+      asOf, periodThroughDate: asOf, settings: SCHEDULE.DEFAULT_SCHEDULE_SETTINGS});
+    const opening = run('2026-10-05');
+    const first = run('2026-11-04');
+    const third = run('2027-01-04');
+    expect(opening.totals.dueMinor).toBe(0);
+    expect(first.totals.dueMinor).toBe(300000);
+    expect(third.totals.dueMinor).toBe(900000);
+    expect(opening.asOf).toBe('2026-10-05');
+    expect(opening.periodThroughDate).toBe('2026-10-05');
+    expect(first.asOf).toBe('2026-11-04');
+    expect(third.asOf).toBe('2027-01-04');
+    expect(third.equations[0].includes('04/01/2027')).toBe(true);
+    expect(third.units.filter(unit => unit.isComplete).every(unit => unit.dueMinor === 300000)).toBe(true);
+  });
+
   // ===== FEAS: Golden Scenarios — explicit snapshots, minor units, audited deltas =====
-  test('FEAS/Golden: minor units reject silent rounding; civil-period snapshot is explicit', () => {
+  test('FEAS/Golden 2026: لا استحقاق في 05/10؛ 3,000 في 04/11 و9,000 في 04/01 بلا تناسب', () => {
     expect(toMinorUnits('120.50', 'EGP')).toBe(12050);
     expect(toMinorUnits('12.345', 'BHD')).toBe(12345);
     expect(() => toMinorUnits('1.001', 'EGP')).toThrow();
     expect(() => toMinorUnits('1.00', 'XYZ')).toThrow();
-    const obligation = {id: 'ob-1', obligationType: 'نفقة كما وردت', currency: 'EGP', frequency: 'monthly', prorationPolicy: 'days', startDate: '2025-01-01'};
-    const source = {id: 'slice-1', obligationId: 'ob-1', judgmentId: 'j-1', valueType: 'periodic', amountMinor: 300000, currency: 'EGP', startDate: '2025-01-01', status: 'active'};
-    const result = FEAS.resolveExecutionClaim({obligation, valuePeriods: [source], fromDate: '2025-01-01', toDate: '2025-03-31'});
-    expect(result.recognizedAmountMinor).toBe(900000);
-    expect(result.segments.length).toBe(3);
-    expect(result.segments[2].unitEnd).toBe('2025-03-31');
+    const obligation = {id: 'ob-2026', obligationType: 'نفقة كما وردت', currency: 'EGP', frequency: 'monthly',
+      periodBasis: 'ANNIVERSARY', startPolicy: 'ASK', midChangePolicy: 'ASK', endPolicy: 'ASK', startDate: '2026-10-05', anchorDate: '2026-10-05'};
+    const source = {id: 'slice-2026', obligationId: 'ob-2026', judgmentId: 'j-2026', valueType: 'periodic', amountMinor: 300000,
+      currency: 'EGP', startDate: '2026-10-05', status: 'active'};
+    const openingDay = FEAS.resolveExecutionClaim({obligation, valuePeriods: [source], fromDate: '2026-10-05', toDate: '2026-10-05'});
+    expect(openingDay.recognizedAmountMinor).toBe(0);
+    expect(openingDay.decisions.length > 0).toBe(true);
+    const firstComplete = FEAS.resolveExecutionClaim({obligation, valuePeriods: [source], fromDate: '2026-10-05', toDate: '2026-11-04'});
+    expect(firstComplete.recognizedAmountMinor).toBe(300000);
+    expect(firstComplete.segments.length).toBe(1);
+    expect(firstComplete.segments[0].unitStart).toBe('2026-10-05');
+    expect(firstComplete.segments[0].unitEnd).toBe('2026-11-04');
+    const throughThird = FEAS.resolveExecutionClaim({obligation, valuePeriods: [source], fromDate: '2026-10-05', toDate: '2027-01-04'});
+    expect(throughThird.recognizedAmountMinor).toBe(900000);
+    expect(throughThird.segments.length).toBe(3);
+    expect(throughThird.segments[2].unitEnd).toBe('2027-01-04');
+  });
+  test('FEAS/قرار حدّ: لا اعتراف بلا قرار؛ المقارنة جنبًا إلى جنب ثم حفظ السبب والفاعل والتاريخ في Trace', async () => {
+    const e = await env({accountingModel: FEAS.FEAS_MODEL});
+    try {
+      const obligation = await FEASApp.saveExecutionObligation(e.office, {executionId: e.execution.id, obligationType: 'نفقة دورية',
+        frequency: 'monthly', currency: 'EGP', startDate: '2025-01-01', anchorDate: '2025-01-01', periodBasis: 'ANNIVERSARY',
+        startPolicy: 'ASK', midChangePolicy: 'ASK', endPolicy: 'ASK'});
+      const judgment = await EX.addExecutionJudgment(e.office, {executionId: e.execution.id, entitlementType: obligation.obligationType,
+        judgmentKind: 'original', judgmentDate: '2025-01-01', valueType: 'periodic', periodicity: 'monthly', amount: 3000, effectiveFrom: '2025-01-01'});
+      await EX.saveValueSlice(e.office, {executionId: e.execution.id, obligationId: obligation.id, judgmentId: judgment.id,
+        valueType: 'periodic', amount: '3000.00', startDate: '2025-01-01'});
+      const pending = await FEASApp.projectExecutionPeriod(e.office, {executionId: e.execution.id, obligationId: obligation.id,
+        fromDate: '2025-01-01', toDate: '2025-01-15'});
+      expect(pending.recognizedAmountMinor).toBe(0);
+      expect(pending.partials.length).toBe(1);
+      const boundary = pending.decisions.find(row => row.kind === 'RANGE_END');
+      expect(Boolean(boundary)).toBe(true);
+      expect(pending.sideBySideScenarios.find(row => row.choice === 'INCLUDE_FULL').amountMinor).toBe(300000);
+      expect(pending.sideBySideScenarios.find(row => row.choice === 'EXCLUDE').amountMinor).toBe(null);
+      const blocked = await rejects(() => FEASApp.recognizeExecutionPeriod(e.office, {executionId: e.execution.id, obligationId: obligation.id,
+        fromDate: '2025-01-01', toDate: '2025-01-15'}));
+      expect(blocked.code).toBe(ERR.VALIDATION);
+      const supplied = {periodKey: boundary.periodKey, kind: boundary.kind, choice: 'INCLUDE_FULL', reason: 'حد التقرير اختير صراحةً',
+        decidedAt: '2025-01-20T12:00:00.000Z', decidedBy: 'tester'};
+      const recognized = await FEASApp.recognizeExecutionPeriod(e.office, {executionId: e.execution.id, obligationId: obligation.id,
+        fromDate: '2025-01-01', toDate: '2025-01-15', periodDecisions: [supplied]});
+      expect(recognized.row.recognizedAmountMinor).toBe(300000);
+      expect(recognized.row.decisionsSnapshot[0].choice).toBe('INCLUDE_FULL');
+      expect(recognized.row.decisionsSnapshot[0].reason).toBe('حد التقرير اختير صراحةً');
+      expect(recognized.row.decisionsSnapshot[0].decidedAt).toBe(supplied.decidedAt);
+      expect(recognized.row.decisionsSnapshot[0].decidedBy).toBe('tester');
+      const balance = await B.executionBalance(e.office, e.execution.id);
+      const flat = [];
+      const walk = node => { flat.push(node); (node.children || []).forEach(walk); };
+      walk(balance.trace);
+      expect(flat.some(node => node.meta?.decision?.choice === 'INCLUDE_FULL' && node.meta.decision.decidedBy === 'tester')).toBe(true);
+    } finally { closeEnv(e); }
   });
   test('FEAS/Golden: لقطات اعتراف ثابتة، فرق الحكم يُعتمد مرة واحدة ولا ينشئ حركة أصل', async () => {
     const e = await feasFixture();
@@ -1050,10 +1273,10 @@ export async function runExecutionTests(test, expect) {
       const initial = await B.executionBalance(e.office, e.execution.id);
       expect(initial.summary.accountingModel).toBe(FEAS.FEAS_MODEL);
       expect(initial.summary.finalEntitlementMinor).toBe(900000);
-      expect(initial.summary.periodCount).toBe(1);
+      expect(initial.summary.periodCount).toBe(3);
       const repeated = await FEASApp.recognizeExecutionPeriod(e.office, {executionId: e.execution.id, obligationId: e.obligation.id, fromDate: '2025-01-01', toDate: '2025-03-31'});
       expect(repeated.row.id).toBe(e.period.id);
-      expect((await FEASApp.executionRecognizedPeriods(e.office, e.execution.id)).length).toBe(1);
+      expect((await FEASApp.executionRecognizedPeriods(e.office, e.execution.id)).length).toBe(3);
       const preRecognition = await B.balanceSnapshot(e.office, e.execution.id, '2000-01-01');
       expect(preRecognition.summary.finalEntitlementMinor).toBe(0);
 
@@ -1064,7 +1287,7 @@ export async function runExecutionTests(test, expect) {
       expect(candidate.status).toBe('needs_review');
       expect(candidate.__impact.totalsMinor.difference).toBe(200000);
       const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: candidate.id});
-      expect(created.impact.rows.length).toBe(1);
+      expect(created.impact.rows.length).toBe(2);
       await DF.settlementReview(e.office, created.settlement.id);
       await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'اختبار ذهبي'});
       const approved = await B.executionBalance(e.office, e.execution.id);
@@ -1108,7 +1331,7 @@ export async function runExecutionTests(test, expect) {
 
       const draft = await POA.buildPoaDraft(e.office, {executionId: e.execution.id});
       expect(draft.accountingModel).toBe(FEAS.FEAS_MODEL);
-      expect(draft.periodRows.length).toBe(1);
+      expect(draft.periodRows.length).toBe(3);
       expect(draft.totals.periodsMinor).toBe(900000);
       const lines = draft.lines.filter(line => line.included && line.amountMinor > 0);
       const poaInput = {executionId: e.execution.id, accountingModel: FEAS.FEAS_MODEL, currency: draft.currency,
@@ -1152,7 +1375,7 @@ export async function runExecutionTests(test, expect) {
     try {
       const obligation = await FEASApp.saveExecutionObligation(e.office, {
         executionId: e.execution.id, obligationType: 'نفقة كما وردت بالمصدر', frequency: 'monthly',
-        prorationPolicy: 'days', currency: 'EGP', startDate: '2025-01-01'
+        currency: 'EGP', startDate: '2025-01-01'
       });
       const judgment = await EX.addExecutionJudgment(e.office, {
         executionId: e.execution.id, entitlementType: obligation.obligationType, judgmentKind: 'original',
