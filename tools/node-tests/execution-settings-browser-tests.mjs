@@ -79,6 +79,28 @@ const verify = async (name, fn) => {
   }
 };
 
+const modalCount = () => page.locator('#modal-root .modal-card').count();
+/** عدد القوائم/القوائم المنسدلة الظاهرة (زر «المزيد» يفتح قائمة لا نافذة). */
+const openMenuCount = () => page.evaluate(() => [...document.querySelectorAll('[class*="menu"],[class*="dropdown"],[class*="popover"],[role="menu"]')]
+  .filter(node => node.offsetParent !== null).length);
+/** ينقر عنصرًا ويتوقع أثرًا مرئيًا (نافذة أو قائمة) — ثم يُغلقه بلا أثر. */
+const expectModal = async selector => {
+  const node = page.locator(selector).first();
+  assert.ok(await node.count(), `عنصر مفقود: ${selector}`);
+  const before = {modals: await modalCount(), menus: await openMenuCount()};
+  await node.click({force: true});
+  await page.waitForTimeout(900);
+  const after = {modals: await modalCount(), menus: await openMenuCount()};
+  const opened = after.modals > before.modals || after.menus > before.menus;
+  const title = after.modals ? ((await page.locator('#modal-root .modal-title').first().textContent().catch(() => '')) || '').trim().slice(0, 30) : 'قائمة';
+  if (!opened) return {opened: false, title: '', before, after};
+  await page.evaluate(() => { for (const b of document.querySelectorAll('#modal-root [data-close], #modal-root [data-cancel]')) b.click(); });
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.locator('body').click({position: {x: 6, y: 6}}).catch(() => {});
+  await page.waitForTimeout(500);
+  return {opened: true, title};
+};
+
 await page.goto(`${base}/index.html`, {waitUntil: 'domcontentloaded'});
 await page.waitForFunction(() => window.__LAW_OFFICE_APP__?.office && !window.__LAW_OFFICE_APP__.booting && !document.querySelector('.error-box'), null, {timeout: 60000});
 const today = await page.evaluate(async () => (await import('./js/core/clock.js')).localDate());
@@ -185,6 +207,55 @@ await verify('قوالب الطباعة: تُفتح من داخل الإعداد
     return JSON.stringify(rows).includes('سطر فحص');
   });
   assert.ok(saved, 'القالب المعدَّل لم يُحفظ');
+});
+
+await verify('«احسب مدة» بمبلغ يدوي: مذكرة 12,600 بمعادلاتها ولا تُغيّر الرصيد المسجَّل', async () => {
+  await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), executionId);
+  await page.waitForSelector('.exec-numbers', {timeout: 30000});
+  await page.waitForTimeout(900);
+  const before = await numbers();
+  await page.locator('.exec-quick-card [data-open-duration]').click();
+  await page.waitForSelector('#modal-root [data-form="duration"]', {timeout: 15000});
+  const form = '#modal-root [data-form="duration"]';
+  await page.locator(`${form} [name="fromDate"]`).fill('2026-10-05');
+  await page.locator(`${form} [name="toDate"]`).fill('2027-01-04');
+  await page.locator(`${form} [name="manualAmount"]`).fill('4000');
+  await page.locator(`${form} [name="manualFees"]`).fill('500');
+  await page.locator(`${form} [name="manualStamps"]`).fill('100');
+  await page.locator(`${form} [data-use-manual]`).check();
+  await page.locator(`${form} [data-save]`).click();
+  await page.waitForTimeout(1200);
+  const result = (await page.locator(`${form} [data-result]`).textContent()).replace(/\s+/g, ' ');
+  assert.ok(result.includes('12,600'), `الإجمالي اليدوي غير صحيح: ${result.slice(0, 220)}`);
+  assert.ok(/3/.test(result), `عدد الفترات غير ظاهر: ${result.slice(0, 160)}`);
+  assert.ok(result.includes('مذكرة'), 'تنبيه «مذكرة يدوية لا تغيّر الرصيد» مفقود');
+  await page.screenshot({path: path.join(artifactDir, '07-manual-memo.png')});
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  const after = await numbers();
+  assert.deepEqual(after, before, `الرصيد المسجَّل تأثر بالمذكرة: ${JSON.stringify({before, after})}`);
+});
+
+await verify('لا زر ميت في مركز التنفيذ: كل عنصر تحكم يفتح نافذته (القائمة والبطاقة)', async () => {
+  await page.evaluate(() => window.__LAW_OFFICE_APP__.go('executionCenter'));
+  await page.waitForSelector('#exec-grid tbody tr[data-i]', {timeout: 30000});
+  await page.waitForTimeout(1200);
+  const listReport = {};
+  for (const selector of ['[data-new-execution]', '[data-help]', '[data-customize-page]', '[data-exec-trash]', '[data-settings]', '[data-exec-clear]']) {
+    const out = await expectModal(selector).catch(error => ({opened: false, title: error.message}));
+    listReport[selector] = `${out.opened ? 'فعّال' : 'ميت'}${out.title ? ` — ${out.title}` : ''}`;
+    assert.ok(out.opened, `زر بلا أثر في صفحة القائمة: ${selector}`);
+  }
+  await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), executionId);
+  await page.waitForSelector('.exec-numbers', {timeout: 30000});
+  await page.waitForTimeout(1000);
+  const cardReport = {};
+  for (const selector of ['[data-more]', '[data-open-duration]', '[data-open-statement]', '[data-record]', '[data-action="collection"]', '.exec-summary [data-settings]']) {
+    const out = await expectModal(selector).catch(error => ({opened: false, title: error.message}));
+    cardReport[selector] = `${out.opened ? 'فعّال' : 'ميت'}${out.title ? ` — ${out.title}` : ''}`;
+    assert.ok(out.opened, `زر بلا أثر في البطاقة: ${selector}`);
+  }
+  report.controlSweep = {list: listReport, card: cardReport};
 });
 
 await verify('لا أخطاء صفحة/كونسول خلال الرحلة كلها', async () => { assert.deepEqual(report.errors, []); });
