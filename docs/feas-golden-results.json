@@ -1,0 +1,95 @@
+{
+  "ranAt": "2026-10-05T17:06:00.014Z",
+  "node": "v22.22.3",
+  "pass": 16,
+  "total": 16,
+  "results": [
+    {
+      "name": "§35 GOLDEN: 27,000 + 30,000 − 10,000 = 47,000 → judgment B 4,000 from 01/06/2025 → 71,000 / 61,000 (never 75,000)",
+      "status": "PASS",
+      "detail": {
+        "before": 47000,
+        "pendingImpact": 14000,
+        "effective": 71000,
+        "outstanding": 61000
+      }
+    },
+    {
+      "name": "G1 fixed 70,000 + collection 70,000 → outstanding 0",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G2 anchor 05/10/2026: at 05/10 nothing due, running 05/10→04/11",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G3 at 04/11/2026 → 1 completed period = 3,000",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G4 9 × 3,000 = 27,000 then collection 27,000 → 0",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G5 anchor 31/01 clamps without drift (31/01 → 28/02 → 31/03)",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G6/G7/G12 changes 3000→4000, 4000→3000 (credit candidate), 3000→4000→5000",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G8 early payment: nothing recognized → due 0, receipt stays unallocated/prepaid",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G9 partial receipt 1,500 on 3,000 → remaining 1,500",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G10 overpayment: due 6,000 collected 8,000 → outstanding 0, credit 2,000, unallocated 2,000",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "G11 POA does not create debt: POA ledger/snapshot rows ignored by balance",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "Allocation guards: over-period allocation rejected; over-receipt impossible",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "Duration tool: partial boundary periods reported, never prorated",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "Period key is anchor + k (stable, not calendar month)",
+      "status": "PASS",
+      "detail": null
+    },
+    {
+      "name": "PROPERTY ×5000: period[k].end + 1 = period[k+1].start; full period value = unit value",
+      "status": "PASS",
+      "detail": {
+        "checked": 5000
+      }
+    },
+    {
+      "name": "PROPERTY ×2000: allocations ≤ receipt and ≤ period for FIFO/PROPORTIONAL",
+      "status": "PASS",
+      "detail": null
+    }
+  ]
+}

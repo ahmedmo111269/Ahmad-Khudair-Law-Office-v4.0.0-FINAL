@@ -587,6 +587,26 @@ export async function executionIntegrityReport(office, executionId) {
     if (Number.isSafeInteger(poa.totalMinor) && Number.isSafeInteger(poa.lines?.reduce((sum, line) => sum + (line.included && Number.isSafeInteger(line.amountMinor) ? line.amountMinor : 0), 0))
       && poa.totalMinor !== poa.lines.reduce((sum, line) => sum + (line.included && Number.isSafeInteger(line.amountMinor) ? line.amountMinor : 0), 0)) add('poa-total-mismatch', 'error', STORE.executionPOAs, poa.id, 'إجمالي لقطة التوكيل لا يساوي مجموع البنود المدرجة.', 'راجع صورة التوكيل المحفوظة؛ لا يعاد حسابها من السجلات الحالية.');
   }
+  // §24/§23/§30/§38: إظهار ما لا يجوز أن يختفي — قراءة فقط، لا إصلاح تلقائي ولا تعديل لأي لقطة.
+  for (const row of differences.filter(item => !item.isDeleted && item.accountingModel === FEAS_MODEL && ['PENDING_REVIEW', 'REVIEWED', 'APPROVED', 'POSTED'].includes(item.status))) {
+    if (!String(row.newJudgmentId || row.judgmentId || '').trim()) add('difference-without-judgment', 'error', STORE.differenceRecords, row.id, 'سجل فرق فعّال بلا حكم مصدر.', 'لا تعتمد الفرق؛ اربطه بالحكم اللاحق الصحيح من مسار التسوية أو ألغِه بقرار موثق.');
+  }
+  for (const receipt of receiptById.values()) {
+    if (execution.accountingModel !== FEAS_MODEL || !Number.isSafeInteger(receipt.amountMinor)) continue;
+    const left = receipt.amountMinor - (allocatedByReceipt.get(receipt.id) || 0);
+    if (left > 0) add('receipt-unallocated', 'warn', STORE.executionReceipts, receipt.id, `محضر تحصيل به ${left} وحدة صغرى غير مخصصة (قد يكون مدفوعًا مقدمًا أو رصيدًا دائنًا).`, 'خصّص المتبقي يدويًا بعد المعاينة أو وثّقه كرصيد دائن؛ لا تخصيص صامت.');
+  }
+  const changeTimes = [
+    ...ledger.filter(row => !row.isDeleted && ['COLLECTION', 'REVERSAL', 'ADJUSTMENT'].includes(row.type)).map(row => row.createdAt),
+    ...differences.filter(row => !row.isDeleted && row.accountingModel === FEAS_MODEL && ['APPROVED', 'POSTED'].includes(row.status)).map(row => row.decidedAt || row.updatedAt),
+    ...livePeriods.map(row => row.recognizedAt)
+  ].filter(Boolean).sort();
+  const lastChange = changeTimes.at(-1) || '';
+  for (const poa of poas.filter(row => !row.isDeleted && row.accountingModel === FEAS_MODEL && row.snapshotAt)) {
+    if (lastChange && lastChange > poa.snapshotAt && !poas.some(other => !other.isDeleted && other.supersedes === poa.id)) {
+      add('poa-stale', 'warn', STORE.executionPOAs, poa.id, `لقطة التوكيل ${poa.poaNumber || ''} صدرت قبل تغيّر لاحق في التحصيل/الفروق/الاعتراف؛ قد لا تعكس الرصيد الحالي.`, 'اللقطة محفوظة كما صدرت؛ أنشئ توكيلًا جديدًا إن احتجت صورة محدثة.');
+    }
+  }
   return {executionId, accountingModel: execution.accountingModel || 'legacy-v1', scanned: {periods: periods.length, allocations: allocations.length, ledger: ledger.length, differences: differences.length, settlements: settlements.length, poas: poas.length}, issues};
 }
 
