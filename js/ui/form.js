@@ -106,6 +106,12 @@ function typeGroupHtml(type,values,ctx){
  */
 export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,title=null,only=null,stageOptions=null,hearingOptions=null,partyOptions=null,bailiffOptions=null,serviceOptions=null,typeFieldsOnly=false}={}){
  const office=app.office;const ent=ENTITIES[store];
+ // إنشاء تنفيذ جديد يمر دائمًا بنموذج مركز التنفيذ الموجَّه: النموذج العام لا ينشئ
+ // حكمًا ولا بند قيمة، فيظهر التنفيذ بلا أي حساب في أي تبويب أو نافذة.
+ if(store==='execution'&&!id){
+  const {newExecutionDialog}=await import('./execution-simple-forms.js');
+  return newExecutionDialog(app,{preset:{...(preset||{})}});
+ }
  if(store==='workItems')await ensureWorkStatuses(office);   // الحالات المخصصة (Lookups) لخيارات الحالة
  const old=id?await office.r[store].get(id):null;
  const isNew=!old;

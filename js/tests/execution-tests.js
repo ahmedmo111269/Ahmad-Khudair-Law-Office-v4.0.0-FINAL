@@ -880,7 +880,7 @@ export async function runExecutionTests(test, expect) {
       expect(upgraded.schedule.startPolicy).toBe('ASK');
       expect(upgraded.schedule.midChangePolicy).toBe('ASK');
       expect(upgraded.schedule.endPolicy).toBe('ASK');
-      expect(upgraded.schedule.accrualTiming).toBe('AFTER_PERIOD_END');
+      expect(upgraded.schedule.accrualTiming).toBe('AT_PERIOD_START'); // خيار مكتب قابل للتغيير من إعدادات التنفيذ
       expect(upgraded.schedule.monthEndPolicy).toBe('CLAMP_TO_LAST_DAY');
       expect(upgraded.schedule.allocationOrder).toBe('lifo'); // خيار المكتب القديم محفوظ
       expect(upgraded.schedule.prorationPolicy === undefined && upgraded.schedule.firstMonthPolicy === undefined).toBe(true);
@@ -1188,15 +1188,30 @@ export async function runExecutionTests(test, expect) {
   });
 
   // ===== 2026 Goldens: anchored complete periods, never day-prorated =====
-  test('تنفيذ/Golden 2026: 05/10 = صفر؛ 04/11 = 3,000؛ 04/01 = 9,000 مع asOf فعلي', () => {
+  test('تنفيذ/Golden 2026 (توقيت الاستحقاق: بداية الفترة): 05/10 = 3,000؛ 04/11 = 3,000؛ 04/01 = 9,000', () => {
     const slice = {id: 'legacy-2026', itemId: 'item-2026', anchorDate: '2026-10-05', entitlementType: 'نفقة شهرية',
       valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2026-10-05', status: 'active'};
+    const settings = {...SCHEDULE.DEFAULT_SCHEDULE_SETTINGS, accrualTiming: 'AT_PERIOD_START'};
     const run = asOf => SCHEDULE.buildExecutionSchedule({slices: [slice], receipts: [], allocations: [],
-      asOf, periodThroughDate: asOf, settings: SCHEDULE.DEFAULT_SCHEDULE_SETTINGS});
+      asOf, periodThroughDate: asOf, settings});
+    // تنفيذ جديد يبدأ سريانه من اليوم: لا يظهر بلا أي رقم (كان يعطي صفرًا قبل هذا الإصلاح).
+    expect(run('2026-10-05').totals.dueMinor).toBe(300000);
+    expect(run('2026-11-04').totals.dueMinor).toBe(300000);
+    expect(run('2027-01-04').totals.dueMinor).toBe(900000);
+  });
+  test('تنفيذ/Golden 2026 (توقيت الاستحقاق: بعد الاكتمال): 05/10 = صفر؛ 04/11 = 3,000؛ 04/01 = 9,000', () => {
+    const slice = {id: 'legacy-2026', itemId: 'item-2026', anchorDate: '2026-10-05', entitlementType: 'نفقة شهرية',
+      valueType: 'periodic', periodicity: 'monthly', amount: 3000, startDate: '2026-10-05', status: 'active'};
+    const settings = {...SCHEDULE.DEFAULT_SCHEDULE_SETTINGS, accrualTiming: 'AFTER_PERIOD_END'};
+    const run = asOf => SCHEDULE.buildExecutionSchedule({slices: [slice], receipts: [], allocations: [],
+      asOf, periodThroughDate: asOf, settings});
     const opening = run('2026-10-05');
     const first = run('2026-11-04');
     const third = run('2027-01-04');
     expect(opening.totals.dueMinor).toBe(0);
+    // الفترة الجارية تبقى ظاهرة بمبلغها المتوقع فلا تختفي الأرقام بلا سبب.
+    expect(opening.totals.runningPeriods).toBe(1);
+    expect(opening.rows[0].projectedMinor).toBe(300000);
     expect(first.totals.dueMinor).toBe(300000);
     expect(third.totals.dueMinor).toBe(900000);
     expect(opening.asOf).toBe('2026-10-05');

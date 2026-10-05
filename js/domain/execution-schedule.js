@@ -22,6 +22,19 @@ export const PERIOD_STATUS_LABELS = Object.freeze({
   RUNNING: '⏳ جارية (تُستحق عند اكتمالها)', NEEDS_DECISION: '⚠ بحاجة قرار'
 });
 
+/**
+ * توقيت الاستحقاق — إعداد ممارسة مكتب قابل للاختيار، وليس ثابتًا قانونيًا.
+ * • AT_PERIOD_START : الفترة تُستحق من يوم بدايتها (نفقة تُستحق مقدَّمًا) — وهو
+ *   الافتراضي، لأنه يمنع «تنفيذ جديد بلا أي رقم» عند بدء السريان من اليوم.
+ * • AFTER_PERIOD_END: الفترة لا تُستحق إلا بعد انتهائها (مطالبة بالمدة المنقضية).
+ * في الحالتين تبقى الفترة الجارية ظاهرة بمبلغها المتوقع، فلا نافذة فارغة أبدًا.
+ */
+export const ACCRUAL_TIMINGS = Object.freeze(['AT_PERIOD_START', 'AFTER_PERIOD_END']);
+export const ACCRUAL_TIMING_LABELS = Object.freeze({
+  AT_PERIOD_START: 'من بداية الفترة (تُستحق مقدَّمًا)',
+  AFTER_PERIOD_END: 'بعد اكتمال الفترة'
+});
+
 /** إعداد ممارسة المكتب المؤرخة — لا تمثل حكمًا قانونيًا ثابتًا. */
 export const DEFAULT_SCHEDULE_SETTINGS = Object.freeze({
   engineVersion: EXECUTION_ENGINE_VERSION,
@@ -31,7 +44,7 @@ export const DEFAULT_SCHEDULE_SETTINGS = Object.freeze({
   startPolicy: 'ASK',
   midChangePolicy: 'ASK',
   endPolicy: 'ASK',
-  accrualTiming: 'AFTER_PERIOD_END',
+  accrualTiming: 'AT_PERIOD_START',
   monthEndPolicy: 'CLAMP_TO_LAST_DAY',
   allocationOrder: 'fifo',
   roundingPolicy: 'integerMinorUnits',
@@ -64,7 +77,9 @@ function settingsWith(settings) {
   if (!['ASK', 'INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].includes(out.startPolicy)) out.startPolicy = 'ASK';
   if (!['ASK', 'KEEP_OLD_VALUE', 'USE_NEW_VALUE', 'MANUAL'].includes(out.midChangePolicy)) out.midChangePolicy = 'ASK';
   if (!['ASK', 'INCLUDE_FULL', 'EXCLUDE', 'MANUAL'].includes(out.endPolicy)) out.endPolicy = 'ASK';
-  out.accrualTiming = 'AFTER_PERIOD_END';
+  // توقيت الاستحقاق خيار مكتب حقيقي: كان مُثبَّتًا برمجيًا على AFTER_PERIOD_END فصار أي
+  // تنفيذ جديد يبدأ سريانه من اليوم بلا أي رقم حتى نهاية الشهر. صار قابلًا للاختيار.
+  if (!ACCRUAL_TIMINGS.includes(out.accrualTiming)) out.accrualTiming = DEFAULT_SCHEDULE_SETTINGS.accrualTiming;
   out.monthEndPolicy = 'CLAMP_TO_LAST_DAY';
   if (!['fifo', 'lifo', 'proportional'].includes(out.allocationOrder)) out.allocationOrder = 'fifo';
   return out;
@@ -587,9 +602,20 @@ export function claimForRange({slices = [], receipts = [], allocations = [], set
   })));
   const complete = [], partials = [], decisionRows = [], notYetComplete = [], boundaryCandidates = [];
   const seenCandidates = new Set();
+  const hasSuppliedDecision = unit => (rangeDecisions || []).some(decision => decision?.periodKey === unit.periodKey && decision?.choice
+    && (!decision.range || (decision.range.fromDate === fromDate && decision.range.toDate === toDate)));
   for (const entry of allUnits) {
     const {unit, row, lines} = entry;
     if (unit.toDate < fromDate || unit.fromDate > toDate) continue;
+    // المطالبة تطالب بما انقضى فعلاً: الفترة التي لم تنتهِ بعد تُعرض بمبلغها
+    // المتوقع ولا تُطالب به افتراضيًا — إلا بقرار صريح من المكتب يدرجها كاملة.
+    // هذا يفصل «المطلوب حتى اليوم» (يتبع توقيت الاستحقاق) عن «مطالبة مدة».
+    if (unit.toDate > horizon && !hasSuppliedDecision(unit)) {
+      notYetComplete.push({periodKey: unit.periodKey, fromDate: unit.fromDate, toDate: unit.toDate,
+        projectedMinor: unit.dueMinor || unit.projectedMinor || 0, paidMinor: sumMinor(lines, line => line.amountMinor),
+        label: `${dateLabel(unit.fromDate)} – ${dateLabel(unit.toDate)}`, status: PERIOD_STATUS.RUNNING});
+      continue;
+    }
     const enclosed = unit.fromDate >= fromDate && unit.toDate <= toDate;
     const values = {
       dueMinor: unit.isComplete && !unit.needsDecision ? unit.dueMinor : 0,
@@ -601,7 +627,11 @@ export function claimForRange({slices = [], receipts = [], allocations = [], set
       continue;
     }
     if (!unit.isComplete) {
-      notYetComplete.push({periodKey: unit.periodKey, fromDate: unit.fromDate, toDate: unit.toDate, projectedMinor: unit.projectedMinor || 0});
+      // فترة جارية: لا تدخل في المستحق، لكنها تُعرض دائمًا بمبلغها المتوقع —
+      // لا نافذة «احسب مدة» فارغة ولا رقم يختفي بلا سبب مفهوم.
+      notYetComplete.push({periodKey: unit.periodKey, fromDate: unit.fromDate, toDate: unit.toDate,
+        projectedMinor: unit.projectedMinor || 0, paidMinor: sumMinor(lines, line => line.amountMinor),
+        label: `${dateLabel(unit.fromDate)} – ${dateLabel(unit.toDate)}`, status: PERIOD_STATUS.RUNNING});
       continue;
     }
     if (enclosed) {
@@ -664,6 +694,7 @@ export function claimForRange({slices = [], receipts = [], allocations = [], set
   }));
   const decisions = boundaryCandidates.filter(candidate => candidate.choice && !candidate.needsReason && !candidate.needsAmount)
     .map(candidate => ({...candidate, trace: `قرار ${candidate.choice} للفترة ${candidate.fromDate} → ${candidate.toDate}: ${candidate.reason}`}));
+  const runningProjectedMinor = sumMinor(notYetComplete, row => row.projectedMinor || 0);
   const fmt = value => fromMinorUnits(value, full.currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const equations = [
     `${includedRows.length} فترات مكتملة/محسومة داخل المدة = ${fmt(dueMinor)} ${full.currency}`,
@@ -672,7 +703,7 @@ export function claimForRange({slices = [], receipts = [], allocations = [], set
     decisions.length ? `قرارات حدود المدة المسجلة: ${decisions.map(row => `${row.trace} — ${row.decidedBy || 'فاعل غير محدد'} — ${row.decidedAt || 'تاريخ غير محدد'}`).join('؛ ')}` : '',
     partials.length ? `حدود فترة ناقصة تنتظر قرارًا صريحًا: ${partials.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : 'لا توجد حدود ناقصة بلا قرار',
     decisionRows.length ? `فترات تحتاج قرار قيمة منفصلًا: ${decisionRows.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
-    notYetComplete.length ? `فترات جارية معلوماتية فقط وليست مستحقة: ${notYetComplete.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
+    notYetComplete.length ? `فترات جارية معلوماتية وليست مستحقة بعد (قيمتها المتوقعة ${fmt(runningProjectedMinor)} ${full.currency}): ${notYetComplete.map(row => `${row.fromDate} → ${row.toDate} = ${fmt(row.projectedMinor)}`).join('؛ ')}` : '',
     beforeMinor ? `رصيد سابق غير مسدد قبل المدة = ${fmt(beforeMinor)} ${full.currency}` : 'لا يوجد رصيد سابق غير مسدد قبل المدة',
     `الإجمالي المطلوب = ${fmt(remainingMinor + beforeMinor)} ${full.currency}`
   ].filter(Boolean);
@@ -681,7 +712,8 @@ export function claimForRange({slices = [], receipts = [], allocations = [], set
     partialAtStart: partials.find(row => row.kind === 'RANGE_START' || row.kind === 'RANGE_BOUNDARY') || null,
     partialAtEnd: partials.find(row => row.kind === 'RANGE_END' || row.kind === 'RANGE_BOUNDARY') || null,
     partials, decisionRows, notYetComplete, decisions, sideBySideScenarios,
-    totals: {dueMinor, paidMinor, remainingMinor, beforeMinor, totalRequiredMinor: dueMinor ? remainingMinor + beforeMinor : beforeMinor, currency: full.currency},
+    totals: {dueMinor, paidMinor, remainingMinor, beforeMinor, runningProjectedMinor,
+      totalRequiredMinor: dueMinor ? remainingMinor + beforeMinor : beforeMinor, currency: full.currency},
     equations, asOf: horizon, settings: options
   };
 }
@@ -806,7 +838,7 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
   if (!schedule) throw new TypeError('جدول التنفيذ مطلوب لحساب التوكيل.');
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new RangeError('مدة التوكيل غير صحيحة.');
   let previousMinor = 0, periodDueMinor = 0, periodPaidMinor = 0, differencesMinor = 0;
-  const lines = [], partials = [], decisionsUsed = [];
+  const lines = [], partials = [], decisionsUsed = [], runningPeriods = [];
   const units = schedule.rows.flatMap(row => (row.units || []).length ? row.units.map(unit => {
     const linesForUnit = (row.lines || []).filter(line => line.unitKey === unit.unitKey);
     const dueMinor = Number.isSafeInteger(unit.dueMinor) ? unit.dueMinor : 0;
@@ -815,8 +847,20 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
       label: monthLabel(unit.fromDate, unit.toDate),
       valueChanges: (unit.parts || []).map(part => part.valueChange).filter(Boolean)};
   }) : [row]);
+  const claimThrough = isCivilDate(schedule.asOf) ? schedule.asOf : toDate;
+  const poaDecisionFor = key => (rangeDecisions || []).some(decision => decision?.periodKey === key && decision?.choice
+    && (!decision.range || (decision.range.fromDate === fromDate && decision.range.toDate === toDate)));
   for (const row of units) {
-    if (!row.isComplete || row.needsDecision) continue;
+    if (row.needsDecision) continue;
+    // فترة جارية: معلومة ظاهرة بمبلغها المتوقع، ولا تُضاف إلى إجمالي التوكيل
+    // لأنها لم تُستحق بعد. ظهورها يمنع «توكيل بلا أي سطر» عند تنفيذ جديد.
+    if (!row.isComplete || (row.toDate > claimThrough && !poaDecisionFor(row.periodKey))) {
+      if (row.fromDate > toDate || row.toDate < fromDate) continue;
+      runningPeriods.push({periodKey: row.periodKey || '', fromDate: row.fromDate, toDate: row.toDate,
+        label: row.label || monthLabel(row.fromDate, row.toDate), projectedMinor: Number.isSafeInteger(row.projectedMinor) ? row.projectedMinor : 0,
+        paidMinor: 0, note: 'فترة جارية لم تكتمل — لا تدخل في إجمالي التوكيل'});
+      continue;
+    }
     if (row.toDate < fromDate) {
       previousMinor = addMinor(previousMinor, Math.max(0, row.remainingMinor));
       continue;
@@ -869,7 +913,7 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     fromDate, toDate, currency: schedule.currency,
     previousBalanceMinor: previousMinor, previousAppliedMinor: previousApplied,
     periodDueMinor, periodPaidMinor, periodRemainingMinor: Math.max(0, addMinor(periodDueMinor, -periodPaidMinor)),
-    differencesMinor, expensesMinor, totalMinor, partials, rangeDecisions: decisionsUsed,
+    differencesMinor, expensesMinor, totalMinor, partials, rangeDecisions: decisionsUsed, runningPeriods,
     lines: [
       ...(previousApplied ? [{kind: 'previous', label: `رصيد سابق غير مسدد حتى ${addCivilDays(fromDate, -1)}`, fromDate: '', toDate: '', amountMinor: previousApplied, remainingMinor: previousApplied, note: 'جزء من المتبقي — لا يُضاف عليه مرة ثانية'}] : []),
       ...lines, ...expenseLines
@@ -879,6 +923,7 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
       `فترة التوكيل (${fromDate} → ${toDate}) = ${fromMinorUnits(periodDueMinor, schedule.currency)}`,
       ...decisionsUsed.map(row => row.trace),
       partials.length ? `فترات حدّية تنتظر قرارًا صريحًا: ${partials.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
+      runningPeriods.length ? `فترات جارية ظاهرة بمبلغها المتوقع ولا تدخل في الإجمالي: ${runningPeriods.map(row => `${row.fromDate} → ${row.toDate} = ${fromMinorUnits(row.projectedMinor || 0, schedule.currency)}`).join('؛ ')}` : '',
       ...(expensesMinor ? [`مصروفات مختارة = ${fromMinorUnits(expensesMinor, schedule.currency)}`] : []),
       `إجمالي التوكيل = ${fromMinorUnits(totalMinor, schedule.currency)}`,
       differencesMinor ? `منها فروق أحكام ${fromMinorUnits(differencesMinor, schedule.currency)} مضمّنة داخل الفترة — لا تُضاف مرة ثانية` : ''
