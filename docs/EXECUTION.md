@@ -113,6 +113,6 @@
 
 ## 6) التحقق والحالة
 
-- **PASS (v5.13.2):** `node tools/node-tests/run-tests.mjs` = **470/470**، و`node tools/node-tests/execution-practical-tests.mjs` = **44/44** (تشمل الأرقام المرجعية 3,000/9,000، الانعكاس الفوري للإعدادات، عزل تاريخ كل بطاقة، رسوم/دمغة التوكيل، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية). وفحوص Chromium حقيقية: `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19.
+- **PASS (v5.13.2):** `node tools/node-tests/run-tests.mjs` = **470/470**، و`node tools/node-tests/execution-practical-tests.mjs` = **44/44** (تشمل الأرقام المرجعية 3,000/9,000، الانعكاس الفوري للإعدادات، عزل تاريخ كل بطاقة، رسوم/دمغة التوكيل، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية). وفحوص Chromium حقيقية: `execution-settings-browser` **6/6** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19.
 - **NOT VERIFIED:** معاينة الطباعة الأصلية والطابعة الورقية، المتصفحات غير Chromium، قارئ الشاشة. (`execution-print-browser` 9/3 و`grid-browser` فشل قائم على `main` قبل هذا الإصدار.)
 - أي قاعدة حساب جديدة مستقبلًا يجب أن تحفظ `asOf` بوصفه تاريخ الحساب وتصرّح بأفق الوحدة منفصلًا؛ لا يجوز إعادة إدخال تناسب الأيام أو تفسير ممارسة المكتب على أنها حكم قانوني ثابت.

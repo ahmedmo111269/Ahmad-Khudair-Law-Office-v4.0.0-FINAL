@@ -27,6 +27,7 @@
 
 - `node tools/node-tests/run-tests.mjs` = **470/470**.
 - `node tools/node-tests/execution-practical-tests.mjs` = **44/44** (15 فحصًا جديدًا: الأرقام المرجعية 3,000/9,000، الانعكاس الفوري للإعدادات، عزل تاريخ كل بطاقة، رسوم/دمغة التوكيل، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية).
+- **فحص متصفح جديد مخصص للشكوى**: `tools/node-tests/execution-settings-browser-tests.mjs` = **6/6** في Chromium حقيقي (`npm run test:execution-settings-browser`): 3,000 من اليوم ← «+شهر» = 04/11/2026 = 3,000 · 04/01/2027 = 3 × 3,000 = 9,000 بلا قصّ صامت · الإعدادات تُفتح من البطاقة وكل قواعدها قابلة للتعديل والحفظ ينعكس فورًا · التوكيل 9,600 · قوالب الطباعة تُعدَّل وتُحفظ · بلا أخطاء كونسول. لقطاته في `docs/execution-ux-shots/v5.13.2-*.png`.
 - فحوص Chromium الحقيقية: `execution-simple-browser` **20/20** · `execution-browser` **34/34** · `execution-feas-browser` **10/10** · `execution-feas-cycle` **19/19** · `offline-sync` و`quick-notes` ناجحان. (`execution-print-browser` 9/3 و`grid-browser` فشلان قائمان قبل هذا الإصدار على `main`؛ لم يُزد عليها.)
 - `sw.js`: إضافة `execution-cache.js` و`execution-horizon-picker.js` و`execution-summary-card.js` إلى precache ورفع اسم الذاكرة إلى `…v5.13.2-execution-settings-and-horizon` — الوحدات الجديدة كانت تغيب عن العمل بلا شبكة قبل ذلك.
 

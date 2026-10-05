@@ -15,8 +15,9 @@
 | `sw.js` + `js/core/constants.js` | `APP_VERSION = 5.13.2`، و`CACHE=…-v5.13.2-execution-settings-and-horizon` مع إضافة الوحدات الثلاث الجديدة إلى precache (كان غيابها يُفشل الإقلاع بلا شبكة). |
 | `tools/node-tests/execution-practical-tests.mjs` | 15 فحصًا جديدًا (15–29): الأرقام المرجعية 3,000/9,000 والمعادلة، عزل تاريخ البطاقات، رسوم/دمغة التوكيل 9,600، الانعكاس الفوري للإعدادات، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية. |
 | `tools/node-tests/dom-forms.mjs` | `TestFormData` يطابق المتصفح في قيمة مربع الاختيار الافتراضية (`on`) فلا تنجح الاختبارات على سلوك لا يراه المستخدم. |
+| `tools/node-tests/execution-settings-browser-tests.mjs` (جديد) | 6 فحوص Chromium حقيقية لرحلة الشكوى نفسها: الأرقام المرجعية 3,000/9,000 · الإعدادات من البطاقة وانعكاسها الفوري · التوكيل 9,600 · قوالب الطباعة · بلا أخطاء كونسول. `npm run test:execution-settings-browser`، ولقطاته في `docs/execution-ux-shots/v5.13.2-*.png`. |
 
-**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **44/44**؛ Chromium: `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19. **NOT VERIFIED:** الطباعة الورقية ومتصفحات غير Chromium.
+**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **44/44**؛ Chromium: `execution-settings-browser` 6/6 · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19. **NOT VERIFIED:** الطباعة الورقية ومتصفحات غير Chromium.
 
 # v5.13.1 — خريطة إصلاح حساب التنفيذ وإدارة البيانات
 
