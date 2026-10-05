@@ -19,7 +19,7 @@ import {formatFileNumber} from '../core/file-number.js';
 import {localDate} from '../core/clock.js';
 import {userError} from '../core/errors.js';
 import {fromMinorUnits} from '../domain/execution-money.js';
-import {isCivilDate} from '../domain/execution-calendar.js';
+import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import * as S from '../services/execution-simple.js';
@@ -1034,7 +1034,11 @@ export async function bindExecutionDetail(app, executionId) {
       toast('فُتح التوكيل للطباعة بترقيم الصفحات');
       return undefined;
     })));
-    container.querySelectorAll('[data-reissue-poa]').forEach(button => button.addEventListener('click', guard(() => openPoa())));
+    container.querySelectorAll('[data-reissue-poa]').forEach(button => button.addEventListener('click', guard(() => {
+      // إعادة توكيل محدد: تبدأ من اليوم التالي لنهاية التوكيل الذي نُقر عليه (لا آخر توكيل دائمًا).
+      const source = (bundle?.poas || []).find(row => row.id === button.dataset.reissuePoa);
+      return openPoa(source?.toDate ? addCivilDays(source.toDate, 1) : '');
+    })));
     const logList = container.querySelector('[data-log-list]');
     if (logList) {
       const applyLogFilters = () => {

@@ -14,6 +14,7 @@
   "test:execution-print-browser": "node execution-print-browser-tests.mjs",
   "test:execution-feas-cycle-browser": "node execution-feas-cycle-browser-tests.mjs",
   "test:execution-practical": "node execution-practical-tests.mjs",
+    "test:execution-real-example": "node execution-real-example-tests.mjs",
   "test:execution-settings-browser": "node execution-settings-browser-tests.mjs"
  },
  "keywords": [],
