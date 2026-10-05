@@ -355,10 +355,27 @@ export async function runExecutionTests(test, expect) {
       expect(posted.code === ERR.CONFLICT || posted.code === ERR.VALIDATION).toBe(true);
     } finally { closeEnv(e); }
   });
+  test('تنفيذ/تسوية: لا اعتماد من المسودة مباشرة، وتغيّر المحصل بعد المراجعة يرفض الاعتماد (REJECT_RECALCULATE)', async () => {
+    const e = await familyFixture();
+    try {
+      const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: e.s2.id});
+      const skipped = await rejects(() => DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve'}));
+      expect(skipped.code).toBe(ERR.CONFLICT);
+      const review = await DF.settlementReview(e.office, created.settlement.id);
+      const key = review.rows[0].periodKey;
+      await L.recordCollection(e.office, {executionId: e.execution.id, amount: 100, date: '2025-12-01', allocation: {method: 'DIRECT', targets: [{periodKey: key, amount: 100}]}});
+      const stale = await rejects(() => DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve'}));
+      expect(stale.code).toBe(ERR.CONFLICT);
+      await DF.settlementReview(e.office, created.settlement.id);
+      await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'بعد إعادة المراجعة'});
+      expect((await DF.settlementReview(e.office, created.settlement.id)).settlement.status).toBe('APPROVED');
+    } finally { closeEnv(e); }
+  });
   test('تنفيذ/تسوية: الاعتماد ثم الترحيل يكتب DIFFERENCE_DUE مرتبطة بسجل الفرق والحكم', async () => {
     const e = await familyFixture();
     try {
       const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: e.s2.id});
+      await DF.settlementReview(e.office, created.settlement.id);
       await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'مطابقة الحكم'});
       const posted = await DF.postSettlement(e.office, created.settlement.id);
       expect(posted.posted.length).toBe(6);
@@ -596,6 +613,7 @@ export async function runExecutionTests(test, expect) {
     try {
       await L.recordCollection(e.office, {executionId: e.execution.id, amount: 2000, date: '2025-03-01', allocation: {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-01-01', amount: 2000}]}});
       const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: e.s2.id});
+      await DF.settlementReview(e.office, created.settlement.id);
       await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'اعتماد المراجعة'});
       await DF.postSettlement(e.office, created.settlement.id);
       const balance = await B.executionBalance(e.office, e.execution.id);
@@ -713,6 +731,7 @@ export async function runExecutionTests(test, expect) {
     const e = await familyFixture();
     try {
       const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: e.s2.id});
+      await DF.settlementReview(e.office, created.settlement.id);
       await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve', reason: 'اعتماد'});
       await DF.postSettlement(e.office, created.settlement.id);
       const first = await POA.buildPoaDraft(e.office, {executionId: e.execution.id, fromDate: '2025-01-01', toDate: '2025-12-31', includeDifferences: true});
@@ -880,7 +899,7 @@ export async function runExecutionTests(test, expect) {
       expect(upgraded.schedule.startPolicy).toBe('ASK');
       expect(upgraded.schedule.midChangePolicy).toBe('ASK');
       expect(upgraded.schedule.endPolicy).toBe('ASK');
-      expect(upgraded.schedule.accrualTiming).toBe('AT_PERIOD_START'); // خيار مكتب قابل للتغيير من إعدادات التنفيذ
+      expect(upgraded.schedule.accrualTiming).toBe('AFTER_PERIOD_END'); // خيار مكتب قابل للتغيير من إعدادات التنفيذ
       expect(upgraded.schedule.monthEndPolicy).toBe('CLAMP_TO_LAST_DAY');
       expect(upgraded.schedule.allocationOrder).toBe('lifo'); // خيار المكتب القديم محفوظ
       expect(upgraded.schedule.prorationPolicy === undefined && upgraded.schedule.firstMonthPolicy === undefined).toBe(true);
@@ -1099,6 +1118,7 @@ export async function runExecutionTests(test, expect) {
       const created = await DF.createSettlement(e.office, {executionId: e.execution.id, sliceId: s2.id});
       const before = await B.executionsForKpi(e.office, {kpi: 'differencesUnpaid'});
       expect(before.rows.length).toBe(1);
+      await DF.settlementReview(e.office, created.settlement.id);
       await DF.decideSettlement(e.office, created.settlement.id, {decision: 'approve'});
       const after = await B.executionsForKpi(e.office, {kpi: 'differencesUnpaid'});
       expect(after.rows.length).toBe(1);
@@ -1118,6 +1138,7 @@ export async function runExecutionTests(test, expect) {
       const s2 = await EX.saveValueSlice(e.office, {executionId: exec.id, judgmentId: j2.id, entitlementType: 'نفقة شهرية', valueType: 'periodic', periodicity: 'monthly', amount: 4000, startDate: '2025-07-01'});
       await L.recordCollection(e.office, {executionId: exec.id, amount: 1000, date: '2025-03-03', allocation: {method: 'MANUAL', targets: [{periodKey: 'نفقة شهرية::2025-01-01', amount: 1000}]}});
       const settlement = await DF.createSettlement(e.office, {executionId: exec.id, sliceId: s2.id});
+      await DF.settlementReview(e.office, settlement.settlement.id);
       await DF.decideSettlement(e.office, settlement.settlement.id, {decision: 'approve'});
       await DF.postSettlement(e.office, settlement.settlement.id);
       await L.recordExpense(e.office, {executionId: exec.id, type: 'EXECUTION_FEE', amount: 250, date: '2025-04-01', includeInPoa: true});
@@ -1360,6 +1381,30 @@ export async function runExecutionTests(test, expect) {
       expect((await B.executionBalance(e.office, e.execution.id)).summary.remainingMinor).toBe(800000);
       const report = await FEASApp.executionIntegrityReport(e.office, e.execution.id);
       expect(report.issues.some(issue => issue.severity === 'error')).toBe(false);
+    } finally { closeEnv(e); }
+  });
+  test('FEAS/Integrity: توكيل ثم تحصيل لاحق ⇒ تحذير «توكيل قديم» بلا تعديل اللقطة، والتحصيل غير المخصص ظاهر', async () => {
+    const e = await feasFixture();
+    try {
+      const draft = await POA.buildPoaDraft(e.office, {executionId: e.execution.id});
+      const lines = draft.lines.filter(line => line.included && line.amountMinor > 0);
+      const poa = await POA.saveExecutionPoa(e.office, {executionId: e.execution.id, accountingModel: FEAS.FEAS_MODEL, currency: draft.currency,
+        idempotencyKey: draft.idempotencyKey, sourceFingerprint: draft.sourceFingerprint, date: Clock.today(),
+        fromDate: draft.fromDate, toDate: draft.toDate, lines, totalMinor: draft.totals.totalMinor, total: draft.totals.total, judgmentIds: [e.judgment.id]});
+      const before = await FEASApp.executionIntegrityReport(e.office, e.execution.id);
+      expect(before.issues.some(issue => issue.code === 'poa-stale')).toBe(false);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      await L.recordCollection(e.office, {executionId: e.execution.id, amount: '500.00', date: '2025-04-01', idempotencyKey: 'stale-poa-receipt'});
+      const after = await FEASApp.executionIntegrityReport(e.office, e.execution.id);
+      expect(after.issues.some(issue => issue.code === 'poa-stale' && issue.recordId === poa.id && issue.severity === 'warn')).toBe(true);
+      expect(after.issues.some(issue => issue.severity === 'error')).toBe(false);
+      const stored = await e.office.r.executionPOAs.get(poa.id);
+      expect(stored.totalMinor).toBe(poa.totalMinor);
+      expect(stored.version).toBe(poa.version);
+      const balance = (await B.executionBalance(e.office, e.execution.id)).summary;
+      expect(balance.collectedMinor).toBe(50000);
+      expect(balance.allocatedMinor + balance.unallocatedMinor).toBe(50000);
+      expect(after.issues.some(issue => issue.code === 'receipt-unallocated')).toBe(balance.unallocatedMinor > 0);
     } finally { closeEnv(e); }
   });
   test('FEAS/Integrity: duplicate settlement-period delta blocks the full balance, not a partial total', async () => {

@@ -1,3 +1,16 @@
+# تقرير التحقق الحالي — تدقيق مركز التنفيذ FEAS · v5.13.3 / Schema 18 — 2026-10-05
+
+التفاصيل الكاملة: [`docs/EXECUTION-AUDIT-DESIGN-DELTA-2026-10-05.md`](docs/EXECUTION-AUDIT-DESIGN-DELTA-2026-10-05.md).
+
+| الفحص | النتيجة |
+|---|---|
+| `node feas-golden-tests.mjs` (§35 + G1–G12 + Property) | **16/16 PASS** (`docs/feas-golden-results.json`) |
+| `node run-tests.mjs` | **472/472 PASS** |
+| Chromium execution / feas-cycle / feas / simple / offline-sync | **34/34 · 19/19 · 10/10 · 20/20 · PASS** |
+| `node feas-bench.mjs` (حساب نقي، 1.5M سجل) | 2,216.6ms إجمالي، 0.443ms/تنفيذ — **بلا IndexedDB** |
+
+**NOT VERIFIED:** أداء IndexedDB على 1M سجل، G13–G16 كسيناريوهات FEAS مخصصة، Cache دائم، Work Item آلي للتحذيرات، الطباعة الأصلية، متصفحات غير Chromium.
+
 # تقرير التحقق الحالي — تبسيط قسم التنفيذ (طبقة الاستخدام) · v5.12.0 / Schema 18 — 2026-10-04
 
 **النطاق:** إعادة بناء واجهة «مركز التنفيذ» و«بطاقة التنفيذ» + خدمة تطبيقية موحّدة فوق المحرك النقي والمخازن القائمة. لا مخزن جديد، لا ترقية مخطط، لا حذف/تحويل لأي سجل، ولا نظام موازٍ (نفس DataGrid/Search/ActivityLog/PrintContext/Saved Views). التقرير الكامل A–J: [`docs/EXECUTION-SIMPLE-UX-REPORT.md`](docs/EXECUTION-SIMPLE-UX-REPORT.md).

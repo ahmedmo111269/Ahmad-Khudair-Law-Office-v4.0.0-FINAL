@@ -414,7 +414,8 @@ await check('كل ملف تنفيذ تجريبي يحسب أرقامًا حقي�
   for (const execution of executions) {
     const bundle = await S.simpleCardBundle(office, execution.id);
     const totals = bundle.schedule.totals;
-    assert.ok(totals.dueMinor > 0, `${execution.internalNumber || execution.id}: المطلوب صفر`);
+    // ملف يبدأ اليوم: المستحق صفر بحكم «بعد اكتمال الفترة» لكن الفترة الجارية ظاهرة بمبلغها.
+    assert.ok(totals.dueMinor > 0 || (totals.runningPeriods > 0 && bundle.schedule.rows[0].projectedMinor > 0), `${execution.internalNumber || execution.id}: المطلوب صفر بلا فترة جارية`);
     assert.ok(bundle.schedule.rows.length > 0, `${execution.internalNumber}: لا فترات`);
     assert.ok(bundle.judgments.length > 0, `${execution.internalNumber}: لا حكم`);
     console.log(`      ${execution.internalNumber || execution.officialNumber} — مطلوب ${totals.dueMinor / 100} · مدفوع ${totals.paidMinor / 100} · متبقٍ ${totals.remainingMinor / 100} · فترات ${bundle.schedule.rows.length} · ${bundle.status.label}`);
@@ -427,7 +428,7 @@ await check('بطاقة كل ملف تجريبي تُفتح وكل تبويب ف
     await app.go(`exc:${execution.id}`);
     await tick(500);
     const numbers = await cardNumbers();
-    assert.ok(numbers.due > 0, `${execution.internalNumber}: أرقام البطاقة صفر`);
+    assert.ok(numbers.due > 0 || text(q('.exec-summary')).includes('فترة جارية'), `${execution.internalNumber}: أرقام البطاقة صفر بلا فترة جارية`);
     for (const tab of ['log', 'data', 'poa', 'account']) {
       const button = qa('.exec-tab').find(node => node.dataset.tab === tab);
       assert.ok(button, `${execution.internalNumber}: تبويب ${tab} مفقود`);

@@ -1212,8 +1212,8 @@ export function executionSettingsDialog(app) {
         <div class="form-grid">
           <label class="field">توقيت الاستحقاق
             <select name="accrualTiming">
-              <option value="AT_PERIOD_START"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? '' : ' selected'}>من بداية الفترة (تُستحق مقدَّمًا)</option>
-              <option value="AFTER_PERIOD_END"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? ' selected' : ''}>بعد اكتمال الفترة</option>
+              <option value="AT_PERIOD_START"${schedule.accrualTiming === 'AT_PERIOD_START' ? ' selected' : ''}>من بداية الفترة (تُستحق مقدَّمًا)</option>
+              <option value="AFTER_PERIOD_END"${schedule.accrualTiming === 'AT_PERIOD_START' ? '' : ' selected'}>بعد اكتمال الفترة</option>
             </select>
           </label>
           <label class="field">أساس الفترة الشهرية

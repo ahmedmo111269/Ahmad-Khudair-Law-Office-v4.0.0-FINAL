@@ -137,6 +137,37 @@ export async function createSettlement(office, {executionId, sliceId = '', judgm
   return {settlement, differences, impact, reused: false};
 }
 
+/** بصمة أساس المراجعة للتسوية القديمة: الفرق المعروض + المحصل الحالي لكل فترة (حماية التزامن §33). */
+function legacyReviewBase(differences, collectedByPeriod) {
+  return JSON.stringify(differences.filter(row => IN_REVIEW_DIFFERENCE_STATUSES.includes(row.status))
+    .slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .map(row => [row.id, round2(num(row.differenceAmount)), collectedByPeriod.get(row.periodKey) || 0]));
+}
+
+async function legacyCollectedByPeriod(office, executionId) {
+  const map = new Map();
+  for (const allocation of await executionAllocations(office, executionId)) {
+    if (allocation.isDeleted || allocation.isActive === false) continue;
+    map.set(allocation.periodKey, round2((map.get(allocation.periodKey) || 0) + num(allocation.amount)));
+  }
+  return map;
+}
+
+/** فتح المراجعة يثبّت حالة «مُراجَعة» وأساس المقارنة؛ لا يغيّر أي مبلغ. */
+async function stampLegacyReview(office, settlement, differences, collectedByPeriod) {
+  if (!['DRAFT', 'PENDING_REVIEW'].includes(settlement.status)) return settlement;
+  const expectedBase = legacyReviewBase(differences, collectedByPeriod);
+  if (settlement.reviewedAt && settlement.expectedBase === expectedBase) return settlement;
+  const now = Clock.now();
+  const next = {...settlement, reviewedAt: now, expectedBase, updatedAt: now, version: (settlement.version || 0) + 1};
+  await transaction(office.ctx, [STORE.executionSettlements, STORE.activityLog], async tx => {
+    await request(tx.objectStore(STORE.executionSettlements).put(next));
+    await request(tx.objectStore(STORE.activityLog).add(logRow(office, STORE.executionSettlements, settlement.id, 'review',
+      'مراجعة تسوية فروق: ثُبّت أساس المقارنة قبل القرار', {fileId: settlement.fileId})));
+  });
+  return next;
+}
+
 /** صفوف التسوية للمراجعة، مع إعادة قراءة المحصل الحالي لكل فترة. */
 export async function settlementReview(office, settlementId) {
   const settlement = await office.r.executionSettlements.get(settlementId);
@@ -149,8 +180,9 @@ export async function settlementReview(office, settlementId) {
     if (allocation.isDeleted || allocation.isActive === false) continue;
     collectedByPeriod.set(allocation.periodKey, round2((collectedByPeriod.get(allocation.periodKey) || 0) + num(allocation.amount)));
   }
+  const reviewed = await stampLegacyReview(office, settlement, differences, collectedByPeriod);
   return {
-    settlement,
+    settlement: reviewed,
     rows: differences.slice().sort((a, b) => String(a.periodKey).localeCompare(String(b.periodKey))).map(row => {
       const collected = collectedByPeriod.get(row.periodKey) || 0;
       return {
@@ -174,6 +206,12 @@ export async function decideSettlement(office, settlementId, {decision, reason =
     return decideExecutionSettlement(office, settlementId, {decision, reason});
   }
   const all = await office.r.differenceRecords.byIndex('settlementId', settlementId, 5000);
+  if (decision === 'approve') {
+    // §32/§33: لا اعتماد بلا مراجعة، ولا اعتماد على أساس تغيّر بعد المراجعة (REJECT_RECALCULATE).
+    if (!settlement.reviewedAt || !settlement.expectedBase) throw new AppError(ERR.CONFLICT, 'افتح مراجعة التسوية قبل اعتمادها؛ لا يجوز الانتقال من المسودة إلى الاعتماد مباشرة.');
+    const currentBase = legacyReviewBase(all, await legacyCollectedByPeriod(office, settlement.executionId));
+    if (currentBase !== settlement.expectedBase) throw new AppError(ERR.CONFLICT, 'تغيّر المحصل أو الفروق بعد المراجعة؛ أعد المراجعة قبل الاعتماد.');
+  }
   const selected = rowIds ? all.filter(row => rowIds.includes(row.id)) : all;
   if (!selected.length) throw new AppError(ERR.VALIDATION, 'لا توجد صفوف لتطبيق القرار عليها.');
   const now = Clock.now();

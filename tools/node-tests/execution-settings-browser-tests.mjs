@@ -123,8 +123,9 @@ await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), executionId
 await page.waitForSelector('.exec-numbers', {timeout: 30000});
 await wait(1000);
 
-await verify('تنفيذ 3,000 من اليوم: المطلوب 3,000، و«+شهر» يعطي «مطلوب حتى 04/11/2026» = 3,000', async () => {
-  assert.equal((await numbers()).due, 3000, 'المطلوب في يوم الفتح');
+await verify('تنفيذ 3,000 من اليوم: المطلوب صفر يوم البداية (بعد اكتمال الفترة)، و«+شهر» يعطي «مطلوب حتى 04/11/2026» = 3,000', async () => {
+  assert.equal((await numbers()).due, 0, 'المطلوب في يوم الفتح يجب أن يكون صفرًا');
+  assert.ok((await page.locator('.exec-summary').textContent()).includes('فترة جارية'), 'الفترة الجارية غير ظاهرة يوم البداية');
   await page.locator('[data-horizon-preset="plus-1"]').click();
   await wait(1400);
   assert.equal((await numbers()).due, 3000, 'المطلوب حتى 04/11/2026');
@@ -147,7 +148,7 @@ await verify('04/01/2027 = 3 فترات = 9,000 والاختصار ظاهر (ب�
 await verify('الإعدادات تُفتح من البطاقة، وكل قواعدها قابلة للتعديل، والحفظ ينعكس على الرقم فورًا', async () => {
   await page.locator('[data-horizon-preset="today"]').click();
   await wait(1200);
-  assert.equal((await numbers()).due, 3000, 'المطلوب بعد الرجوع إلى اليوم');
+  assert.equal((await numbers()).due, 0, 'المطلوب بعد الرجوع إلى اليوم');
   await page.locator('.exec-summary [data-settings]').first().click();
   await page.waitForSelector('#modal-root [data-form="settings"]', {timeout: 15000});
   assert.equal(await page.locator('#modal-root [data-form="settings"] [name="accrualTiming"] option').count(), 2, 'خيارا توقيت الاستحقاق');
@@ -156,20 +157,19 @@ await verify('الإعدادات تُفتح من البطاقة، وكل قوا�
   }
   assert.equal(await page.locator('#modal-root [data-form="settings"] [data-templates]').count(), 1, 'زر قوالب الطباعة');
   await shot('03-settings-dialog.png');
-  // تغيير حقيقي: «بعد اكتمال الفترة» ⇒ لا استحقاق اليوم مع إظهار الفترة الجارية بمبلغها.
-  await page.locator('#modal-root [data-form="settings"] [name="accrualTiming"]').selectOption('AFTER_PERIOD_END');
-  await page.locator('#modal-root [data-form="settings"] [data-save]').click();
-  await wait(1600);
-  assert.equal(await page.locator('#modal-root [data-form="settings"]').count(), 0, 'النافذة لم تُغلق بعد الحفظ الناجح');
-  assert.equal((await numbers()).due, 0, 'توقيت «بعد اكتمال الفترة» يجب أن يوقف استحقاق اليوم');
-  assert.ok((await page.locator('.exec-summary').textContent()).includes('فترة جارية'), 'سطر الفترة الجارية غير ظاهر');
-  // إعادة القاعدة الافتراضية من الشاشة نفسها.
-  await page.locator('.exec-summary [data-settings]').first().click();
-  await page.waitForSelector('#modal-root [data-form="settings"]', {timeout: 15000});
+  // تغيير حقيقي: «من بداية الفترة» ⇒ الفترة التي تبدأ اليوم تُستحق فورًا.
   await page.locator('#modal-root [data-form="settings"] [name="accrualTiming"]').selectOption('AT_PERIOD_START');
   await page.locator('#modal-root [data-form="settings"] [data-save]').click();
   await wait(1600);
-  assert.equal((await numbers()).due, 3000, 'الأرقام لم تعد بعد إعادة الإعداد');
+  assert.equal(await page.locator('#modal-root [data-form="settings"]').count(), 0, 'النافذة لم تُغلق بعد الحفظ الناجح');
+  assert.equal((await numbers()).due, 3000, 'توقيت «من بداية الفترة» يجب أن يستحق الفترة اليوم');
+  // إعادة القاعدة الافتراضية من الشاشة نفسها.
+  await page.locator('.exec-summary [data-settings]').first().click();
+  await page.waitForSelector('#modal-root [data-form="settings"]', {timeout: 15000});
+  await page.locator('#modal-root [data-form="settings"] [name="accrualTiming"]').selectOption('AFTER_PERIOD_END');
+  await page.locator('#modal-root [data-form="settings"] [data-save]').click();
+  await wait(1600);
+  assert.equal((await numbers()).due, 0, 'الأرقام لم تعد بعد إعادة الإعداد الافتراضي');
 });
 
 await verify('التوكيل: يُبنى على نطاقه كاملًا (3 فترات) + رسوم 500 ودمغة 100 = 9,600', async () => {
@@ -290,7 +290,7 @@ await phoneWait(1000);
 
 await verify('الموبايل: البطاقة والأرقام والأفق ظاهرة بلا عناصر خارجة عن الشاشة', async () => {
   const due = money(await phone.locator('.exec-numbers .num b').nth(0).textContent());
-  assert.equal(due, 3000, `المطلوب على الهاتف ${due}`);
+  assert.equal(due, 0, `المطلوب على الهاتف يوم البداية ${due}`);
   for (const selector of ['[data-horizon-picker] [data-asof]', '[data-horizon-preset="plus-1"]', '.exec-quick-card [data-settings]', '.exec-quick-card [data-action="poa"]']) {
     assert.equal(await phone.locator(selector).first().isVisible(), true, `عنصر غير مرئي على الهاتف: ${selector}`);
   }
@@ -309,7 +309,7 @@ await verify('الموبايل: اختيار 04/01/2027 يعطي 9,000، وال�
   await phone.waitForSelector('#modal-root [data-form="settings"]', {timeout: 15000});
   const saveVisible = await phone.locator('#modal-root [data-form="settings"] [data-save]').isVisible();
   assert.ok(saveVisible, 'زر الحفظ غير مرئي على الهاتف');
-  await phone.locator('#modal-root [data-form="settings"] [name="accrualTiming"]').selectOption('AFTER_PERIOD_END');
+  await phone.locator('#modal-root [data-form="settings"] [name="accrualTiming"]').selectOption('AT_PERIOD_START');
   await phone.locator('#modal-root [data-form="settings"] [data-save]').click();
   await phoneWait(1800);
   assert.equal(await phone.locator('#modal-root [data-form="settings"]').count(), 0, 'النافذة لم تُغلق على الهاتف');
@@ -318,7 +318,7 @@ await verify('الموبايل: اختيار 04/01/2027 يعطي 9,000، وال�
     const S = await import('./js/services/execution-settings.js');
     return S.executionSettings(app.office).schedule.accrualTiming;
   });
-  assert.equal(stored, 'AFTER_PERIOD_END', 'الإعداد لم يُحفظ من الهاتف');
+  assert.equal(stored, 'AT_PERIOD_START', 'الإعداد لم يُحفظ من الهاتف');
   await phone.screenshot({path: path.join(artifactDir, '06-mobile-settings-saved.png')});
   assert.deepEqual(phoneErrors, [], `أخطاء على الهاتف: ${phoneErrors.join(' | ')}`);
 });
