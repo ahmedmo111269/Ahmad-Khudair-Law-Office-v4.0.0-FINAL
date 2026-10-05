@@ -189,6 +189,71 @@ await verify('قوالب الطباعة: تُفتح من داخل الإعداد
 
 await verify('لا أخطاء صفحة/كونسول خلال الرحلة كلها', async () => { assert.deepEqual(report.errors, []); });
 
+/* ======================= الموبايل: نفس الرحلات بعرض ضيق =======================
+   المكتب يستخدم الهاتف فعليًا؛ نتحقق أن الأفق والإعدادات والتوكيل تبقى صالحة
+   للعمل بلمسة واحدة وبلا عناصر خارجة عن الشاشة. */
+const mobile = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true, serviceWorkers: 'block', locale: 'ar-EG'});
+await mobile.route('https://fonts.googleapis.com/**', route => route.fulfill({body: '', contentType: 'text/css'}));
+const phone = await mobile.newPage();
+const phoneErrors = [];
+phone.on('pageerror', error => phoneErrors.push(`pageerror: ${error.message}`));
+phone.on('console', message => { if (message.type() === 'error' && !/favicon|fonts\.google/.test(message.text())) phoneErrors.push(`console: ${message.text()}`); });
+const phoneWait = ms => phone.waitForTimeout(ms);
+
+await phone.goto(`${base}/index.html`, {waitUntil: 'domcontentloaded'});
+await phone.waitForFunction(() => window.__LAW_OFFICE_APP__?.office && !window.__LAW_OFFICE_APP__.booting && !document.querySelector('.error-box'), null, {timeout: 60000});
+const phoneExecutionId = await phone.evaluate(async () => {
+  const app = window.__LAW_OFFICE_APP__;
+  const S = await import('./js/services/execution-simple.js');
+  const {localDate} = await import('./js/core/clock.js');
+  const created = await S.createSimpleExecution(app.office, {
+    newClientName: 'عميل فحص الموبايل', opponentName: 'خصم فحص الموبايل', entitlementType: 'نفقة صغار',
+    valueType: 'periodic', periodicity: 'monthly', amount: '3000', effectiveFrom: localDate(),
+    judgmentNumber: '888/2026', court: 'محكمة الأسرة', executionType: 'family'
+  });
+  return created.execution.id;
+});
+await phone.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), phoneExecutionId);
+await phone.waitForSelector('.exec-numbers', {timeout: 30000});
+await phoneWait(1000);
+
+await verify('الموبايل: البطاقة والأرقام والأفق ظاهرة بلا عناصر خارجة عن الشاشة', async () => {
+  const due = money(await phone.locator('.exec-numbers .num b').nth(0).textContent());
+  assert.equal(due, 3000, `المطلوب على الهاتف ${due}`);
+  for (const selector of ['[data-horizon-picker] [data-asof]', '[data-horizon-preset="plus-1"]', '.exec-quick-card [data-settings]', '.exec-quick-card [data-action="poa"]']) {
+    assert.equal(await phone.locator(selector).first().isVisible(), true, `عنصر غير مرئي على الهاتف: ${selector}`);
+  }
+  const overflow = await phone.evaluate(() => Math.max(0, document.documentElement.scrollWidth - window.innerWidth));
+  assert.ok(overflow <= 8, `الشاشة تتجاوز العرض بـ${overflow}px`);
+  await phone.screenshot({path: path.join(artifactDir, '05-mobile-card.png')});
+});
+
+await verify('الموبايل: اختيار 04/01/2027 يعطي 9,000، والإعدادات تُفتح وتُحفظ بلمسة', async () => {
+  await phone.locator('[data-horizon-picker] [data-asof]').fill('2027-01-04');
+  await phone.locator('[data-horizon-picker] [data-asof]').dispatchEvent('change');
+  await phoneWait(1400);
+  const due = money(await phone.locator('.exec-numbers .num b').nth(0).textContent());
+  assert.equal(due, 9000, `المطلوب على الهاتف حتى 04/01/2027 = ${due}`);
+  await phone.locator('.exec-quick-card [data-settings]').click();
+  await phone.waitForSelector('#modal-root [data-form="settings"]', {timeout: 15000});
+  const saveVisible = await phone.locator('#modal-root [data-form="settings"] [data-save]').isVisible();
+  assert.ok(saveVisible, 'زر الحفظ غير مرئي على الهاتف');
+  await phone.locator('#modal-root [data-form="settings"] [name="accrualTiming"]').selectOption('AFTER_PERIOD_END');
+  await phone.locator('#modal-root [data-form="settings"] [data-save]').click();
+  await phoneWait(1800);
+  assert.equal(await phone.locator('#modal-root [data-form="settings"]').count(), 0, 'النافذة لم تُغلق على الهاتف');
+  const stored = await phone.evaluate(async () => {
+    const app = window.__LAW_OFFICE_APP__;
+    const S = await import('./js/services/execution-settings.js');
+    return S.executionSettings(app.office).schedule.accrualTiming;
+  });
+  assert.equal(stored, 'AFTER_PERIOD_END', 'الإعداد لم يُحفظ من الهاتف');
+  await phone.screenshot({path: path.join(artifactDir, '06-mobile-settings-saved.png')});
+  assert.deepEqual(phoneErrors, [], `أخطاء على الهاتف: ${phoneErrors.join(' | ')}`);
+});
+
+await mobile.close();
+
 report.consoleErrors = [...new Set(report.errors)];
 await fs.writeFile(path.join(artifactDir, 'report.json'), JSON.stringify(report, null, 2));
 console.log(`\n${report.checks.filter(row => row.status === 'PASS').length} فحصًا ناجحًا / ${report.failures.length} فشل`);
