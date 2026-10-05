@@ -119,7 +119,7 @@ await check('تجهيز: مسح البيانات وفتح مركز التنفي�
   assert.ok(q('#exec-grid'));
 });
 
-await check(`1) إنشاء تنفيذ نفقة 3,000 من ${dmy(A)} ⇒ إعداد المكتب الحالي «عند بداية الفترة»: 10 فترات = 30,000؛ و«بعد الاكتمال»: 27,000`, async () => {
+await check(`1) إنشاء تنفيذ نفقة 3,000 من ${dmy(A)} ⇒ الافتراضي «بعد اكتمال الفترة»: 9 فترات = 27,000 (الفترة التي تبدأ اليوم = صفر)؛ و«من بداية الفترة»: 30,000`, async () => {
   const client = await office.saveClient({fullName: 'هدى السيد (مثال فعلي)', phones: ['01011111111'], status: 'active'});
   await openModalBy('[data-new-execution]', 300);
   const form = modalRoot().querySelector('[data-form="new-execution"]');
@@ -130,13 +130,14 @@ await check(`1) إنشاء تنفيذ نفقة 3,000 من ${dmy(A)} ⇒ إعدا
   await tick(600);
   const n = await cardNumbers();
   console.log(`      مطلوب ${n.due} · مدفوع ${n.paid} · متبقٍ ${n.remaining}`);
-  assert.equal(n.due, 30000); assert.equal(n.remaining, 30000);
+  assert.equal(n.due, 27000); assert.equal(n.remaining, 27000);
   const SET = await import('../../js/services/execution-settings.js');
   const cur = SET.executionSettings(office);
-  await SET.saveExecutionSettings(office, {...cur, schedule: {...cur.schedule, accrualTiming: 'AFTER_PERIOD_END'}});
+  await SET.saveExecutionSettings(office, {...cur, schedule: {...cur.schedule, accrualTiming: 'AT_PERIOD_START'}});
   const after = await bundle();
-  console.log(`      بعد الاكتمال: مستحق ${after.schedule.totals.dueMinor / 100} · فترات جارية ${after.schedule.totals.runningPeriods}`);
-  assert.equal(after.schedule.totals.dueMinor, 2700000, 'بعد الاكتمال: الفترة الجارية لا تُستحق اليوم');
+  console.log(`      من بداية الفترة: مستحق ${after.schedule.totals.dueMinor / 100} · فترات جارية ${after.schedule.totals.runningPeriods}`);
+  assert.equal(after.schedule.totals.dueMinor, 3000000, 'من بداية الفترة: الفترة الجارية تُستحق اليوم');
+  assert.equal(cur.schedule.accrualTiming, 'AFTER_PERIOD_END', 'الافتراضي يجب أن يكون بعد الاكتمال');
   await SET.saveExecutionSettings(office, {...SET.executionSettings(office), schedule: {...SET.executionSettings(office).schedule, accrualTiming: cur.schedule.accrualTiming}});
   const b = await bundle();
   const firstRow = b.schedule.rows[0];
@@ -167,14 +168,14 @@ await check('3) احسب مدة بنطاق يقطع فترتين: لا تناس�
   await closeModals();
 });
 
-await check('4) محضر تحصيل 10,000 ⇒ مدفوع 10,000 ومتبقٍ 20,000', async () => {
+await check('4) محضر تحصيل 10,000 ⇒ مدفوع 10,000 ومتبقٍ 17,000', async () => {
   await record('collection');
   const form = modalRoot().querySelector('[data-form="collection"]');
   await fill(form, {amount: '10000', date: addDays(today, -20), target: 'auto', reference: 'محضر 55'});
   await submit(form, 900);
   await refresh();
   const n = await cardNumbers();
-  assert.equal(n.paid, 10000); assert.equal(n.remaining, 20000);
+  assert.equal(n.paid, 10000); assert.equal(n.remaining, 17000);
 });
 
 let poa1 = null, poa2 = null;
@@ -196,7 +197,7 @@ await check(`5) إنشاء توكيل من الواجهة: ${dmy(pS(0))} → ${d
   console.log(`      ت-1: من ${dmy(poa1.fromDate)} إلى ${dmy(poa1.toDate)} · إجمالي ${poa1.total}`);
   assert.equal(poa1.toDate, pE(5));
   assert.equal(Number(poa1.total), 18000, 'ت-1 يجب أن يساوي 6 × 3,000');
-  const n = await cardNumbers(); assert.equal(n.remaining, 20000, 'التوكيل غيّر المتبقي');
+  const n = await cardNumbers(); assert.equal(n.remaining, 17000, 'التوكيل غيّر المتبقي');
 });
 
 await check('6) «توكيل جديد» يبدأ تلقائيًا من اليوم التالي لنهاية آخر توكيل', async () => {
@@ -213,7 +214,7 @@ await check('6) «توكيل جديد» يبدأ تلقائيًا من اليو�
   assert.ok(poa2, 'التوكيل الثاني لم يُحفظ');
   console.log(`      ت-2: من ${dmy(poa2.fromDate)} إلى ${dmy(poa2.toDate)} · إجمالي ${poa2.total}`);
   assert.equal(poa2.fromDate, pS(6));
-  const n = await cardNumbers(); assert.equal(n.remaining, 20000, 'التوكيل الثاني غيّر المتبقي (ازدواج)');
+  const n = await cardNumbers(); assert.equal(n.remaining, 17000, 'التوكيل الثاني غيّر المتبقي (ازدواج)');
   const prev = Number(poa2.previousBalance), base = Number(poa2.baseAmount);
   console.log(`      رصيد سابق ${prev} + فترة ${base} = ${poa2.total}`);
   assert.equal(base, 9000, 'فترة ت-2 = 3 × 3,000'); assert.equal(prev, 8000, 'الرصيد السابق = 18,000 − 10,000'); assert.equal(Number(poa2.total), 17000);
@@ -244,17 +245,17 @@ await check('8) إجراء تنفيذ + مصروف 350 (لا يزيد أصل ا�
   form = modalRoot().querySelector('[data-form="expense"]');
   await fill(form, {typeLabel: 'رسم تنفيذ', amount: '350', date: addDays(today, -4), borneBy: 'debtor'});
   await submit(form, 900); await refresh();
-  const n = await cardNumbers(); assert.equal(n.due, 30000); assert.equal(n.remaining, 20000);
+  const n = await cardNumbers(); assert.equal(n.due, 27000); assert.equal(n.remaining, 17000);
 });
 
-await check(`9) حكم لاحق 4,000 من ${dmy(pS(5))} ⇒ +5 × 1,000 = 35,000 مطلوب و25,000 متبقٍ؛ التوكيلات المحفوظة لا تتغير`, async () => {
+await check(`9) حكم لاحق 4,000 من ${dmy(pS(5))} ⇒ +4 × 1,000 = 31,000 مطلوب و21,000 متبقٍ؛ التوكيلات المحفوظة لا تتغير`, async () => {
   await record('judgment');
   const form = modalRoot().querySelector('[data-form="later-judgment"]');
   await fill(form, {amount: '4000', effectiveFrom: pS(5), entitlementType: 'نفقة صغار', judgmentNumber: '90/2026', judgmentDate: addDays(pS(5), -3)});
   await tick(500); await submit(form, 1000); await refresh();
   const n = await cardNumbers();
   console.log(`      مطلوب ${n.due} · مدفوع ${n.paid} · متبقٍ ${n.remaining}`);
-  assert.equal(n.due, 35000); assert.equal(n.remaining, 25000);
+  assert.equal(n.due, 31000); assert.equal(n.remaining, 21000);
   const b = await bundle();
   assert.equal(b.poas.find(p => p.id === poa1.id).total, poa1.total, 'لقطة ت-1 تغيّرت');
   assert.equal(b.poas.find(p => p.id === poa2.id).total, poa2.total, 'لقطة ت-2 تغيّرت');
@@ -283,15 +284,15 @@ await check('11) التبويبات الأربعة + تتبّع الأرقام +
   }
   const doc = await S.simpleStatementDocument(office, executionId, {mode: 'monthly'});
   const docText = JSON.stringify(doc);
-  assert.ok(docText.includes('35,000') || docText.includes('3500000') || docText.includes('35000'), 'الكشف لا يحمل 35,000');
+  assert.ok(docText.includes('31,000') || docText.includes('3100000') || docText.includes('31000'), 'الكشف لا يحمل 31,000');
 });
 
-await check('12) إلغاء التحصيل من السجل يعيد المتبقي 35,000، ثم مركز السلامة بلا أخطاء حاجبة', async () => {
+await check('12) إلغاء التحصيل من السجل يعيد المتبقي 31,000، ثم مركز السلامة بلا أخطاء حاجبة', async () => {
   const b = await bundle();
   const receipt = b.receipts?.[0] || (await office.r.executionReceipts.byIndex('executionId', executionId, 10))[0];
   await S.voidSimpleRecord(office, {kind: 'receipt', id: receipt.id, reason: 'اختبار إلغاء'});
   await refresh();
-  const n = await cardNumbers(); assert.equal(n.paid, 0); assert.equal(n.remaining, 35000);
+  const n = await cardNumbers(); assert.equal(n.paid, 0); assert.equal(n.remaining, 31000);
   const report = await FEASApp.executionIntegrityReport(office, executionId);
   console.log(`      سلامة: ${report.issues.length} ملاحظة (${report.issues.map(i => i.code).join(', ') || '—'})`);
   assert.ok(!report.issues.some(i => i.severity === 'error'));

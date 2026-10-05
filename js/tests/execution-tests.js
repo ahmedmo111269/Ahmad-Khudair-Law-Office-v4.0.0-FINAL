@@ -899,7 +899,7 @@ export async function runExecutionTests(test, expect) {
       expect(upgraded.schedule.startPolicy).toBe('ASK');
       expect(upgraded.schedule.midChangePolicy).toBe('ASK');
       expect(upgraded.schedule.endPolicy).toBe('ASK');
-      expect(upgraded.schedule.accrualTiming).toBe('AT_PERIOD_START'); // خيار مكتب قابل للتغيير من إعدادات التنفيذ
+      expect(upgraded.schedule.accrualTiming).toBe('AFTER_PERIOD_END'); // خيار مكتب قابل للتغيير من إعدادات التنفيذ
       expect(upgraded.schedule.monthEndPolicy).toBe('CLAMP_TO_LAST_DAY');
       expect(upgraded.schedule.allocationOrder).toBe('lifo'); // خيار المكتب القديم محفوظ
       expect(upgraded.schedule.prorationPolicy === undefined && upgraded.schedule.firstMonthPolicy === undefined).toBe(true);

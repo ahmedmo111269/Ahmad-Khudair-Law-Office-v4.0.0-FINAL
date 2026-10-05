@@ -24,9 +24,9 @@ export const PERIOD_STATUS_LABELS = Object.freeze({
 
 /**
  * توقيت الاستحقاق — إعداد ممارسة مكتب قابل للاختيار، وليس ثابتًا قانونيًا.
- * • AT_PERIOD_START : الفترة تُستحق من يوم بدايتها (نفقة تُستحق مقدَّمًا) — وهو
- *   الافتراضي، لأنه يمنع «تنفيذ جديد بلا أي رقم» عند بدء السريان من اليوم.
- * • AFTER_PERIOD_END: الفترة لا تُستحق إلا بعد انتهائها (مطالبة بالمدة المنقضية).
+ * • AFTER_PERIOD_END: الفترة لا تُستحق إلا بعد انتهائها — **الافتراضي** باختيار المكتب
+ *   (2026-10-05): المستحق صفر يوم بداية الفترة، وتظهر الفترة الجارية بمبلغها المتوقع.
+ * • AT_PERIOD_START : الفترة تُستحق من يوم بدايتها (نفقة تُستحق مقدَّمًا) — اختياري.
  * في الحالتين تبقى الفترة الجارية ظاهرة بمبلغها المتوقع، فلا نافذة فارغة أبدًا.
  */
 export const ACCRUAL_TIMINGS = Object.freeze(['AT_PERIOD_START', 'AFTER_PERIOD_END']);
@@ -44,7 +44,7 @@ export const DEFAULT_SCHEDULE_SETTINGS = Object.freeze({
   startPolicy: 'ASK',
   midChangePolicy: 'ASK',
   endPolicy: 'ASK',
-  accrualTiming: 'AT_PERIOD_START',
+  accrualTiming: 'AFTER_PERIOD_END',
   monthEndPolicy: 'CLAMP_TO_LAST_DAY',
   allocationOrder: 'fifo',
   roundingPolicy: 'integerMinorUnits',

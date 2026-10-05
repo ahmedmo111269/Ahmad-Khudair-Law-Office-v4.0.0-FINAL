@@ -1167,6 +1167,9 @@ export async function simpleDurationClaim(office, executionId, {fromDate, toDate
   const today = localDate();
   const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, today, {allowFuture: false});
   const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate, {allowFuture});
+  // تاريخ قياس المطالبة: اليوم افتراضيًا (المطالبة بالمدة المنقضية)، ومع طلب
+  // صريح لنطاق مستقبلي يصبح حدّ النطاق نفسه حتى تُحتسب الفترات المنتهية داخله.
+  const claimAsOf = allowFuture && horizon > today ? horizon : today;
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
     // مسار FEAS كما هو: تاريخ الحساب اليوم، والأفق عند آخر فترة معترف بها.
@@ -1174,12 +1177,11 @@ export async function simpleDurationClaim(office, executionId, {fromDate, toDate
     const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: today, periodThroughDate});
     schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: today, periodThroughDate, settings});
   } else {
+    // الاكتمال يُقاس بتاريخ قياس المطالبة (اليوم أو النطاق المستقبلي المطلوب)، لا بنهاية النطاق:
+    // وإلا فمع «بعد اكتمال الفترة» تختفي الفترة الحدّية المنقضية بدل أن تطلب قرارًا صريحًا.
     schedule = buildExecutionSchedule({slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-      settings: settings.schedule, asOf: horizon, periodThroughDate: horizon});
+      settings: settings.schedule, asOf: claimAsOf, periodThroughDate: simpleScheduleHorizon(inputs.execution, inputs.periods, claimAsOf, {allowFuture})});
   }
-  // تاريخ قياس المطالبة: اليوم افتراضيًا (المطالبة بالمدة المنقضية)، ومع طلب
-  // صريح لنطاق مستقبلي يصبح حدّ النطاق نفسه حتى تُحتسب الفترات المنتهية داخله.
-  const claimAsOf = allowFuture && horizon > today ? horizon : today;
   const claim = claimForRange({
     slices: feasScheduleSlices(inputs.execution, inputs.slices, inputs.periods), receipts: inputs.receipts, allocations: inputs.allocations,
     settings: settings.schedule, schedule, fromDate, toDate: horizon, asOf: claimAsOf, rangeDecisions
@@ -1253,13 +1255,16 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
   }
   const calculationAsOf = localDate();
   const cappedTo = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate || calculationAsOf, {allowFuture});
+  const measureAsOf = allowFuture && cappedTo > calculationAsOf ? cappedTo : calculationAsOf;
   // الجدول يُبنى حتى نهاية النطاق المطلوب فعلًا (cappedTo) لا عند اليوم، وإلا
   // اختفت فترات داخل النطاق فحسب التوكيل فترة واحدة — وهذا هو جوهر شكوى
   // «التوكيل لا يعمل». كل بند بعد اليوم يبقى معلَّمًا «لم تنتهِ بعد» ولا يدخل
   // الإجمالي إلا بقرار صريح من المكتب.
   const schedule = buildExecutionSchedule({
     slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-    settings: settings.schedule, asOf: cappedTo, periodThroughDate: cappedTo
+    // الاكتمال يُقاس باليوم (أو بنهاية نطاق مستقبلي مطلوب صراحةً) حتى تظهر الفترة الحدّية المنقضية
+    // كقرار صريح مع «بعد اكتمال الفترة» بدل أن تُعامل كجارية.
+    settings: settings.schedule, asOf: measureAsOf, periodThroughDate: simpleScheduleHorizon(inputs.execution, inputs.periods, measureAsOf, {allowFuture})
   });
   const expenses = expensesFrom(inputs.ledger, settings);
   const source = previousBalanceSource(inputs.actions);
