@@ -38,6 +38,8 @@ import {
 
 const TAB_KEY = 'ui:exec:tab:v1';
 const ASOF_KEY = 'ui:exec:asof:v1';
+const ASOF_MODE_KEY = 'ui:exec:asof-mode:v1';
+const asOfKeyFor = id => `ui:exec:asof:${id}`;
 const COUNT_KEY = 'ui:exec:count:v1';
 const accountFilterKey = executionId => `ui:exec:account-filter:${executionId}`;
 
@@ -316,8 +318,8 @@ export async function bindExecutionCenter(app) {
     return {counts, counted: items.length, scannedAll: !hasMore};
   };
 
-  root.querySelector('[data-new-execution]')?.addEventListener('click', () => newExecutionDialog(app));
-  root.querySelector('[data-demo-example]')?.addEventListener('click', async event => {
+  root.querySelectorAll('[data-new-execution]').forEach(el => el.addEventListener('click', () => newExecutionDialog(app)));
+  root.querySelectorAll('[data-demo-example]').forEach(el => el.addEventListener('click', async event => {
     const button = event.currentTarget;
     const label = button.textContent;
     button.disabled = true;
@@ -331,12 +333,13 @@ export async function bindExecutionCenter(app) {
       button.disabled = false;
       button.textContent = label;
     }
-  });
-  root.querySelector('[data-help]')?.addEventListener('click', () => openHelp(app));
-  root.querySelector('[data-settings]')?.addEventListener('click', () => executionSettingsDialog(app));
-  root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root}));
-  root.querySelector('[data-exec-trash]')?.addEventListener('click', () => openExecutionTrash(app));
-  root.querySelector('[data-exec-demo]')?.addEventListener('click', async event => {
+  }));
+  // querySelector المفرد لا يكفي عند تكرار الـ hook — استخدم querySelectorAll دائمًا.
+  root.querySelectorAll('[data-help]').forEach(b => b.addEventListener('click', () => openHelp(app)));
+  root.querySelectorAll('[data-settings]').forEach(b => b.addEventListener('click', () => executionSettingsDialog(app)));
+  root.querySelectorAll('[data-customize-page]').forEach(b => b.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root})));
+  root.querySelectorAll('[data-exec-trash]').forEach(b => b.addEventListener('click', () => openExecutionTrash(app)));
+  root.querySelectorAll('[data-exec-demo]').forEach(el => el.addEventListener('click', async event => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
@@ -363,8 +366,8 @@ export async function bindExecutionCenter(app) {
       toast(userError(error), 'error');
       button.disabled = false;
     }
-  });
-  root.querySelector('[data-exec-clear]')?.addEventListener('click', async () => {
+  }));
+  root.querySelectorAll('[data-exec-clear]').forEach(el => el.addEventListener('click', async () => {
     const answer = await confirmBox('مسح كل بيانات قسم التنفيذ؟ تُمسح التنفيذات وأحكامها وشرائح القيمة ومحاضر التحصيل والتوكيلات والفروق. بقية أقسام المكتب تبقى كما هي. اكتب سبب المسح ليُحفظ في السجل.', {okText: 'مسح قسم التنفيذ', input: true, label: 'سبب المسح'});
     if (!answer?.ok) return;
     if (!String(answer.value || '').trim()) { toast('السبب مطلوب', 'error'); return; }
@@ -375,20 +378,20 @@ export async function bindExecutionCenter(app) {
       toast(`تم مسح ${total} سجلًا من قسم التنفيذ`, 'ok');
       await app.refresh();
     } catch (error) { toast(userError(error), 'error'); }
-  });
+  }));
   let searchTimer = 0;
-  root.querySelector('[data-search]')?.addEventListener('input', event => {
+  root.querySelectorAll('[data-search]').forEach(el => el.addEventListener('input', event => {
     st.search = event.target.value;
     prefs.set('ui:exec:q', st.search);
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => reload().catch(error => app.fail(error)), 250);
-  });
-  root.querySelector('[data-clear-search]')?.addEventListener('click', async () => {
+  }));
+  root.querySelectorAll('[data-clear-search]').forEach(el => el.addEventListener('click', async () => {
     st.search = ''; prefs.set('ui:exec:q', '');
     const input = root.querySelector('[data-search]');
     if (input) input.value = '';
     await reload();
-  });
+  }));
 
   // العدّادات تُحسب عند كل دخول للصفحة: كانت تُحسب مرة واحدة لكل جلسة (st.ready)
   // فتظل تعرض أصفارًا قديمة بعد أي إضافة أو حذف أو إلغاء حتى إعادة تحميل التطبيق.
@@ -473,7 +476,13 @@ export async function executionDetailPage(app, executionId) {
     ]
   });
   let bundle = null;
-  try { bundle = await S.simpleCardBundle(app.office, executionId, {asOf: prefs.get(ASOF_KEY, '') || ''}); }
+  try {
+    const mode = prefs.get(ASOF_MODE_KEY, 'per');
+    const localAsOf = mode === 'global' ? '' : prefs.get(asOfKeyFor(executionId), '');
+    const globalAsOf = prefs.get(ASOF_KEY, '');
+    const effectiveAsOf = localAsOf || globalAsOf || '';
+    bundle = await S.simpleCardBundle(app.office, executionId, {asOf: effectiveAsOf, allowFuture: true});
+  }
   catch (error) { return `<div class="error-box" role="alert"><h2>${esc(userError(error))}</h2><p class="muted small">قد يكون ملف التنفيذ محذوفًا. راجعه في سلة التنفيذ.</p><div class="error-actions"><button class="primary" data-route="executionCenter">رجوع إلى مركز التنفيذ</button></div></div>`; }
   cardState(app)[executionId] = bundle;
   const {execution, client, file, creditor, debtor, schedule, status} = bundle;
@@ -561,15 +570,27 @@ function summarySectionMarkup(bundle) {
   const currency = schedule.currency;
   const progress = totals.dueMinor > 0 ? Math.min(100, Math.round((totals.allocatedMinor / totals.dueMinor) * 100)) : 0;
   const expensesMinor = expenses.reduce((sum, item) => sum + item.amountMinor, 0);
+  const today = localDate();
+  const requestedAsOf = schedule.requestedAsOf || schedule.asOf || '';
+  const effectiveAsOf = schedule.effectiveAsOf || schedule.asOf || '';
+  const isFuture = requestedAsOf && requestedAsOf > today;
+  const horizonCapped = Boolean(schedule.horizonCapped);
+  const horizonNote = schedule.horizonNote || '';
+  // مبدأ ملزم: ممنوع عرض رقم بجانب تاريخ لم يُحسب عنده
+  const asofDisplay = esc(dateText(requestedAsOf || schedule.asOf));
+  const effectiveDisplay = esc(dateText(effectiveAsOf));
+  const cappedAlert = horizonCapped ? `<div class="hint hint-warn" role="alert" style="background:#fff3cd;border:1px solid #ffc107;padding:8px;border-radius:6px;margin:8px 0;">⚠ ${esc(horizonNote || `أفق الحساب موقوف عند ${effectiveDisplay} — التواريخ المستقبلية تحتاج تفعيل «احسب حتى تاريخ مستقبلي».`)} — التاريخ الفعلي للحساب: <b>${effectiveDisplay}</b>${requestedAsOf !== effectiveAsOf ? ` (طُلب ${asofDisplay})` : ''}</div>` : '';
+  const futureBadge = isFuture ? `<span class="badge" style="background:#e3f2fd;color:#0d47a1;border:1px solid #90caf9;">تقديري — فترات لم تُستحق بعد</span>` : '';
   return `<section class="panel exec-summary" data-section-id="summary">
     <div class="asof-row">
-      <label>المطلوب حتى <input type="date" data-asof value="${esc(schedule.asOf)}" aria-label="تاريخ الحساب"></label>
-      ${schedule.asOf && schedule.asOf !== localDate() ? `<button type="button" class="ghost small" data-asof-today>↺ ارجع إلى اليوم</button><span class="hint hint-warn small">الحساب موقوف عند تاريخ قديم — هذا يخفي الأرقام عن كل التنفيذات حتى تعيده إلى اليوم.</span>` : ''}
-      <span class="muted small">غيّر التاريخ تغيّر الأرقام والجدول فورًا — بلا أي خطوة أخرى.</span>
+      <label>المطلوب حتى <input type="date" data-asof value="${esc(requestedAsOf || schedule.asOf)}" aria-label="تاريخ الحساب"></label>
+      ${requestedAsOf && requestedAsOf !== today ? `<button type="button" class="ghost small" data-asof-today>↺ ارجع إلى اليوم</button>${futureBadge}<span class="hint hint-warn small">الحساب ${isFuture ? 'تقديري لمستقبل' : 'موقوف عند تاريخ قديم'} — ${isFuture ? 'الفترات المستقبلية محسوبة كتقدير للمطالبة' : 'هذا يخفي الأرقام عن كل التنفيذات حتى تعيده إلى اليوم'}.</span>` : ''}
+      <span class="muted small">غيّر التاريخ تغيّر الأرقام والجدول فورًا — بلا أي خطوة أخرى. ${horizonCapped ? `التاريخ الفعلي: ${effectiveDisplay}` : ''}</span>
     </div>
+    ${cappedAlert}
     ${cappedNote(bundle)}
     <div class="exec-numbers">
-      <button type="button" class="num" data-trace="due"><span>المطلوب حتى ${esc(dateText(schedule.asOf))}</span><b>${moneyShort(totals.dueMinor, currency)}</b><small>ج.م · اضغط للتفسير</small></button>
+      <button type="button" class="num" data-trace="due"><span>المطلوب حتى ${requestedAsOf ? asofDisplay : esc(dateText(schedule.asOf))}${horizonCapped ? ` (فعليًا حتى ${effectiveDisplay})` : ''} ${futureBadge}</span><b>${moneyShort(totals.dueMinor, currency)}</b><small>ج.م · اضغط للتفسير</small></button>
       <button type="button" class="num" data-trace="paid"><span>المدفوع</span><b>${moneyShort(totals.paidMinor, currency)}</b><small>${totals.creditMinor > 0 ? `منه رصيد دائن ${moneyShort(totals.creditMinor, currency)}` : 'من المحاضر المسجلة'}</small></button>
       <button type="button" class="num num-primary" data-trace="remaining"><span>المتبقي</span><b>${moneyShort(totals.remainingMinor, currency)}</b><small>ج.م · اضغط للتفسير</small></button>
     </div>
@@ -905,6 +926,9 @@ export async function bindExecutionDetail(app, executionId) {
   };
 
   const bindContainer = container => {
+    // querySelector المفرد لا يكفي عند تكرار الـ hook — نربط كل الأزرار التي تحمل نفس الخاصية
+    container.querySelectorAll('[data-settings]').forEach(b => b.addEventListener('click', () => executionSettingsDialog(app)));
+    container.querySelectorAll('[data-help]').forEach(b => b.addEventListener('click', () => openHelp(app)));
     container.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', guard(() => runAction[button.dataset.action]?.())));
     container.querySelectorAll('[data-trace]').forEach(button => button.addEventListener('click', () => traceDialog(bundle, button.dataset.trace)));
     container.querySelectorAll('[data-open-duration]').forEach(button => button.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true}))));
@@ -981,37 +1005,51 @@ export async function bindExecutionDetail(app, executionId) {
 
   root.querySelectorAll('.exec-toolbar [data-action]').forEach(button => button.addEventListener('click', guard(() => runAction[button.dataset.action]?.())));
   root.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab).catch(error => app.fail(error))));
-  root.querySelector('[data-record]')?.addEventListener('click', openRecord);
-  root.querySelector('[data-open-duration]')?.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true})));
-  root.querySelector('[data-open-statement]')?.addEventListener('click', openStatement);
-  root.querySelector('[data-help]')?.addEventListener('click', () => openHelp(app));
-  root.querySelector('[data-settings]')?.addEventListener('click', () => executionSettingsDialog(app));
+  root.querySelectorAll('[data-record]').forEach(el => el.addEventListener('click', openRecord));
+  root.querySelectorAll('[data-open-duration]').forEach(el => el.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true}))));
+  root.querySelectorAll('[data-open-statement]').forEach(el => el.addEventListener('click', openStatement));
+  root.querySelectorAll('[data-help]').forEach(el => el.addEventListener('click', () => openHelp(app)));
+  root.querySelectorAll('[data-settings]').forEach(el => el.addEventListener('click', () => executionSettingsDialog(app)));
+  // [data-more] قد يتكرر — نربط كل الأزرار
   const moreMenu = root.querySelector('[data-more-menu]');
-  const moreButton = root.querySelector('[data-more]');
-  moreButton?.addEventListener('click', () => {
+  root.querySelectorAll('[data-more]').forEach(moreButton => moreButton.addEventListener('click', () => {
     if (!moreMenu) return;
     moreMenu.hidden = !moreMenu.hidden;
     moreButton.setAttribute('aria-expanded', String(!moreMenu.hidden));
-  });
-  root.querySelector('[data-delete-execution]')?.addEventListener('click', async () => {
+  }));
+  root.querySelectorAll('[data-delete-execution]').forEach(el => el.addEventListener('click', async () => {
     if (!await confirmBox('حذف ملف التنفيذ بالكامل منطقيًا؟ يُحفظ كل شيء ويمكن استعادته من سلة التنفيذ.', {okText: 'حذف الملف'})) return;
     try {
       await EX.deleteExecution(app.office, executionId, bundle.execution.version ?? null, 'حذف من البطاقة');
       toast('تم الحذف المنطقي — الاستعادة من سلة التنفيذ');
       await app.go('executionCenter');
     } catch (error) { toast(userError(error), 'error'); }
-  });
-  const asofInput = root.querySelector('[data-asof]');
-  asofInput?.addEventListener('change', async () => {
-    prefs.set(ASOF_KEY, asofInput.value || '');
+  }));
+  // تاريخ الحساب: قد يكون لكل بطاقة على حدة — استخدم المفتاح المحلي إن وجد
+  root.querySelectorAll('[data-asof]').forEach(asofInput => asofInput.addEventListener('change', async () => {
+    const executionId = bundle?.execution?.id || '';
+    const localKey = executionId ? `ui:exec:asof:${executionId}` : '';
+    const value = asofInput.value || '';
+    if (localKey) await prefs.set(localKey, value);
+    else await prefs.set(ASOF_KEY, value);
+    // إن كان الوضع موحّد، حدّث المفتاح العام أيضًا
+    const mode = prefs.get('ui:exec:asof-mode:v1', 'per');
+    if (mode === 'global' || !localKey) await prefs.set(ASOF_KEY, value);
     await app.refresh();
-  });
+  }));
   // زر الرجوع إلى اليوم: تاريخ الحساب محفوظ عالميًا، وتاريخ قديم يخفي الحسابات
   // عن كل التنفيذات (وينشأ تنفيذ جديد يبدو بلا أرقام) — فنجعل الرجوع بنقرة واحدة.
-  root.querySelector('[data-asof-today]')?.addEventListener('click', async () => {
-    prefs.set(ASOF_KEY, '');
+  // زر الرجوع إلى اليوم يمسح المحلي فقط ثم يعيد الرسم — العام يبقى كافتراضي للجلسة
+  root.querySelectorAll('[data-asof-today]').forEach(el => el.addEventListener('click', async () => {
+    const executionId = bundle?.execution?.id || '';
+    if (executionId) {
+      await prefs.set(`ui:exec:asof:${executionId}`, '');
+      await prefs.set(ASOF_KEY, '');
+    } else {
+      await prefs.set(ASOF_KEY, '');
+    }
     await app.refresh();
-  });
+  }));
   // الجوال: نفس شريط الأزرار مثبَّت أسفل الشاشة.
   const toolbar = root.querySelector('.exec-toolbar');
   if (toolbar) {

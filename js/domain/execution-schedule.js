@@ -834,7 +834,7 @@ export function previewValueChange({slices = [], receipts = [], allocations = []
 }
 
 /** رصيد سابق + فترة جديدة + مصروفات مختارة = إجمالي التوكيل (بلا ازدواج). */
-export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBalance = true, expenses = [], expenseIds = [], rangeDecisions = []} = {}) {
+export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBalance = true, expenses = [], expenseIds = [], rangeDecisions = [], feesMinor = 0, stampsMinor = 0, previousAction = null} = {}) {
   if (!schedule) throw new TypeError('جدول التنفيذ مطلوب لحساب التوكيل.');
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new RangeError('مدة التوكيل غير صحيحة.');
   let previousMinor = 0, periodDueMinor = 0, periodPaidMinor = 0, differencesMinor = 0;
@@ -904,28 +904,69 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     .map(expense => ({
       kind: 'expense', id: expense.id, label: expense.label || expense.type, fromDate: expense.date, toDate: expense.date,
       amountMinor: expense.amountMinor, remainingMinor: expense.amountMinor,
-      note: expense.borneByLabel ? `يتحمله: ${expense.borneByLabel}` : ''
+      note: expense.borneByLabel ? `يتحمله: ${expense.borneByLabel}` : '',
+      equation: `${expense.label || expense.type}: ${fromMinorUnits(expense.amountMinor, schedule.currency)}`
     }));
   const expensesMinor = sumMinor(expenseLines, line => line.amountMinor);
+  const fees = Number.isSafeInteger(feesMinor) ? feesMinor : 0;
+  const stamps = Number.isSafeInteger(stampsMinor) ? stampsMinor : 0;
+  const feesLine = fees ? {kind: 'fee', label: 'رسوم (إدخال يدوي)', fromDate: '', toDate: '', amountMinor: fees, remainingMinor: fees, note: 'النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.', equation: `رسوم = ${fromMinorUnits(fees, schedule.currency)}`} : null;
+  const stampsLine = stamps ? {kind: 'stamp', label: 'دمغة (إدخال يدوي)', fromDate: '', toDate: '', amountMinor: stamps, remainingMinor: stamps, note: 'النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.', equation: `دمغة = ${fromMinorUnits(stamps, schedule.currency)}`} : null;
   const previousApplied = includePreviousBalance ? previousMinor : 0;
-  const totalMinor = addMinor(addMinor(previousApplied, periodDueMinor), expensesMinor);
+  const totalMinor = addMinor(addMinor(addMinor(addMinor(previousApplied, periodDueMinor), expensesMinor), fees), stamps);
+  // معادلات لكل سطر فترة: متساوية ⇒ 9 × 3,000 = 27,000 · مختلفة ⇒ 3 × 3,000 + 6 × 3,500 = 30,000 · جزئية ⇒ قسمة يومية واضحة
+  // نضيف equation لكل سطر فترة بناءً على تجميع القيم
+  const periodEquations = (() => {
+    if (!lines.length) return [];
+    // إذا كل الفترات بنفس المبلغ
+    const amounts = lines.map(l => l.amountMinor);
+    const unique = [...new Set(amounts)];
+    if (unique.length === 1) {
+      const amt = unique[0];
+      const formatted = fromMinorUnits(amt, schedule.currency).toLocaleString('en-US', {minimumFractionDigits: 2});
+      return [`${lines.length} × ${formatted} = ${fromMinorUnits(periodDueMinor, schedule.currency)}`];
+    }
+    // مختلفة
+    const groups = new Map();
+    for (const l of lines) {
+      const key = l.amountMinor;
+      groups.set(key, (groups.get(key) || 0) + 1);
+    }
+    const parts = [...groups.entries()].map(([amt, count]) => `${count} × ${fromMinorUnits(amt, schedule.currency).toLocaleString('en-US', {minimumFractionDigits: 2})}`).join(' + ');
+    return [`${parts} = ${fromMinorUnits(periodDueMinor, schedule.currency)}`];
+  })();
+
+  const previousNote = (() => {
+    if (!previousAction) return 'جزء من المتبقي — لا يُضاف عليه مرة ثانية';
+    const num = previousAction.referenceNumber || previousAction.id || '';
+    const date = previousAction.date || '';
+    return `مرتبط بمحضر ${previousAction.kindLabel || previousAction.kind || 'تبديد'}${num ? ` رقم ${num}` : ''}${date ? ` بتاريخ ${date}` : ''} — جزء من المتبقي ولا يُضاف عليه مرة ثانية`;
+  })();
+
   return {
     fromDate, toDate, currency: schedule.currency,
     previousBalanceMinor: previousMinor, previousAppliedMinor: previousApplied,
     periodDueMinor, periodPaidMinor, periodRemainingMinor: Math.max(0, addMinor(periodDueMinor, -periodPaidMinor)),
-    differencesMinor, expensesMinor, totalMinor, partials, rangeDecisions: decisionsUsed, runningPeriods,
+    differencesMinor, expensesMinor, feesMinor: fees, stampsMinor: stamps, totalMinor, partials, rangeDecisions: decisionsUsed, runningPeriods,
+    previousAction,
     lines: [
-      ...(previousApplied ? [{kind: 'previous', label: `رصيد سابق غير مسدد حتى ${addCivilDays(fromDate, -1)}`, fromDate: '', toDate: '', amountMinor: previousApplied, remainingMinor: previousApplied, note: 'جزء من المتبقي — لا يُضاف عليه مرة ثانية'}] : []),
-      ...lines, ...expenseLines
+      ...(previousApplied ? [{kind: 'previous', label: `رصيد سابق غير مسدد حتى ${addCivilDays(fromDate, -1)}`, fromDate: '', toDate: '', amountMinor: previousApplied, remainingMinor: previousApplied, note: previousNote, equation: `رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}${previousAction ? ` — مرتبط بمحضر ${previousAction.kindLabel || previousAction.kind}` : ''}`}] : []),
+      ...lines.map(l => ({...l, equation: l.equation || `${l.label}: ${fromMinorUnits(l.amountMinor, schedule.currency)}`})),
+      ...expenseLines,
+      ...(feesLine ? [feesLine] : []),
+      ...(stampsLine ? [stampsLine] : [])
     ],
     equations: [
-      ...(previousApplied ? [`رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}`] : []),
-      `فترة التوكيل (${fromDate} → ${toDate}) = ${fromMinorUnits(periodDueMinor, schedule.currency)}`,
+      ...(previousApplied ? [`رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}${previousAction ? ` — مرتبط بمحضر ${previousAction.kindLabel || previousAction.kind} رقم ${previousAction.referenceNumber || ''} بتاريخ ${previousAction.date || ''}` : ' — لا يوجد محضر تبديد/حجز مرتبط'}`] : []),
+      ...(periodEquations.length ? [`الفترة الجديدة: ${periodEquations[0]}`] : [`فترة التوكيل (${fromDate} → ${toDate}) = ${fromMinorUnits(periodDueMinor, schedule.currency)}`]),
+      ...lines.map(l => l.equation || `${l.label} = ${fromMinorUnits(l.amountMinor, schedule.currency)}`),
       ...decisionsUsed.map(row => row.trace),
       partials.length ? `فترات حدّية تنتظر قرارًا صريحًا: ${partials.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
       runningPeriods.length ? `فترات جارية ظاهرة بمبلغها المتوقع ولا تدخل في الإجمالي: ${runningPeriods.map(row => `${row.fromDate} → ${row.toDate} = ${fromMinorUnits(row.projectedMinor || 0, schedule.currency)}`).join('؛ ')}` : '',
       ...(expensesMinor ? [`مصروفات مختارة = ${fromMinorUnits(expensesMinor, schedule.currency)}`] : []),
-      `إجمالي التوكيل = ${fromMinorUnits(totalMinor, schedule.currency)}`,
+      ...(fees ? [`رسوم (يدوي) = ${fromMinorUnits(fees, schedule.currency)} — النظام لا يفترض رسومًا ولا دمغة`] : []),
+      ...(stamps ? [`دمغة (يدوي) = ${fromMinorUnits(stamps, schedule.currency)} — النظام لا يفترض رسومًا ولا دمغة`] : []),
+      `إجمالي التوكيل = ${fromMinorUnits(totalMinor, schedule.currency)}${fees || stamps ? ` = ${fromMinorUnits(previousApplied, schedule.currency)} + ${fromMinorUnits(periodDueMinor, schedule.currency)} + ${fromMinorUnits(expensesMinor, schedule.currency)} + ${fromMinorUnits(fees, schedule.currency)} + ${fromMinorUnits(stamps, schedule.currency)}` : ''}`,
       differencesMinor ? `منها فروق أحكام ${fromMinorUnits(differencesMinor, schedule.currency)} مضمّنة داخل الفترة — لا تُضاف مرة ثانية` : ''
     ].filter(Boolean)
   };
