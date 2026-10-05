@@ -12,12 +12,24 @@ import {formatFileNumber} from '../core/file-number.js';
 import {localDate} from '../core/clock.js';
 import {userError} from '../core/errors.js';
 import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
-import {addCivilDays, isCivilDate} from '../domain/execution-calendar.js';
-import {enumerateExecutionUnits} from '../domain/execution-period-calendar.js';
+import {addCivilDays, isCivilDate, enumerateExecutionUnits} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import * as S from '../services/execution-simple.js';
 import {executionSettings, saveExecutionSettings, resetExecutionSettings, actionKindOptions, expenseTypeOptions, entitlementOptions, collectionMethodOptions, executionMethodOptions, borneByLabelOf} from '../services/execution-settings.js';
 import {EXECUTION_TYPE_LABELS, executionTypeLabel} from '../domain/execution.js';
+import {prefs} from '../core/preferences.js';
+import {ASOF_SCOPE_KEY, asOfKeyFor} from './execution-horizon-picker.js';
+
+
+/**
+ * مفتاح اختيار (مربع/زر راديو): قيمته في المتصفح «on» عند غياب value، لكن
+ * الاعتماد على النص هشّ (قيمة مخصّصة، بيئات اختبار، تعريب…) — أي قيمة غير
+ * فارغة تفعيل صريح، والغياب تعطيل.
+ */
+const flag = value => value !== undefined && value !== null && value !== '' && value !== 'off' && value !== 'false';
+
+/** المفتاح الموحّد لتاريخ الحساب — مطابق لما تستخدمه بطاقة التنفيذ في مركز التنفيذ. */
+const ASOF_KEY = 'ui:exec:asof:v1';
 
 const money = minor => `${fromMinorUnits(minor, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 const displayDate = iso => (isCivilDate(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
@@ -387,7 +399,7 @@ export async function simpleActionDialog(app, executionId, {action = null} = {})
     if (!kind) return toast('اكتب نوع الإجراء أو اختره من القائمة', 'error');
     const save = form.querySelector('[data-save]');
     save.disabled = true;
-    const payload = {...values, kind, executionId, createFollowUp: values.createFollowUp === 'on'};
+    const payload = {...values, kind, executionId, createFollowUp: flag(values.createFollowUp)};
     const out = action
       ? await runSave(app, () => S.updateSimpleAction(app.office, {actionId: action.id, patch: payload, reason: values.reason}), 'تم تعديل الإجراء')
       : await runSave(app, () => S.recordSimpleAction(app.office, payload), 'تم تسجيل الإجراء');
@@ -610,7 +622,7 @@ export async function subsequentJudgmentDialog(app, executionId, {bundle = null}
     const out = await runSave(app, () => S.recordSubsequentJudgment(app.office, {
       executionId, entitlementType: values.entitlementType, amount: values.amount, effectiveFrom: values.effectiveFrom,
       effectiveTo: values.effectiveTo, judgmentNumber: values.judgmentNumber, court: values.court,
-      judgmentDate: values.judgmentDate, notes: values.notes, confirmedDecrease: values.confirmedDecrease === 'on',
+      judgmentDate: values.judgmentDate, notes: values.notes, confirmedDecrease: flag(values.confirmedDecrease),
       midPeriodChoice: values.midPeriodChoice, midPeriodReason: values.midPeriodReason, manualPeriodAmount: values.manualPeriodAmount,
       endPeriodChoice: values.endPeriodChoice, endPeriodReason: values.endPeriodReason, manualEndAmount: values.manualEndAmount,
       previousSliceId: current?.id || ''
@@ -645,6 +657,7 @@ export function simpleNoteDialog(app, executionId) {
 /* ======================= احسب مدة (S5) ======================= */
 export async function durationDialog(app, executionId = '', {bundle = null, lockExecution = false, fromDate = '', toDate = ''} = {}) {
   const presetFrom = isCivilDate(fromDate) ? fromDate : '';
+  const presetAmount = (bundle?.slices || []).filter(slice => !['cancelled', 'superseded'].includes(String(slice.status || ''))).at(-1)?.amount || '';
   const presetTo = isCivilDate(toDate) ? toDate : '';
   const clientsDefault = lockExecution ? executionId : '';
   const executions = lockExecution ? [] : (await app.office.r.execution.page({index: 'openedDate', direction: 'prev', limit: 100}).catch(() => ({items: []}))).items || [];
@@ -655,9 +668,6 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
     {key: 'last12', label: 'آخر 12 شهرًا', from: addCivilDays(today, -365), to: today},
     {key: 'year', label: 'السنة الحالية', from: `${today.slice(0, 4)}-01-01`, to: today}
   ];
-  // Preset amount from bundle if available
-  const bundleData = bundle || null;
-  const presetAmount = bundleData?.slices?.filter(s => !['cancelled', 'superseded'].includes(String(s.status || ''))).at(-1)?.amount || '';
   const card = modal(`<h2 class="modal-title">🧮 احسب مبلغ مدة</h2>
     ${executions.length ? `<label class="field">التنفيذ
       <select name="executionId">${executions.map(row => `<option value="${esc(row.id)}"${row.id === clientsDefault ? ' selected' : ''}>${esc(row.internalNumber || row.officialNumber || 'تنفيذ')}</option>`).join('')}</select>
@@ -670,10 +680,10 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
         <label class="field">إلى <b class="req">*</b><input name="toDate" type="date" value="${esc(presetTo || today)}"></label>
       </div>
       <fieldset data-manual-calc>
-        <legend>💰 الحساب بالمبلغ اليدوي</legend>
-        <p class="muted small">أدخل المبلغ يدويًا (مثل مبلغ النفقة) ليُحسب بناءً عليه — يعمل حتى بدون إعداد قيمة التنفيذ.</p>
+        <legend>💰 الحساب بمبلغ يدوي (بدلًا من الجدول المسجَّل)</legend>
+        <p class="muted small">مذكرة حساب سريعة بالمبلغ والدورية الذين تكتبهما — تعمل حتى لو لم تُسجَّل قيمة على التنفيذ. لا تُنشئ استحقاقًا ولا تغيّر الرصيد المسجَّل.</p>
         <div class="form-grid">
-          <label class="field">المبلغ (ج.م)<input name="manualAmount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(presetAmount)}" placeholder="مثال: 4000"></label>
+          <label class="field">المبلغ (ج.م)<input name="manualAmount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(presetAmount)}" placeholder="مثال: 3,000"></label>
           <label class="field">الدورية
             <select name="manualPeriodicity">
               <option value="monthly" selected>شهري</option>
@@ -682,14 +692,14 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
               <option value="yearly">سنوي</option>
             </select>
           </label>
-          <label class="field">رسوم التنفيذ (ج.م) <small class="muted">(اختياري)</small><input name="manualFees" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 500"></label>
-          <label class="field">دمغة (ج.م) <small class="muted">(اختياري)</small><input name="manualStamps" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 100"></label>
+          <label class="field">رسوم التنفيذ (اختياري)<input name="manualFees" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 500"></label>
+          <label class="field">دمغة (اختياري)<input name="manualStamps" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 100"></label>
         </div>
-        <label class="check-line" style="margin-top:8px;">
-          <input type="checkbox" name="useManual" checked> استخدم الحساب اليدوي (بدلًا من حساب الجدول المسجل)
-        </label>
+        <label class="check-line"><input type="checkbox" name="useManual" data-use-manual> استخدم هذا الحساب اليدوي في النتيجة</label>
       </fieldset>
-      <div class="alloc-preview" data-result aria-live="polite"><span class="muted small">اختر المدة وأدخل المبلغ ثم اضغط احسب.</span></div>
+      <label class="check-line"><input type="checkbox" name="allowFuture" data-allow-future> احسب حتى تاريخ مستقبلي (تقديري)</label>
+      <p class="hint hint-info small" data-future-hint>إن كان تاريخ النهاية بعد اليوم: النظام ينفّذ التاريخ الذي اخترته ويتضمن الفترات المنتهية داخله، ويعلّم الفترات التي لم تنتهِ بعد بأنها <b>تقديرية</b> — بلا قصّ صامت إلى اليوم.</p>
+      <div class="alloc-preview" data-result aria-live="polite"><span class="muted small">اختر المدة ثم اضغط احسب.</span></div>
       <div class="form-actions">
         <button type="submit" class="primary" data-save>احسب</button>
         <button type="button" class="ghost" data-copy hidden>نسخ</button>
@@ -699,88 +709,92 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
     </form>`);
   const form = card.querySelector('[data-form="duration"]');
   const resultHost = form.querySelector('[data-result]');
+  // اقتراح مبدئي لمبلغ الحساب اليدوي من آخر بند قيمة مسجَّل (عرض فقط — لا يُنشئ شيئًا).
+  if (presetAmount && !form.querySelector('[name="manualAmount"]').value) form.querySelector('[name="manualAmount"]').value = presetAmount;
+  const futureBox = form.querySelector('[data-allow-future]');
   const currentId = () => (lockExecution ? executionId : (form.closest('.modal-card').querySelector('[name="executionId"]')?.value || executionId));
+  // اختيار تاريخ نهاية مستقبلي = طلب صريح: يُفعَّل خيار «تقديري» تلقائيًا
+  // حتى لا يُقَصّ النطاق إلى اليوم في صمت (وهو جوهر الشكوى المبلَّغة).
+  const syncFutureBox = () => {
+    const to = form.querySelector('[name="toDate"]')?.value || '';
+    if (to && to > localDate() && futureBox && !futureBox.checked) futureBox.checked = true;
+    const hint = form.querySelector('[data-future-hint]');
+    if (hint) hint.innerHTML = to && to > localDate()
+      ? (futureBox?.checked
+        ? 'النطاق يمتد بعد اليوم: ستُحتسب الفترات المنتهية داخل النطاق، وتظهر الفترات التي لم تنتهِ بعد بوسم <b>تقديري</b> بمبلغها المتوقع.'
+        : 'النطاق يمتد بعد اليوم والخيار غير مفعَّل: سيتوقف الحساب عند اليوم ويظهر التاريخ الفعلي صراحةً بدل رقم منسوب لتاريخ آخر.')
+      : 'حدّد تاريخ نهاية بعد اليوم لإظهار خيار الحساب المستقبلي (تقديري).';
+  };
+  form.querySelector('[name="toDate"]')?.addEventListener('change', syncFutureBox);
+  futureBox?.addEventListener('change', syncFutureBox);
+  syncFutureBox();
   card.querySelectorAll('[data-from]').forEach(button => button.addEventListener('click', () => {
     form.querySelector('[name="fromDate"]').value = button.dataset.from;
     form.querySelector('[name="toDate"]').value = button.dataset.to;
-    resultHost.innerHTML = '<span class="muted small">اختر المدة وأدخل المبلغ ثم اضغط احسب.</span>';
+    if (futureBox) futureBox.checked = button.dataset.to > localDate();
+    syncFutureBox();
+    resultHost.innerHTML = '<span class="muted small">اختر المدة ثم اضغط احسب.</span>';
     form.requestSubmit();
   }));
-  card.querySelector('[data-custom]')?.addEventListener('click', () => {
-    form.querySelector('[name="fromDate"]').focus();
-    form.querySelector('[name="fromDate"]').showPicker?.();
-  });
-  // Helper: manual duration calculation
-  const calcManualDuration = (values) => {
-    const amount = parseFloat(values.manualAmount || '0');
-    const fees = parseFloat(values.manualFees || '0');
-    const stamps = parseFloat(values.manualStamps || '0');
-    const periodicity = values.manualPeriodicity || 'monthly';
-    const fd = values.fromDate;
-    const td = values.toDate;
-    if (!isCivilDate(fd) || !isCivilDate(td)) throw new Error('تاريخ البداية والنهاية مطلوبان بصيغة صحيحة.');
-    if (td < fd) throw new Error('تاريخ النهاية يجب أن يكون بعد تاريخ البداية.');
-    if (!(amount > 0)) throw new Error('أدخل مبلغًا أكبر من صفر.');
-    // Enumerate periods between fromDate and toDate
-    const {units} = enumerateExecutionUnits({fromDate: fd, toDate: td, frequency: periodicity});
-    const periodCount = units.length || 0;
-    if (!periodCount) throw new Error('لا توجد فترات في النطاق المحدد.');
-    const totalAmount = amount * periodCount;
-    const grandTotal = totalAmount + (fees || 0) + (stamps || 0);
-    const periodLabel = {monthly: 'شهريًا', weekly: 'أسبوعيًا', semiMonthly: 'نصف شهري', yearly: 'سنويًا'}[periodicity] || periodicity;
-    return {
-      amount, fees: fees || 0, stamps: stamps || 0, periodicity, periodLabel,
-      periodCount, totalAmount, grandTotal, units, fromDate: fd, toDate: td,
-      equations: [
-        `قيمة الفترة الواحدة = ${amount.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م (${periodLabel})`,
-        `عدد الفترات من ${fd} إلى ${td} = ${periodCount}`,
-        `إجمالي الفترات = ${amount.toLocaleString('en-US', {minimumFractionDigits: 2})} × ${periodCount} = ${totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م`,
-        fees > 0 ? `رسوم التنفيذ = ${fees.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م` : '',
-        stamps > 0 ? `الدمغة = ${stamps.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م` : '',
-        `الإجمالي المطلوب = ${grandTotal.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م`
-      ].filter(Boolean)
+  /** عرض نتيجة الحساب اليدوي: مذكرة بأرقامها ومعادلاتها — بلا أي كتابة على السجل. */
+  const renderManualDuration = calc => {
+    const money0 = minor => `${fromMinorUnits(minor, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    const label = {monthly: 'شهريًا', weekly: 'أسبوعيًا', semiMonthly: 'نصف شهري', yearly: 'سنويًا'}[calc.periodicity] || '';
+    const rows = calc.units.map(unit => `<tr><td>${displayDate(unit.fromDate)} – ${displayDate(unit.toDate)}</td><td>${money0(calc.amountMinor)}</td></tr>`).join('');
+    const equations = [
+      `قيمة الفترة = ${money0(calc.amountMinor)} ج.م ${label}`,
+      `عدد الفترات من ${displayDate(form.querySelector('[name="fromDate"]').value)} إلى ${displayDate(form.querySelector('[name="toDate"]').value)} = ${calc.units.length}`,
+      `إجمالي الفترات = ${calc.units.length} × ${money0(calc.amountMinor)} = ${money0(calc.totalMinor)} ج.م`,
+      calc.feesMinor ? `رسوم التنفيذ (إدخال يدوي) = ${money0(calc.feesMinor)} ج.م` : '',
+      calc.stampsMinor ? `الدمغة (إدخال يدوي) = ${money0(calc.stampsMinor)} ج.م` : '',
+      `الإجمالي = ${money0(calc.grandMinor)} ج.م`
+    ].filter(Boolean);
+    resultHost.dataset.currency = 'EGP';
+    resultHost.innerHTML = `<div class="result-numbers">
+        <div><span>قيمة الفترة (${esc(label)})</span><b>${money0(calc.amountMinor)}</b></div>
+        <div><span>عدد الفترات</span><b>${calc.units.length}</b></div>
+        <div><span>إجمالي الفترات</span><b>${money0(calc.totalMinor)}</b></div>
+        ${calc.feesMinor ? `<div><span>رسوم (يدوي)</span><b>${money0(calc.feesMinor)}</b></div>` : ''}
+        ${calc.stampsMinor ? `<div><span>دمغة (يدوي)</span><b>${money0(calc.stampsMinor)}</b></div>` : ''}
+        <div class="total"><span>الإجمالي المطلوب</span><b>${money0(calc.grandMinor)}</b></div>
+      </div>
+      <p class="hint hint-info small">هذه <b>مذكرة حساب يدوي</b> بالأرقام التي أدخلتها: لا تُنشئ استحقاقًا مسجَّلًا ولا تغيّر «المطلوب/المدقوع» على التنفيذ. أما «طباعة كشف» و«توكيل» فيعتمدان على بيانات التنفيذ المسجَّلة وحدها.</p>
+      <table class="mini-table"><thead><tr><th>الفترة</th><th>المبلغ</th></tr></thead><tbody>${rows}
+        <tr class="total"><td><b>إجمالي الفترات</b></td><td><b>${money0(calc.totalMinor)}</b></td></tr>
+        ${calc.feesMinor ? `<tr><td>رسوم التنفيذ (يدوي)</td><td>${money0(calc.feesMinor)}</td></tr>` : ''}
+        ${calc.stampsMinor ? `<tr><td>الدمغة (يدوي)</td><td>${money0(calc.stampsMinor)}</td></tr>` : ''}
+        <tr class="total"><td><b>الإجمالي النهائي</b></td><td><b>${money0(calc.grandMinor)}</b></td></tr>
+      </tbody></table>
+      <ol class="small">${equations.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
+    form.querySelector('[data-save]').textContent = 'احسب';
+    form.querySelector('[data-copy]').hidden = false;
+    form.querySelector('[data-print]').hidden = true;
+    form.querySelector('[data-poa]').hidden = true;
+    form.querySelector('[data-copy]').onclick = async () => {
+      try { await navigator.clipboard.writeText(equations.join('\n')); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
     };
+  };
+  /**
+   * الحساب اليدوي: عدد فترات النطاق بالمحرك النقي نفسه × المبلغ الذي أدخله المكتب,
+   * ثم + رسوم/دمغة يدوية. لا يستنتج النظام مبلغًا ولا ينشئ استحقاقًا — مذكرة فقط.
+   */
+  const manualDuration = values => {
+    const amountMinor = toMinorUnits(values.manualAmount || '', 'EGP');
+    if (!amountMinor || amountMinor <= 0) throw new Error('أدخل مبلغًا يدويًا أكبر من صفر (أو ألغِ خيار الحساب اليدوي).');
+    if (!isCivilDate(values.fromDate) || !isCivilDate(values.toDate) || values.toDate < values.fromDate) throw new Error('نطاق المدة غير صحيح: راجع تاريخي البداية والنهاية.');
+    const periodicity = values.manualPeriodicity || 'monthly';
+    const {units} = enumerateExecutionUnits({fromDate: values.fromDate, toDate: values.toDate, frequency: periodicity});
+    if (!units.length) throw new Error('لا توجد فترات في النطاق المحدد.');
+    const feesMinor = toMinorUnits(values.manualFees || '', 'EGP') || 0;
+    const stampsMinor = toMinorUnits(values.manualStamps || '', 'EGP') || 0;
+    const totalMinor = amountMinor * units.length;
+    return {amountMinor, feesMinor, stampsMinor, totalMinor, grandMinor: totalMinor + feesMinor + stampsMinor, periodicity, units};
   };
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
-    const useManual = values.useManual === 'on' || values.useManual === true;
-    const manualAmount = parseFloat(values.manualAmount || '0');
     try {
-      // === Manual calculation path ===
-      if (useManual && manualAmount > 0) {
-        const calc = calcManualDuration(values);
-        resultHost.dataset.currency = 'EGP';
-        const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-        const periodRows = calc.units.map((unit, i) => `<tr><td>${i + 1}</td><td>${displayDate(unit.from)}</td><td>${displayDate(unit.to)}</td><td>${fmt(calc.amount)}</td><td>✗ لم يُدفع</td></tr>`).join('');
-        resultHost.innerHTML = `<div class="result-numbers">
-            <div><span>قيمة الفترة (${calc.periodLabel})</span><b>${fmt(calc.amount)} ج.م</b></div>
-            <div><span>عدد الفترات</span><b>${calc.periodCount}</b></div>
-            <div><span>إجمالي الفترات</span><b>${fmt(calc.totalAmount)} ج.م</b></div>
-            ${calc.fees > 0 ? `<div><span>رسوم التنفيذ</span><b>${fmt(calc.fees)} ج.م</b></div>` : ''}
-            ${calc.stamps > 0 ? `<div><span>الدمغة</span><b>${fmt(calc.stamps)} ج.م</b></div>` : ''}
-            <div class="total"><span>الإجمالي المطلوب</span><b>${fmt(calc.grandTotal)} ج.م</b></div>
-          </div>
-          <table class="mini-table"><thead><tr><th>#</th><th>من</th><th>إلى</th><th>المبلغ</th><th>الحالة</th></tr></thead><tbody>
-          ${periodRows}
-          <tr class="total"><td colspan="3"><b>إجمالي الفترات</b></td><td><b>${fmt(calc.totalAmount)} ج.م</b></td><td></td></tr>
-          ${calc.fees > 0 ? `<tr><td colspan="3">رسوم التنفيذ</td><td><b>${fmt(calc.fees)} ج.م</b></td><td></td></tr>` : ''}
-          ${calc.stamps > 0 ? `<tr><td colspan="3">الدمغة</td><td><b>${fmt(calc.stamps)} ج.م</b></td><td></td></tr>` : ''}
-          <tr class="total" style="background:#e8f5e9"><td colspan="3"><b>الإجمالي النهائي</b></td><td><b>${fmt(calc.grandTotal)} ج.م</b></td><td></td></tr>
-          </tbody></table>
-          <ol class="small">${calc.equations.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
-        form.querySelector('[data-copy]').hidden = false;
-        form.querySelector('[data-print]').hidden = true; // No execution-linked print for manual
-        form.querySelector('[data-poa]').hidden = false;
-        form.querySelector('[data-poa]').disabled = false;
-        form.querySelector('[data-copy]').onclick = async () => {
-          const text = calc.equations.join('\n');
-          try { await navigator.clipboard.writeText(text); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
-        };
-        form.querySelector('[data-poa]').onclick = () => simplePoaDialog(app, currentId(), {fromDate: values.fromDate, toDate: values.toDate}).catch(error => toast(userError(error), 'error'));
-        return;
-      }
-      // === Existing slice-based calculation path ===
+      if (flag(values.useManual)) return renderManualDuration(manualDuration(values));
       const pendingControls = [...resultHost.querySelectorAll('[data-range-decision]')];
       let rangeDecisions = [];
       if (pendingControls.length) {
@@ -798,28 +812,13 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
           rangeDecisions = saved.decisions;
         }
       }
-      const claim = await S.simpleDurationClaim(app.office, currentId(), {fromDate: values.fromDate, toDate: values.toDate, rangeDecisions});
+      const claim = await S.simpleDurationClaim(app.office, currentId(), {
+        fromDate: values.fromDate, toDate: values.toDate, rangeDecisions,
+        allowFuture: flag(values.allowFuture)
+      });
       const currency = claim.totals.currency;
       resultHost.dataset.currency = currency;
       const amount = minor => `${fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-      // Check if calculation returned all zeros (no slices set up)
-      const hasData = claim.totals.dueMinor > 0 || claim.rows.length > 0;
-      if (!hasData) {
-        // Provide a clear message instead of showing zeros
-        resultHost.innerHTML = `<div class="hint hint-warn" style="padding:16px;border:1px solid #ffc107;border-radius:8px;background:#fff3cd;">
-          <b>⚠ لا توجد بيانات قيمة مسجَّلة لهذا التنفيذ.</b>
-          <p class="small" style="margin-top:8px;">لم يُدخل أي بند قيمة (مثل النفقة) لهذا التنفيذ بعد. لإجراء حساب:</p>
-          <ul class="small" style="margin-top:4px;">
-            <li><b>الطريقة 1:</b> أدخل المبلغ يدويًا في حقل «الحساب بالمبلغ اليدوي» أعلاه واضغط احسب.</li>
-            <li><b>الطريقة 2:</b> أدخل قيمة النفقة والدورية من <button type="button" class="link" data-goto-value style="text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;color:inherit;font:inherit;">قيمة النفقة (البند والدورية)</button> ثم عُد واحسب.</li>
-          </ul>
-        </div>`;
-        resultHost.querySelector('[data-goto-value]')?.addEventListener('click', () => {
-          closeModal();
-          valueSetupDialog(app, currentId(), {bundle: bundleData});
-        });
-        return;
-      }
       const boundaryHtml = claim.partials.length ? `<section class="hint hint-warning"><b>الفترة الحدّية لا تُحتسب بنسبة الأيام.</b><p class="small">اختر قرارًا صريحًا لكل فترة؛ القرار وسببه وتاريخه والمستخدم سيُحفظ في سجل النشاط.</p>
         ${claim.partials.map(decision => `<div class="form-grid" data-range-decision data-period-key="${esc(decision.periodKey)}" data-kind="${esc(decision.kind)}" data-item-id="${esc(decision.itemId || '')}" data-anchor-date="${esc(decision.anchorDate || '')}" data-k="${esc(decision.k)}" data-from-date="${esc(decision.fromDate)}" data-to-date="${esc(decision.toDate)}">
           <p class="small">${displayDate(decision.fromDate)} – ${displayDate(decision.toDate)} — قيمة الفترة الكاملة ${amount(decision.dueMinor)}.</p>
@@ -831,7 +830,8 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
       const statusNotes = [
         ...claim.decisionRows.map(row => `تحتاج الفترة ${displayDate(row.fromDate)} – ${displayDate(row.toDate)} قرارًا مستقلًا بشأن القيمة: ${row.reason}`),
         ...claim.notYetComplete.map(row => `فترة جارية ${displayDate(row.fromDate)} – ${displayDate(row.toDate)} بمبلغ متوقع ${amount(row.projectedMinor || 0)} تُستحق في ${displayDate(row.toDate)} — معلوماتية ولا تدخل في المستحق.`),
-        claim.horizonCapped ? `قُصّ أفق الحساب إلى ${displayDate(claim.toDate)}؛ تاريخ الحساب الفعلي ${displayDate(claim.asOf)}.` : ''
+        claim.horizonCapped ? `لم يُحسب بعد ${displayDate(claim.requestedToDate || claim.toDate)}: أفق الحساب الفعلي ${displayDate(claim.effectiveAsOf || claim.toDate)}. ${claim.horizonNote || ''}`
+          : (claim.estimateNote || '')
       ].filter(Boolean);
       resultHost.innerHTML = `<div class="result-numbers">
           <div><span>المستحق عن المدة</span><b>${amount(claim.totals.dueMinor)}</b></div>
@@ -861,10 +861,10 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
       form.querySelector('[data-poa]').hidden = false;
       form.querySelector('[data-poa]').disabled = !canFinalize;
       form.querySelector('[data-copy]').onclick = async () => {
-        const text = claim.equations.join('\n');
+        const text = claim.equations.join('\\n');
         try { await navigator.clipboard.writeText(text); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
       };
-      form.querySelector('[data-print]').onclick = () => app.office && S.printSimpleStatement(app.office, currentId(), {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: claim.decisions}).catch(error => toast(userError(error), 'error'));
+      form.querySelector('[data-print]').onclick = () => app.office && S.printSimpleStatement(app.office, currentId(), {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: claim.decisions, allowFuture: flag(futureBox?.checked)}).catch(error => toast(userError(error), 'error'));
       form.querySelector('[data-poa]').onclick = () => simplePoaDialog(app, currentId(), {fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: claim.decisions}).catch(error => toast(userError(error), 'error'));
     } catch (error) { resultHost.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; }
   });
@@ -872,12 +872,20 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
 }
 
 /* ======================= التوكيل والطباعة (S7) ======================= */
+/** وصف مصدر الرصيد السابق: محضر تبديد/حجز مسجَّل على التنفيذ، أو تصريح بعدم وجوده. */
+function previousSourceHint(data) {
+  const source = S.previousBalanceSource(data?.actions || []);
+  return source
+    ? `الرصيد السابق مرتبط بمصدر مسجَّل: ${source.label} — يُدرج بالسطر المستقل عند تفعيل الخيار أعلاه.`
+    : 'لا يوجد محضر تبديد/حجز مرتبط: يظهر الرصيد السابق من الفترات غير المسددة قبل بداية النطاق، وإن لم يوجد فهو صفر.';
+}
 export async function simplePoaDialog(app, executionId, {fromDate = '', toDate = '', bundle = null, rangeDecisions = []} = {}) {
   const data = bundle || await S.simpleCardBundle(app.office, executionId);
   const today = localDate();
   const firstUnpaid = data.schedule.rows.find(row => row.remainingMinor > 0)?.fromDate || data.schedule.rows[0]?.fromDate || today;
   const lastPoa = data.poas[0] || null;
   const start = isCivilDate(fromDate) ? fromDate : (lastPoa?.toDate ? addCivilDays(lastPoa.toDate, 1) : firstUnpaid);
+  const feasModel = String(data.execution?.accountingModel || '') === 'feas-v1';
   const card = modal(`<h2 class="modal-title">إنشاء توكيل</h2>
     <form class="simple-form" data-form="poa">
       <div class="form-grid">
@@ -885,13 +893,24 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
         <label class="field">إلى <b class="req">*</b><input name="toDate" type="date" value="${esc(isCivilDate(toDate) ? toDate : today)}"></label>
         <label class="field">رقم التوكيل (اختياري)<input name="poaNumber" value="${esc(lastPoa?.poaNumber || '')}"></label>
         <label class="field">تاريخ التوكيل<input name="date" type="date" value="${esc(today)}"></label>
-        <label class="field">رسوم (إدخال يدوي)<input name="fees" inputmode="decimal" placeholder="مثال: 500"><small class="hint">النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.</small></label>
-        <label class="field">دمغة (إدخال يدوي)<input name="stamps" inputmode="decimal" placeholder="مثال: 100"><small class="hint">النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.</small></label>
       </div>
       <p class="hint hint-info" data-no-double-count>قاعدة منع الازدواج: «الرصيد السابق جزء من المتبقي ولا يُضاف عليه مرة ثانية» — إصدار التوكيل لا يغيّر المتبقي أبدًا.</p>
       <label class="check-line"><input type="checkbox" name="includePreviousBalance" checked> إدراج الرصيد السابق غير المسدد (جزء من المتبقي — لا يُضاف عليه مرتين)</label>
+      <p class="muted small" data-previous-source>${esc(previousSourceHint(data))}</p>
+      <label class="check-line"><input type="checkbox" name="allowFuture" data-poa-future${esc(isCivilDate(toDate) && toDate > today ? ' checked' : '')}> احتساب الفترات المستقبلية داخل النطاق (تقديري)</label>
+      <p class="hint hint-info small" data-poa-future-hint>إن كان تاريخ النهاية بعد اليوم فسيُفعَّل هذا الخيار تلقائيًا: النظام ينفّذ النطاق الذي اخترته ويعلّم الفترات القادمة بأنها <b>تقديرية</b> — بلا قصّ صامت إلى اليوم.</p>
+      <label class="check-line"><input type="checkbox" name="includeRunningPeriods" data-poa-running> إدراج الفترات التي لم تنتهِ بعد كاملةً (قرار صريح — تقديري)</label>
       <fieldset data-expenses><legend>مصروفات تُدرج في التوكيل</legend>
         ${data.expenses.length ? data.expenses.map(expense => `<label class="check-line"><input type="checkbox" name="expense" value="${esc(expense.id)}"${expense.includeInPoa ? ' checked' : ''}> ${esc(expense.label)} — ${money(expense.amountMinor)} ${esc(expense.date)}${expense.borneByLabel ? ` (يتحمله: ${esc(expense.borneByLabel)})` : ''}</label>`).join('') : '<p class="muted small">لا توجد مصروفات مسجلة.</p>'}
+      </fieldset>
+      <fieldset${feasModel ? ' data-feas-disabled' : ''}><legend>رسوم ودمغة (إدخال يدوي — لا يزيدان أصل الدين)</legend>
+        <div class="form-grid">
+          <label class="field">رسوم (إدخال يدوي)<input name="fees" inputmode="decimal" placeholder="0.00"${feasModel ? ' disabled' : ''}></label>
+          <label class="field">دمغة (إدخال يدوي)<input name="stamps" inputmode="decimal" placeholder="0.00"${feasModel ? ' disabled' : ''}></label>
+        </div>
+        <p class="muted small">${feasModel
+          ? 'هذا التنفيذ على نموذج FEAS (اعتراف صريح بفترات): الرسوم والدمغة اليدوية هنا لا تُطبَّق عليه، ويُدار ما يخصّه من مسار الاعتراف نفسه.'
+          : 'النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف. تُضاف إلى إجمالي التوكيل كسطرين مستقلين ولا تزيد أصل الالتزام الدوري.'}</p>
       </fieldset>
       <div class="alloc-preview" data-preview aria-live="polite"></div>
       <div class="form-actions">
@@ -903,13 +922,23 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
   const form = card.querySelector('[data-form="poa"]');
   const previewHost = form.querySelector('[data-preview]');
   let activeRangeDecisions = Array.isArray(rangeDecisions) ? rangeDecisions : [];
+  const manualMinor = (value, currency) => {
+    const text = String(value ?? '').trim();
+    if (!text) return 0;
+    const parsed = toMinorUnitsSafe(text, currency);
+    if (!parsed) return 0;
+    return parsed;
+  };
   const currentDraft = async () => {
     const values = Object.fromEntries(new FormData(form).entries());
     const expenseIds = [...form.querySelectorAll('[name="expense"]:checked')].map(input => input.value);
+    const currency = data.schedule?.currency || 'EGP';
     const draft = await S.simplePoaDraft(app.office, executionId, {
       fromDate: values.fromDate, toDate: values.toDate,
-      includePreviousBalance: values.includePreviousBalance === 'on', expenseIds, rangeDecisions: activeRangeDecisions,
-      fees: values.fees || '0', stamps: values.stamps || '0'
+      includePreviousBalance: flag(values.includePreviousBalance), expenseIds, rangeDecisions: activeRangeDecisions,
+      allowFuture: flag(values.allowFuture),
+      includeRunningPeriods: flag(values.includeRunningPeriods),
+      feesMinor: manualMinor(values.fees, currency), stampsMinor: manualMinor(values.stamps, currency)
     });
     return {draft, values, expenseIds};
   };
@@ -928,22 +957,26 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
         </div>`).join('')}</section>` : '';
       const scenarioRows = draft.rangeScenarios || [];
       const scenarioHtml = scenarioRows.length ? `<details><summary>مقارنة خيارات الحدّ بلا تناسب</summary><table class="mini-table"><thead><tr><th>الفترة</th><th>الخيار</th><th>القيمة</th></tr></thead><tbody>${scenarioRows.map(row => `<tr><td>${esc(row.periodKey)}</td><td>${esc(row.choice)}</td><td>${row.amountMinor === null ? '—' : amount(row.amountMinor)}</td></tr>`).join('')}</tbody></table></details>` : '';
-      // ربط الرصيد السابق بمحضر: إن وُجد محضر تبديد/حجز يظهر رقمه وتاريخه
-      const prevAction = draft.previousAction;
-      const prevLabel = prevAction ? `رصيد سابق: ${amount(draft.previousAppliedMinor)} — مرتبط بمحضر ${esc(prevAction.kindLabel || prevAction.kind || 'تبديد')}${prevAction.referenceNumber ? ` رقم ${esc(prevAction.referenceNumber)}` : ''}${prevAction.date ? ` بتاريخ ${esc(displayDate(prevAction.date))}` : ''}` : (draft.previousAppliedMinor ? `رصيد سابق: ${amount(draft.previousAppliedMinor)} — لا يوجد محضر تبديد/حجز مرتبط` : 'رصيد سابق: 0 — لا يوجد محضر تبديد/حجز مرتبط');
-      const feesMinor = draft.feesMinor || 0;
-      const stampsMinor = draft.stampsMinor || 0;
+      const lineRows = (draft.lines || []).filter(line => Number(line.amountMinor || 0) > 0);
+      const linesHtml = lineRows.length ? `<details open><summary>بنود التوكيل ومعادلة كل بند (${lineRows.length})</summary>
+        <table class="mini-table"><thead><tr><th>البند</th><th>المبلغ</th><th>المعادلة / المصدر</th></tr></thead><tbody>
+        ${lineRows.map(line => `<tr><td>${esc(line.label || '')}</td><td>${amount(line.amountMinor)}</td><td class="muted small">${esc([line.equation, line.note, line.source?.label].filter(Boolean).join(' — '))}</td></tr>`).join('')}
+        </tbody></table></details>` : '';
+      const manual = Number(draft.manualAdjustmentsMinor || 0);
       previewHost.innerHTML = `${boundaryHtml}<div class="result-numbers">
-          <div><span>${esc(prevLabel)}</span><b>${amount(draft.previousAppliedMinor)}</b></div>
-          <div><span>الفترة الجديدة: ${esc(draft.lines.filter(l => l.kind==='period').map(l => l.equation || l.label).join(' · ') || `${draft.periodDueMinor ? `${amount(draft.periodDueMinor)}` : ''}`)}</span><b>${amount(draft.periodDueMinor)}</b></div>
-          ${draft.lines.filter(l => l.kind==='period').map(l => `<div class="muted small">${esc(l.equation || '')}</div>`).join('')}
+          <div><span>رصيد سابق${draft.previousSource ? ' (مرتبط بمحضر)' : ''}</span><b>${amount(draft.previousAppliedMinor)}</b></div>
+          <div><span>فترة التوكيل</span><b>${amount(draft.periodDueMinor)}</b>${draft.periodsEquation ? `<small class="muted">${esc(draft.periodsEquation)}</small>` : ''}</div>
           <div><span>مصروفات مختارة</span><b>${amount(draft.expensesMinor)}</b></div>
-          ${feesMinor ? `<div><span>رسوم (إدخال يدوي)</span><b>${amount(feesMinor)}</b></div>` : '<div><span>رسوم (يدوي)</span><b>0</b> <small class="muted">النظام لا يفترض رسومًا</small></div>'}
-          ${stampsMinor ? `<div><span>دمغة (إدخال يدوي)</span><b>${amount(stampsMinor)}</b></div>` : '<div><span>دمغة (يدوي)</span><b>0</b> <small class="muted">النظام لا يفترض دمغة</small></div>'}
-          <div class="total"><span>إجمالي التوكيل</span><b>${amount(draft.totalMinor)}</b> <small class="muted">(${amount(draft.previousAppliedMinor)} + ${amount(draft.periodDueMinor)} + ${amount(draft.expensesMinor)} + ${amount(feesMinor)} + ${amount(stampsMinor)})</small></div>
+          ${manual ? `<div><span>رسوم + دمغة (يدوي)</span><b>${amount(manual)}</b></div>` : ''}
+          <div class="total"><span>إجمالي التوكيل</span><b>${amount(draft.totalMinor)}</b></div>
         </div>
-        ${(draft.runningPeriods?.length) ? `<p class="hint hint-info small">فترات جارية ظاهرة بمبلغها المتوقع <b>ولا تدخل في الإجمالي</b>: ${draft.runningPeriods.map(row => `${esc(row.label || `${displayDate(row.fromDate)} – ${displayDate(row.toDate)}`)} = ${amount(row.projectedMinor || 0)}`).join(' · ')}</p>` : ''}
-        ${scenarioHtml}<p class="muted small">${esc(draft.equations.join(' — '))}</p>
+        ${draft.previousSource ? `<p class="hint hint-info small">الرصيد السابق ${amount(draft.previousAppliedMinor)} — ${esc(draft.previousSource.label)}. وهو جزء من المتبقي ولا يُضاف عليه مرة ثانية.</p>` : ''}
+        ${(draft.feesMinor || draft.stampsMinor) ? `<p class="muted small">رسوم ${amount(draft.feesMinor || 0)} · دمغة ${amount(draft.stampsMinor || 0)} — إدخال يدوي من المكتب، ولا تزيدان أصل الدين.</p>` : ''}
+        ${(draft.runningPeriods?.length) ? `<p class="hint hint-warning small"><b>${draft.runningPeriods.length} فترة لم تنتهِ بعد</b> ظاهرة بمبلغها المتوقع <b>ولا تدخل في الإجمالي</b>: ${draft.runningPeriods.map(row => `${esc(row.label || `${displayDate(row.fromDate)} – ${displayDate(row.toDate)}`)} = ${amount(row.projectedMinor || 0)}`).join(' · ')} — لإدراجها كاملةً فعّل «إدراج الفترات التي لم تنتهِ بعد» (قرار صريح).</p>` : ''}
+        ${draft.runningIncluded?.length ? `<p class="hint hint-info small">أُدرجت بقرار صريح ${draft.runningIncluded.length} فترة لم تنتهِ بعد (تقديري) بمبلغ ${amount(draft.runningIncluded.reduce((sum, row) => sum + row.amountMinor, 0))}.</p>` : ''}
+        ${draft.horizonCapped ? `<p class="hint hint-warning small">⚠ ${esc(draft.horizonNote || '')}</p>` : ''}
+        ${draft.estimateNote && !draft.horizonCapped ? `<p class="hint hint-info small">ⓘ ${esc(draft.estimateNote)}</p>` : ''}
+        ${linesHtml}${scenarioHtml}<p class="muted small">${esc(draft.equations.join(' — '))}</p>
         <p class="muted small">إصدار التوكيل لا يغيّر المتبقي: ${amount(draft.periodRemainingMinor)} متبقٍ داخل الفترة.</p>`;
       previewHost.querySelectorAll('[data-poa-choice]').forEach(select => select.addEventListener('change', () => {
         const wrap = select.closest('[data-range-poa]').querySelector('[data-poa-manual]');
@@ -953,8 +986,21 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
       }));
     } catch (error) { previewHost.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; }
   };
+  // اختيار نهاية مستقبلية = طلب صريح، مثله مثل نافذة «احسب مدة»: نفعّل خيار
+  // النطاق المستقبلي تلقائيًا حتى لا يُقصّ النطاق إلى اليوم بلا إعلان، ويبقى
+  // بإمكان المستخدم إلغاؤه صراحةً فيُعلن التاريخ الفعلي بدل رقم منسوب لغيره.
+  const futureBox = form.querySelector('[data-poa-future]');
+  const futureHint = form.querySelector('[data-poa-future-hint]');
+  const syncFuture = ({autoCheck = false} = {}) => {
+    const to = form.querySelector('[name="toDate"]')?.value || '';
+    if (autoCheck && to > localDate() && futureBox && !futureBox.checked) futureBox.checked = true;
+    if (futureHint) futureHint.innerHTML = to && to > localDate() && !futureBox?.checked
+      ? 'تاريخ النهاية بعد اليوم والخيار غير مفعَّل: سيتوقف الحساب عند اليوم ويظهر التاريخ الفعلي صراحةً بدل رقم منسوب لتاريخ آخر.'
+      : 'إن كان تاريخ النهاية بعد اليوم فسيُفعَّل هذا الخيار تلقائيًا: النظام ينفّذ النطاق الذي اخترته ويعلّم الفترات القادمة بأنها <b>تقديرية</b> — بلا قصّ صامت إلى اليوم.';
+  };
   form.addEventListener('change', event => {
     if (event.target.closest('[data-range-poa]')) return;
+    if (event.target?.name === 'toDate') syncFuture({autoCheck: true});
     render().catch(() => {});
   });
   form.addEventListener('input', event => {
@@ -994,7 +1040,7 @@ export async function simplePoaDialog(app, executionId, {fromDate = '', toDate =
     try {
       const {draft, values} = await currentDraft();
       if (draft.partials?.length) throw new Error('احسم حدود الفترات قبل طباعة هذا النطاق.');
-      await S.printSimpleStatement(app.office, executionId, {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: activeRangeDecisions});
+      await S.printSimpleStatement(app.office, executionId, {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: activeRangeDecisions, allowFuture: flag(values.allowFuture)});
       void draft;
     } catch (error) { toast(userError(error), 'error'); }
   });
@@ -1016,7 +1062,6 @@ export async function statementDialog(app, executionId) {
         <label class="field">إلى (للمدة)<input name="toDate" type="date" value="${esc(localDate())}"></label>
         <label class="field">تاريخ الحساب<input name="asOf" type="date" value="${esc(localDate())}"></label>
       </div>
-      <p class="muted small">💡 إذا كانت النتيجة فارغة، تأكد من إدخال قيمة النفقة والدورية أولًا أو استخدم «احسب مدة» بالحساب اليدوي.</p>
       <div class="form-actions">
         <button type="submit" class="primary">طباعة</button>
         <button type="button" class="ghost" data-close>إلغاء</button>
@@ -1025,14 +1070,10 @@ export async function statementDialog(app, executionId) {
   card.querySelector('[data-form="statement"]').addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.target).entries());
-    const submitBtn = event.target.querySelector('[type="submit"]');
-    submitBtn.disabled = true;
     try {
-      await S.printSimpleStatement(app.office, executionId, {mode: values.mode, fromDate: values.fromDate, toDate: values.toDate, asOf: values.asOf});
+      await S.printSimpleStatement(app.office, executionId, {mode: values.mode, fromDate: values.fromDate, toDate: values.toDate, asOf: values.asOf, allowFuture: isCivilDate(values.asOf) && values.asOf > localDate()});
       toast('فُتح الكشف للطباعة');
-      closeModal();
     } catch (error) { toast(userError(error), 'error'); }
-    submitBtn.disabled = false;
   });
   return card;
 }
@@ -1109,30 +1150,77 @@ export async function valueSetupDialog(app, executionId, {bundle = null} = {}) {
 
 const inputValue = value => (value === undefined || value === null ? '' : String(value));
 
-/* ================== إعدادات التنفيذ (قليلة وبأسماء واضحة) ================== */
+/* ================== إعدادات التنفيذ: تعديل يدوي كامل وواضح ==================
+   كل خيار هنا يقود حسابًا حقيقيًا أو قائمة حقيقية في مركز التنفيذ:
+   لا خيار معروض بلا أثر. الكتابة تمر عبر services/execution-settings.js
+   ثم تُبطل ذاكرة الحساب فورًا فتتغير الأرقام بلا إعادة تحميل. */
+
+/** قارئ قوائم نصية (سطر لكل عنصر) مع تحقق عربي واضح. */
+function readListLines(value, {label, required = true} = {}) {
+  const rows = String(value || '').split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+  if (required && !rows.length) throw new Error(`«${label}» لا يمكن أن تكون فارغة — اكتب عنصرًا واحدًا على الأقل.`);
+  const unique = [...new Set(rows)];
+  if (unique.length !== rows.length) throw new Error(`«${label}» فيها عنصر مكرر — أزل التكرار.`);
+  return unique;
+}
+
+/** قارئ أزواج «الكود=الاسم» مع تحقق الكود (بلا مسافات ولا تكرار). */
+function readCodePairs(value, {label} = {}) {
+  const rows = String(value || '').split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+  if (!rows.length) throw new Error(`«${label}» لا يمكن أن تكون فارغة — اكتب «الكود=الاسم» في سطر.`);
+  const seen = new Set();
+  return rows.map(row => {
+    const index = row.indexOf('=');
+    const code = (index >= 0 ? row.slice(0, index) : row).trim();
+    const name = (index >= 0 ? row.slice(index + 1) : row).trim() || code;
+    if (!code) throw new Error(`«${label}»: سطر بلا كود — اكتب «الكود=الاسم».`);
+    if (/\s/.test(code)) throw new Error(`«${label}»: الكود «${code}» لا يقبل مسافات.`);
+    if (seen.has(code)) throw new Error(`«${label}»: الكود «${code}» مكرر — لكل عنصر كود واحد.`);
+    seen.add(code);
+    return [code, name];
+  });
+}
+
+const CURRENCY_CHOICES = Object.freeze([['EGP', 'جنيه مصري (ج.م)'], ['USD', 'دولار أمريكي'], ['EUR', 'يورو'], ['GBP', 'جنيه إسترليني'], ['SAR', 'ريال سعودي'], ['AED', 'درهم إماراتي'], ['KWD', 'دينار كويتي'], ['JOD', 'دينار أردني']]);
+
+/** وصف مختصر لأثر كل قاعدة — بلغة غير تقنية. */
+const RULE_HINTS = Object.freeze({
+  accrualTiming: '«من بداية الفترة» يظهر المطلوب من أول يوم في الفترة الجارية، و«بعد اكتمال الفترة» لا يحتسبها إلا بعد انتهائها. في الحالتين تبقى الفترة الجارية ظاهرة بمبلغها المتوقع.',
+  periodBasis: '«من يوم الارتكاز إلى ما قبل يومه التالي» يعني: تنفيذ يبدأ 05/10/2026 تكون فترته الأولى 05/10/2026 → 04/11/2026. و«شهر تقويمي كامل» يعني 01/10/2026 → 31/10/2026.',
+  startPolicy: 'ما يحدث إن وقع تاريخ السريان في منتصف فترة: السؤال، أو احتساب الفترة كاملة، أو استبعادها، أو مبلغ كامل يدوي — بلا تناسب بالأيام.',
+  midChangePolicy: 'ما يحدث إن بدأ حكم لاحق (زيادة/تخفيض) في منتصف فترة: إبقاء القيمة القديمة، أو استخدام الجديدة، أو مبلغ يدوي كامل.',
+  endPolicy: 'ما يحدث إن وقعت نهاية الحكم في منتصف فترة: احتساب الفترة كاملة، أو استبعادها، أو مبلغ يدوي كامل.',
+  allocationOrder: 'ترتيب توزيع أي تحصيل على الفترات المستحقة: الأقدم أولًا (الافتراضي)، أو الأحدث فالأقدم، أو تناسبيًا.',
+  defaultCurrency: 'العملة المستخدمة لأي سجل لم تُسجَّل له عملة صريحة. لا تُحوّل النظام ولا تُبدّل أرقامًا مسجَّلة.',
+  monthEndPolicy: 'قصّ يوم الارتكاز في نهاية الشهر إلى آخر يوم متاح ثم يعود إلى يومه الأصلي في الأشهر التي تسمح به — فلا انجراف. وهو الخيار الوحيد المتاح في المحرك حاليًا.',
+  asOfScope: '«لكل تنفيذ على حدة» يبقي تاريخ كل بطاقة محفوظًا لها وحدها. «موحّد» يجعل تاريخًا واحدًا افتراضيًا لكل البطاقات — ولا يخفي أرقام أي بطاقة لها تاريخها الخاص.'
+});
 
 export function executionSettingsDialog(app) {
   const settings = executionSettings(app.office);
   const schedule = settings.schedule;
-  const asofModeActual = (() => {
-    try {
-      const raw = localStorage.getItem('akl:prefs:ui:exec:asof-mode:v1');
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return 'per';
-  })();
-  const card = modal(`<h2 class="modal-title">⚙ إعدادات التنفيذ</h2>
-    <p class="muted small">لا يوجد رسم أو دمغة أو مدة مفروضة في الكود: كل القوائم يعدّلها المكتب، والافتراضيات مقترحات فقط. يمكنك تعديل كل شيء يدويًا هنا.</p>
+  const lists = settings.lists;
+  const history = [...(settings.ruleHistory || [])].reverse();
+  const scope = prefs.get(ASOF_SCOPE_KEY, 'per-execution') === 'global' ? 'global' : 'per-execution';
+  const pairsText = rows => (rows || []).map(row => (Array.isArray(row) ? `${row[0]}=${row[1]}` : String(row))).join('\n');
+  const card = modal(`<h2 class="modal-title">⚙ إعدادات مركز التنفيذ</h2>
+    <p class="muted small">كل خيار هنا يعدّله المكتب بنفسه ويُحفظ فورًا في نسخة قواعد مؤرخة: لا رسم ولا دمغة ولا مدة مفروضة في الكود. النسخة الحالية <b>${esc(String(settings.ruleVersion))}</b> · المحرك <b>${esc(String(settings.engineVersion))}</b> · سارية من <b>${esc(displayDate(settings.effectiveFrom) )}</b> · المصدر: ${esc(settings.source || '—')}</p>
     <form class="simple-form" data-form="settings">
-      <fieldset><legend>قواعد الفترة — ممارسة المكتب المؤرخة، وليست قاعدة قانونية مفروضة</legend>
-        <p class="muted small">النسخة ${esc(String(settings.ruleVersion))} · المحرك ${esc(String(settings.engineVersion))} · السريان ${esc(settings.effectiveFrom || '—')} · المصدر: ${esc(settings.source || '—')}</p>
+      <p class="error-line" data-settings-error role="alert" hidden></p>
+
+      <fieldset><legend>قواعد الفترة والاستحقاق (ممارسة المكتب المؤرخة — ليست قاعدة قانونية مفروضة)</legend>
         <div class="form-grid">
+          <label class="field">توقيت الاستحقاق
+            <select name="accrualTiming">
+              <option value="AT_PERIOD_START"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? '' : ' selected'}>من بداية الفترة (تُستحق مقدَّمًا)</option>
+              <option value="AFTER_PERIOD_END"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? ' selected' : ''}>بعد اكتمال الفترة</option>
+            </select>
+          </label>
           <label class="field">أساس الفترة الشهرية
             <select name="periodBasis">
               <option value="ANNIVERSARY"${schedule.periodBasis === 'ANNIVERSARY' ? ' selected' : ''}>من يوم الارتكاز إلى ما قبل يوم الارتكاز التالي</option>
               <option value="CALENDAR_MONTH"${schedule.periodBasis === 'CALENDAR_MONTH' ? ' selected' : ''}>شهر تقويمي كامل</option>
             </select>
-            <small class="hint">ANNIVERSARY ⇒ من 05/10/2026 إلى 04/11/2026 (الارتكاز إلى ما قبله في الشهر التالي) · CALENDAR_MONTH ⇒ 01/10/2026 إلى 31/10/2026</small>
           </label>
           <label class="field">البداية داخل فترة ناقصة
             <select name="startPolicy">
@@ -1142,7 +1230,7 @@ export function executionSettingsDialog(app) {
               <option value="MANUAL"${schedule.startPolicy === 'MANUAL' ? ' selected' : ''}>مبلغ يدوي للفترة</option>
             </select>
           </label>
-          <label class="field">تغير القيمة منتصف الفترة
+          <label class="field">تغيّر القيمة منتصف الفترة
             <select name="midChangePolicy">
               <option value="ASK"${schedule.midChangePolicy === 'ASK' ? ' selected' : ''}>اسأل المستخدم</option>
               <option value="KEEP_OLD_VALUE"${schedule.midChangePolicy === 'KEEP_OLD_VALUE' ? ' selected' : ''}>القيمة القديمة للفترة كاملة</option>
@@ -1158,60 +1246,64 @@ export function executionSettingsDialog(app) {
               <option value="MANUAL"${schedule.endPolicy === 'MANUAL' ? ' selected' : ''}>مبلغ يدوي للفترة</option>
             </select>
           </label>
-          <label class="field">توقيت الاستحقاق
-            <select name="accrualTiming">
-              <option value="AT_PERIOD_START"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? '' : ' selected'}>من بداية الفترة (تُستحق مقدَّمًا)</option>
-              <option value="AFTER_PERIOD_END"${schedule.accrualTiming === 'AFTER_PERIOD_END' ? ' selected' : ''}>بعد اكتمال الفترة</option>
-            </select>
-            <small class="hint">«من بداية الفترة»: الفترة الجارية تُحسب فورًا فيظهر المطلوب من أول يوم (مثال: بداية 05/10/2026 ⇒ مطلوب حتى 04/11/2026 = 3,000). «بعد اكتمالها»: لا تُحسب إلا بعد انتهائها. في الحالتين تظهر الفترة الجارية بمبلغها المتوقع.</small>
-          </label>
-          <label class="field">قص اليوم في نهاية الشهر
-            <select name="monthEndPolicy">
-              <option value="CLAMP_TO_LAST_DAY" selected>قص إلى آخر يوم — بلا انجراف</option>
-            </select>
-          </label>
-          <label class="field">ترتيب التخصيص الافتراضي
+        </div>
+        <p class="hint hint-info small">${esc(RULE_HINTS.accrualTiming)}</p>
+        <p class="hint hint-info small">${esc(RULE_HINTS.periodBasis)}</p>
+        <p class="muted small">${esc(RULE_HINTS.startPolicy)}</p>
+        <p class="muted small">${esc(RULE_HINTS.midChangePolicy)}</p>
+        <p class="muted small">${esc(RULE_HINTS.endPolicy)}</p>
+        <p class="muted small">قصّ يوم الارتكاز في نهاية الشهر: ${esc(RULE_HINTS.monthEndPolicy)}</p>
+        <p class="muted small">الدقة النقدية: الحساب بالوحدات الصغرى الصحيحة (القروش) بلا تقريب ولا تناسب بالأيام.</p>
+      </fieldset>
+
+      <fieldset><legend>التوزيع والعملة</legend>
+        <div class="form-grid">
+          <label class="field">ترتيب تخصيص التحصيلات
             <select name="allocationOrder">
-              <option value="fifo"${schedule.allocationOrder === 'fifo' ? ' selected' : ''}>الأقدم أولًا (FIFO)</option>
+              <option value="fifo"${schedule.allocationOrder === 'fifo' ? ' selected' : ''}>الأقدم أولًا</option>
               <option value="lifo"${schedule.allocationOrder === 'lifo' ? ' selected' : ''}>الأحدث فالأقدم</option>
               <option value="proportional"${schedule.allocationOrder === 'proportional' ? ' selected' : ''}>تناسبي</option>
             </select>
           </label>
-          <label class="field">الدقة النقدية
-            <input value="${esc(schedule.roundingPolicy || 'وحدات العملة الصغرى') }" readonly>
+          <label class="field">العملة الافتراضية
+            <select name="defaultCurrency">
+              ${CURRENCY_CHOICES.map(([code, label]) => `<option value="${esc(code)}"${String(schedule.defaultCurrency || 'EGP').toUpperCase() === code ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+            </select>
           </label>
         </div>
+        <p class="muted small">${esc(RULE_HINTS.allocationOrder)} ${esc(RULE_HINTS.defaultCurrency)}</p>
       </fieldset>
-      <fieldset><legend>تاريخ الحساب «المطلوب حتى»</legend>
-        <div class="form-grid">
-          <label class="field">وضع تاريخ الحساب
-            <select name="asofMode">
-              <option value="per"${asofModeActual === 'global' ? '' : ' selected'}>لكل تنفيذ على حدة (افتراضي)</option>
-              <option value="global"${asofModeActual === 'global' ? ' selected' : ''}>موحّد لكل التنفيذات</option>
-            </select>
-            <small class="hint">لكل تنفيذ على حدة: كل بطاقة لها تاريخها الخاص. موحّد: نفس التاريخ لكل البطاقات. العام يُستخدم فقط حين المحلي فارغ.</small>
-          </label>
-          <label class="field">احسب حتى تاريخ مستقبلي (تقديري)
-            <select name="allowFuture">
-              <option value="true" selected>مفعّل — يسمح بحساب المستقبل (مثال: 04/01/2027 ⇒ 12,000)</option>
-              <option value="false">معطّل — يقصّ الأفق إلى اليوم مع تنبيه صريح</option>
-            </select>
-            <small class="hint">عند التفعيل: اختيار 04/01/2027 يجيب المطلوب حتى ذلك التاريخ (4 فترات = 12,000). عند التعطيل: 1 فترة + تنبيه horizonCapped.</small>
-          </label>
+
+      <fieldset><legend>القوائم القابلة للتعديل (سطر لكل عنصر)</legend>
+        <label class="field span2">البنود (نفقة صغار، أجرة حضانة…) <textarea name="entitlementTypes" rows="3">${esc((lists.entitlementTypes || []).join('\n'))}</textarea></label>
+        <label class="field span2">طرق التنفيذ <textarea name="executionMethods" rows="2">${esc((lists.executionMethods || []).join('\n'))}</textarea></label>
+        <label class="field span2">طرق التحصيل <textarea name="collectionMethods" rows="2">${esc((lists.collectionMethods || []).join('\n'))}</textarea></label>
+        <label class="field span2">أنواع الإجراءات (كود=الاسم) <textarea name="actionKinds" rows="4">${esc(pairsText(lists.actionKinds))}</textarea></label>
+        <label class="field span2">أنواع المصروفات والرسوم (كود=الاسم) <textarea name="expenseTypes" rows="3">${esc(pairsText(lists.expenseTypes))}</textarea></label>
+        <label class="field span2">على مَن يتحمّل المصروف (كود=الاسم) <textarea name="borneBy" rows="3">${esc(pairsText(lists.borneBy))}</textarea></label>
+        <label class="field span2">أنواع الأحكام اللاحقة (كود=الاسم) <textarea name="laterJudgmentKinds" rows="3">${esc(pairsText(lists.laterJudgmentKinds))}</textarea></label>
+        <p class="muted small">تُستخدم هذه القوائم في نماذج التسجيل فورًا بعد الحفظ. «الكود» معرّف داخلي ثابت لا يتغير بعد الاستخدام، و«الاسم» هو ما يظهر للمستخدم.</p>
+      </fieldset>
+
+      <fieldset><legend>تاريخ الحساب «المطلوب حتى» (لكل بطاقة أم موحّد)</legend>
+        <label class="check-line"><input type="radio" name="asOfScope" value="per-execution"${scope !== 'global' ? ' checked' : ''}> لكل تنفيذ على حدة (افتراضي) — تغيير تاريخ بطاقة لا يمسّ غيرها</label>
+        <label class="check-line"><input type="radio" name="asOfScope" value="global"${scope === 'global' ? ' checked' : ''}> موحّد لكل التنفيذات (تاريخ واحد افتراضي)</label>
+        <p class="muted small">${esc(RULE_HINTS.asOfScope)}</p>
+        <div class="form-actions">
+          <button type="button" class="ghost small" data-asof-reset-all>↺ ارجع بكل البطاقات إلى اليوم</button>
         </div>
       </fieldset>
-      <fieldset><legend>القوائم القابلة للتعديل (سطر لكل عنصر) — يمكنك تعديلها يدويًا</legend>
-        <label class="field span2">البنود<textarea name="entitlementTypes" rows="2">${esc(settings.lists.entitlementTypes.join('\n'))}</textarea></label>
-        <label class="field span2">طرق التنفيذ<textarea name="executionMethods" rows="2">${esc(settings.lists.executionMethods.join('\n'))}</textarea></label>
-        <label class="field span2">طرق التحصيل<textarea name="collectionMethods" rows="2">${esc(settings.lists.collectionMethods.join('\n'))}</textarea></label>
-        <label class="field span2">أنواع الإجراءات (كود=الاسم)<textarea name="actionKinds" rows="3">${esc(settings.lists.actionKinds.map(([key, label]) => `${key}=${label}`).join('\n'))}</textarea></label>
-        <label class="field span2">أنواع المصروفات والرسوم (كود=الاسم)<textarea name="expenseTypes" rows="3">${esc(settings.lists.expenseTypes.map(([key, label]) => `${key}=${label}`).join('\n'))}</textarea></label>
-        <label class="field span2">يتحملها (كود=الاسم)<textarea name="borneBy" rows="2">${esc((settings.lists.borneBy || []).map(([k,l]) => `${k}=${l}`).join('\n'))}</textarea></label>
-        <label class="field span2">أنواع الحكم اللاحق<textarea name="laterJudgmentKinds" rows="2">${esc((settings.lists.laterJudgmentKinds || []).map(([k,l]) => `${k}=${l}`).join('\n'))}</textarea></label>
-        <label class="field span2">قوالب (JSON اختياري)<textarea name="templates" rows="3" placeholder='{"poaBody":"... {{client}} {{periods}} {{total}} {{fees}}"}'>${esc(JSON.stringify(settings.lists.templates || {}, null, 2))}</textarea></label>
-        <label class="field span2">حدود المتابعة (JSON)<textarea name="followUpThresholds" rows="2" placeholder='{"overdueDays":60,"poaNoResultDays":30}'>${esc(JSON.stringify(settings.lists.followUpThresholds || {overdueDays:60, poaNoResultDays:30}, null, 2))}</textarea></label>
+
+      <fieldset><legend>قوالب الطباعة (التوكيل وكشف الرصيد)</legend>
+        <p class="muted small">نص القالب بمتغيّرات تُملأ من السجل: {{client.name}} · {{execution.number}} · {{poa.fromDate}} · {{totals.total}} …</p>
+        <div class="form-actions"><button type="button" class="ghost" data-templates>✎ تعديل قوالب الطباعة…</button></div>
       </fieldset>
-      <p class="error-line" data-error hidden role="alert" style="color:#b00020;background:#fdecea;padding:8px;border-radius:6px;"></p>
+
+      ${history.length > 1 ? `<details><summary>نسخ القواعد المحفوظة (${history.length}) — كل تعديل يحفظ نسخة مؤرخة</summary>
+        <div class="exec-table-wrap"><table class="mini-table"><thead><tr><th>النسخة</th><th>سارية من</th><th>المصدر</th><th>توقيت الاستحقاق</th><th>أساس الفترة</th><th>التوزيع</th></tr></thead><tbody>
+          ${history.map(row => `<tr><td>${esc(String(row.version || ''))}</td><td>${esc(displayDate(row.effectiveFrom))}</td><td>${esc(row.source || '—')}</td><td>${esc(row.rules?.accrualTiming || '—')}</td><td>${esc(row.rules?.periodBasis || '—')}</td><td>${esc(row.rules?.allocationOrder || '—')}</td></tr>`).join('')}
+        </tbody></table></div></details>` : ''}
+
       <div class="form-actions">
         <button type="submit" class="primary" data-save>حفظ الإعدادات</button>
         <button type="button" class="ghost" data-migration-report>تقرير الترحيل (قبل/بعد)</button>
@@ -1219,126 +1311,201 @@ export function executionSettingsDialog(app) {
         <button type="button" class="ghost" data-close>إغلاق</button>
       </div>
     </form>`);
-
   const form = card.querySelector('[data-form="settings"]');
-  const saveBtn = form.querySelector('[data-save]');
-  const errorLine = form.querySelector('[data-error]');
-  const lines = value => String(value || '').split(/\r?\n/).map(row => row.trim()).filter(Boolean);
-  const pairs = value => lines(value).map(row => {
-    const [key, ...rest] = row.split('=');
-    return rest.length ? [key.trim(), rest.join('=').trim()] : [key.trim(), key.trim()];
-  });
-  const showError = msg => {
-    if (errorLine) {
-      errorLine.textContent = msg;
-      errorLine.hidden = false;
-    }
+  const errorBox = form.querySelector('[data-settings-error]');
+  const showError = message => {
+    errorBox.hidden = !message;
+    errorBox.textContent = message || '';
+    if (message) errorBox.scrollIntoView?.({block: 'center'});
   };
-  const clearError = () => { if (errorLine) { errorLine.textContent = ''; errorLine.hidden = true; } };
+  /** تشغيل عملية حفظ بزر معطَّل ونص «جارٍ الحفظ…» ثم إعادة التمكين دائمًا. */
+  const withBusy = async (button, busyLabel, task) => {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = busyLabel;
+    showError('');
+    try { return await task(); }
+    finally { button.disabled = false; button.textContent = label; }
+  };
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    clearError();
-    const originalText = saveBtn.textContent;
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'جارٍ الحفظ…';
+    const save = form.querySelector('[data-save]');
+    const values = Object.fromEntries(new FormData(form).entries());
+    // 1) التحقق أولًا: لا يُحفظ نصف إعداد صامتًا.
+    let patch;
     try {
-      const values = Object.fromEntries(new FormData(form).entries());
-      try {
-        const {prefs} = await import('../core/preferences.js');
-        await prefs.set('ui:exec:asof-mode:v1', values.asofMode || 'per');
-      } catch {}
-      let templates = {};
-      let thresholds = {};
-      try { templates = values.templates ? JSON.parse(values.templates) : (settings.lists.templates || {}); } catch { templates = settings.lists.templates || {}; }
-      try { thresholds = values.followUpThresholds ? JSON.parse(values.followUpThresholds) : (settings.lists.followUpThresholds || {}); } catch { thresholds = settings.lists.followUpThresholds || {}; }
-      await saveExecutionSettings(app.office, {
-        source: 'ممارسة المكتب — تعديل يدوي من واجهة إعدادات التنفيذ',
+      patch = {
+        source: 'تعديل يدوي من واجهة إعدادات مركز التنفيذ',
         schedule: {
-          ...schedule, periodBasis: values.periodBasis, startPolicy: values.startPolicy,
+          ...schedule,
+          periodBasis: values.periodBasis, startPolicy: values.startPolicy,
           midChangePolicy: values.midChangePolicy, endPolicy: values.endPolicy,
-          accrualTiming: values.accrualTiming, monthEndPolicy: values.monthEndPolicy,
-          allocationOrder: values.allocationOrder
+          accrualTiming: values.accrualTiming, allocationOrder: values.allocationOrder,
+          defaultCurrency: String(values.defaultCurrency || 'EGP').toUpperCase()
         },
         lists: {
-          ...settings.lists,
-          entitlementTypes: lines(values.entitlementTypes),
-          executionMethods: lines(values.executionMethods),
-          collectionMethods: lines(values.collectionMethods),
-          actionKinds: pairs(values.actionKinds),
-          expenseTypes: pairs(values.expenseTypes),
-          borneBy: pairs(values.borneBy),
-          laterJudgmentKinds: pairs(values.laterJudgmentKinds),
-          templates,
-          followUpThresholds: thresholds
+          ...lists,
+          entitlementTypes: readListLines(values.entitlementTypes, {label: 'البنود'}),
+          executionMethods: readListLines(values.executionMethods, {label: 'طرق التنفيذ'}),
+          collectionMethods: readListLines(values.collectionMethods, {label: 'طرق التحصيل'}),
+          actionKinds: readCodePairs(values.actionKinds, {label: 'أنواع الإجراءات'}),
+          expenseTypes: readCodePairs(values.expenseTypes, {label: 'أنواع المصروفات والرسوم'}),
+          borneBy: readCodePairs(values.borneBy, {label: 'على مَن يتحمّل المصروف'}),
+          laterJudgmentKinds: readCodePairs(values.laterJudgmentKinds, {label: 'أنواع الأحكام اللاحقة'})
         }
-      });
-      toast('حُفظت إعدادات التنفيذ — تظهر فورًا في الحسابات بلا إعادة تحميل', 'ok');
-      closeModal();
-      await app.refresh();
+      };
     } catch (error) {
-      const msg = userError(error);
-      toast(msg, 'error');
-      showError(msg);
-    } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = originalText;
+      showError(userError(error));
+      toast('راجع الإعدادات: توجد قيمة غير صحيحة', 'error');
+      return;
     }
+    // 2) الحفظ: أي فشل يبقى ظاهرًا في النافذة ولا يُغلقها (BUG-5).
+    await withBusy(save, 'جارٍ الحفظ…', async () => {
+      try {
+        const next = await saveExecutionSettings(app.office, patch);
+        const changed = Number(next.ruleVersion) > Number(settings.ruleVersion);
+        toast(changed
+          ? `حُفظت الإعدادات — نسخة القواعد ${next.ruleVersion}، وستتغير الأرقام فورًا`
+          : 'حُفظت الإعدادات', 'ok');
+        closeModal();
+        await app.refresh();
+      } catch (error) {
+        showError(userError(error));
+        toast(userError(error), 'error');
+      }
+    });
   });
 
-  form.querySelector('[data-migration-report]').addEventListener('click', async () => {
-    const btn = form.querySelector('[data-migration-report]');
-    const orig = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'جارٍ التحميل…';
+  // نطاق تاريخ الحساب: يُحفظ فور التغيير (لا يمس أرقام البطاقات ذات التاريخ الخاص).
+  form.querySelectorAll('[name="asOfScope"]').forEach(input => input.addEventListener('change', async () => {
     try {
-      const {migrateSimpleExecutionData} = S;
-      const {fromMinorUnits: toMoney} = await import('../domain/execution-money.js');
-      const report = await migrateSimpleExecutionData(app.office);
-      const rows = (report.report || []).slice(0, 60);
-      modal(`<h2 class="modal-title">تقرير الترحيل — قبل/بعد لكل تنفيذ</h2>
-        <p class="muted small">الترحيل لا يحوّل ولا يحذف: مسار FEAS القديم يبقى كما هو، والقيم المعروضة مشتقة من الجدول الجديد. فُحص ${report.scanned} تنفيذ، ويحتاج إكمال بيانات: ${report.withIssues}${report.hasMore ? ' (توجد صفحات أخرى تُستكمل تلقائيًا)' : ''}.</p>
-        <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>التنفيذ</th><th>قبل (شرائح/محاضر/تخصيصات/دفتر)</th><th>بعد (مستحق/مدفوع/متبقٍ)</th><th>ملاحظات</th></tr></thead><tbody>
-          ${rows.map(item => `<tr><td>${esc(item.internalNumber || item.executionId)}</td><td>${item.before.slices} / ${item.before.receipts} / ${item.before.allocations} / ${item.before.ledger}</td><td>${toMoney(item.after.due, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2})} / ${toMoney(item.after.paid, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2})} / ${toMoney(item.after.remaining, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2})}</td><td>${item.incomplete.length ? esc(item.incomplete.map(row => row.label).join(' · ')) : '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا تنفيذات بعد.</td></tr>'}
-        </tbody></table></div>
-        <div class="form-actions"><button type="button" class="ghost" data-close data-back-settings>رجوع إلى الإعدادات</button></div>`)
-        .querySelector('[data-back-settings]')?.addEventListener('click', () => { executionSettingsDialog(app); });
-    } catch (error) {
-      const msg = userError(error);
-      toast(msg, 'error');
-      showError(msg);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = orig;
-    }
-  });
-
-  form.querySelector('[data-reset]').addEventListener('click', async () => {
-    const btn = form.querySelector('[data-reset]');
-    const orig = btn.textContent;
-    if (!await confirmBox('استعادة الإعدادات الافتراضية للتنفيذ؟')) return;
-    btn.disabled = true;
-    btn.textContent = 'جارٍ الاستعادة…';
-    try {
-      await resetExecutionSettings(app.office);
-      toast('أُعيدت الإعدادات الافتراضية — تظهر فورًا', 'ok');
-      closeModal();
+      await prefs.set(ASOF_SCOPE_KEY, input.value === 'global' ? 'global' : 'per-execution');
+      toast(input.value === 'global' ? 'صار تاريخ الحساب موحّدًا لكل التنفيذات' : 'صار تاريخ الحساب لكل تنفيذ على حدة');
       await app.refresh();
-    } catch (error) {
-      const msg = userError(error);
-      toast(msg, 'error');
-      showError(msg);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = orig;
-    }
+    } catch (error) { showError(userError(error)); }
+  }));
+  form.querySelector('[data-asof-reset-all]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (!await confirmBox('إرجاع «المطلوب حتى» إلى اليوم في كل البطاقات؟ لا يُحذف أي رقم مسجَّل — الحساب وحده يعود إلى اليوم.', {okText: 'إرجاع الكل إلى اليوم'})) return;
+    await withBusy(button, 'جارٍ الإرجاع…', async () => {
+      try {
+        await prefs.set(ASOF_KEY, '');
+        const page = await app.office.r.execution.page({index: 'openedDate', direction: 'prev', limit: 300}).catch(() => ({items: []}));
+        for (const row of page.items || []) await prefs.set(asOfKeyFor(row.id), '');
+        toast('أُعيدت كل البطاقات إلى «المطلوب حتى اليوم»');
+        await app.refresh();
+      } catch (error) { showError(userError(error)); toast(userError(error), 'error'); }
+    });
   });
 
+  form.querySelector('[data-templates]')?.addEventListener('click', () => { executionTemplatesDialog(app); });
+  form.querySelector('[data-migration-report]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    await withBusy(button, 'جارٍ الفحص…', async () => {
+      try {
+        const {migrateSimpleExecutionData} = S;
+        const {fromMinorUnits: toMoney} = await import('../domain/execution-money.js');
+        const report = await migrateSimpleExecutionData(app.office);
+        const rows = (report.report || []).slice(0, 60);
+        modal(`<h2 class="modal-title">تقرير الترحيل — قبل/بعد لكل تنفيذ</h2>
+          <p class="muted small">الترحيل لا يحوّل ولا يحذف: مسار FEAS القديم يبقى كما هو، والقيم المعروضة مشتقة من الجدول الجديد. فُحص ${report.scanned} تنفيذ، ويحتاج إكمال بيانات: ${report.withIssues}${report.hasMore ? ' (توجد صفحات أخرى تُستكمل تلقائيًا)' : ''}.</p>
+          <div class="exec-table-wrap"><table class="exec-table"><thead><tr><th>التنفيذ</th><th>قبل (شرائح/محاضر/تخصيصات/دفتر)</th><th>بعد (مستحق/مدفوع/متبقٍ)</th><th>ملاحظات</th></tr></thead><tbody>
+            ${rows.map(item => `<tr><td>${esc(item.internalNumber || item.executionId)}</td><td>${item.before.slices} / ${item.before.receipts} / ${item.before.allocations} / ${item.before.ledger}</td><td>${toMoney(item.after.due, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2})} / ${toMoney(item.after.paid, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2})} / ${toMoney(item.after.remaining, 'EGP').toLocaleString('en-US', {minimumFractionDigits: 2})}</td><td>${item.incomplete.length ? esc(item.incomplete.map(row => row.label).join(' · ')) : '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا تنفيذات بعد.</td></tr>'}
+          </tbody></table></div>
+          <div class="form-actions"><button type="button" class="ghost" data-close data-back-settings>رجوع إلى الإعدادات</button></div>`)
+          .querySelector('[data-back-settings]')?.addEventListener('click', () => { executionSettingsDialog(app); });
+      } catch (error) {
+        showError(userError(error));
+        toast(userError(error), 'error');
+      }
+    });
+  });
+
+  form.querySelector('[data-reset]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const answer = await confirmBox('استعادة الإعدادات الافتراضية لمركز التنفيذ؟ القوالب والقوائم المخصصة ستعود إلى الافتراضي، وتُحفظ نسخة القواعد الحالية في السجل قبل ذلك.', {okText: 'استعادة الافتراضي'});
+    if (!answer) return;
+    await withBusy(button, 'جارٍ الاستعادة…', async () => {
+      try {
+        await resetExecutionSettings(app.office);
+        toast('أُعيدت الإعدادات الافتراضية وسُجّلت نسخة القواعد السابقة', 'ok');
+        closeModal();
+        await app.refresh();
+      } catch (error) {
+        showError(userError(error));
+        toast(userError(error), 'error');
+      }
+    });
+  });
+  void RULE_HINTS.monthEndPolicy;
   return card;
 }
 
-
-
+/** تعديل قوالب الطباعة (التوكيل وكشف الرصيد) — نص حر بمتغيّرات، مع استعادة الافتراضي. */
+export async function executionTemplatesDialog(app) {
+  const PR = await import('../services/execution-print.js');
+  const templates = await PR.templatesFor(app.office).catch(() => []);
+  const rows = (templates.length ? templates : Object.entries(PR.DEFAULT_TEMPLATES).map(([kind, value]) => ({kind, ...value}))).slice(0, 20);
+  const card = modal(`<h2 class="modal-title">✎ قوالب الطباعة</h2>
+    <p class="muted small">عدّل نص القالب كما تريد. المتغيّرات بين {{ }} تُملأ من السجل، وأي متغيّر غير موجود يُطبع فارغًا — ولا يُطبع مبلغ غير مسجل.</p>
+    <p class="error-line" data-template-error role="alert" hidden></p>
+    <form class="simple-form" data-form="templates">
+      <label class="field">القالب <select name="kind">${rows.map(row => `<option value="${esc(row.kind)}">${esc(row.title || row.kind)}</option>`).join('')}</select></label>
+      <label class="field">عنوان المستند <input name="title" value="${esc(rows[0]?.title || '')}"></label>
+      <label class="field">نص القالب <textarea name="body" rows="12">${esc(rows[0]?.body || '')}</textarea></label>
+      <div class="form-actions">
+        <button type="submit" class="primary" data-save>حفظ القالب</button>
+        <button type="button" class="ghost" data-reset-template>استعادة القالب الافتراضي</button>
+        <button type="button" class="ghost" data-close>إغلاق</button>
+      </div>
+    </form>`);
+  const form = card.querySelector('[data-form="templates"]');
+  const errorBox = form.querySelector('[data-template-error]');
+  const showError = message => { errorBox.hidden = !message; errorBox.textContent = message || ''; };
+  const fill = kind => {
+    const row = rows.find(item => item.kind === kind) || rows[0] || {title: '', body: ''};
+    form.querySelector('[name="title"]').value = row.title || '';
+    form.querySelector('[name="body"]').value = row.body || '';
+    showError('');
+  };
+  form.querySelector('[name="kind"]')?.addEventListener('change', event => fill(event.target.value));
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const save = form.querySelector('[data-save]');
+    const values = Object.fromEntries(new FormData(form).entries());
+    const label = save.textContent;
+    save.disabled = true; save.textContent = 'جارٍ الحفظ…';
+    try {
+      if (!String(values.body || '').trim()) throw new Error('نص القالب مطلوب — لا يُحفظ قالب فارغ.');
+      await PR.saveTemplate(app.office, {kind: values.kind, title: values.title, body: values.body});
+      toast('حُفظ القالب — سيظهر في الطباعة القادمة');
+      closeModal();
+      await app.refresh();
+    } catch (error) {
+      showError(userError(error));
+      toast(userError(error), 'error');
+    } finally { save.disabled = false; save.textContent = label; }
+  });
+  form.querySelector('[data-reset-template]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form).entries());
+    if (!await confirmBox('استعادة نص هذا القالب إلى الافتراضي؟', {okText: 'استعادة'})) return;
+    const label = button.textContent;
+    button.disabled = true; button.textContent = 'جارٍ الاستعادة…';
+    try {
+      await PR.resetTemplate(app.office, values.kind);
+      const fresh = await PR.templatesFor(app.office).catch(() => []);
+      const row = fresh.find(item => item.kind === values.kind);
+      if (row) { form.querySelector('[name="title"]').value = row.title || ''; form.querySelector('[name="body"]').value = row.body || ''; }
+      toast('أُعيد القالب الافتراضي');
+      await app.refresh();
+    } catch (error) { showError(userError(error)); toast(userError(error), 'error'); }
+    finally { button.disabled = false; button.textContent = label; }
+  });
+  return card;
+}
+/* ================== دليل الاستخدام (نُقل من الصفحة إلى مساعدة) ================== */
 export function executionHelpDialog(app) {
   return modal(`<h2 class="modal-title">؟ مساعدة سريعة</h2>
     <div class="help-body">

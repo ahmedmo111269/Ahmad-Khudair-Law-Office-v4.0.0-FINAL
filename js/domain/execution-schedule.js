@@ -103,7 +103,7 @@ function calendarFor(group, settings) {
 }
 
 /** قيم البند على محور زمني، مع إبقاء ارتكاز أول قيمة ثابتًا في السلسلة كلها. */
-export function valueTimeline(slices = []) {
+export function valueTimeline(slices = [], {defaultCurrency = DEFAULT_SCHEDULE_SETTINGS.defaultCurrency} = {}) {
   const groups = new Map();
   for (const slice of (slices || []).filter(isActiveSlice)) {
     const start = sliceStart(slice);
@@ -112,11 +112,11 @@ export function valueTimeline(slices = []) {
     const type = String(slice.entitlementType || slice.obligationType || 'بند').trim() || 'بند';
     const itemId = String(slice.itemId || slice.obligationId || `legacy:${type}`);
     const key = `${itemId}::${fixed ? 'fixed' : 'periodic'}`;
-    if (!groups.has(key)) groups.set(key, {key, itemId, entitlementType: type, fixed, slices: [], periodicity: slice.periodicity || 'monthly', currency: currencyCode(slice.currency, DEFAULT_SCHEDULE_SETTINGS.defaultCurrency)});
+    if (!groups.has(key)) groups.set(key, {key, itemId, entitlementType: type, fixed, slices: [], periodicity: slice.periodicity || 'monthly', currency: currencyCode(slice.currency, defaultCurrency)});
     const group = groups.get(key);
     group.slices.push({
       id: slice.id, startDate: start, endDate: sliceEnd(slice), fixed,
-      amountMinor: minorFromRow(slice, currencyCode(slice.currency, DEFAULT_SCHEDULE_SETTINGS.defaultCurrency)), judgmentId: slice.judgmentId || slice.linkedJudgmentId || '',
+      amountMinor: minorFromRow(slice, currencyCode(slice.currency, defaultCurrency)), judgmentId: slice.judgmentId || slice.linkedJudgmentId || '',
       partyId: slice.partyId || '', judgmentKind: slice.judgmentKind || '', periodicity: slice.periodicity || group.periodicity,
       customDays: Number(slice.customDays) || null,
       anchorDate: isCivilDate(slice.anchorDate) ? slice.anchorDate : (isCivilDate(slice.anchor) ? slice.anchor : ''),
@@ -275,7 +275,8 @@ export function buildScheduleUnits({slices = [], asOf = '', fromDate = '', setti
   const options = settingsWith(settings);
   if (!isCivilDate(asOf)) throw new RangeError('تاريخ الحساب غير صحيح.');
   if (fromDate && !isCivilDate(fromDate)) throw new RangeError('تاريخ البداية غير صحيح.');
-  const groups = valueTimeline(slices);
+  // عملة المكتب الافتراضية تُحترم في البنود أيضًا، لا في التخصيصات والمصروفات فقط.
+  const groups = valueTimeline(slices, {defaultCurrency: options.defaultCurrency});
   const units = [];
   const decisions = [];
   let truncated = false;
@@ -775,7 +776,7 @@ export function previewValueChange({slices = [], receipts = [], allocations = []
     return buildExecutionSchedule({slices: [...withoutPrevious, nextCandidate], receipts, allocations, settings: options, asOf, periodThroughDate});
   };
   const defaultAfter = evaluate();
-  const nextGroups = valueTimeline([...withoutPrevious, candidateSlice]);
+  const nextGroups = valueTimeline([...withoutPrevious, candidateSlice], {defaultCurrency: options.defaultCurrency});
   const group = nextGroups.find(row => row.entitlementType === candidateSlice.entitlementType && row.itemId === itemId);
   const anchor = group?.anchorDate || candidate.startDate;
   const normalizedGroup = group || {anchorDate: anchor, periodicity: candidate.periodicity || 'monthly', customDays: candidate.customDays || null};
@@ -833,12 +834,28 @@ export function previewValueChange({slices = [], receipts = [], allocations = []
   };
 }
 
-/** رصيد سابق + فترة جديدة + مصروفات مختارة = إجمالي التوكيل (بلا ازدواج). */
-export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBalance = true, expenses = [], expenseIds = [], rangeDecisions = [], feesMinor = 0, stampsMinor = 0, previousAction = null} = {}) {
+/**
+ * معادلة مبلغ من قائمة أسطر: متساوية ⇒ «9 × 3,000 = 27,000»، مختلفة ⇒
+ * «3 × 3,000 + 6 × 3,500 = 30,000». لا تُقسَّم قيمة أي فترة على الأيام أبدًا.
+ * تُعرض بجانب الرقم دائمًا (كل رقم له معادلة قابلة للعرض).
+ */
+export function amountEquation(lines = [], currency = 'EGP') {
+  const rows = (lines || []).filter(line => Number.isSafeInteger(line?.amountMinor));
+  if (!rows.length) return '';
+  const fmt = minor => fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+  const groups = new Map();
+  for (const line of rows) groups.set(line.amountMinor, (groups.get(line.amountMinor) || 0) + 1);
+  const factors = [...groups.entries()].sort((a, b) => b[0] - a[0]).map(([amountMinor, count]) => `${count} × ${fmt(amountMinor)}`);
+  return `${factors.join(' + ')} = ${fmt(sumMinor(rows, line => line.amountMinor))}`;
+}
+
+/** رصيد سابق + فترة جديدة + مصروفات مختارة + رسوم/دمغة يدوية = إجمالي التوكيل (بلا ازدواج). */
+export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBalance = true, expenses = [], expenseIds = [], rangeDecisions = [],
+  feesMinor = 0, stampsMinor = 0, previousSource = null, includeRunningPeriods = false} = {}) {
   if (!schedule) throw new TypeError('جدول التنفيذ مطلوب لحساب التوكيل.');
   if (!isCivilDate(fromDate) || !isCivilDate(toDate) || toDate < fromDate) throw new RangeError('مدة التوكيل غير صحيحة.');
   let previousMinor = 0, periodDueMinor = 0, periodPaidMinor = 0, differencesMinor = 0;
-  const lines = [], partials = [], decisionsUsed = [], runningPeriods = [];
+  const lines = [], partials = [], decisionsUsed = [], runningPeriods = [], runningIncluded = [];
   const units = schedule.rows.flatMap(row => (row.units || []).length ? row.units.map(unit => {
     const linesForUnit = (row.lines || []).filter(line => line.unitKey === unit.unitKey);
     const dueMinor = Number.isSafeInteger(unit.dueMinor) ? unit.dueMinor : 0;
@@ -856,8 +873,24 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     // لأنها لم تُستحق بعد. ظهورها يمنع «توكيل بلا أي سطر» عند تنفيذ جديد.
     if (!row.isComplete || (row.toDate > claimThrough && !poaDecisionFor(row.periodKey))) {
       if (row.fromDate > toDate || row.toDate < fromDate) continue;
+      const projected = Number.isSafeInteger(row.projectedMinor) ? row.projectedMinor : 0;
+      // قرار صريح من المكتب بإدراج فترة لم تنتهِ بعد: لا إدراج صامت أبدًا.
+      if (includeRunningPeriods) {
+        const runningDue = Number.isSafeInteger(row.dueMinor) && row.dueMinor > 0 ? row.dueMinor : projected;
+        periodDueMinor = addMinor(periodDueMinor, runningDue);
+        runningIncluded.push({periodKey: row.periodKey || '', fromDate: row.fromDate, toDate: row.toDate,
+          amountMinor: runningDue, decision: 'INCLUDE_RUNNING'});
+        lines.push({
+          kind: 'period', periodKey: row.periodKey || '', fromDate: row.fromDate, toDate: row.toDate,
+          label: row.label || monthLabel(row.fromDate, row.toDate), amountMinor: runningDue, paidMinor: 0, remainingMinor: runningDue,
+          equation: `1 × ${fromMinorUnits(runningDue, schedule.currency)} = ${fromMinorUnits(runningDue, schedule.currency)}`,
+          note: 'فترة لم تنتهِ بعد — أُدرجت بقرار صريح من المكتب (تقديري) ولا تناسب بالأيام',
+          runningPeriod: true, rangeDecision: null
+        });
+        continue;
+      }
       runningPeriods.push({periodKey: row.periodKey || '', fromDate: row.fromDate, toDate: row.toDate,
-        label: row.label || monthLabel(row.fromDate, row.toDate), projectedMinor: Number.isSafeInteger(row.projectedMinor) ? row.projectedMinor : 0,
+        label: row.label || monthLabel(row.fromDate, row.toDate), projectedMinor: projected,
         paidMinor: 0, note: 'فترة جارية لم تكتمل — لا تدخل في إجمالي التوكيل'});
       continue;
     }
@@ -893,9 +926,13 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     periodDueMinor = addMinor(periodDueMinor, dueMinor);
     periodPaidMinor = addMinor(periodPaidMinor, paidMinor);
     for (const change of row.valueChanges || []) differencesMinor = addMinor(differencesMinor, Math.abs(change.differenceMinor || 0));
+    const lineEquation = rangeDecision
+      ? (rangeDecision.choice === 'MANUAL' ? `قيمة كاملة يدوية ${fromMinorUnits(dueMinor, schedule.currency)} (لا تناسب بالأيام)` : `1 × ${fromMinorUnits(dueMinor, schedule.currency)} = ${fromMinorUnits(dueMinor, schedule.currency)}`)
+      : (dueMinor ? `1 × ${fromMinorUnits(dueMinor, schedule.currency)} = ${fromMinorUnits(dueMinor, schedule.currency)}` : 'لا استحقاق');
     lines.push({
       kind: 'period', periodKey: row.periodKey || '', fromDate: row.fromDate, toDate: row.toDate, label: row.label || monthLabel(row.fromDate, row.toDate),
       amountMinor: dueMinor, paidMinor, remainingMinor: Math.max(0, dueMinor - paidMinor),
+      equation: lineEquation,
       note: rangeDecision ? `${rangeDecision.trace} — لا تناسب بالأيام` : (dueMinor ? '' : 'لا استحقاق'),
       rangeDecision: rangeDecision || null
     });
@@ -904,69 +941,50 @@ export function buildPoaFigures({schedule, fromDate, toDate, includePreviousBala
     .map(expense => ({
       kind: 'expense', id: expense.id, label: expense.label || expense.type, fromDate: expense.date, toDate: expense.date,
       amountMinor: expense.amountMinor, remainingMinor: expense.amountMinor,
-      note: expense.borneByLabel ? `يتحمله: ${expense.borneByLabel}` : '',
-      equation: `${expense.label || expense.type}: ${fromMinorUnits(expense.amountMinor, schedule.currency)}`
+      equation: `مصروف مسجَّل = ${fromMinorUnits(expense.amountMinor, schedule.currency)}`,
+      note: expense.borneByLabel ? `يتحمله: ${expense.borneByLabel}` : ''
     }));
   const expensesMinor = sumMinor(expenseLines, line => line.amountMinor);
-  const fees = Number.isSafeInteger(feesMinor) ? feesMinor : 0;
-  const stamps = Number.isSafeInteger(stampsMinor) ? stampsMinor : 0;
-  const feesLine = fees ? {kind: 'fee', label: 'رسوم (إدخال يدوي)', fromDate: '', toDate: '', amountMinor: fees, remainingMinor: fees, note: 'النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.', equation: `رسوم = ${fromMinorUnits(fees, schedule.currency)}`} : null;
-  const stampsLine = stamps ? {kind: 'stamp', label: 'دمغة (إدخال يدوي)', fromDate: '', toDate: '', amountMinor: stamps, remainingMinor: stamps, note: 'النظام لا يفترض رسومًا ولا دمغة — أدخلها أنت حسب واقع الملف.', equation: `دمغة = ${fromMinorUnits(stamps, schedule.currency)}`} : null;
+  // الرسوم والدمغة: إدخال يدوي من المكتب فقط. النظام لا يفترض رسمًا ولا دمغة،
+  // وهما سطران مستقلان لا يزيدان أصل الالتزام الدوري (يظهران في التوكيل باختيار صريح).
+  const safeManual = value => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+  const fees = safeManual(feesMinor), stamps = safeManual(stampsMinor);
+  const manualLines = [
+    ...(fees ? [{kind: 'fees', label: 'رسوم (إدخال يدوي)', amountMinor: fees, remainingMinor: 0, equation: `رسوم يدوية = ${fromMinorUnits(fees, schedule.currency)}`, note: 'النظام لا يفترض رسومًا — أدخلها أنت حسب واقع الملف'}] : []),
+    ...(stamps ? [{kind: 'stamps', label: 'دمغة (إدخال يدوي)', amountMinor: stamps, remainingMinor: 0, equation: `دمغة يدوية = ${fromMinorUnits(stamps, schedule.currency)}`, note: 'النظام لا يفترض دمغة — أدخلها أنت حسب واقع الملف'}] : [])
+  ];
   const previousApplied = includePreviousBalance ? previousMinor : 0;
-  const totalMinor = addMinor(addMinor(addMinor(addMinor(previousApplied, periodDueMinor), expensesMinor), fees), stamps);
-  // معادلات لكل سطر فترة: متساوية ⇒ 9 × 3,000 = 27,000 · مختلفة ⇒ 3 × 3,000 + 6 × 3,500 = 30,000 · جزئية ⇒ قسمة يومية واضحة
-  // نضيف equation لكل سطر فترة بناءً على تجميع القيم
-  const periodEquations = (() => {
-    if (!lines.length) return [];
-    // إذا كل الفترات بنفس المبلغ
-    const amounts = lines.map(l => l.amountMinor);
-    const unique = [...new Set(amounts)];
-    if (unique.length === 1) {
-      const amt = unique[0];
-      const formatted = fromMinorUnits(amt, schedule.currency).toLocaleString('en-US', {minimumFractionDigits: 2});
-      return [`${lines.length} × ${formatted} = ${fromMinorUnits(periodDueMinor, schedule.currency)}`];
-    }
-    // مختلفة
-    const groups = new Map();
-    for (const l of lines) {
-      const key = l.amountMinor;
-      groups.set(key, (groups.get(key) || 0) + 1);
-    }
-    const parts = [...groups.entries()].map(([amt, count]) => `${count} × ${fromMinorUnits(amt, schedule.currency).toLocaleString('en-US', {minimumFractionDigits: 2})}`).join(' + ');
-    return [`${parts} = ${fromMinorUnits(periodDueMinor, schedule.currency)}`];
-  })();
-
-  const previousNote = (() => {
-    if (!previousAction) return 'جزء من المتبقي — لا يُضاف عليه مرة ثانية';
-    const num = previousAction.referenceNumber || previousAction.id || '';
-    const date = previousAction.date || '';
-    return `مرتبط بمحضر ${previousAction.kindLabel || previousAction.kind || 'تبديد'}${num ? ` رقم ${num}` : ''}${date ? ` بتاريخ ${date}` : ''} — جزء من المتبقي ولا يُضاف عليه مرة ثانية`;
-  })();
-
+  const periodLines = lines.filter(line => line.kind === 'period');
+  const periodsEquation = amountEquation(periodLines, schedule.currency);
+  const previousLine = previousApplied ? {
+    kind: 'previous', label: `رصيد سابق غير مسدد حتى ${addCivilDays(fromDate, -1)}`, fromDate: '', toDate: '',
+    amountMinor: previousApplied, remainingMinor: previousApplied,
+    equation: `رصيد سابق غير مسدد = ${fromMinorUnits(previousApplied, schedule.currency)}`,
+    note: previousSource?.label
+      ? `${previousSource.label} — جزء من المتبقي ولا يُضاف عليه مرة ثانية`
+      : 'جزء من المتبقي — لا يُضاف عليه مرة ثانية',
+    source: previousSource || null
+  } : null;
+  const totalMinor = addMinor(addMinor(addMinor(previousApplied, periodDueMinor), expensesMinor), addMinor(fees, stamps));
   return {
     fromDate, toDate, currency: schedule.currency,
-    previousBalanceMinor: previousMinor, previousAppliedMinor: previousApplied,
+    previousBalanceMinor: previousMinor, previousAppliedMinor: previousApplied, previousSource: previousSource || null,
     periodDueMinor, periodPaidMinor, periodRemainingMinor: Math.max(0, addMinor(periodDueMinor, -periodPaidMinor)),
-    differencesMinor, expensesMinor, feesMinor: fees, stampsMinor: stamps, totalMinor, partials, rangeDecisions: decisionsUsed, runningPeriods,
-    previousAction,
-    lines: [
-      ...(previousApplied ? [{kind: 'previous', label: `رصيد سابق غير مسدد حتى ${addCivilDays(fromDate, -1)}`, fromDate: '', toDate: '', amountMinor: previousApplied, remainingMinor: previousApplied, note: previousNote, equation: `رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}${previousAction ? ` — مرتبط بمحضر ${previousAction.kindLabel || previousAction.kind}` : ''}`}] : []),
-      ...lines.map(l => ({...l, equation: l.equation || `${l.label}: ${fromMinorUnits(l.amountMinor, schedule.currency)}`})),
-      ...expenseLines,
-      ...(feesLine ? [feesLine] : []),
-      ...(stampsLine ? [stampsLine] : [])
-    ],
+    differencesMinor, expensesMinor, feesMinor: fees, stampsMinor: stamps, manualAdjustmentsMinor: addMinor(fees, stamps),
+    totalMinor, partials, rangeDecisions: decisionsUsed, runningPeriods, runningIncluded, periodsEquation,
+    includeRunningPeriods: Boolean(includeRunningPeriods) && runningIncluded.length > 0,
+    lines: [...(previousLine ? [previousLine] : []), ...lines, ...expenseLines, ...manualLines],
     equations: [
-      ...(previousApplied ? [`رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}${previousAction ? ` — مرتبط بمحضر ${previousAction.kindLabel || previousAction.kind} رقم ${previousAction.referenceNumber || ''} بتاريخ ${previousAction.date || ''}` : ' — لا يوجد محضر تبديد/حجز مرتبط'}`] : []),
-      ...(periodEquations.length ? [`الفترة الجديدة: ${periodEquations[0]}`] : [`فترة التوكيل (${fromDate} → ${toDate}) = ${fromMinorUnits(periodDueMinor, schedule.currency)}`]),
-      ...lines.map(l => l.equation || `${l.label} = ${fromMinorUnits(l.amountMinor, schedule.currency)}`),
+      ...(previousApplied ? [`رصيد سابق = ${fromMinorUnits(previousApplied, schedule.currency)}${previousSource?.label ? ` (${previousSource.label})` : ''}`] : []),
+      `فترة التوكيل (${fromDate} → ${toDate}) = ${periodsEquation || fromMinorUnits(periodDueMinor, schedule.currency)}`,
       ...decisionsUsed.map(row => row.trace),
       partials.length ? `فترات حدّية تنتظر قرارًا صريحًا: ${partials.map(row => `${row.fromDate} → ${row.toDate}`).join('؛ ')}` : '',
       runningPeriods.length ? `فترات جارية ظاهرة بمبلغها المتوقع ولا تدخل في الإجمالي: ${runningPeriods.map(row => `${row.fromDate} → ${row.toDate} = ${fromMinorUnits(row.projectedMinor || 0, schedule.currency)}`).join('؛ ')}` : '',
+      runningIncluded.length ? `قرار صريح بإدراج ${runningIncluded.length} فترة لم تنتهِ بعد (تقديري): ${runningIncluded.map(row => `${row.fromDate} → ${row.toDate} = ${fromMinorUnits(row.amountMinor, schedule.currency)}`).join('؛ ')}` : '',
       ...(expensesMinor ? [`مصروفات مختارة = ${fromMinorUnits(expensesMinor, schedule.currency)}`] : []),
-      ...(fees ? [`رسوم (يدوي) = ${fromMinorUnits(fees, schedule.currency)} — النظام لا يفترض رسومًا ولا دمغة`] : []),
-      ...(stamps ? [`دمغة (يدوي) = ${fromMinorUnits(stamps, schedule.currency)} — النظام لا يفترض رسومًا ولا دمغة`] : []),
-      `إجمالي التوكيل = ${fromMinorUnits(totalMinor, schedule.currency)}${fees || stamps ? ` = ${fromMinorUnits(previousApplied, schedule.currency)} + ${fromMinorUnits(periodDueMinor, schedule.currency)} + ${fromMinorUnits(expensesMinor, schedule.currency)} + ${fromMinorUnits(fees, schedule.currency)} + ${fromMinorUnits(stamps, schedule.currency)}` : ''}`,
+      ...(fees ? [`رسوم (إدخال يدوي) = ${fromMinorUnits(fees, schedule.currency)} — لا تزيد أصل الدين`] : []),
+      ...(stamps ? [`دمغة (إدخال يدوي) = ${fromMinorUnits(stamps, schedule.currency)} — لا تزيد أصل الدين`] : []),
+      `إجمالي التوكيل = ${fromMinorUnits(previousApplied, schedule.currency)}${periodDueMinor ? ` + ${fromMinorUnits(periodDueMinor, schedule.currency)}` : ''}${expensesMinor ? ` + ${fromMinorUnits(expensesMinor, schedule.currency)}` : ''}${fees ? ` + ${fromMinorUnits(fees, schedule.currency)}` : ''}${stamps ? ` + ${fromMinorUnits(stamps, schedule.currency)}` : ''} = ${fromMinorUnits(totalMinor, schedule.currency)}`,
       differencesMinor ? `منها فروق أحكام ${fromMinorUnits(differencesMinor, schedule.currency)} مضمّنة داخل الفترة — لا تُضاف مرة ثانية` : ''
     ].filter(Boolean)
   };

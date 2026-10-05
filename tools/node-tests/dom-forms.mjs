@@ -17,7 +17,11 @@ class TestFormData {
       if (!name || el.hasAttribute('disabled')) continue;
       const type = (el.getAttribute('type') || '').toLowerCase();
       if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
-      this.m.set(name, el.value ?? '');
+      // في المتصفح قيمة أي مربع اختيار بلا value هي «on» — نطابق السلوك نفسه
+      // حتى لا تنجح الاختبارات على سلوك لا يراه المستخدم.
+      const isCheck = type === 'checkbox' || type === 'radio';
+      const raw = el.getAttribute('value');
+      this.m.set(name, isCheck ? (raw == null ? 'on' : raw) : (el.value ?? ''));
     }
   }
   append(k, v) { this.m.set(k, v); }

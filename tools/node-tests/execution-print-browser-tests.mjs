@@ -44,7 +44,13 @@ page.on('console', message => { if (message.type() === 'error' && !/favicon|ERR_
 await page.goto(`${base}/index.html`);
 await page.waitForFunction(() => window.__LAW_OFFICE_APP__ && !window.__LAW_OFFICE_APP__.booting, null, {timeout: 90000});
 
-// ===== تجهيز البيانات: 33 فترة مكتملة حتى 05/10/2026 + فترة أكتوبر الجارية للإعلام =====
+// ===== تجهيز البيانات =====
+// العقد v5.13.2: التاريخ المطلوب صراحةً (asOf) يُنفَّذ كما هو ويُوسم «تقديري»،
+// ولا يُقصّ صامتًا إلى اليوم. السيناريو: 2,500 شهريًا من 01/01/2024، ثم حكم لاحق
+// يرفعها إلى 3,000 من 01/01/2026، ونهاية الاستحقاق 31/12/2026 ⇒ طلب كشف حتى
+// 31/12/2026 يعطي 36 فترة:
+//   2024: 12 × 2,500 = 30,000 · 2025: 12 × 2,500 = 30,000 · 2026: 12 × 3,000 = 36,000
+//   الإجمالي المستحق 96,000 · المدفوع 30,000 + 12,000 = 42,000 · المتبقي 54,000
 const seed = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__, office = app.office;
   const S = await import('/js/services/execution-simple.js');
@@ -67,9 +73,9 @@ const seed = await page.evaluate(async () => {
   };
 });
 report.seed = seed;
-check('المستحق يضم 33 فترة مكتملة حتى أفق 05/10/2026، ولا يستحق أكتوبر الجاري',
-  seed.totals.periods === 33 && seed.totals.due === (2500 * 24 + 3000 * 9) * 100
-  && seed.totals.paid === 42_000 * 100 && seed.totals.remaining === 45_000 * 100,
+check('المستحق حتى 31/12/2026 المطلوبة صراحةً: 36 فترة = 96,000 (بلا قصّ صامت إلى اليوم)',
+  seed.totals.periods === 36 && seed.totals.due === (2500 * 24 + 3000 * 12) * 100
+  && seed.totals.paid === 42_000 * 100 && seed.totals.remaining === 54_000 * 100,
   JSON.stringify(seed.totals));
 
 // ===== كشف الحساب: فتح مسار الطباعة من الواجهة ثم قياس الصفحات =====
@@ -108,22 +114,38 @@ report.statementPdfPages = statementPdfPages;
 check('كشف 36 شهرًا انقسم إلى أكثر من صفحة واحدة بترقيم متسلسل صحيح',
   statement.pageCount >= 2 && statement.footers.every((text, index) => text === `صفحة ${index + 1} من ${statement.pageCount}`),
   JSON.stringify({pages: statement.pageCount, footers: statement.footers}));
-check('33 فترة مكتملة + صف أكتوبر الجاري المعلوماتي + الإجمالي ظاهرة مرة واحدة، والرؤوس تتكرر',
-  statement.periodRows === 35 && statement.headRowsPerPage.every(count => count >= 1),
+// 36 فترة (شهر لكل صف) + صف الإجمالي = 37 صفًّا داخل جدول الفترات.
+check('36 فترة مطلوبة + صف الإجمالي = 37 صفًّا ظاهرة مرة واحدة، والرؤوس تتكرر في كل صفحة',
+  statement.periodRows === 37 && statement.headRowsPerPage.every(count => count >= 1),
   JSON.stringify({periodRows: statement.periodRows, rowsPerPage: statement.rowCounts, heads: statement.headRowsPerPage}));
 check('عدد صفحات PDF الفعلي يطابق عدد الصفحات المُرقَّمة (لا قطع ولا صفحة زائدة)',
   statementPdfPages === statement.pageCount, `${statementPdfPages} صفحة PDF مقابل ${statement.pageCount} صفحة مرقّمة`);
-check('إجمالي الكشف صحيح: 87,000 مستحق · 42,000 مدفوع · 45,000 متبقٍ، والمصروف مستقل',
-  statement.totalsText.length === 1 && /87,000/.test(statement.totalsText[0]) && /42,000/.test(statement.totalsText[0]) && /45,000/.test(statement.totalsText[0]),
+check('إجمالي الكشف صحيح: 96,000 مستحق · 42,000 مدفوع · 54,000 متبقٍ، والمصروف مستقل',
+  statement.totalsText.length === 1 && /96,000/.test(statement.totalsText[0]) && /42,000/.test(statement.totalsText[0]) && /54,000/.test(statement.totalsText[0]),
   statement.totalsText[0] || '');
-check('كشف الطباعة يفصل asOf عن أفق الاستحقاق ويُظهر الفترة الجارية بصفر فقط',
-  statement.bodyText.includes('تاريخ الحساب الفعلي: 31/12/2026') && statement.bodyText.includes('أفق الفترات: 05/10/2026')
-  && /01\/10\/2026 – 31\/10\/2026 0\.00/.test(statement.bodyText),
-  statement.bodyText.slice(0, 180));
+// لا رقم منسوب إلى تاريخ آخر: الأفق المعلن = التاريخ المطلوب، موسوم «تقديري»،
+// ولا صف واحد بعد نهاية النطاق المطلوب.
+check('الكشف يعلن أفقًا مساويًا للتاريخ المطلوب ويوسم المستقبل «تقديري» ولا يتجاوز النطاق',
+  statement.bodyText.includes('تاريخ الحساب الفعلي: 31/12/2026') && statement.bodyText.includes('أفق الفترات: 31/12/2026')
+  && statement.bodyText.includes('تقديري') && !statement.bodyText.includes('01/01/2027'),
+  statement.bodyText.slice(0, 200));
 check('حافة الطباعة: المصروف يظهر كسطر مستقل ولا يزيد أصل النفقة',
   /رسوم تنفيذ/.test(statement.bodyText) && /منفصلة عن أصل الدين/.test(statement.bodyText),
   statement.bodyText.slice(0, 120));
 await statementPopup.screenshot({path: path.join(artifactDir, 'statement-page-1.png')});
+
+// ===== الكشف العادي (تاريخ الحساب = اليوم): بلا وسم «تقديري» ولا أفق ممدود =====
+const plain = await page.evaluate(async id => {
+  const S = await import('/js/services/execution-simple.js');
+  const {localDate} = await import('/js/core/clock.js');
+  const today = localDate();
+  const doc = await S.simpleStatementDocument(window.__LAW_OFFICE_APP__.office, id, {mode: 'monthly', asOf: today});
+  const display = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  return {html: doc.html, today, horizon: doc.totals ? doc.rows.length : 0, display: display(today)};
+}, seed.executionId);
+check('كشف «حتى اليوم» لا يحمل وسم «تقديري» ويعلن أفق اليوم نفسه',
+  !plain.html.includes('تقديري') && plain.html.includes(`أفق الفترات: ${plain.display}`),
+  JSON.stringify({today: plain.today, horizon: plain.horizon}));
 
 // ===== التوكيل: نفس مسار الطباعة والترقيم على مستند التوكيل القائم =====
 let poa = null, poaPdfPages = 0;

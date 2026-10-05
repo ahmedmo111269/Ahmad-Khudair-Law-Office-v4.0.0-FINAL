@@ -1,3 +1,26 @@
+# v5.13.2 — خريطة «الإعدادات تعمل» وأفق الحساب الصريح
+
+**2026-10-05 — إصلاح محدود فوق v5.13.1 أدناه؛ لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن ولا في مسار FEAS.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/execution-simple.js` | فصل `asOf` المعلن عن `periodThroughDate` (أفق الفترات) داخل `simpleSchedule`، وفي الكشف/الطباعة صار التاريخ المستقبلي المطلوب صراحةً هو الأفق نفسه موسومًا «تقديري» (لا كشف يعلن تاريخًا ويحسب غيره)؛ `claimHorizon`/`simpleScheduleHorizon` تقبلان `allowFuture`؛ `horizonTransparency` يخرج `requestedAsOf`/`effectiveAsOf`/`periodThroughDate`/`horizonCapReasons`/`horizonShowWarning`/`horizonNote`/`estimatedPeriods`؛ `simpleDurationClaim` و`simplePoaDraft` و`simpleStatementDocument` تحترم النطاق المستقبلي عند الطلب الصريح وتعلن القصّ بسببه؛ جدول التوكيل يُبنى حتى نهاية النطاق (كان عند اليوم فحسب)؛ `simpleStatementDocument` تقبل `allowFuture` وتوسم الكشف المستقبلي «تقديري». |
+| `js/services/execution-cache.js` | `executionCache.clearExecution(id)` لإبطال مخصوص لتنفيذ واحد (تُنادى من كتابة شرائح القيمة)؛ مفتاح جديد يشمل `periodThrough`، وإبطال عند أي كتابة على كيان تنفيذي (أُضيفت `executionSettlements` و`executionAdjustments` وكل ما يبدأ بـ`execution`)، فلا يبقى رقم اعتراف قديم بعد اعتماد فرق في FEAS. |
+| `js/ui/execution-horizon-picker.js` | شاشة «المطلوب حتى»: اختصارات من ارتكاز الفترة، مفتاح «احسب حتى تاريخ مستقبلي» يحترم الإلغاء الصريح، بيانات الفترات الداخلة والمعادلة، وإنذار القصّ/التقدير/التاريخ الأقدم من اليوم. |
+| `js/ui/execution-summary-card.js` | بطاقة الملخص السريع: الموكل/النوع/طريقة التنفيذ + الأرقام الثلاثة القابلة للتفسير + المعادلة + أزرار العمل و«⚙ إعدادات التنفيذ» داخل البطاقة. |
+| `js/modules/execution-center.js` | تاريخ حساب لكل تنفيذ (`asOfKeyFor`/`resolveAsOf` ونطاق موحّد اختياري)؛ قرار المستقبل لكل بطاقة في جلسة العرض (`detailAllowFuture`)؛ `bindAll` لكل العناصر بدل `querySelector` المفرد فتعمل روابط الإعدادات كلها؛ تمرير `allowFuture` للطباعة؛ سطر الفترة الجارية يصف حالها بحسب توقيت الاستحقاق الفعلي. |
+| `js/ui/execution-simple-forms.js` | «احسب مدة» فيها مساران: الجدول المسجَّل (الافتراضي) و**مذكرة بمبلغ يدوي** (مبلغ + دورية + رسوم/دمغة) تعمل بلا تسجيل قيمة وتُعلن أنها لا تُنشئ استحقاقًا؛ نافذة إعدادات كاملة قابلة للتعديل (قواعد + سبع قوائم + نطاق تاريخ الحساب + قوالب + سجل النسخ) بتحقق عربي ورسالة فشل داخل النموذج؛ «احسب مدة» و«التوكيل»: قراءة قرارات المربعات بأي قيمة تفعيل غير فارغة، ومزامنة خيار المستقبل عند اختيار تاريخ لاحق، ومعاينة توكيل بمعادلة الفترات ورسوم/دمغة يدوية ومصدر الرصيد السابق، مع تعطيل الرسوم اليدوية في مسار FEAS. |
+| `js/domain/execution-schedule.js` | `amountEquation` تعرض الأعداد بفواصل الآلاف (`3 × 3,000 = 9,000`) فتطابق المعادلة المعروضة في كل الشاشات؛ `valueTimeline` يحترم `defaultCurrency` في البنود بلا عملة صريحة. |
+| `js/services/execution-settings.js` | `RULE_KEYS` صار يضم `allocationOrder` و`defaultCurrency`، فتغييرهما يرفع نسخة القواعد ويُسجَّل في سجل النسخ ويُبطل الذاكرة — لا خيار بلا أثر. |
+| `sw.js` + `js/core/constants.js` | `APP_VERSION = 5.13.2`، و`CACHE=…-v5.13.2-execution-settings-and-horizon` مع إضافة الوحدات الثلاث الجديدة إلى precache (كان غيابها يُفشل الإقلاع بلا شبكة). |
+| `tools/node-tests/execution-practical-tests.mjs` | 15 فحصًا جديدًا (15–29): الأرقام المرجعية 3,000/9,000 والمعادلة، عزل تاريخ البطاقات، رسوم/دمغة التوكيل 9,600، الانعكاس الفوري للإعدادات، إبطال الذاكرة، رسائل الفشل والتحقق، الأساس التقويمي، وأثر ترتيب التوزيع والعملة الافتراضية. |
+| `tools/node-tests/dom-forms.mjs` | `TestFormData` يطابق المتصفح في قيمة مربع الاختيار الافتراضية (`on`) فلا تنجح الاختبارات على سلوك لا يراه المستخدم. |
+| `tools/node-tests/execution-settings-browser-tests.mjs` (جديد) | 10 فحوص Chromium حقيقية لرحلة الشكوى نفسها (ثمانية مكتبي — منها «لا زر ميت» ومذكرة الحساب اليدوي — + فحصا موبايل بعرض 390px): الأرقام المرجعية 3,000/9,000 · الإعدادات من البطاقة وانعكاسها الفوري · التوكيل 9,600 · قوالب الطباعة · بلا أخطاء كونسول. `npm run test:execution-settings-browser`، ولقطاته في `docs/execution-ux-shots/v5.13.2-*.png`. |
+
+**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **45/45**؛ Chromium: `execution-settings-browser` 10/10 · `execution-print-browser` **13/13** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19 · `offline-sync` و`quick-notes` ناجحان. يبقى `grid-browser` فشلًا قائمًا على `main` في تخصيص الجدول (خارج نطاق التنفيذ). **NOT VERIFIED:** معاينة الطباعة الأصلية والطباعة الورقية ومتصفحات غير Chromium.
+
+---
+
 # v5.13.1 — إصلاح مركز التنفيذ فقط (BUG-1..7) تراكمي
 
 **2026-10-05 — النطاق: Execution Center فقط، المحرك سليم — إصلاح واجهة + أفق + توكيل.**

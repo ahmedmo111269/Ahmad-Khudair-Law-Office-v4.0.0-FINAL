@@ -11,7 +11,9 @@ import {events} from '../core/events.js';
 export const EXECUTION_SETTINGS_VERSION = 2;
 const KEY_BASE = `exec:settings:v${EXECUTION_SETTINGS_VERSION}`;
 const LEGACY_KEY_BASE = 'exec:settings:v1';
-const RULE_KEYS = Object.freeze(['periodBasis', 'startPolicy', 'midChangePolicy', 'endPolicy', 'accrualTiming', 'monthEndPolicy']);
+// كل مفتاح هنا يغيّر رقمًا محسوبًا فعلًا، فتغييره يرفع نسخة القواعد ويُبطِل الذاكرة
+// ويُسجَّل في سجل النسخ — ومنه ترتيب التوزيع والعملة الافتراضية.
+const RULE_KEYS = Object.freeze(['periodBasis', 'startPolicy', 'midChangePolicy', 'endPolicy', 'accrualTiming', 'monthEndPolicy', 'allocationOrder', 'defaultCurrency']);
 const RETIRED_SCHEDULE_KEYS = Object.freeze(['prorationPolicy', 'firstMonthPolicy', 'monthBasis', 'monthDayBasis']);
 function cleanSchedule(schedule) {
   const result = {...schedule};

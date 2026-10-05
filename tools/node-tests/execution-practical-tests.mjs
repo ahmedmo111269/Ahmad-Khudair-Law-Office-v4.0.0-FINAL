@@ -503,6 +503,359 @@ await check('النموذج العام لا ينشئ تنفيذًا بلا حك�
   void card;
 });
 
+/* ====================================================================
+   الإصلاح 5.13.2 — أفق الحساب والإعدادات القابلة للتعديل
+   الدليل المرجعي: تنفيذ نفقة يبدأ 2026-10-05 بمبلغ 3,000 شهريًا.
+   كل فحص هنا يثبت سلوكًا كان مكسورًا سابقًا: القصّ الصامت للمستقبل،
+   تاريخ حساب عالمي يخفي الأرقام، زر إعدادات ميت، وحفظ بلا رسالة خطأ.
+   ==================================================================== */
+const {prefs} = await import('../../js/core/preferences.js');
+const {executionSettings: readSettings} = await import('../../js/services/execution-settings.js');
+const CACHE = await import('../../js/services/execution-cache.js');
+const HORIZON = await import('../../js/ui/execution-horizon-picker.js');
+const ANCHOR_EXEC_COUNT = (await office.r.execution.all(500)).filter(row => !row.isDeleted).length;
+
+/** تنظيف تفضيلات الحساب حتى يبدأ هذا القسم من اليوم فعلًا. */
+const resetAsOfPrefs = async ids => {
+  await prefs.set('ui:exec:asof:v1', '');
+  await prefs.set('ui:exec:asof-scope:v1', 'per-execution');
+  for (const id of ids || []) { await prefs.set(HORIZON.asOfKeyFor(id), ''); await prefs.set(`ui:exec:asof-future:${id}`, '1'); }
+};
+
+const newAnchorExecution = async label => {
+  const client = await office.saveClient({fullName: `عميل أفق ${label}`, phones: ['011'], status: 'active'});
+  const created = await S.createSimpleExecution(office, {
+    clientId: client.id, opponentName: `خصم أفق ${label}`, entitlementType: 'نفقة صغار',
+    valueType: 'periodic', periodicity: 'monthly', amount: '3000', effectiveFrom: today,
+    judgmentNumber: '900/2026', court: 'محكمة الأسرة', executionType: 'family'
+  });
+  return created.execution;
+};
+
+const horizonText = () => text(q('[data-horizon-picker]'));
+const pickerDate = () => q('[data-horizon-picker] [data-asof]')?.value || '';
+
+let anchorId = '', anchorTwoId = '';
+await check('15) الدليل المرجعي: تنفيذ يبدأ اليوم بمبلغ 3,000 يعطي فترة واحدة = 3,000', async () => {
+  const anchor = await newAnchorExecution('أ');
+  anchorId = anchor.id;
+  const second = await newAnchorExecution('ب');
+  anchorTwoId = second.id;
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+  assert.equal((await office.r.execution.all(500)).filter(row => !row.isDeleted).length, ANCHOR_EXEC_COUNT + 2);
+  const bundle = await S.simpleCardBundle(office, anchorId, {asOf: today, allowFuture: true});
+  assert.equal(bundle.schedule.totals.dueMinor, 300000, `المطلوب ${bundle.schedule.totals.dueMinor}`);
+  assert.equal(bundle.schedule.rows.length, 1, `عدد الفترات ${bundle.schedule.rows.length}`);
+  assert.equal(bundle.schedule.rows[0].toDate, '2026-11-04');
+});
+
+await check('16) اختصار «+شهر» يعطي «مطلوب حتى 04/11/2026» = 3,000 من ارتكاز الفترة', async () => {
+  await app.go(`exc:${anchorId}`);
+  await tick(600);
+  const chip = qa('[data-horizon-preset]').find(button => button.dataset.horizonPreset === 'plus-1');
+  assert.ok(chip, 'اختصار «+شهر» غير موجود في شاشة الأفق');
+  assert.equal(chip.dataset.date, '2026-11-04', `تاريخ الاختصار ${chip.dataset.date}`);
+  chip.dispatchEvent(new globalThis.Event('click', {bubbles: true}));
+  await tick(900);
+  assert.equal(pickerDate(), '2026-11-04', 'حقل التاريخ لم يتغير');
+  const numbers = await cardNumbers();
+  assert.equal(numbers.due, 3000, `المطلوب ${numbers.due}`);
+  assert.ok(horizonText().includes('1'), 'عدد الفترات غير معروض');
+});
+
+await check('17) تاريخ 04/01/2027 يُحسب فعلًا: 3 فترات = 9,000 ومعادلة ظاهرة (بلا قصّ صامت)', async () => {
+  const input = q('[data-horizon-picker] [data-asof]');
+  input.value = '2027-01-04';
+  input.dispatchEvent(new globalThis.Event('change', {bubbles: true}));
+  await tick(900);
+  const numbers = await cardNumbers();
+  assert.equal(numbers.due, 9000, `المطلوب عند 04/01/2027 = ${numbers.due} (المتوقع 9,000 = 3 فترات)`);
+  const summary = text(q('.exec-summary'));
+  assert.ok(/3 × 3,000/.test(summary), `معادلة الفترات غير ظاهرة: ${summary.slice(0, 300)}`);
+  assert.ok(!summary.includes('حتى 05/10/2026') || summary.includes('04/01/2027'), 'التاريخ المعروض لا يطابق المحسوب');
+  const stored = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: true});
+  assert.equal(stored.schedule.requestedAsOf, '2027-01-04');
+  assert.equal(stored.schedule.effectiveAsOf, '2027-01-04');
+  assert.equal(stored.schedule.horizonCapped, false);
+  assert.equal(Boolean(stored.schedule.estimatedPeriods), true, 'وسم «تقديري» مفقود للفترات المستقبلية');
+});
+
+await check('18) عند إيقاف الحساب المستقبلي: تاريخ فعلي معلن + تنبيه، ولا رقم منسوب لتاريخ آخر', async () => {
+  const box = q('[data-horizon-picker] [data-horizon-future]');
+  assert.ok(box, 'مفتاح «احسب حتى تاريخ مستقبلي» مفقود');
+  box.checked = false;
+  box.dispatchEvent(new globalThis.Event('change', {bubbles: true}));
+  await tick(900);
+  const summary = text(q('.exec-summary'));
+  const numbers = await cardNumbers();
+  assert.equal(numbers.due, 3000, `المطلوب بعد الإيقاف ${numbers.due}`);
+  assert.ok(q('[data-horizon-capped]'), 'تنبيه القصّ غير ظاهر');
+  assert.ok(summary.includes('05/10/2026'), `التاريخ الفعلي غير معلن: ${summary.slice(0, 300)}`);
+  const stored = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: false});
+  assert.equal(stored.schedule.horizonCapped, true);
+  assert.equal(stored.schedule.effectiveAsOf, today);
+  assert.ok(String(stored.schedule.horizonNote || '').length > 10, 'نص سبب القصّ مفقود');
+});
+
+await check('19) «المطلوب حتى» لكل بطاقة على حدة: تغيير بطاقة (أ) لا يمسّ بطاقة (ب)', async () => {
+  await prefs.set(HORIZON.asOfKeyFor(anchorId), '2027-01-04');
+  await app.go(`exc:${anchorTwoId}`);
+  await tick(800);
+  const numbers = await cardNumbers();
+  assert.equal(numbers.due, 3000, `بطاقة (ب) تأثرت بتاريخ بطاقة (أ): ${numbers.due}`);
+  assert.notEqual(pickerDate(), '2027-01-04', 'بطاقة (ب) حملت تاريخ بطاقة (أ)');
+  assert.equal(pickerDate(), today, 'حقل بطاقة (ب) يجب أن يبدأ من اليوم (بلا تاريخ محفوظ)');
+  const storedTwo = await S.simpleSchedule(office, anchorTwoId, {asOf: '', allowFuture: true});
+  assert.equal(storedTwo.schedule.rows.length, 1);
+});
+
+await check('20) «احسب مدة» لنطاق مستقبلي: لا رسالة «قُصّ أفق الحساب» بلا مبرر وتُحتسب الفترات المنتهية', async () => {
+  await app.go(`exc:${anchorId}`);
+  await tick(700);
+  const card = await openModalBy('[data-open-duration]', 500);
+  const form = modalRoot().querySelector('[data-form="duration"]');
+  assert.ok(form, 'نموذج «احسب مدة» غير موجود');
+  const future = form.querySelector('[data-allow-future]');
+  assert.ok(future, 'خيار الحساب المستقبلي غير موجود في «احسب مدة»');
+  await fill(form, {fromDate: '2026-10-05', toDate: '2027-01-04'});
+  future.checked = true;
+  await submit(form, 900);
+  const result = text(form.querySelector('[data-result]'));
+  assert.ok(result.includes('9,000'), `النتيجة لا تحتوي 9,000: ${result.slice(0, 260)}`);
+  assert.ok(!result.includes('قُصّ أفق الحساب'), `ما زالت رسالة القصّ القديمة ظاهرة: ${result.slice(0, 260)}`);
+  assert.ok(result.includes('تقديري'), 'وسم «تقديري» غير ظاهر في نتيجة المدة');
+  await closeModals();
+  void card;
+});
+
+await check('21) التوكيل: رصيد سابق + فترة + معادلة + رسوم/دمغة يدوية = إجمالي صحيح', async () => {
+  const card = await openModalBy('[data-action="poa"]', 700);
+  const form = modalRoot().querySelector('[data-form="poa"]');
+  assert.ok(form, 'نموذج التوكيل غير موجود');
+  await fill(form, {fromDate: '2026-10-05', toDate: '2027-01-04', fees: '500', stamps: '100'});
+  const running = form.querySelector('[name="includeRunningPeriods"]');
+  assert.ok(running, 'خيار إدراج الفترات غير المنتهية مفقود');
+  running.checked = true;
+  running.dispatchEvent(new globalThis.Event('change', {bubbles: true}));
+  await tick(900);
+  const preview = text(form.querySelector('[data-preview]'));
+  assert.ok(/3 × 3,000/.test(preview), `معادلة فترة التوكيل مفقودة: ${preview.slice(0, 300)}`);
+  assert.ok(preview.includes('9,600'), `الإجمالي مع الرسوم والدمغة غير صحيح: ${preview.slice(0, 300)}`);
+  assert.ok(preview.includes('رسوم') && preview.includes('دمغة'), 'سطرا الرسوم والدمغة غير ظاهرين');
+  assert.ok(form.querySelector('[name="fees"]') && form.querySelector('[name="stamps"]'), 'حقلا الرسوم والدمغة مفقودان');
+  await submit(form, 1200);
+  const poas = await office.r.executionPOAs.byIndex('executionId', anchorId, 20);
+  const saved = poas.filter(row => !row.isDeleted).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  assert.ok(saved, 'لم يُحفظ التوكيل');
+  assert.equal(Number(saved.feesAmount), 500, `الرسوم المحفوظة ${saved.feesAmount}`);
+  assert.equal(Number(saved.stampAmount), 100, `الدمغة المحفوظة ${saved.stampAmount}`);
+  assert.equal(Number(saved.total), 9600, `إجمالي التوكيل ${saved.total}`);
+  void card;
+});
+
+await check('22) شاشة الإعدادات: كل الخيارات قابلة للتعديل ويُحفظ التغيير وينعكس على الأرقام فورًا', async () => {
+  // نُعيد بطاقة القياس إلى «المطلوب حتى اليوم» أولًا حتى يكون الفرق من الإعدادات
+  // وحدها لا من تاريخ محفوظ من فحص سابق.
+  await prefs.set(HORIZON.asOfKeyFor(anchorId), '');
+  await prefs.set(HORIZON.asOfKeyFor(anchorTwoId), '');
+  await app.go('executionCenter');
+  await tick(700);
+  await openModalBy('[data-settings]', 500);
+  const form = modalRoot().querySelector('[data-form="settings"]');
+  assert.ok(form, 'نموذج الإعدادات غير موجود');
+  const accrual = form.querySelector('[name="accrualTiming"]');
+  assert.equal([...accrual.querySelectorAll('option')].length, 2, 'خيارات توقيت الاستحقاق ناقصة');
+  for (const name of ['periodBasis', 'startPolicy', 'midChangePolicy', 'endPolicy', 'allocationOrder', 'defaultCurrency']) {
+    assert.ok(form.querySelector(`[name="${name}"]`), `قاعدة ${name} غير قابلة للتعديل`);
+  }
+  for (const name of ['entitlementTypes', 'executionMethods', 'collectionMethods', 'actionKinds', 'expenseTypes', 'borneBy', 'laterJudgmentKinds']) {
+    assert.ok(form.querySelector(`[name="${name}"]`), `قائمة ${name} غير قابلة للتعديل`);
+  }
+  assert.ok(form.querySelector('[data-templates]'), 'زر تعديل قوالب الطباعة مفقود');
+  assert.ok(form.querySelector('[name="asOfScope"]'), 'خيار نطاق تاريخ الحساب مفقود');
+  const before = readSettings(office);
+  await fill(form, {accrualTiming: 'AFTER_PERIOD_END'});
+  await submit(form, 1200);
+  const after = readSettings(office);
+  assert.equal(after.schedule.accrualTiming, 'AFTER_PERIOD_END', 'لم يُحفظ توقيت الاستحقاق');
+  assert.ok(Number(after.ruleVersion) > Number(before.ruleVersion), 'نسخة القواعد لم ترتفع');
+  assert.ok(!modalRoot().querySelector('[data-form="settings"]'), 'النافذة لم تُغلق بعد الحفظ الناجح');
+  await app.go(`exc:${anchorId}`);
+  await tick(800);
+  const summary = text(q('.exec-summary'));
+  assert.ok(summary.includes('فترة جارية'), `لم تنعكس الإعدادات على الحساب: ${summary.slice(0, 240)}`);
+  assert.equal((await cardNumbers()).due, 0, 'توقيت «بعد اكتمال الفترة» يجب أن يؤجل المستحق');
+});
+
+await check('23) رابط «إعدادات التنفيذ» داخل ملاحظة الفترة الجارية يفتح النافذة (كان زرًا ميتًا)', async () => {
+  await app.go(`exc:${anchorId}`);
+  await tick(800);
+  const link = q('.exec-summary [data-settings]');
+  assert.ok(link, 'رابط الإعدادات داخل الملاحظة غير موجود');
+  link.dispatchEvent(new globalThis.Event('click', {bubbles: true}));
+  await tick(500);
+  assert.ok(modalRoot().querySelector('[data-form="settings"]'), 'الرابط لم يفتح نافذة الإعدادات');
+  await closeModals();
+});
+
+await check('24) حفظ الإعدادات الفاشل: رسالة خطأ صريحة داخل النموذج والنافذة لا تُغلق', async () => {
+  await app.go('executionCenter');
+  await tick(600);
+  await openModalBy('[data-settings]', 500);
+  const form = modalRoot().querySelector('[data-form="settings"]');
+  const original = prefs.set.bind(prefs);
+  prefs.set = () => { throw new Error('تعذّر الكتابة في التخزين (محاكاة فشل)'); };
+  try {
+    await fill(form, {accrualTiming: 'AT_PERIOD_START'});
+    await submit(form, 900);
+  } finally { prefs.set = original; }
+  const form2 = modalRoot().querySelector('[data-form="settings"]');
+  assert.ok(form2, 'النافذة أُغلقت رغم فشل الحفظ');
+  const errorLine = form2.querySelector('[data-settings-error]');
+  assert.ok(errorLine && !errorLine.hidden, 'لا رسالة خطأ داخل النموذج');
+  assert.ok(text(errorLine).length > 5, 'رسالة الخطأ فارغة');
+  await closeModals();
+});
+
+await check('25) تحقق الإعدادات: قائمة فارغة أو كود مكرر لا يُحفظ ولا يُغلق النافذة', async () => {
+  await app.go('executionCenter');
+  await tick(600);
+  await openModalBy('[data-settings]', 500);
+  const form = modalRoot().querySelector('[data-form="settings"]');
+  const before = readSettings(office);
+  await fill(form, {entitlementTypes: '   '});
+  await submit(form, 700);
+  assert.ok(modalRoot().querySelector('[data-form="settings"]'), 'النافذة أُغلقت مع قائمة فارغة');
+  assert.ok(!modalRoot().querySelector('[data-settings-error]')?.hidden, 'لا رسالة تحقق للقائمة الفارغة');
+  await fill(form, {entitlementTypes: 'نفقة صغار', expenseTypes: 'A=رسم\nA=مصروف'});
+  await submit(form, 700);
+  assert.ok(!modalRoot().querySelector('[data-settings-error]')?.hidden, 'لا رسالة تحقق للكود المكرر');
+  assert.equal(Number(readSettings(office).ruleVersion), Number(before.ruleVersion), 'حُفظ إعداد غير صالح');
+  await closeModals();
+});
+
+await check('26) إبطال ذاكرة الحساب: تغيير الإعدادات يغيّر نتيجة simpleSchedule المخزّنة مؤقتًا', async () => {
+  CACHE.clearExecutionCache('فحص');
+  const first = await S.simpleSchedule(office, anchorId, {asOf: today, allowFuture: true});
+  const second = await S.simpleSchedule(office, anchorId, {asOf: today, allowFuture: true});
+  assert.equal(second.cacheHit, true, 'لم تُستَخدم الذاكرة المؤقتة في الطلب المتكرر');
+  const before = second.schedule.totals.dueMinor;
+  const {saveExecutionSettings} = await import('../../js/services/execution-settings.js');
+  const settings = readSettings(office);
+  await saveExecutionSettings(office, {...settings, schedule: {...settings.schedule, accrualTiming: 'AT_PERIOD_START'}});
+  const third = await S.simpleSchedule(office, anchorId, {asOf: today, allowFuture: true});
+  assert.equal(third.cacheHit, false, 'الذاكرة لم تُبطَل بعد تغيير الإعدادات');
+  assert.notEqual(third.schedule.totals.dueMinor, before, 'الأرقام لم تتغير بعد تغيير الإعدادات');
+  // الكتابة على سجلات التنفيذ تُبطل الذاكرة أيضًا (تحصيل/إجراء/مصروف…)
+  await S.recordSimpleCollection(office, {executionId: anchorId, amount: 500, date: today, paymentMethod: 'نقدي'});
+  const fourth = await S.simpleSchedule(office, anchorId, {asOf: today, allowFuture: true});
+  assert.equal(fourth.cacheHit, false, 'الذاكرة لم تُبطَل بعد تسجيل تحصيل');
+  assert.equal(fourth.schedule.totals.paidMinor, 50000, `المدفوع ${fourth.schedule.totals.paidMinor}`);
+  // تنظيف: إلغاء التحصيل وإعادة التوقيت الافتراضي
+  const receipts = await office.r.executionReceipts.byIndex('executionId', anchorId, 20);
+  for (const receipt of receipts.filter(row => !row.isDeleted)) await S.voidSimpleRecord(office, {kind: 'receipt', id: receipt.id, reason: 'تنظيف فحص'});
+  const fresh = readSettings(office);
+  await saveExecutionSettings(office, {...fresh, schedule: {...fresh.schedule, accrualTiming: 'AT_PERIOD_START'}});
+});
+
+await check('27) واجهة مركز التنفيذ عربية RTL وبمسميات غير تقنية في كل الشاشات الجديدة', async () => {
+  await app.go(`exc:${anchorId}`);
+  await tick(700);
+  const summary = text(q('.exec-summary'));
+  for (const label of ['المطلوب حتى', 'المحصّل', 'الرصيد', 'المعادلة', 'احسب مدة', 'توكيل جديد', 'محضر تحصيل']) {
+    assert.ok(summary.includes(label), `مسمّى عربي مفقود: ${label}`);
+  }
+  const visibleText = `${text(q('[data-horizon-picker]'))} ${summary}`;
+  assert.ok(!/[A-Za-z]{4,}/.test(visibleText), `تسريب مصطلح إنجليزي في واجهة الأفق: ${visibleText.slice(0, 180)}`);
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+});
+
+await check('28) تغيير «أساس الفترة الشهرية» من الإعدادات يغيّر بنية الجدول فورًا (إعداد مكتب لا كود)', async () => {
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+  const SETTINGS_SERVICE = await import('../../js/services/execution-settings.js');
+  const before = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: true});
+  assert.equal(before.schedule.rows.length, 3, `الافتراضي (يوم الارتكاز) يجب أن يعطي 3 فترات حتى 04/01/2027 — وجد ${before.schedule.rows.length}`);
+  assert.equal(before.schedule.totals.dueMinor, 900000, `المطلوب الافتراضي ${before.schedule.totals.dueMinor}`);
+  const base = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...base, schedule: {...base.schedule, periodBasis: 'CALENDAR_MONTH'}});
+  const after = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: true});
+  assert.equal(after.schedule.rows.length, 4, `أساس الشهر التقويمي يجب أن يعطي 4 فترات — وجد ${after.schedule.rows.length}`);
+  assert.equal(after.schedule.rows[0].status, 'NEEDS_DECISION', 'الفترة الجزئية (01/10–31/10) يجب أن تطلب قرارًا صريحًا بلا احتساب تناسبي');
+  assert.equal(Number(after.schedule.totals.dueMinor), 900000, 'لا يُحتسب ما لم يُقرَّر صراحةً');
+  const now = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...now, schedule: {...now.schedule, periodBasis: 'ANNIVERSARY'}});
+  const restored = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: true});
+  assert.equal(restored.schedule.rows.length, 3, 'لم تُستعد القاعدة الافتراضية');
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+});
+
+await check('29) ترتيب التوزيع والعملة الافتراضية: إعدادان يغيّران النتيجة فعلًا (لا خيار بلا أثر)', async () => {
+  const SETTINGS_SERVICE = await import('../../js/services/execution-settings.js');
+  const base = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...base, schedule: {...base.schedule, allocationOrder: 'fifo'}});
+  await S.recordSimpleCollection(office, {executionId: anchorId, amount: 1000, date: today, paymentMethod: 'نقدي'});
+  const fifo = await S.simpleSchedule(office, anchorId, {asOf: '2026-12-04', allowFuture: true});
+  assert.equal(fifo.schedule.rows[0].paidMinor, 100000, `في «الأقدم أولًا» يجب أن تُخصم 1,000 من الفترة الأولى — وجد ${fifo.schedule.rows[0].paidMinor}`);
+  assert.equal(fifo.schedule.rows[1].paidMinor, 0, `الفترة الثانية يجب أن تبقى بلا سداد — وجد ${fifo.schedule.rows[1].paidMinor}`);
+  const fifoRuleVersion = readSettings(office).ruleVersion;
+  const mid = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...mid, schedule: {...mid.schedule, allocationOrder: 'lifo'}});
+  assert.ok(Number(readSettings(office).ruleVersion) > Number(fifoRuleVersion), 'تغيير ترتيب التوزيع لم يرفع نسخة القواعد');
+  await S.recordSimpleCollection(office, {executionId: anchorId, amount: 1000, date: today, paymentMethod: 'نقدي'});
+  const lifo = await S.simpleSchedule(office, anchorId, {asOf: '2026-12-04', allowFuture: true});
+  assert.equal(lifo.schedule.rows[0].paidMinor, 0, `في «الأحدث فالأقدم» لا يجب أن تصل دفعة إلى الفترة الأقدم — وجد ${lifo.schedule.rows[0].paidMinor}`);
+  assert.equal(lifo.schedule.rows[1].paidMinor, 200000, `كل المدفوع (2,000) يجب أن يتجه إلى الفترة الأحدث — وجد ${lifo.schedule.rows[1].paidMinor}`);
+  // العملة الافتراضية تُطبَّق على السجلات الجديدة (ولا تبدّل عملة مبلغ مسجَّل فعلًا).
+  const afterOrder = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...afterOrder, schedule: {...afterOrder.schedule, defaultCurrency: 'USD'}});
+  const EX = await import('../../js/services/execution.js');
+  const temp = await S.createSimpleExecution(office, {
+    newClientName: 'عميل عملة الفحص', entitlementType: 'نفقة', valueType: 'periodic',
+    periodicity: 'monthly', amount: '1000', effectiveFrom: today
+  });
+  const usd = await S.simpleSchedule(office, temp.execution.id, {asOf: today, allowFuture: true});
+  assert.equal(usd.schedule.currency, 'USD', `العملة الافتراضية لم تُطبَّق على بند جديد — وجد ${usd.schedule.currency}`);
+  const anchorStill = await S.simpleSchedule(office, anchorId, {asOf: '2026-12-04', allowFuture: true});
+  assert.equal(anchorStill.schedule.currency, 'EGP', 'مبلغ مسجَّل صراحةً بعملة يجب ألا تُبدَّل بتغيير الافتراضي');
+  await EX.deleteExecution(office, temp.execution.id, null, 'تنظيف فحص الإعدادات').catch(() => {});
+  const afterCurrency = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...afterCurrency, schedule: {...afterCurrency.schedule, defaultCurrency: 'EGP'}});
+  // تنظيف: إلغاء المحضرين وإعادة القيم الافتراضية
+  const receipts = await office.r.executionReceipts.byIndex('executionId', anchorId, 30);
+  for (const receipt of receipts.filter(row => !row.isDeleted && String(row.status || '') !== 'voided')) {
+    await S.voidSimpleRecord(office, {kind: 'receipt', id: receipt.id, reason: 'تنظيف فحص الإعدادات'});
+  }
+  const now = readSettings(office);
+  await SETTINGS_SERVICE.saveExecutionSettings(office, {...now, schedule: {...now.schedule, allocationOrder: 'fifo'}});
+  const restored = await S.simpleSchedule(office, anchorId, {asOf: '2026-12-04', allowFuture: true});
+  assert.equal(Number(restored.schedule.totals.paidMinor), 0, `لم يُنظَّف التحصيل: ${restored.schedule.totals.paidMinor}`);
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+});
+
+await check('30) «احسب مدة» بمبلغ يدوي: 4,000 × 3 فترات + رسوم 500 + دمغة 100 = 12,600 مع المعادلة', async () => {
+  await app.go(`exc:${anchorId}`);
+  await tick(700);
+  await openModalBy('[data-open-duration]', 500);
+  const form = modalRoot().querySelector('[data-form="duration"]');
+  assert.ok(form, 'نموذج «احسب مدة» غير موجود');
+  const manualBox = form.querySelector('[data-use-manual]');
+  assert.ok(manualBox, 'خيار «استخدم الحساب اليدوي» مفقود');
+  assert.equal(manualBox.checked, false, 'الجدول المسجَّل هو المصدر الافتراضي — والخيار اليدوي اختياري');
+  await fill(form, {fromDate: '2026-10-05', toDate: '2027-01-04', manualAmount: '4000', manualPeriodicity: 'monthly', manualFees: '500', manualStamps: '100'});
+  manualBox.checked = true;
+  await submit(form, 900);
+  const result = text(form.querySelector('[data-result]'));
+  assert.ok(result.includes('12,600'), `الإجمالي اليدوي غير صحيح: ${result.slice(0, 260)}`);
+  assert.ok(result.includes('3'), 'عدد الفترات غير ظاهر');
+  assert.ok(/12,000/.test(result), `إجمالي الفترات غير ظاهر: ${result.slice(0, 260)}`);
+  assert.ok(result.includes('مذكرة'), 'تنبيه «مذكرة يدوية لا تغيّر الرصيد» مفقود');
+  await closeModals();
+  // الجدول المسجَّل لم يتغير من الحساب اليدوي.
+  const after = await S.simpleSchedule(office, anchorId, {asOf: '2027-01-04', allowFuture: true});
+  assert.equal(Number(after.schedule.totals.dueMinor), 900000, `الحساب المسجَّل تأثر بالمذكرة اليدوية: ${after.schedule.totals.dueMinor}`);
+  await resetAsOfPrefs([anchorId, anchorTwoId]);
+});
+
 /* ==================== التقرير ==================== */
 console.log(`\n==================================================`);
 console.log(`${results.length - failures}/${results.length} فحصًا ناجحًا · ${failures} فشل`);
