@@ -18,6 +18,7 @@ import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {buildExecutionSchedule, claimForRange, previewValueChange, buildPoaFigures, currencyCode, minorFromRow, monthLabel, PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {addMinor, fromMinorUnits, sumMinor, toMinorUnits} from '../domain/execution-money.js';
 import {executionSettings} from './execution-settings.js';
+import {executionCache, executionCacheKey, executionCacheScope, bindExecutionCache, isCacheableSchedule, clearExecutionCache} from './execution-cache.js';
 import {addExecutionJudgment, saveValueSlice, createExecution, saveExecutionParty, cancelValueSlice, deleteExecutionJudgment, refreshExecutionSearchText} from './execution.js';
 import {saveEntity} from './entity-save.js';
 import {createLegalFile} from './legal-files.js';
@@ -71,13 +72,29 @@ export async function executionSimpleInputs(office, executionId, {includeDeleted
 }
 
 /** الجدول المشتق + الأرقام الثلاثة (كتابة صفر). */
-export async function simpleSchedule(office, executionId, {asOf = '', fromDate = ''} = {}) {
+export async function simpleSchedule(office, executionId, {asOf = '', fromDate = '', allowFuture = false} = {}) {
+  bindExecutionCache();
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
-  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  const today = localDate();
+  const requested = isCivilDate(asOf) ? asOf : today;
+  // فصل المفهومين (جوهر شكوى «رقم بجانب تاريخ لا يخصّه»):
+  // • تاريخ الحساب المعلن (asOf): ما تمثله الأرقام المعروضة — لا يتجاوز اليوم إلا
+  //   بطلب مستقبلي صريح.
+  // • أفق الفترات (periodThroughDate): أقصى ما تُولَّد له فترات، ولا يتجاوز
+  //   «تاريخ الاستحقاق حتى» المسجَّل على التنفيذ أو آخر فترة معترف بها في FEAS.
+  // وبهذا لا يُنسب مبلغ مُولَّد بعد نهاية الاستحقاق إلى تاريخ نهاية الاستحقاق.
+  const calculationAsOf = allowFuture ? requested : (requested > today ? today : requested);
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf, {allowFuture: true});
+  const cacheKey = executionCacheKey({
+    scope: executionCacheScope(office), executionId, asOf: calculationAsOf, allowFuture, fromDate, periodThrough: periodThroughDate,
+    ruleVersion: settings.ruleVersion, engineVersion: settings.engineVersion
+  });
+  const cached = executionCache.get(cacheKey);
+  if (cached) return {...inputs, schedule: cached, settings, cacheHit: true};
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    // مسار FEAS كما هو: تاريخ الحساب المعلن، وأفق الفترات عند آخر فترة معترف بها.
     const FEAS = await import('./execution-feas.js');
     const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: calculationAsOf, periodThroughDate});
     schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: calculationAsOf, periodThroughDate, settings});
@@ -88,21 +105,76 @@ export async function simpleSchedule(office, executionId, {asOf = '', fromDate =
     });
   }
   schedule.expenses = expensesFrom(inputs.ledger, settings);
-  return {...inputs, schedule, settings};
+  Object.assign(schedule, horizonTransparency(schedule, {requestedAsOf: requested, allowFuture, capDate: periodThroughDate, today}));
+  if (isCacheableSchedule(schedule)) executionCache.set(cacheKey, schedule);
+  return {...inputs, schedule, settings, cacheHit: false};
 }
 
 /**
  * أقصى تاريخ يُحسب إليه الاستحقاق: إذا سجّل المكتب «تاريخ الاستحقاق حتى» على
  * التنفيذ فلا يتجاوزه أي حساب (لا فترات وهمية بعد نهاية المدة المسجلة).
  * يُستخدم في كل مسارات الحساب: الجدول، صفوف القائمة، المدة، والتوكيل.
+ *
+ * allowFuture:
+ *  • false (الافتراضي في القائمة والصفوف): أفق الحساب موقوف عند اليوم، وطلب
+ *    تاريخ مستقبلي لا يُنفَّذ صامتًا — بل تُعاد الحقول أدناه توضح القصّ.
+ *  • true: يُحسب حتى التاريخ المطلوب نفسه (بطاقة التنفيذ و«احسب مدة» و«توكيل»
+ *    حيث يكون التاريخ اختيارًا صريحًا من المستخدم).
  */
-export function claimHorizon(execution, asOf = '') {
+export function claimHorizon(execution, asOf = '', {allowFuture = false} = {}) {
   const today = localDate();
   const requestedDate = isCivilDate(asOf) ? asOf : today;
-  const requested = requestedDate > today ? today : requestedDate;
+  const requested = allowFuture ? requestedDate : (requestedDate > today ? today : requestedDate);
   const through = isCivilDate(execution?.entitlementThroughDate) ? execution.entitlementThroughDate : '';
   return through && through < requested ? through : requested;
 }
+
+/**
+ * شفافية أفق الحساب: كل جدول مُعاد يحمل ما طلبه المستخدم وما حُسب به فعلًا
+ * وسبب القصّ نصًّا. القاعدة الملزمة: ممنوع عرض رقم بجانب تاريخ لم يُحسب عنده.
+ */
+export function horizonTransparency(schedule, {requestedAsOf = '', allowFuture = false, capDate = '', today = localDate()} = {}) {
+  const requested = isCivilDate(requestedAsOf) ? requestedAsOf : today;
+  const effective = isCivilDate(schedule?.asOf) ? schedule.asOf : requested;
+  const ceiling = isCivilDate(capDate) ? capDate : (isCivilDate(schedule?.periodThroughDate) ? schedule.periodThroughDate : effective);
+  const through = isCivilDate(schedule?.entitlementThroughDate) ? schedule.entitlementThroughDate : '';
+  const feas = String(schedule?.accountingModel || '') === 'feas-v1';
+  const reasons = [];
+  // 1) الطلب المستقبلي نفسه لم يُنفَّذ (المفتاح غير مفعَّل) — هذا أول ما يجب إعلانه.
+  if (!allowFuture && requested > effective) reasons.push('future-disabled');
+  // 2) «تاريخ الاستحقاق حتى» المسجَّل على التنفيذ يوقف توليد الفترات.
+  if (through && through < (effective > requested ? effective : requested)) reasons.push('entitlement');
+  // 3) سقف المسار: آخر فترة معترف بها في FEAS أو حد المحرك.
+  if (effective > ceiling && !reasons.includes('entitlement')) reasons.push(feas ? 'feas' : 'engine');
+  const sentences = {
+    'future-disabled': `لم يُحسب بعد ${displayIso(requested)} لأن التاريخ المستقبلي يحتاج تفعيل «احسب حتى تاريخ مستقبلي» — الأرقام المعروضة حتى ${displayIso(effective)}.`,
+    entitlement: `الاستحقاق متوقف عند ${displayIso(through)} لأن «تاريخ الاستحقاق حتى» مسجَّل على التنفيذ — لم تُحسب فترات بعده.`,
+    feas: `الحساب موقوف عند ${displayIso(ceiling)} — آخر فترة معترف بها في نموذج FEAS.`,
+    engine: `الحساب موقوف عند ${displayIso(ceiling)} — حد المحرك لهذا المسار.`
+  };
+  const rows = schedule?.rows || [];
+  const futureRows = rows.filter(row => row.toDate > today);
+  // الفترات التي لم تُستحق بعد فعليًا: تبدأ بعد اليوم وتدخل في المستحق المعروض.
+  const estimatedRows = rows.filter(row => row.fromDate > today && Number(row.dueMinor || 0) > 0);
+  return {
+    requestedAsOf: requested, effectiveAsOf: effective, periodThroughDate: ceiling,
+    horizonCapped: reasons.length > 0,
+    horizonCapReasons: reasons,
+    // إنذار شاشة الأفق يُعرض لما هو قابل للعلاج من الشاشة؛ توقف الاستحقاق المسجَّل
+    // له سطره المستقل قرب الأرقام فلا نكرّره.
+    horizonShowWarning: reasons.some(reason => reason !== 'entitlement'),
+    horizonNote: reasons.map(reason => sentences[reason]).filter(Boolean).join(' '),
+    futurePeriods: futureRows.length,
+    estimatedPeriods: estimatedRows.length,
+    estimatedMinor: estimatedRows.reduce((sum, row) => sum + Number(row.dueMinor || 0), 0),
+    futureEstimate: estimatedRows.length > 0,
+    estimateNote: estimatedRows.length
+      ? `تقديري — ${estimatedRows.length} فترة لم تُستحق بعد (${displayIso(estimatedRows[0].fromDate)} → ${displayIso(estimatedRows.at(-1).toDate)}) وتُعرض بمبلغها المتوقع.`
+      : ''
+  };
+}
+
+const displayIso = iso => (isCivilDate(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
 
 /**
  * «تاريخ الاستحقاق حتى» يوقف توليد الفترات عند تاريخه فقط — ولا يمنع تسجيل
@@ -139,9 +211,10 @@ export function feasRecognizedThrough(periods = []) {
   return ends.at(-1) || '';
 }
 
-export function simpleScheduleHorizon(execution, periods = [], requested = '') {
-  let horizon = claimHorizon(execution, requested);
+export function simpleScheduleHorizon(execution, periods = [], requested = '', {allowFuture = false} = {}) {
+  let horizon = claimHorizon(execution, requested, {allowFuture});
   if (String(execution?.accountingModel || '') === 'feas-v1') {
+    // مسار FEAS القديم لا يتغيّر: الحساب يقف عند آخر فترة معترف بها.
     const recognized = feasRecognizedThrough(periods);
     if (!recognized) return horizon;
     if (recognized < horizon) horizon = recognized;
@@ -283,8 +356,8 @@ export async function hydrateSimpleRows(office, executions = []) {
 }
 
 /** حزمة البطاقة: كل ما تحتاجه شاشة واحدة (بلا أي قراءة داخل الواجهة). */
-export async function simpleCardBundle(office, executionId, {asOf = ''} = {}) {
-  const data = await simpleSchedule(office, executionId, {asOf});
+export async function simpleCardBundle(office, executionId, {asOf = '', allowFuture = true} = {}) {
+  const data = await simpleSchedule(office, executionId, {asOf, allowFuture});
   const execution = data.execution;
   const [client, file] = await Promise.all([
     execution.clientId ? office.r.clients.get(execution.clientId).catch(() => null) : null,
@@ -1083,29 +1156,46 @@ export async function previewSubsequentJudgment(office, executionId, {amount, ef
   return preview;
 }
 
-/** «احسب مدة»: المستحق/المدفوع/المتبقي عن مدة + رصيد سابق + الإجمالي. */
-export async function simpleDurationClaim(office, executionId, {fromDate, toDate, rangeDecisions = []} = {}) {
+/**
+ * «احسب مدة»: المستحق/المدفوع/المتبقي عن مدة + رصيد سابق + الإجمالي.
+ * allowFuture: يُفعَّل عندما يطلب المستخدم تاريخ نهاية مستقبلي صراحةً (تقديري)،
+ * فلا يُقصّ النطاق إلى اليوم بلا إعلان — ومع ذلك يبقى كل رقم معلَّمًا بأنه تقديري.
+ */
+export async function simpleDurationClaim(office, executionId, {fromDate, toDate, rangeDecisions = [], allowFuture = false} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const asOf = localDate();
-  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, asOf);
-  const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate);
+  const today = localDate();
+  const periodThroughDate = simpleScheduleHorizon(inputs.execution, inputs.periods, today, {allowFuture: false});
+  const horizon = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate, {allowFuture});
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
+    // مسار FEAS كما هو: تاريخ الحساب اليوم، والأفق عند آخر فترة معترف بها.
     const FEAS = await import('./execution-feas.js');
-    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf, periodThroughDate});
-    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf, periodThroughDate, settings});
+    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: today, periodThroughDate});
+    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: today, periodThroughDate, settings});
   } else {
     schedule = buildExecutionSchedule({slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-      settings: settings.schedule, asOf, periodThroughDate});
+      settings: settings.schedule, asOf: horizon, periodThroughDate: horizon});
   }
+  // تاريخ قياس المطالبة: اليوم افتراضيًا (المطالبة بالمدة المنقضية)، ومع طلب
+  // صريح لنطاق مستقبلي يصبح حدّ النطاق نفسه حتى تُحتسب الفترات المنتهية داخله.
+  const claimAsOf = allowFuture && horizon > today ? horizon : today;
   const claim = claimForRange({
     slices: feasScheduleSlices(inputs.execution, inputs.slices, inputs.periods), receipts: inputs.receipts, allocations: inputs.allocations,
-    settings: settings.schedule, schedule, fromDate, toDate: horizon, asOf, rangeDecisions
+    settings: settings.schedule, schedule, fromDate, toDate: horizon, asOf: claimAsOf, rangeDecisions
   });
   claim.currencyLabel = claim.totals.currency;
   claim.requestedToDate = toDate;
+  claim.requestedAsOf = toDate;
+  claim.effectiveAsOf = horizon;
+  claim.allowFuture = Boolean(allowFuture);
   claim.horizonCapped = Boolean(toDate && horizon && horizon < toDate);
+  claim.horizonNote = claim.horizonCapped
+    ? `أفق الحساب موقوف عند ${displayIso(horizon)} — فعّل «احسب حتى تاريخ مستقبلي» لاحتساب الفترات القادمة (تقديري).`
+    : '';
+  claim.estimateNote = allowFuture && toDate > today
+    ? `تقديري — هذا النطاق يمتد بعد اليوم (${displayIso(today)}) وتظهر فيه فترات لم تنتهِ بعد بمبلغها المتوقع.`
+    : '';
   return claim;
 }
 
@@ -1141,8 +1231,13 @@ export async function recordSimpleDurationDecisions(office, executionId, {fromDa
   return {decisions: rows.map(row => row.metadata.trace), recorded: rows.length};
 }
 
-/** مسودة توكيل: رصيد سابق + فترة جديدة + فروق مضمّنة (بلا ازدواج) + مصروفات مختارة. */
-export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = []} = {}) {
+/**
+ * مسودة توكيل: رصيد سابق + فترة جديدة + فروق مضمّنة (بلا ازدواج) + مصروفات مختارة.
+ * allowFuture: تُحتسب الفترات المنتهية داخل النطاق حتى لو كان نهايته مستقبلية —
+ * ومع ذلك لا تدخل أي فترة لم تنتهِ في الإجمالي إلا بقرار صريح من المكتب.
+ * previousSource: مصدر الرصيد السابق المعروض (محضر تبديد/حجز مرتبط) — عرض فقط.
+ */
+export async function simplePoaDraft(office, executionId, {fromDate, toDate, includePreviousBalance = true, expenseIds = [], rangeDecisions = [], allowFuture = false, feesMinor = 0, stampsMinor = 0, includeRunningPeriods = false} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
@@ -1157,31 +1252,57 @@ export async function simplePoaDraft(office, executionId, {fromDate, toDate, inc
       requestedToDate: toDate, horizonCapped: Boolean(toDate && feasDraft.toDate && feasDraft.toDate < toDate), suggestedFrom: feasDraft.fromDate};
   }
   const calculationAsOf = localDate();
-  const cappedTo = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate || calculationAsOf);
-  // Keep the selected duration boundary separate from the unit-calculation horizon:
-  // an explicit boundary choice may include the full period even when `toDate` falls inside it.
-  const unitAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
-  let schedule;
-  if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
-    const FEAS = await import('./execution-feas.js');
-    const balance = await FEAS.executionFeasBalanceData(office, executionId, {asOf: calculationAsOf, periodThroughDate: unitAsOf});
-    schedule = feasScheduleFromBalance({inputs, summary: balance.summary, asOf: calculationAsOf, periodThroughDate: unitAsOf, settings});
-  } else {
-    schedule = buildExecutionSchedule({
-      slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
-      settings: settings.schedule, asOf: calculationAsOf, periodThroughDate: unitAsOf
-    });
-  }
+  const cappedTo = simpleScheduleHorizon(inputs.execution, inputs.periods, toDate || calculationAsOf, {allowFuture});
+  // الجدول يُبنى حتى نهاية النطاق المطلوب فعلًا (cappedTo) لا عند اليوم، وإلا
+  // اختفت فترات داخل النطاق فحسب التوكيل فترة واحدة — وهذا هو جوهر شكوى
+  // «التوكيل لا يعمل». كل بند بعد اليوم يبقى معلَّمًا «لم تنتهِ بعد» ولا يدخل
+  // الإجمالي إلا بقرار صريح من المكتب.
+  const schedule = buildExecutionSchedule({
+    slices: inputs.slices, receipts: inputs.receipts, allocations: inputs.allocations, ledger: inputs.ledger,
+    settings: settings.schedule, asOf: cappedTo, periodThroughDate: cappedTo
+  });
   const expenses = expensesFrom(inputs.ledger, settings);
-  const draft = buildPoaFigures({schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions});
+  const source = previousBalanceSource(inputs.actions);
+  const draft = buildPoaFigures({
+    schedule, fromDate, toDate: cappedTo, includePreviousBalance, expenses, expenseIds, rangeDecisions,
+    feesMinor, stampsMinor, previousSource: source, includeRunningPeriods
+  });
   draft.rangeDecisions = draft.rangeDecisions || [];
   draft.partials = draft.partials || [];
   draft.requestedToDate = toDate;
+  draft.requestedAsOf = toDate || calculationAsOf;
+  draft.effectiveAsOf = cappedTo || calculationAsOf;
+  draft.allowFuture = Boolean(allowFuture);
   draft.horizonCapped = Boolean(toDate && cappedTo && cappedTo < toDate);
+  draft.horizonNote = draft.horizonCapped
+    ? `النطاق المطلوب ينتهي عند ${displayIso(toDate)} والحساب موقوف عند ${displayIso(cappedTo)} — فعّل «احتساب الفترات المستقبلية (تقديري)» لإظهار الفترات القادمة.`
+    : '';
+  draft.estimateNote = allowFuture && toDate > calculationAsOf
+    ? `تقديري — النطاق يمتد بعد اليوم (${displayIso(calculationAsOf)}).`
+    : '';
   const suggestedFrom = inputs.slices.length
     ? (schedule.rows.find(row => row.remainingMinor > 0)?.fromDate || fromDate)
     : fromDate;
   return {...draft, suggestedFrom, execution: inputs.execution, expenses};
+}
+
+/**
+ * مصدر الرصيد السابق: آخر محضر تبديد/حجز مسجَّل على التنفيذ (عرض وربط فقط).
+ * لا يُنشئ النظام رصيدًا ولا يفترض رقمًا — يذكّر المكتب بمصدر ما هو مسجَّل أصلًا.
+ */
+export function previousBalanceSource(actions = []) {
+  const isSeizure = action => ['dissipation', 'seizure'].includes(String(action?.kind || ''))
+    || /تبديد|حجز/.test(String(action?.kindLabel || ''));
+  const rows = (actions || [])
+    .filter(action => action && !action.isDeleted && String(action.status || '') !== 'voided' && isSeizure(action))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const row = rows[0];
+  if (!row) return null;
+  const kindLabel = row.kindLabel || (String(row.kind) === 'dissipation' ? 'تبديد' : 'حجز');
+  return {
+    kind: row.kind || '', id: row.id, date: row.date || '', referenceNumber: row.referenceNumber || '', authority: row.authority || '',
+    label: `مرتبط بمحضر ${kindLabel}${row.referenceNumber ? ` رقم ${row.referenceNumber}` : ''}${row.date ? ` بتاريخ ${displayIso(row.date)}` : ''}`
+  };
 }
 
 /** حفظ التوكيل موقّعًا كنسخة غير قابلة للتعديل (Snapshot) + طبعه عبر PrintContext. */
@@ -1203,7 +1324,8 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
   }
   const lines = (draft.lines || []).map(line => ({
     key: line.periodKey || line.kind, label: line.label, fromDate: line.fromDate || '', toDate: line.toDate || '',
-    amount: fromMinorUnits(line.amountMinor, draft.currency), amountMinor: line.amountMinor, included: true, note: line.note || '', detail: line.note || ''
+    amount: fromMinorUnits(line.amountMinor, draft.currency), amountMinor: line.amountMinor, included: true,
+    note: [line.equation, line.note].filter(Boolean).join(' — '), detail: [line.equation, line.note, line.source?.label].filter(Boolean).join(' — ')
   }));
   const poa = await POA.saveExecutionPoa(office, {
     executionId, previousPoaId: draft.previousPoaId || '', poaNumber: String(draft.poaNumber || '').trim(),
@@ -1213,10 +1335,26 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
     previousBalance: fromMinorUnits(draft.previousAppliedMinor, draft.currency),
     differencesAmount: fromMinorUnits(draft.differencesMinor, draft.currency),
     expensesAmount: fromMinorUnits(draft.expensesMinor, draft.currency),
-    stampAmount: 0, total: fromMinorUnits(draft.totalMinor, draft.currency),
+    stampAmount: fromMinorUnits(draft.stampsMinor || 0, draft.currency),
+    // حقول إضافية اختيارية (لا تغيّر السكيمة: لا مخزن ولا فهرس جديد):
+    // رسوم يدوية، ومصدر الرصيد السابق، ومعادلات المعاينة، والفترات الجارية المُدرجة بقرار.
+    feesAmount: fromMinorUnits(draft.feesMinor || 0, draft.currency),
+    previousBalanceSource: draft.previousSource || null,
+    equationsSnapshot: draft.equations || [],
+    includedRunningPeriods: draft.runningIncluded || [],
+    total: fromMinorUnits(draft.totalMinor, draft.currency),
     lines, judgmentIds: [], rangeDecisionsSnapshot: draft.rangeDecisions || [], notes: String(notes || '').trim()
   });
   emitChanged(STORE.executionPOAs, poa.id);
+  // ملخّص المعادلة في Activity Log: كل رقم صدر في التوكيل يمكن تتبّعه لاحقًا.
+  if (draft.equations?.length) {
+    await transaction(office.ctx, [STORE.activityLog], async tx => {
+      await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionPOAs, poa.id, 'poa-equations',
+        `معادلة التوكيل ${poa.poaNumber || ''}: ${draft.equations.join(' · ')}`,
+        execution.fileId || '', {executionId, poaId: poa.id, totalMinor: draft.totalMinor, feesMinor: draft.feesMinor || 0, stampsMinor: draft.stampsMinor || 0,
+          includeRunningPeriods: Boolean(draft.includeRunningPeriods), previousSource: draft.previousSource?.label || ''}))); 
+    }).catch(error => console.info('poa equations log skipped', error));
+  }
   if (printNow) {
     const PR = await import('./execution-print.js');
     await PR.printPoa(office, poa.id).catch(() => null);
@@ -1229,11 +1367,13 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
  * كشف حساب بسيط (ملخص/تفصيلي شهري/عن مدة) → HTML يُطبع عبر PrintContext القائم.
  * التواريخ DD/MM/YYYY والأرقام بفواصل آلاف والعملة ظاهرة.
  */
-export async function simpleStatementDocument(office, executionId, {mode = 'monthly', fromDate = '', toDate = '', asOf = '', rangeDecisions = []} = {}) {
+export async function simpleStatementDocument(office, executionId, {mode = 'monthly', fromDate = '', toDate = '', asOf = '', rangeDecisions = [], allowFuture = false} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
   const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
-  const statementAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf);
+  // تاريخ الكشف نفسه الذي تراه الشاشة: طلب مستقبلي صريح يُنفَّذ مع وسم «تقديري»،
+  // ولا يُطبع رقم منسوب إلى تاريخ مختلف عن المعروض.
+  const statementAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf, {allowFuture});
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
     const FEAS = await import('./execution-feas.js');
@@ -1258,7 +1398,8 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
   const rows = (claim ? claim.rows : schedule.rows);
   const expenses = expensesFrom(inputs.ledger, settings);
   const parts = [];
-  parts.push(`<header><h1>كشف حساب تنفيذ</h1><p class="muted">${execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم'} — تاريخ الحساب الفعلي: ${date(schedule.asOf)} — أفق الفترات: ${date(schedule.periodThroughDate || schedule.asOf)}</p></header>`);
+  const estimatedStatement = Boolean(allowFuture && calculationAsOf > localDate() && schedule.asOf >= calculationAsOf);
+  parts.push(`<header><h1>كشف حساب تنفيذ</h1><p class="muted">${execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم'} — تاريخ الحساب الفعلي: ${date(schedule.asOf)} — أفق الفترات: ${date(schedule.periodThroughDate || schedule.asOf)}${estimatedStatement ? ' — <b>تقديري</b>: يشمل فترات لم تُستحق بعد بمبلغها المتوقع' : ''}</p></header>`);
   parts.push(`<section class="grid2">
     <div><b>الموكل:</b> ${client?.fullName || '—'}</div>
     <div><b>المنفذ ضده:</b> ${inputs.parties.find(party => party.side === 'debtor')?.name || '—'}</div>

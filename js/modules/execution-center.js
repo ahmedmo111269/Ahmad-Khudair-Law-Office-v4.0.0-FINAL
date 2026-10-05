@@ -31,15 +31,46 @@ import {
   subsequentJudgmentDialog, simplePoaDialog, simpleNoteDialog, durationDialog, statementDialog,
   valueSetupDialog, executionSettingsDialog, executionHelpDialog
 } from '../ui/execution-simple-forms.js';
+import {executionSummaryCardMarkup, summaryEquation} from '../ui/execution-summary-card.js';
+import {
+  horizonPickerMarkup, bindHorizonPicker, horizonSummary,
+  ASOF_SCOPE_KEY, asOfScope, asOfKeyFor, resolveAsOf
+} from '../ui/execution-horizon-picker.js';
 import {
   executionDialog, executionObligationDialog, recognitionDialog, partyDialog, judgmentDialog,
   settlementReviewDialog, snapshotDialog, simulatorDialog, comparisonDialog, printBalanceDialog
 } from '../ui/execution-forms.js';
 
 const TAB_KEY = 'ui:exec:tab:v1';
+/** التاريخ الموحّد (افتراضي الجلسة) — ولم يعد يخفي أرقام البطاقات: لكل تنفيذ مفتاحه الخاص. */
 const ASOF_KEY = 'ui:exec:asof:v1';
 const COUNT_KEY = 'ui:exec:count:v1';
 const accountFilterKey = executionId => `ui:exec:account-filter:${executionId}`;
+/**
+ * تاريخ حساب «المطلوب حتى» لكل تنفيذ على حدة (BUG-4): كان مفتاحًا عالميًا واحدًا
+ * فيتغيّر رقم بطاقة (أ) عند تغيير بطاقة (ب). المحلي أولًا، والعام افتراضي فقط.
+ */
+const asOfFor = (app, executionId) => resolveAsOf(executionId, ASOF_KEY);
+/**
+ * قرار «احسب حتى تاريخ مستقبلي» داخل صفحة البطاقة: حاليّ لكل فتحة صفحة،
+ * فلا يُخزَّن كتفضيل دائم ولا يترك أثرًا على حسابات لم يُغيّر المستخدم تاريخها.
+ */
+const detailAllowFuture = new Map();
+/** هل يُحسب ما بعد اليوم في هذه البطاقة؟ الافتراضي نعم (تاريخ المستخدم ينفَّذ)، وإلغاؤه اختيار صريح. */
+const allowFutureFor = executionId => detailAllowFuture.get(executionId) !== false;
+const saveAsOf = async (app, executionId, value) => {
+  const key = asOfScope() === 'global' ? ASOF_KEY : asOfKeyFor(executionId);
+  await prefs.set(key, value || '');
+};
+const clearAsOf = async (app, executionId) => {
+  detailAllowFuture.delete(executionId);
+  await prefs.set(asOfKeyFor(executionId), '');
+  // في الوضع الموحّد لا يكفي مسح المحلي — نمسح الموحّد أيضًا حتى يعود الرقم فعلًا.
+  if (asOfScope() === 'global') { await prefs.set(ASOF_KEY, ''); return; }
+  // الوضع الافتراضي: يُمسح المحلي فقط، وإن كان في التاريخ الموحّد قيمة فإننا
+  // نثبّت لهذه البطاقة استثناءً محليًا عند اليوم — فلا تتأثر بقية البطاقات.
+  if (prefs.get(ASOF_KEY, '')) await prefs.set(asOfKeyFor(executionId), localDate());
+};
 
 /* ============================ تنسيقات موحدة ============================ */
 const money = (minor, currency = 'EGP') => `${fromMinorUnits(minor || 0, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ج.م`;
@@ -119,6 +150,17 @@ const listState = app => (app.__execCenter = app.__execCenter || {
   count: prefs.get(COUNT_KEY, 'all'), search: prefs.get('ui:exec:q', ''), counts: null, counted: 0, scannedAll: false, ready: false
 });
 const cardState = app => (app.__execSimple = app.__execSimple || {});
+
+/**
+ * ربط **كل** العناصر المطابقة لخطاف واحد.
+ * querySelector المفرد لا يكفي عند تكرار الخطاف: زر «إعدادات التنفيذ» يظهر في
+ * الترويسة **وداخل** ملاحظة الفترة الجارية، وكان الربط المفرد يجعل الثاني ميتًا.
+ */
+const bindAll = (container, selector, handler) => {
+  const nodes = container?.querySelectorAll?.(selector) || [];
+  nodes.forEach(node => node.addEventListener('click', handler));
+  return nodes.length;
+};
 
 /* ============================ صفحة القائمة ============================ */
 export function executionCenterPage(app) {
@@ -316,8 +358,8 @@ export async function bindExecutionCenter(app) {
     return {counts, counted: items.length, scannedAll: !hasMore};
   };
 
-  root.querySelector('[data-new-execution]')?.addEventListener('click', () => newExecutionDialog(app));
-  root.querySelector('[data-demo-example]')?.addEventListener('click', async event => {
+  bindAll(root, '[data-new-execution]', () => newExecutionDialog(app));
+  bindAll(root, '[data-demo-example]', async event => {
     const button = event.currentTarget;
     const label = button.textContent;
     button.disabled = true;
@@ -332,11 +374,12 @@ export async function bindExecutionCenter(app) {
       button.textContent = label;
     }
   });
-  root.querySelector('[data-help]')?.addEventListener('click', () => openHelp(app));
-  root.querySelector('[data-settings]')?.addEventListener('click', () => executionSettingsDialog(app));
-  root.querySelector('[data-customize-page]')?.addEventListener('click', () => openPageCustomizer(app, {pageId: 'executionCenter', root}));
-  root.querySelector('[data-exec-trash]')?.addEventListener('click', () => openExecutionTrash(app));
-  root.querySelector('[data-exec-demo]')?.addEventListener('click', async event => {
+  bindAll(root, '[data-help]', () => openHelp(app));
+  // زر الإعدادات يظهر في الترويسة وقد يظهر داخل شرح آخر — الربط لكل المطابق.
+  bindAll(root, '[data-settings]', event => executionSettingsDialog(app, {opener: event?.currentTarget || null}));
+  bindAll(root, '[data-customize-page]', () => openPageCustomizer(app, {pageId: 'executionCenter', root}));
+  bindAll(root, '[data-exec-trash]', () => openExecutionTrash(app));
+  bindAll(root, '[data-exec-demo]', async event => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
@@ -364,7 +407,7 @@ export async function bindExecutionCenter(app) {
       button.disabled = false;
     }
   });
-  root.querySelector('[data-exec-clear]')?.addEventListener('click', async () => {
+  bindAll(root, '[data-exec-clear]', async () => {
     const answer = await confirmBox('مسح كل بيانات قسم التنفيذ؟ تُمسح التنفيذات وأحكامها وشرائح القيمة ومحاضر التحصيل والتوكيلات والفروق. بقية أقسام المكتب تبقى كما هي. اكتب سبب المسح ليُحفظ في السجل.', {okText: 'مسح قسم التنفيذ', input: true, label: 'سبب المسح'});
     if (!answer?.ok) return;
     if (!String(answer.value || '').trim()) { toast('السبب مطلوب', 'error'); return; }
@@ -377,13 +420,13 @@ export async function bindExecutionCenter(app) {
     } catch (error) { toast(userError(error), 'error'); }
   });
   let searchTimer = 0;
-  root.querySelector('[data-search]')?.addEventListener('input', event => {
+  root.querySelectorAll('[data-search]').forEach(input => input.addEventListener('input', event => {
     st.search = event.target.value;
     prefs.set('ui:exec:q', st.search);
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => reload().catch(error => app.fail(error)), 250);
-  });
-  root.querySelector('[data-clear-search]')?.addEventListener('click', async () => {
+  }));
+  bindAll(root, '[data-clear-search]', async () => {
     st.search = ''; prefs.set('ui:exec:q', '');
     const input = root.querySelector('[data-search]');
     if (input) input.value = '';
@@ -473,7 +516,12 @@ export async function executionDetailPage(app, executionId) {
     ]
   });
   let bundle = null;
-  try { bundle = await S.simpleCardBundle(app.office, executionId, {asOf: prefs.get(ASOF_KEY, '') || ''}); }
+  // تاريخ «المطلوب حتى» من هذا التنفيذ وحده (المحلي أولًا)، والمستقبل مسموح
+  // افتراضيًا حتى ينفّذ النظام التاريخ الذي اختاره المستخدم فعلًا.
+  const asOf = asOfFor(app, executionId);
+  // إظهار الفترات المستقبلية افتراضي (تاريخ المستخدم يُنفَّذ)، وإلغاؤه من مفتاح
+  // الأفق قرار حاليّ داخل الصفحة لا يُخزَّن كتفضيل دائم.
+  try { bundle = await S.simpleCardBundle(app.office, executionId, {asOf, allowFuture: allowFutureFor(executionId)}); }
   catch (error) { return `<div class="error-box" role="alert"><h2>${esc(userError(error))}</h2><p class="muted small">قد يكون ملف التنفيذ محذوفًا. راجعه في سلة التنفيذ.</p><div class="error-actions"><button class="primary" data-route="executionCenter">رجوع إلى مركز التنفيذ</button></div></div>`; }
   cardState(app)[executionId] = bundle;
   const {execution, client, file, creditor, debtor, schedule, status} = bundle;
@@ -550,9 +598,13 @@ function runningPeriodNote(bundle) {
   if (!rows.length) return '';
   const currency = bundle.schedule.currency;
   const projected = rows.reduce((sum, row) => sum + Number(row.projectedMinor || 0), 0);
+  const included = rows.some(row => Number(row.dueMinor || 0) > 0);
   const dueOn = rows.map(row => row.toDate).filter(Boolean).sort().at(-1) || '';
   const list = rows.slice(0, 4).map(row => `${esc(dateText(row.fromDate))} – ${esc(dateText(row.toDate))}`).join(' · ');
-  return `<p class="hint hint-info">⏳ <b>فترة جارية لم تكتمل:</b> ${list} — قيمتها المتوقعة <b>${money(projected, currency)}</b>${dueOn ? ` وتُستحق في <b>${esc(dateText(dueOn))}</b>` : ''}. لا تدخل في «المطلوب» أعلاه إلا باكتمالها؛ ويمكن احتسابها من بدايتها بتغيير «توقيت الاستحقاق» في <button type="button" class="link" data-settings>إعدادات التنفيذ</button>.</p>`;
+  const rule = included
+    ? `احتسبها النظام من بدايتها لأن «توقيت الاستحقاق» الحالي يجعله مستحقًا مع بداية الفترة، فهي داخلة في «المطلوب» أعلاه بمبلغها.`
+    : `لا تدخل في «المطلوب» أعلاه إلا باكتمالها.`;
+  return `<p class="hint hint-info">⏳ <b>فترة جارية لم تكتمل:</b> ${list} — قيمتها المتوقعة <b>${money(projected, currency)}</b>${dueOn ? ` وتُستحق في <b>${esc(dateText(dueOn))}</b>` : ''}. ${rule} ويمكن تغيير ذلك من <button type="button" class="link" data-settings>إعدادات التنفيذ</button>.</p>`;
 }
 
 function summarySectionMarkup(bundle) {
@@ -561,12 +613,10 @@ function summarySectionMarkup(bundle) {
   const currency = schedule.currency;
   const progress = totals.dueMinor > 0 ? Math.min(100, Math.round((totals.allocatedMinor / totals.dueMinor) * 100)) : 0;
   const expensesMinor = expenses.reduce((sum, item) => sum + item.amountMinor, 0);
+  const allowFuture = allowFutureFor(bundle.execution.id);
   return `<section class="panel exec-summary" data-section-id="summary">
-    <div class="asof-row">
-      <label>المطلوب حتى <input type="date" data-asof value="${esc(schedule.asOf)}" aria-label="تاريخ الحساب"></label>
-      ${schedule.asOf && schedule.asOf !== localDate() ? `<button type="button" class="ghost small" data-asof-today>↺ ارجع إلى اليوم</button><span class="hint hint-warn small">الحساب موقوف عند تاريخ قديم — هذا يخفي الأرقام عن كل التنفيذات حتى تعيده إلى اليوم.</span>` : ''}
-      <span class="muted small">غيّر التاريخ تغيّر الأرقام والجدول فورًا — بلا أي خطوة أخرى.</span>
-    </div>
+    ${executionSummaryCardMarkup(bundle)}
+    ${horizonPickerMarkup(bundle, {asOf: schedule.requestedAsOf || schedule.asOf, allowFuture})}
     ${cappedNote(bundle)}
     <div class="exec-numbers">
       <button type="button" class="num" data-trace="due"><span>المطلوب حتى ${esc(dateText(schedule.asOf))}</span><b>${moneyShort(totals.dueMinor, currency)}</b><small>ج.م · اضغط للتفسير</small></button>
@@ -842,6 +892,8 @@ export async function bindExecutionDetail(app, executionId) {
     expense: () => simpleExpenseDialog(app, executionId),
     poa: () => openPoa(),
     collection: () => openCollection(),
+    action: () => openAction(null),
+    statement: () => openStatement(),
     lifecycle: async () => {
       const answer = await confirmBox('إيقاف هذا التنفيذ مؤقتًا؟ اكتب السبب ليُحفظ في السجل (الحالة الوحيدة التي تضبطها بنفسك).', {okText: 'إيقاف', input: true, label: 'سبب الإيقاف'});
       if (!answer?.ok) return undefined;
@@ -908,11 +960,37 @@ export async function bindExecutionDetail(app, executionId) {
     container.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', guard(() => runAction[button.dataset.action]?.())));
     container.querySelectorAll('[data-trace]').forEach(button => button.addEventListener('click', () => traceDialog(bundle, button.dataset.trace)));
     container.querySelectorAll('[data-open-duration]').forEach(button => button.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true}))));
+    // الإعدادات قد تظهر في أكثر من موضع داخل نفس الحاوية (ملاحظة الفترة الجارية
+    // مثلًا) — الربط لكل المطابق لا للأول فقط.
+    bindAll(container, '[data-settings]', () => executionSettingsDialog(app));
     container.querySelectorAll('[data-statement-mode]').forEach(button => button.addEventListener('click', guard(async () => {
-      await S.printSimpleStatement(app.office, executionId, {mode: button.dataset.statementMode, asOf: bundle.schedule.asOf});
+      // نفس تاريخ الشاشة (وإن كان مستقبليًا صريحًا) حتى لا يطبع رقم منسوب لتاريخ آخر.
+      await S.printSimpleStatement(app.office, executionId, {mode: button.dataset.statementMode, asOf: bundle.schedule.effectiveAsOf || bundle.schedule.asOf, allowFuture: true});
       toast('فُتح الكشف للطباعة');
       return undefined;
     })));
+    // بطاقة الملخص: زر «تغيير التاريخ» ينقل التركيز إلى حقل التاريخ نفسه.
+    bindAll(container, '[data-horizon-focus]', () => {
+      const input = root.querySelector('[data-horizon-picker] [data-asof]');
+      input?.focus?.();
+      input?.scrollIntoView?.({block: 'center'});
+    });
+    // معادلة الرقم في بطاقة الملخص تُفتح على نفس نافذة التفسير القائمة.
+    bindAll(container, '[data-equation-details]', () => traceDialog(bundle, 'due'));
+    // شاشة «المطلوب حتى تاريخ»: الاختصارات والتحقق من أفق الحساب.
+    bindHorizonPicker(container, {
+      // ملاحظة: قرار «احسب حتى تاريخ مستقبلي» حاليّ لا يُخزّن؛ يُطبَّق عند التحديث
+      // التالي للبطاقة فقط، فلا يترك أثرًا دائمًا على حساب لم يُغيّر تاريخه.
+      onApply: async ({date, allowFuture}) => {
+        await saveAsOf(app, executionId, date);
+        detailAllowFuture.set(executionId, Boolean(allowFuture));
+        await app.refresh();
+      }
+    });
+    bindAll(container, '[data-asof-today]', async () => {
+      await clearAsOf(app, executionId);
+      await app.refresh();
+    });
     container.querySelectorAll('[data-hint-action]').forEach(button => button.addEventListener('click', guard(() => (button.dataset.hintAction === 'judgment' ? runAction.edit() : openValue()))));
     container.querySelectorAll('[data-row-info]').forEach(button => button.addEventListener('click', () => periodDetailsDialog(app, bundle, button.dataset.rowInfo)));
     container.querySelectorAll('[data-change]').forEach(button => button.addEventListener('click', () => {
@@ -981,19 +1059,19 @@ export async function bindExecutionDetail(app, executionId) {
 
   root.querySelectorAll('.exec-toolbar [data-action]').forEach(button => button.addEventListener('click', guard(() => runAction[button.dataset.action]?.())));
   root.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab).catch(error => app.fail(error))));
-  root.querySelector('[data-record]')?.addEventListener('click', openRecord);
-  root.querySelector('[data-open-duration]')?.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true})));
-  root.querySelector('[data-open-statement]')?.addEventListener('click', openStatement);
-  root.querySelector('[data-help]')?.addEventListener('click', () => openHelp(app));
-  root.querySelector('[data-settings]')?.addEventListener('click', () => executionSettingsDialog(app));
+  // كل خطاف يُربط لكل عناصره: querySelector المفرد يترك أزرارًا ميتة عند تكراره.
+  bindAll(root, '[data-record]', openRecord);
+  root.querySelectorAll('[data-open-duration]').forEach(button => button.addEventListener('click', guard(() => durationDialog(app, executionId, {lockExecution: true}))));
+  root.querySelectorAll('[data-open-statement]').forEach(button => button.addEventListener('click', openStatement));
+  bindAll(root, '[data-help]', () => openHelp(app));
+  bindAll(root, '[data-settings]', () => executionSettingsDialog(app));
   const moreMenu = root.querySelector('[data-more-menu]');
-  const moreButton = root.querySelector('[data-more]');
-  moreButton?.addEventListener('click', () => {
+  root.querySelectorAll('[data-more]').forEach(moreButton => moreButton.addEventListener('click', () => {
     if (!moreMenu) return;
     moreMenu.hidden = !moreMenu.hidden;
     moreButton.setAttribute('aria-expanded', String(!moreMenu.hidden));
-  });
-  root.querySelector('[data-delete-execution]')?.addEventListener('click', async () => {
+  }));
+  bindAll(root, '[data-delete-execution]', async () => {
     if (!await confirmBox('حذف ملف التنفيذ بالكامل منطقيًا؟ يُحفظ كل شيء ويمكن استعادته من سلة التنفيذ.', {okText: 'حذف الملف'})) return;
     try {
       await EX.deleteExecution(app.office, executionId, bundle.execution.version ?? null, 'حذف من البطاقة');
@@ -1001,17 +1079,8 @@ export async function bindExecutionDetail(app, executionId) {
       await app.go('executionCenter');
     } catch (error) { toast(userError(error), 'error'); }
   });
-  const asofInput = root.querySelector('[data-asof]');
-  asofInput?.addEventListener('change', async () => {
-    prefs.set(ASOF_KEY, asofInput.value || '');
-    await app.refresh();
-  });
-  // زر الرجوع إلى اليوم: تاريخ الحساب محفوظ عالميًا، وتاريخ قديم يخفي الحسابات
-  // عن كل التنفيذات (وينشأ تنفيذ جديد يبدو بلا أرقام) — فنجعل الرجوع بنقرة واحدة.
-  root.querySelector('[data-asof-today]')?.addEventListener('click', async () => {
-    prefs.set(ASOF_KEY, '');
-    await app.refresh();
-  });
+  // «المطلوب حتى» أصبح لكل تنفيذ على حدة (BUG-4): تغيير تاريخ بطاقة لا يمسّ
+  // بطاقة أخرى. الربط داخل bindContainer (شاشة الأفق + الاختصارات).
   // الجوال: نفس شريط الأزرار مثبَّت أسفل الشاشة.
   const toolbar = root.querySelector('.exec-toolbar');
   if (toolbar) {
@@ -1039,9 +1108,15 @@ function traceDialog(bundle, which) {
   const {schedule} = bundle;
   const currency = schedule.currency;
   const totals = schedule.totals;
-  const title = {due: 'المطلوب حتى اليوم', paid: 'المدفوع', remaining: 'المتبقي'}[which] || 'الأرقام';
+  const title = {due: 'المطلوب حتى التاريخ', paid: 'المدفوع', remaining: 'المتبقي'}[which] || 'الأرقام';
+  const effective = schedule.effectiveAsOf || schedule.asOf;
+  const requested = schedule.requestedAsOf || effective;
+  const horizonLines = [
+    `تاريخ الحساب الفعلي: ${dateText(effective)}${schedule.horizonCapped && requested !== effective ? ` — التاريخ المطلوب ${dateText(requested)} لم يُحسب بعده (${schedule.horizonNote || 'سبب غير مسجَّل'})` : ''}`,
+    schedule.estimatedPeriods ? `فترات تقديرية (لم تُستحق بعد): ${schedule.estimatedPeriods} بإجمالي ${money(schedule.estimatedMinor, currency)} — ${schedule.estimateNote || ''}` : ''
+  ].filter(Boolean);
   const equations = which === 'due'
-    ? [`مجموع استحقاق الفترات حتى ${dateText(schedule.asOf)} = ${money(totals.dueMinor, currency)}`, ...schedule.rows.slice(0, 12).map(row => `${row.label}: ${row.trace?.equation || `${money(row.dueMinor, currency)}`}`)]
+    ? [`المعادلة: ${summaryEquation(bundle)}`, ...horizonLines, `مجموع استحقاق الفترات حتى ${dateText(effective)} = ${money(totals.dueMinor, currency)}`, ...schedule.rows.slice(0, 12).map(row => `${row.label}: ${row.trace?.equation || `${row.units?.[0]?.parts?.map(part => part.equation).filter(Boolean).join(' + ') || money(row.dueMinor, currency)}`}`)]
     : which === 'paid'
       ? [`مجموع المحاضر المسجلة = ${money(totals.paidMinor, currency)}`, `المخصّص على الفترات = ${money(totals.allocatedMinor, currency)}`, `رصيد دائن غير مخصص = ${money(totals.creditMinor, currency)}`, ...(schedule.receipts || []).map(receipt => `${receipt.receiptNumber || 'محضر'} ${dateText(receipt.date)}: ${money(receipt.amountMinor, currency)} (مخصص ${money(receipt.allocatedMinor, currency)}${receipt.creditMinor ? ` · دائن ${money(receipt.creditMinor, currency)}` : ''})`)]
       : [`المتبقي = المطلوب − المخصّص = ${money(totals.remainingMinor, currency)}`, ...schedule.rows.filter(row => row.remainingMinor > 0).slice(0, 12).map(row => `${row.label}: ${money(row.dueMinor, currency)} − ${money(row.paidMinor, currency)} = ${money(row.remainingMinor, currency)}`), ...(totals.overpaidMinor > 0 ? [`دفعة زائدة ظاهرة: ${money(totals.overpaidMinor, currency)} (بلا رد تلقائي)`] : [])];
