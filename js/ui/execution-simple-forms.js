@@ -13,6 +13,7 @@ import {localDate} from '../core/clock.js';
 import {userError} from '../core/errors.js';
 import {fromMinorUnits, toMinorUnits} from '../domain/execution-money.js';
 import {addCivilDays, isCivilDate} from '../domain/execution-calendar.js';
+import {enumerateExecutionUnits} from '../domain/execution-period-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import * as S from '../services/execution-simple.js';
 import {executionSettings, saveExecutionSettings, resetExecutionSettings, actionKindOptions, expenseTypeOptions, entitlementOptions, collectionMethodOptions, executionMethodOptions, borneByLabelOf} from '../services/execution-settings.js';
@@ -654,6 +655,9 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
     {key: 'last12', label: 'آخر 12 شهرًا', from: addCivilDays(today, -365), to: today},
     {key: 'year', label: 'السنة الحالية', from: `${today.slice(0, 4)}-01-01`, to: today}
   ];
+  // Preset amount from bundle if available
+  const bundleData = bundle || null;
+  const presetAmount = bundleData?.slices?.filter(s => !['cancelled', 'superseded'].includes(String(s.status || ''))).at(-1)?.amount || '';
   const card = modal(`<h2 class="modal-title">🧮 احسب مبلغ مدة</h2>
     ${executions.length ? `<label class="field">التنفيذ
       <select name="executionId">${executions.map(row => `<option value="${esc(row.id)}"${row.id === clientsDefault ? ' selected' : ''}>${esc(row.internalNumber || row.officialNumber || 'تنفيذ')}</option>`).join('')}</select>
@@ -665,7 +669,27 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
         <label class="field">من <b class="req">*</b><input name="fromDate" type="date" value="${esc(presetFrom || `${today.slice(0, 4)}-01-01`)}"></label>
         <label class="field">إلى <b class="req">*</b><input name="toDate" type="date" value="${esc(presetTo || today)}"></label>
       </div>
-      <div class="alloc-preview" data-result aria-live="polite"><span class="muted small">اختر المدة ثم اضغط احسب.</span></div>
+      <fieldset data-manual-calc>
+        <legend>💰 الحساب بالمبلغ اليدوي</legend>
+        <p class="muted small">أدخل المبلغ يدويًا (مثل مبلغ النفقة) ليُحسب بناءً عليه — يعمل حتى بدون إعداد قيمة التنفيذ.</p>
+        <div class="form-grid">
+          <label class="field">المبلغ (ج.م)<input name="manualAmount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(presetAmount)}" placeholder="مثال: 4000"></label>
+          <label class="field">الدورية
+            <select name="manualPeriodicity">
+              <option value="monthly" selected>شهري</option>
+              <option value="weekly">أسبوعي</option>
+              <option value="semiMonthly">نصف شهري</option>
+              <option value="yearly">سنوي</option>
+            </select>
+          </label>
+          <label class="field">رسوم التنفيذ (ج.م) <small class="muted">(اختياري)</small><input name="manualFees" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 500"></label>
+          <label class="field">دمغة (ج.م) <small class="muted">(اختياري)</small><input name="manualStamps" type="number" min="0" step="0.01" inputmode="decimal" placeholder="مثال: 100"></label>
+        </div>
+        <label class="check-line" style="margin-top:8px;">
+          <input type="checkbox" name="useManual" checked> استخدم الحساب اليدوي (بدلًا من حساب الجدول المسجل)
+        </label>
+      </fieldset>
+      <div class="alloc-preview" data-result aria-live="polite"><span class="muted small">اختر المدة وأدخل المبلغ ثم اضغط احسب.</span></div>
       <div class="form-actions">
         <button type="submit" class="primary" data-save>احسب</button>
         <button type="button" class="ghost" data-copy hidden>نسخ</button>
@@ -679,13 +703,84 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
   card.querySelectorAll('[data-from]').forEach(button => button.addEventListener('click', () => {
     form.querySelector('[name="fromDate"]').value = button.dataset.from;
     form.querySelector('[name="toDate"]').value = button.dataset.to;
-    resultHost.innerHTML = '<span class="muted small">اختر المدة ثم اضغط احسب.</span>';
+    resultHost.innerHTML = '<span class="muted small">اختر المدة وأدخل المبلغ ثم اضغط احسب.</span>';
     form.requestSubmit();
   }));
+  card.querySelector('[data-custom]')?.addEventListener('click', () => {
+    form.querySelector('[name="fromDate"]').focus();
+    form.querySelector('[name="fromDate"]').showPicker?.();
+  });
+  // Helper: manual duration calculation
+  const calcManualDuration = (values) => {
+    const amount = parseFloat(values.manualAmount || '0');
+    const fees = parseFloat(values.manualFees || '0');
+    const stamps = parseFloat(values.manualStamps || '0');
+    const periodicity = values.manualPeriodicity || 'monthly';
+    const fd = values.fromDate;
+    const td = values.toDate;
+    if (!isCivilDate(fd) || !isCivilDate(td)) throw new Error('تاريخ البداية والنهاية مطلوبان بصيغة صحيحة.');
+    if (td < fd) throw new Error('تاريخ النهاية يجب أن يكون بعد تاريخ البداية.');
+    if (!(amount > 0)) throw new Error('أدخل مبلغًا أكبر من صفر.');
+    // Enumerate periods between fromDate and toDate
+    const {units} = enumerateExecutionUnits({fromDate: fd, toDate: td, frequency: periodicity});
+    const periodCount = units.length || 0;
+    if (!periodCount) throw new Error('لا توجد فترات في النطاق المحدد.');
+    const totalAmount = amount * periodCount;
+    const grandTotal = totalAmount + (fees || 0) + (stamps || 0);
+    const periodLabel = {monthly: 'شهريًا', weekly: 'أسبوعيًا', semiMonthly: 'نصف شهري', yearly: 'سنويًا'}[periodicity] || periodicity;
+    return {
+      amount, fees: fees || 0, stamps: stamps || 0, periodicity, periodLabel,
+      periodCount, totalAmount, grandTotal, units, fromDate: fd, toDate: td,
+      equations: [
+        `قيمة الفترة الواحدة = ${amount.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م (${periodLabel})`,
+        `عدد الفترات من ${fd} إلى ${td} = ${periodCount}`,
+        `إجمالي الفترات = ${amount.toLocaleString('en-US', {minimumFractionDigits: 2})} × ${periodCount} = ${totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م`,
+        fees > 0 ? `رسوم التنفيذ = ${fees.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م` : '',
+        stamps > 0 ? `الدمغة = ${stamps.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م` : '',
+        `الإجمالي المطلوب = ${grandTotal.toLocaleString('en-US', {minimumFractionDigits: 2})} ج.م`
+      ].filter(Boolean)
+    };
+  };
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
+    const useManual = values.useManual === 'on' || values.useManual === true;
+    const manualAmount = parseFloat(values.manualAmount || '0');
     try {
+      // === Manual calculation path ===
+      if (useManual && manualAmount > 0) {
+        const calc = calcManualDuration(values);
+        resultHost.dataset.currency = 'EGP';
+        const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const periodRows = calc.units.map((unit, i) => `<tr><td>${i + 1}</td><td>${displayDate(unit.from)}</td><td>${displayDate(unit.to)}</td><td>${fmt(calc.amount)}</td><td>✗ لم يُدفع</td></tr>`).join('');
+        resultHost.innerHTML = `<div class="result-numbers">
+            <div><span>قيمة الفترة (${calc.periodLabel})</span><b>${fmt(calc.amount)} ج.م</b></div>
+            <div><span>عدد الفترات</span><b>${calc.periodCount}</b></div>
+            <div><span>إجمالي الفترات</span><b>${fmt(calc.totalAmount)} ج.م</b></div>
+            ${calc.fees > 0 ? `<div><span>رسوم التنفيذ</span><b>${fmt(calc.fees)} ج.م</b></div>` : ''}
+            ${calc.stamps > 0 ? `<div><span>الدمغة</span><b>${fmt(calc.stamps)} ج.م</b></div>` : ''}
+            <div class="total"><span>الإجمالي المطلوب</span><b>${fmt(calc.grandTotal)} ج.م</b></div>
+          </div>
+          <table class="mini-table"><thead><tr><th>#</th><th>من</th><th>إلى</th><th>المبلغ</th><th>الحالة</th></tr></thead><tbody>
+          ${periodRows}
+          <tr class="total"><td colspan="3"><b>إجمالي الفترات</b></td><td><b>${fmt(calc.totalAmount)} ج.م</b></td><td></td></tr>
+          ${calc.fees > 0 ? `<tr><td colspan="3">رسوم التنفيذ</td><td><b>${fmt(calc.fees)} ج.م</b></td><td></td></tr>` : ''}
+          ${calc.stamps > 0 ? `<tr><td colspan="3">الدمغة</td><td><b>${fmt(calc.stamps)} ج.م</b></td><td></td></tr>` : ''}
+          <tr class="total" style="background:#e8f5e9"><td colspan="3"><b>الإجمالي النهائي</b></td><td><b>${fmt(calc.grandTotal)} ج.م</b></td><td></td></tr>
+          </tbody></table>
+          <ol class="small">${calc.equations.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
+        form.querySelector('[data-copy]').hidden = false;
+        form.querySelector('[data-print]').hidden = true; // No execution-linked print for manual
+        form.querySelector('[data-poa]').hidden = false;
+        form.querySelector('[data-poa]').disabled = false;
+        form.querySelector('[data-copy]').onclick = async () => {
+          const text = calc.equations.join('\n');
+          try { await navigator.clipboard.writeText(text); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
+        };
+        form.querySelector('[data-poa]').onclick = () => simplePoaDialog(app, currentId(), {fromDate: values.fromDate, toDate: values.toDate}).catch(error => toast(userError(error), 'error'));
+        return;
+      }
+      // === Existing slice-based calculation path ===
       const pendingControls = [...resultHost.querySelectorAll('[data-range-decision]')];
       let rangeDecisions = [];
       if (pendingControls.length) {
@@ -707,6 +802,24 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
       const currency = claim.totals.currency;
       resultHost.dataset.currency = currency;
       const amount = minor => `${fromMinorUnits(minor, currency).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      // Check if calculation returned all zeros (no slices set up)
+      const hasData = claim.totals.dueMinor > 0 || claim.rows.length > 0;
+      if (!hasData) {
+        // Provide a clear message instead of showing zeros
+        resultHost.innerHTML = `<div class="hint hint-warn" style="padding:16px;border:1px solid #ffc107;border-radius:8px;background:#fff3cd;">
+          <b>⚠ لا توجد بيانات قيمة مسجَّلة لهذا التنفيذ.</b>
+          <p class="small" style="margin-top:8px;">لم يُدخل أي بند قيمة (مثل النفقة) لهذا التنفيذ بعد. لإجراء حساب:</p>
+          <ul class="small" style="margin-top:4px;">
+            <li><b>الطريقة 1:</b> أدخل المبلغ يدويًا في حقل «الحساب بالمبلغ اليدوي» أعلاه واضغط احسب.</li>
+            <li><b>الطريقة 2:</b> أدخل قيمة النفقة والدورية من <button type="button" class="link" data-goto-value style="text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;color:inherit;font:inherit;">قيمة النفقة (البند والدورية)</button> ثم عُد واحسب.</li>
+          </ul>
+        </div>`;
+        resultHost.querySelector('[data-goto-value]')?.addEventListener('click', () => {
+          closeModal();
+          valueSetupDialog(app, currentId(), {bundle: bundleData});
+        });
+        return;
+      }
       const boundaryHtml = claim.partials.length ? `<section class="hint hint-warning"><b>الفترة الحدّية لا تُحتسب بنسبة الأيام.</b><p class="small">اختر قرارًا صريحًا لكل فترة؛ القرار وسببه وتاريخه والمستخدم سيُحفظ في سجل النشاط.</p>
         ${claim.partials.map(decision => `<div class="form-grid" data-range-decision data-period-key="${esc(decision.periodKey)}" data-kind="${esc(decision.kind)}" data-item-id="${esc(decision.itemId || '')}" data-anchor-date="${esc(decision.anchorDate || '')}" data-k="${esc(decision.k)}" data-from-date="${esc(decision.fromDate)}" data-to-date="${esc(decision.toDate)}">
           <p class="small">${displayDate(decision.fromDate)} – ${displayDate(decision.toDate)} — قيمة الفترة الكاملة ${amount(decision.dueMinor)}.</p>
@@ -748,7 +861,7 @@ export async function durationDialog(app, executionId = '', {bundle = null, lock
       form.querySelector('[data-poa]').hidden = false;
       form.querySelector('[data-poa]').disabled = !canFinalize;
       form.querySelector('[data-copy]').onclick = async () => {
-        const text = claim.equations.join('\\n');
+        const text = claim.equations.join('\n');
         try { await navigator.clipboard.writeText(text); toast('نُسخ الملخص'); } catch { toast('تعذر النسخ تلقائيًا', 'error'); }
       };
       form.querySelector('[data-print]').onclick = () => app.office && S.printSimpleStatement(app.office, currentId(), {mode: 'range', fromDate: values.fromDate, toDate: values.toDate, rangeDecisions: claim.decisions}).catch(error => toast(userError(error), 'error'));
@@ -903,6 +1016,7 @@ export async function statementDialog(app, executionId) {
         <label class="field">إلى (للمدة)<input name="toDate" type="date" value="${esc(localDate())}"></label>
         <label class="field">تاريخ الحساب<input name="asOf" type="date" value="${esc(localDate())}"></label>
       </div>
+      <p class="muted small">💡 إذا كانت النتيجة فارغة، تأكد من إدخال قيمة النفقة والدورية أولًا أو استخدم «احسب مدة» بالحساب اليدوي.</p>
       <div class="form-actions">
         <button type="submit" class="primary">طباعة</button>
         <button type="button" class="ghost" data-close>إلغاء</button>
@@ -911,10 +1025,14 @@ export async function statementDialog(app, executionId) {
   card.querySelector('[data-form="statement"]').addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.target).entries());
+    const submitBtn = event.target.querySelector('[type="submit"]');
+    submitBtn.disabled = true;
     try {
       await S.printSimpleStatement(app.office, executionId, {mode: values.mode, fromDate: values.fromDate, toDate: values.toDate, asOf: values.asOf});
       toast('فُتح الكشف للطباعة');
+      closeModal();
     } catch (error) { toast(userError(error), 'error'); }
+    submitBtn.disabled = false;
   });
   return card;
 }
