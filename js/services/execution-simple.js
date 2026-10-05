@@ -1370,10 +1370,15 @@ export async function saveSimplePoa(office, executionId, draft = {}, {date = '',
 export async function simpleStatementDocument(office, executionId, {mode = 'monthly', fromDate = '', toDate = '', asOf = '', rangeDecisions = [], allowFuture = false} = {}) {
   const inputs = await executionSimpleInputs(office, executionId);
   const settings = executionSettings(office);
-  const calculationAsOf = isCivilDate(asOf) ? asOf : localDate();
+  const today = localDate();
+  const calculationAsOf = isCivilDate(asOf) ? asOf : today;
   // تاريخ الكشف نفسه الذي تراه الشاشة: طلب مستقبلي صريح يُنفَّذ مع وسم «تقديري»،
-  // ولا يُطبع رقم منسوب إلى تاريخ مختلف عن المعروض.
-  const statementAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf, {allowFuture});
+  // ولا يُطبع رقم منسوب إلى تاريخ مختلف عن المعلن. وطلب تاريخ مستقبلي بذاته طلب
+  // صريح (كما في بطاقة التنفيذ) — وإلا طُبع كشف يقول «حتى 31/12/2026» بفترات
+  // تتوقف عند اليوم، وهو عين الخطأ الذي نمنعه.
+  const futureRequested = calculationAsOf > today;
+  const horizonAllowFuture = Boolean(allowFuture) || futureRequested;
+  const statementAsOf = simpleScheduleHorizon(inputs.execution, inputs.periods, calculationAsOf, {allowFuture: horizonAllowFuture});
   let schedule;
   if (String(inputs.execution.accountingModel || '') === 'feas-v1') {
     const FEAS = await import('./execution-feas.js');
@@ -1398,7 +1403,7 @@ export async function simpleStatementDocument(office, executionId, {mode = 'mont
   const rows = (claim ? claim.rows : schedule.rows);
   const expenses = expensesFrom(inputs.ledger, settings);
   const parts = [];
-  const estimatedStatement = Boolean(allowFuture && calculationAsOf > localDate() && schedule.asOf >= calculationAsOf);
+  const estimatedStatement = Boolean(futureRequested && schedule.asOf >= calculationAsOf);
   parts.push(`<header><h1>كشف حساب تنفيذ</h1><p class="muted">${execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم'} — تاريخ الحساب الفعلي: ${date(schedule.asOf)} — أفق الفترات: ${date(schedule.periodThroughDate || schedule.asOf)}${estimatedStatement ? ' — <b>تقديري</b>: يشمل فترات لم تُستحق بعد بمبلغها المتوقع' : ''}</p></header>`);
   parts.push(`<section class="grid2">
     <div><b>الموكل:</b> ${client?.fullName || '—'}</div>

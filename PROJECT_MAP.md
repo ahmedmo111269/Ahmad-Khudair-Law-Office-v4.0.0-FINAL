@@ -4,7 +4,7 @@
 
 | المسار | الدور والتكامل |
 |---|---|
-| `js/services/execution-simple.js` | فصل `asOf` المعلن عن `periodThroughDate` (أفق الفترات) داخل `simpleSchedule`؛ `claimHorizon`/`simpleScheduleHorizon` تقبلان `allowFuture`؛ `horizonTransparency` يخرج `requestedAsOf`/`effectiveAsOf`/`periodThroughDate`/`horizonCapReasons`/`horizonShowWarning`/`horizonNote`/`estimatedPeriods`؛ `simpleDurationClaim` و`simplePoaDraft` و`simpleStatementDocument` تحترم النطاق المستقبلي عند الطلب الصريح وتعلن القصّ بسببه؛ جدول التوكيل يُبنى حتى نهاية النطاق (كان عند اليوم فحسب)؛ `simpleStatementDocument` تقبل `allowFuture` وتوسم الكشف المستقبلي «تقديري». |
+| `js/services/execution-simple.js` | فصل `asOf` المعلن عن `periodThroughDate` (أفق الفترات) داخل `simpleSchedule`، وفي الكشف/الطباعة صار التاريخ المستقبلي المطلوب صراحةً هو الأفق نفسه موسومًا «تقديري» (لا كشف يعلن تاريخًا ويحسب غيره)؛ `claimHorizon`/`simpleScheduleHorizon` تقبلان `allowFuture`؛ `horizonTransparency` يخرج `requestedAsOf`/`effectiveAsOf`/`periodThroughDate`/`horizonCapReasons`/`horizonShowWarning`/`horizonNote`/`estimatedPeriods`؛ `simpleDurationClaim` و`simplePoaDraft` و`simpleStatementDocument` تحترم النطاق المستقبلي عند الطلب الصريح وتعلن القصّ بسببه؛ جدول التوكيل يُبنى حتى نهاية النطاق (كان عند اليوم فحسب)؛ `simpleStatementDocument` تقبل `allowFuture` وتوسم الكشف المستقبلي «تقديري». |
 | `js/services/execution-cache.js` | مفتاح جديد يشمل `periodThrough`، وإبطال عند أي كتابة على كيان تنفيذي (أُضيفت `executionSettlements` و`executionAdjustments` وكل ما يبدأ بـ`execution`)، فلا يبقى رقم اعتراف قديم بعد اعتماد فرق في FEAS. |
 | `js/ui/execution-horizon-picker.js` | شاشة «المطلوب حتى»: اختصارات من ارتكاز الفترة، مفتاح «احسب حتى تاريخ مستقبلي» يحترم الإلغاء الصريح، بيانات الفترات الداخلة والمعادلة، وإنذار القصّ/التقدير/التاريخ الأقدم من اليوم. |
 | `js/ui/execution-summary-card.js` | بطاقة الملخص السريع: الموكل/النوع/طريقة التنفيذ + الأرقام الثلاثة القابلة للتفسير + المعادلة + أزرار العمل و«⚙ إعدادات التنفيذ» داخل البطاقة. |
@@ -17,7 +17,7 @@
 | `tools/node-tests/dom-forms.mjs` | `TestFormData` يطابق المتصفح في قيمة مربع الاختيار الافتراضية (`on`) فلا تنجح الاختبارات على سلوك لا يراه المستخدم. |
 | `tools/node-tests/execution-settings-browser-tests.mjs` (جديد) | 6 فحوص Chromium حقيقية لرحلة الشكوى نفسها: الأرقام المرجعية 3,000/9,000 · الإعدادات من البطاقة وانعكاسها الفوري · التوكيل 9,600 · قوالب الطباعة · بلا أخطاء كونسول. `npm run test:execution-settings-browser`، ولقطاته في `docs/execution-ux-shots/v5.13.2-*.png`. |
 
-**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **44/44**؛ Chromium: `execution-settings-browser` 6/6 · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19. **NOT VERIFIED:** الطباعة الورقية ومتصفحات غير Chromium.
+**التحقق المنفذ فعليًا:** `run-tests.mjs` = **470/470**؛ `execution-practical-tests.mjs` = **44/44**؛ Chromium: `execution-settings-browser` 6/6 · `execution-print-browser` **13/13** · `execution-simple-browser` 20/20 · `execution-browser` 34/34 · `execution-feas-browser` 10/10 · `execution-feas-cycle` 19/19 · `offline-sync` و`quick-notes` ناجحان. يبقى `grid-browser` فشلًا قائمًا على `main` في تخصيص الجدول (خارج نطاق التنفيذ). **NOT VERIFIED:** معاينة الطباعة الأصلية والطباعة الورقية ومتصفحات غير Chromium.
 
 # v5.13.1 — خريطة إصلاح حساب التنفيذ وإدارة البيانات
 
