@@ -18,14 +18,14 @@
 | `css/mobile-pwa.css` (جديد) | مناطق آمنة (`env(safe-area-inset-*)`) · وضع مستقل (`display-mode: standalone`) · أهداف لمس ≈44px محصورة في `(pointer:coarse)` · `scroll-margin-block` للحقول مع لوحة المفاتيح · تنسيقات شاشة الإقلاع وتلميح التثبيت. |
 | `index.html` | `mobile-web-app-capable` · `apple-touch-icon` · أيقونة 192 · شاشة إقلاع بمحتوى حقيقي بدل صفحة فارغة · دعم الفتح المباشر على مسار (`#/…`). |
 | `js/tests/pwa-tests.js` (جديد) | 15 اختبارًا للمنطق الصافي (تاريخ التنقل · الطبقات · حالة الشبكة · رسائل التخزين · التثبيت · التحديث) تُشغَّل من `run-tests.mjs` ومن `tests.html`. |
-| `tools/node-tests/android-pwa-browser-tests.mjs` (جديد) | 21 فحصًا في Chromium بمحاكاة هاتف Android (manifest · `Page.getInstallabilityErrors` · Service Worker وكاش القشرة الكامل · مناطق آمنة · أهداف لمس · **زر الرجوع** · رابط مباشر وتحديث · بقاء البيانات بعد إعادة التشغيل · **إقلاع وتنقّل وكتابة دون اتصال** · **تحديث إصدار آمن** · سطح المكتب بلا تغيير). `npm run test:android-pwa`. |
+| `tools/node-tests/android-pwa-browser-tests.mjs` (جديد) | 28 فحصًا في Chromium بمحاكاة هاتف Android (manifest · `Page.getInstallabilityErrors` · Service Worker وكاش القشرة الكامل · مناطق آمنة · أهداف لمس · **زر الرجوع** · رابط مباشر وتحديث · بقاء البيانات بعد إعادة التشغيل · **إقلاع وتنقّل وكتابة دون اتصال** · **تحديث إصدار آمن** · سطح المكتب بلا تغيير). `npm run test:android-pwa`. |
 | `tools/node-tests/make-pwa-screenshots.mjs` (جديد) | لقطات manifest من تشغيل حقيقي بمقاس 1080×1920 (`npm run screenshots:pwa`) — `screenshots/home-mobile.jpg` و`screenshots/files-mobile.jpg`. |
 | `.nojekyll` (جديد) | يمنع Jekyll على GitHub Pages من استثناء المجلدات التي تبدأ بنقطة، فتُخدَم ملفات مثل `.well-known/assetlinks.json` عند التغليف كـTWA. |
 | `tools/release-audit.mjs` | كان يُفسِّر كلمة `import` داخل تعليق كسطر استيراد فيُفشل الإصدار خطأً (`execution-calendar.js`). صار يُزيل التعليقات قبل الفحص ويكتشف الاستيراد بلا `from` — البوابة **PASS** و1091 استيرادًا مفحوصًا. |
 | `docs/ANDROID-PWA.md` (جديد) | دليل التشغيل على Android: التثبيت، زر الرجوع، العمل دون اتصال، التحديث، مسار التغليف (PWABuilder/TWA)، وحدود التحقق. |
 | `js/core/constants.js` | `APP_VERSION = 5.13.6`. |
 
-**تحقق فعلي منفَّذ:** `run-tests.mjs` **487/487** · `android-pwa-browser` **21/21** · `release-audit` **PASS** (1091 استيرادًا) · `grid-browser` (وضع offline الكامل + تكافؤ الأصل) ناجح · `offline-sync` و`execution-browser` (34/34) و`quick-notes` و`work-center` ناجحة. **NOT VERIFIED:** جهاز Android حقيقي وChrome حقيقي (الاختبار بمحاكاة Chromium موبايل)، ومعاينة الطباعة الأصلية والطباعة الورقية.
+**تحقق فعلي منفَّذ:** `run-tests.mjs` **487/487** · `android-pwa-browser` **28/28** · `release-audit` **PASS** (1091 استيرادًا) · `grid-browser` (وضع offline الكامل + تكافؤ الأصل) ناجح · `offline-sync` و`execution-browser` (34/34) و`quick-notes` و`work-center` ناجحة. **NOT VERIFIED:** جهاز Android حقيقي وChrome حقيقي (الاختبار بمحاكاة Chromium موبايل)، ومعاينة الطباعة الأصلية والطباعة الورقية.
 
 ---
 

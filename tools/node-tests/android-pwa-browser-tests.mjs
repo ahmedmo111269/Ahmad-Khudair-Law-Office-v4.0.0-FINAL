@@ -455,6 +455,130 @@ const counts=page=>page.evaluate(async()=>{
   await page.close();
  });
 
+ // الصفحة السابقة أُغلقت في فحص الأداء، وهذه الفحوص تحتاج جلسة هاتف جديدة
+ const p=await context.newPage();
+ p.on('pageerror',error=>report.errors.push(error.message));
+ await boot(p);
+
+ await verify('Command palette: Android back closes it too, without leaving the screen',async()=>{
+  await p.evaluate(()=>window.__LAW_OFFICE_APP__.go('dashboard'));
+  await p.waitForTimeout(1200);
+  const routeBefore=await p.evaluate(()=>window.__LAW_OFFICE_APP__.route);
+  await p.keyboard.press('Control+k');
+  await p.waitForTimeout(900);
+  assert.equal(await p.evaluate(()=>Boolean(document.querySelector('#modal-root .palette-card'))),true,'the command palette opens from the phone keyboard shortcut');
+  const depthWithPalette=await p.evaluate(()=>window.__LAW_OFFICE_APP__.routeHistory?.depth ?? -1);
+  assert.ok(depthWithPalette>0,'the palette is protected by a history entry');
+  await p.goBack();
+  await p.waitForTimeout(800);
+  const afterBack=await p.evaluate(()=>({palette:Boolean(document.querySelector('#modal-root .palette-card')),route:window.__LAW_OFFICE_APP__.route}));
+  assert.equal(afterBack.palette,false,'back closes the command palette (same as Esc)');
+  assert.equal(afterBack.route,routeBefore,'back keeps the current screen');
+  report.commandPalette={routeBefore,depthWithPalette,afterBack};
+ });
+
+ await verify('Failure recovery: a corrupted/removed application cache recovers on the next online start (data intact)',async()=>{
+  const before=await counts(p);
+  const removed=await p.evaluate(async()=>{const keys=await caches.keys();for(const key of keys)await caches.delete(key);return keys.length});
+  assert.ok(removed>0,'there was an application cache to remove');
+  await p.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
+  await p.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
+  await p.evaluate(()=>{const app=window.__LAW_OFFICE_APP__;return app.go('files')});
+  await p.waitForTimeout(3000);
+  const healed=await p.evaluate(async()=>{const keys=await caches.keys();if(!keys.length)return {keys:0,entries:0};const cache=await caches.open(keys[0]);return {keys:keys.length,entries:(await cache.keys()).length,key:keys[0]}});
+  const after=await counts(p);
+  assert.deepEqual(after,before,'office data is intact after losing the whole application cache');
+  assert.ok(healed.entries>60,`the cache did not rebuild itself while online (entries: ${healed.entries})`);
+  assert.ok(healed.key.startsWith('ahmad-khudair-law-office-'),`unexpected cache name: ${healed.key}`);
+  report.cacheRecovery={removed,healed,before,after};
+ });
+
+ await verify('Failure recovery: an invalid backup file is refused safely, with a clear Arabic message and no data loss',async()=>{
+  await p.evaluate(()=>window.__LAW_OFFICE_APP__.go('backup'));
+  await p.waitForTimeout(1800);
+  const before=await counts(p);
+  const pickers=await p.evaluate(()=>[...document.querySelectorAll('#main-content input[type=file]')].map(i=>i.id));
+  assert.ok(pickers.includes('restore-new-file')&&pickers.includes('inspect-file'),`backup pickers missing: ${pickers}`);
+  await p.setInputFiles('#inspect-file',{name:'broken.json',mimeType:'application/json',buffer:Buffer.from('{"hello":"world"}')});
+  await p.waitForTimeout(1600);
+  const toast=await p.evaluate(()=>document.querySelector('#toast-stack')?.textContent||'');
+  const state=await p.evaluate(()=>({fatal:Boolean(document.querySelector('.error-box')),pickerReset:document.querySelector('#inspect-file').value==='',booted:Boolean(window.__LAW_OFFICE_APP__.office)}));
+  const after=await counts(p);
+  assert.deepEqual(after,before,'data changed after refusing an invalid backup');
+  assert.equal(state.fatal,false,'a refused backup must not produce a fatal error screen');
+  assert.equal(state.booted,true,'the application stays alive after a refused backup');
+  assert.ok(toast.length>0,`no user-facing feedback for an invalid backup: "${toast}"`);
+  assert.ok(!/Error|undefined|Network|fetch/.test(toast),`raw technical text shown to the user: "${toast.slice(0,160)}"`);
+  report.invalidBackup={toast:toast.slice(0,200),pickerReset:state.pickerReset};
+ });
+
+ await verify('Mobile form with the keyboard open: the focused field and the save action are both reachable',async()=>{
+  await p.evaluate(()=>window.__LAW_OFFICE_APP__.go('files'));
+  await p.waitForTimeout(2200);
+  await p.evaluate(()=>document.querySelector('#quick-add')?.click());
+  await p.waitForSelector('#modal-root .quick-item',{timeout:20000});
+  const opened=await p.evaluate(()=>{
+   const item=[...document.querySelectorAll('#modal-root .quick-item')].find(b=>(b.textContent||'').includes('موكل'))||document.querySelector('#modal-root .quick-item');
+   item?.click();return (item?.textContent||'').trim().slice(0,20);
+  });
+  await p.waitForSelector('#modal-root .modal-card form',{timeout:20000});
+  await p.waitForTimeout(900);
+  await p.setViewportSize({width:412,height:360}); // شاشة قصيرة = لوحة مفاتيح مفتوحة
+  await p.waitForTimeout(800);
+  const first=await p.evaluate(()=>{
+   const card=document.querySelector('#modal-root .modal-card');
+   const fields=[...card.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea')].filter(el=>el.offsetParent!==null);
+   if(!fields.length)return {fields:0};
+   const target=fields[fields.length-1];
+   target.focus();
+   const rect=target.getBoundingClientRect();
+   return {fields:fields.length,fieldTop:Math.round(rect.top),fieldBottom:Math.round(rect.bottom),viewport:window.innerHeight,scrollable:card.scrollHeight>card.clientHeight+4,fieldType:target.type||target.tagName};
+  });
+  assert.ok(first.fields>0,'the form exposes fillable fields on a phone');
+  assert.ok(first.fieldTop>=-2&&first.fieldBottom<=first.viewport+2,`the focused field is hidden when the keyboard opens: ${JSON.stringify(first)}`);
+  assert.equal(first.scrollable,true,'a long form stays scrollable inside the card so nothing is unreachable');
+  const save=await p.evaluate(()=>{
+   const card=document.querySelector('#modal-root .modal-card');
+   card.scrollTop=card.scrollHeight;
+   const buttons=[...card.querySelectorAll('button')].filter(b=>b.offsetParent!==null);
+   const saveButton=buttons.find(b=>(b.textContent||'').trim()==='حفظ')
+    ||buttons.find(b=>b.type==='submit'&&!/رجوع|إغلاق|الرئيسية/.test(b.textContent||''))
+    ||buttons.find(b=>b.closest('.form-actions'));
+   if(!saveButton)return {found:false,candidates:buttons.map(b=>(b.textContent||'').trim().slice(0,20))};
+   const rect=saveButton.getBoundingClientRect();
+   return {found:true,top:Math.round(rect.top),bottom:Math.round(rect.bottom),label:(saveButton.textContent||'').trim().slice(0,24),viewport:window.innerHeight,scrollTop:card.scrollTop,scrollHeight:card.scrollHeight,clientHeight:card.clientHeight};
+  });
+  assert.equal(save.found,true,'the save action exists inside the phone form');
+  assert.ok(save.top<save.viewport&&save.bottom>0,`the save action cannot be reached with the keyboard open: ${JSON.stringify(save)}`);
+  await p.evaluate(()=>document.querySelector('#modal-root [data-close]')?.click());
+  await p.setViewportSize({width:412,height:915});
+  await p.waitForTimeout(700);
+  assert.equal(await p.evaluate(()=>Boolean(document.querySelector('#modal-root .modal-card'))),false,'the form closes cleanly');
+  report.mobileForm={opened,fields:first.fields,fieldType:first.fieldType,fieldVisible:true,scrollable:first.scrollable,save};
+ });
+
+ await verify('Arabic typography does not depend on any external font or CDN: text stays readable with every third-party request blocked',async()=>{
+  const page2=await context.newPage();
+  const blocked=[];
+  await page2.route('**/*',route=>{const url=route.request().url();if(url.startsWith(base)||url.startsWith('blob:')||url.startsWith('data:'))return route.continue();blocked.push(new URL(url).origin);return route.abort()});
+  await boot(page2);
+  const typography=await page2.evaluate(()=>{
+   const body=getComputedStyle(document.body);
+   const heading=getComputedStyle(document.querySelector('h1,h2,.p-head h2')||document.body);
+   const sample=[...document.querySelectorAll('#main-content h1,#main-content h2,#main-content p,#main-content td,.btn,button')].find(el=>el.offsetParent!==null&&(el.textContent||'').trim().length>3&&el.getBoundingClientRect().width>0);
+   const rect=sample?.getBoundingClientRect();
+   const arabic=document.body.textContent.match(/[\u0600-\u06FF]/g)||[];
+   return {bodyFont:body.fontFamily,headingFont:heading.fontFamily,textWidth:sample?Math.round(rect.width):0,textHeight:sample?Math.round(rect.height):0,sampleText:sample?(sample.textContent||'').trim().slice(0,40):null,arabicGlyphs:arabic.length,lineHeight:body.lineHeight,fontsStatus:document.fonts?.status||'unknown'};
+  });
+  assert.ok(typography.arabicGlyphs>50,'Arabic text is present on the phone screen');
+  assert.ok(typography.textWidth>0&&typography.textHeight>0,'Arabic text still occupies real space with fonts blocked (no invisible text)');
+  assert.ok(/,-|-apple-system|system-ui|sans-serif|serif/.test(typography.bodyFont),`font stack has no local fallback: ${typography.bodyFont}`);
+  assert.deepEqual(report.errors.filter(Boolean),[],'no uncaught error while third-party requests are blocked');
+  report.typography={...typography,blockedOrigins:[...new Set(blocked)]};
+  await page2.close();
+ });
+ await p.close();
+
  await verify('No application regression in the console during the whole phone journey',async()=>{
   assert.deepEqual(report.errors,[],report.errors.join('\n'));
   report.limitations.push(`Console errors captured: ${consoleErrors.length}`);
@@ -483,6 +607,70 @@ const counts=page=>page.evaluate(async()=>{
   assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route),'dashboard','in-app back returns to the previous screen');
  });
  await context.close();
+}
+
+// =====================================================================
+// 3) إعادة تشغيل المتصفح/الجهاز فعليًا: ملف تعريف دائم (persistent profile)
+//    يُغلق المتصفح بالكامل ثم يُعاد فتحه على نفس ملف التعريف — أقرب محاكاة
+//    متاحة لإعادة تشغيل الجهاز بلا جهاز حقيقي.
+// =====================================================================
+{
+ const profileDir=path.join(process.env.TMPDIR||'/tmp',`akl-restart-${Date.now()}`);
+ const launchOptions={executablePath:await slim.executablePath(),headless:true,args:['--no-sandbox','--disable-dev-shm-usage'],...phone,locale:'ar'};
+ const firstContext=await chromium.launchPersistentContext(profileDir,launchOptions);
+ const firstPage=firstContext.pages()[0]||await firstContext.newPage();
+ firstPage.on('pageerror',error=>report.errors.push(error.message));
+ await firstPage.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
+ await firstPage.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
+ await firstPage.waitForTimeout(2500);
+ const marker=`إعادة تشغيل ${Date.now()}`;
+ await firstPage.evaluate(async label=>{
+  const app=window.__LAW_OFFICE_APP__;
+  const {uid}=await import('./js/core/id.js');
+  await app.office.r.clients.put({id:uid(),fullName:label,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),version:1});
+  localStorage.setItem('akl:pwa:restart-marker',label);
+ },marker);
+ const beforeRestart=await counts(firstPage);
+ await firstContext.close(); // إغلاق المتصفح بالكامل (ليس مجرد تاب)
+
+ const secondContext=await chromium.launchPersistentContext(profileDir,launchOptions);
+ const secondPage=secondContext.pages()[0]||await secondContext.newPage();
+ secondPage.on('pageerror',error=>report.errors.push(error.message));
+ await verify('Full browser/device restart (persistent profile): IndexedDB, preferences and the app cache all survive',async()=>{
+  await secondPage.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
+  await secondPage.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
+  await secondPage.waitForTimeout(1500);
+  const afterRestart=await counts(secondPage);
+  assert.deepEqual(afterRestart,beforeRestart,`stores changed across a full browser restart: ${JSON.stringify({beforeRestart,afterRestart})}`);
+  assert.equal(await secondPage.evaluate(()=>localStorage.getItem('akl:pwa:restart-marker')),marker,'preferences survive a full browser restart');
+  const found=await secondPage.evaluate(async label=>{
+   const rows=await window.__LAW_OFFICE_APP__.office.r.clients.all();
+   return rows.some(row=>row.fullName===label);
+  },marker);
+  assert.equal(found,true,'the record written before the restart is still readable after it');
+  const cacheState=await secondPage.evaluate(async()=>{const keys=await caches.keys();if(!keys.length)return {keys:0,entries:0};const cache=await caches.open(keys[0]);return {keys:keys.length,entries:(await cache.keys()).length}});
+  assert.ok(cacheState.entries>60,`the application cache did not survive the restart: ${JSON.stringify(cacheState)}`);
+  report.deviceRestart={beforeRestart,afterRestart,cacheState,preferenceKept:true};
+ });
+
+ await verify('Offline right after a full restart: the app still boots with no network and keeps every record',async()=>{
+  await secondContext.setOffline(true);
+  const offlinePage=await secondContext.newPage();
+  offlinePage.on('pageerror',error=>report.errors.push(error.message));
+  const started=Date.now();
+  await offlinePage.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
+  await offlinePage.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
+  const ms=Date.now()-started;
+  const offlineCounts=await counts(offlinePage);
+  assert.deepEqual(offlineCounts,report.deviceRestart.afterRestart,'records are intact when the first start after a device restart has no network');
+  await offlinePage.evaluate(()=>window.__LAW_OFFICE_APP__.go('files'));
+  await offlinePage.waitForTimeout(2200);
+  assert.equal(await offlinePage.evaluate(()=>Boolean(document.querySelector('.dg'))),true,'the DataGrid opens offline right after a restart');
+  report.offlineAfterRestart={ms,offlineCounts};
+  await offlinePage.close();
+ });
+ await secondContext.close();
+ await fs.rm(profileDir,{recursive:true,force:true}).catch(()=>{});
 }
 
 await browser.close();
