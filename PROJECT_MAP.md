@@ -15,7 +15,7 @@
 | `sw.js` | الكاش `ahmad-khudair-law-office-v5.14.0-android-pwa` + precache: `css/topbar.css` · `js/services/demo-data.js` · `js/ui/demo-cleanup.js`. |
 | `js/core/constants.js` | `APP_VERSION = 5.14.0`. |
 
-**تحقق فعلي منفَّذ:** `run-tests.mjs` **500/500** · تجاوب الشريط: 17 عرضًا × 5 مسارات بلا تداخل وبلا تمرير أفقي (وسطح المكتب مطابق للأساس) · مسار زر الحذف مُختبر في Chromium حتى الإشعار وسجل النشاط وإعادة الزرع.
+**تحقق فعلي منفَّذ:** `run-tests.mjs` **500/500** · `android-pwa-browser` **28/28** · `work-center-browser` **61/61** · `quick-notes-browser` و`offline-sync-browser` **PASS** · تجاوب الشريط: 17 عرضًا × 5 مسارات بلا تداخل وبلا تمرير أفقي (وسطح المكتب مطابق للأساس) · مسار زر الحذف مُختبر في Chromium حتى الإشعار وسجل النشاط وإعادة الزرع · `grid-browser`: نفس حالات الفشل الخمس الموجودة في الأساس `bb657d5` (لا انحدار).
 
 ---
 
