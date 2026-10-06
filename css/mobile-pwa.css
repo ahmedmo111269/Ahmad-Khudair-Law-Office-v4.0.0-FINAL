@@ -1,0 +1,131 @@
+/* =====================================================================
+   طبقة Android / PWA — مناطق آمنة، أهداف اللمس، الكيبورد، وشاشة الإقلاع
+   ---------------------------------------------------------------------
+   • كل القيم من توكنز themes.css نفسها: لا ألوان ولا خطوط جديدة.
+   • لا تُغيّر أي صنف قائم على سطح المكتب: قواعد اللمس محصورة في
+     (pointer: coarse)، وقواعد المناطق الآمنة تنتج صفرًا حيث لا حاجة لها.
+   • لا تُخفي ولا تعيد ترتيب أي عنصر: حشو وحدود دنيا فقط.
+   ===================================================================== */
+
+/* ---------- 1) المناطق الآمنة: لا شيء يختفي خلف شريط الحالة أو أزرار الجهاز ---------- */
+#sidebar.tn-bar{
+  padding-top:env(safe-area-inset-top,0px);
+}
+#sidebar.tn-bar .tn-inner{
+  padding-inline:max(12px,env(safe-area-inset-left,0px)) max(12px,env(safe-area-inset-right,0px));
+}
+.topbar{
+  padding-inline-start:max(12px,env(safe-area-inset-left,0px));
+  padding-inline-end:max(12px,env(safe-area-inset-right,0px));
+}
+#main-content{
+  padding-inline-start:max(0px,env(safe-area-inset-left,0px));
+  padding-inline-end:max(0px,env(safe-area-inset-right,0px));
+  padding-bottom:max(20px,env(safe-area-inset-bottom,0px));
+}
+#modal-root .modal-card{
+  padding-bottom:max(20px,env(safe-area-inset-bottom,0px));
+}
+.shell-quick-note-fab{
+  bottom:max(22px,calc(14px + env(safe-area-inset-bottom,0px)));
+  inset-inline-start:max(22px,calc(12px + env(safe-area-inset-left,0px)));
+}
+#toast-stack{
+  bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  inset-inline-start:max(12px,env(safe-area-inset-left,0px));
+  inset-inline-end:max(12px,env(safe-area-inset-right,0px));
+}
+.wc-drawer,.tn-panel{padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(max-width:900px){
+  #sidebar.tn-bar .tn-panel{padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  .wc-drawer{padding-bottom:env(safe-area-inset-bottom,0px)}
+}
+
+/* ---------- 2) الوضع المستقل (Standalone): تجربة تطبيق لا صفحة ويب ---------- */
+@media(display-mode:standalone),(display-mode:minimal-ui),(display-mode:fullscreen){
+  /* لا سحب للتحديث يقطع العمل داخل التطبيق المثبَّت */
+  html,body{overscroll-behavior-y:none}
+  body{min-height:100dvh}
+  /* احترام ارتفاع العرض المتغيّر على Android (شرائط النظام) */
+  #sidebar.tn-bar{min-height:calc(var(--topnav-h,0px) + env(safe-area-inset-top,0px))}
+}
+
+/* ---------- 3) شاشة الإقلاع: هوية مباشرة بلا حركة ثقيلة ---------- */
+.boot-splash{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  min-height:min(60vh,420px);padding:32px 18px;text-align:center;color:var(--text);
+}
+.boot-splash .boot-mark{
+  font-size:40px;line-height:1;filter:none;
+}
+.boot-splash .boot-title{
+  font-family:var(--font-heading);font-weight:800;font-size:1.05rem;color:var(--text-strong);margin:0;
+}
+.boot-splash p{margin:0}
+@media(prefers-reduced-motion:no-preference){
+  .boot-splash .boot-mark{animation:boot-pulse 1.6s ease-in-out infinite}
+  @keyframes boot-pulse{0%,100%{opacity:.75}50%{opacity:1}}
+}
+
+/* ---------- 4) أهداف اللمس على الأجهزة اللمسية (≈44px) ---------- */
+@media(pointer:coarse){
+  /* أزرار الشريط العلوي وتبويبات التنقل */
+  .top-actions button,.top-actions .ghost,.top-actions .primary,#mobile-menu{
+    min-height:44px;min-width:44px;
+  }
+  .tn-tab{min-height:44px}
+  .tn-btn{min-height:40px;min-width:40px}
+  .tn-item{min-height:44px}
+  /* أزرار الصفحة العامة */
+  .primary,.ghost,button.link{min-height:40px}
+  .head-actions button,.section-head button,.panel-head button{min-height:40px}
+  /* أدوات الجدول: أزرار وأسهم الفرز */
+  .dg-toolbar button,.dg-toolbar select,.dg-toolbar input,.dg-page,.dg-sort,.dg-pintoggle,.dg-x{
+    min-height:36px;min-width:32px;
+  }
+  .dg-sort{padding:2px 4px}
+  /* صفوف الجدول: مساحة لمس مريحة لأزرار الصف بلا تضخيم ارتفاع الصفوف */
+  .dg tbody tr>.dg-row-btn,.dg tbody td .link{min-height:32px}
+  /* النماذج: حقول وحقول اختيار بحجم لمس صحيح */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),
+  select,textarea{min-height:44px}
+  textarea{min-height:96px}
+  /* صناديق الاختيار: لا تُصغَّر أبدًا على اللمس — حد أدنى 24px كما في تصميم التطبيق */
+  input[type=checkbox],input[type=radio]{min-width:24px;min-height:24px}
+  label{line-height:1.7}
+  /* البطاقات والقوائم القابلة للنقر */
+  .recent-chip,.fav-chip,.qn-action,.qn-stat{min-height:40px}
+  .sidebar-item,.nav-item{min-height:44px}
+}
+
+/* ---------- 5) الكيبورد على Android: لا يختفي الحقل ولا زر الحفظ ---------- */
+input,select,textarea,.modal-card{scroll-margin-block:110px}
+.modal-card{scroll-margin:0}
+@media(pointer:coarse) and (max-height:560px){
+  /* شاشة قصيرة + كيبورد مفتوح: اجعل النافذة قابلة للتمرير كاملة */
+  #modal-root .modal-card{max-height:100dvh;overflow:auto}
+  .modal-backdrop{padding:6px}
+}
+
+/* ---------- 6) الجداول على الهاتف: تمرير أفقي واضح بلا كسر التخطيط ---------- */
+.dg-scroll,.table-wrap{-webkit-overflow-scrolling:touch}
+@media(max-width:900px){
+  .dg-scroll{overscroll-behavior-x:contain}
+  .dg thead th{position:sticky;top:0;z-index:2}
+}
+
+/* ---------- 7) شارات الشبكة والتثبيت ---------- */
+.offline-badge,.is-offline{
+  white-space:nowrap;
+}
+.install-hint{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.install-hint-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:560px){
+  .install-hint-actions{width:100%}
+  .install-hint-actions button{flex:1}
+}
+
+/* ---------- 8) الطباعة: لا تدخل قواعد الواجهة ---------- */
+@media print{
+  .boot-splash,.install-hint{display:none!important}
+}

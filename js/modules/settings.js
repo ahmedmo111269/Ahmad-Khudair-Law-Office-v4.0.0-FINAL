@@ -49,6 +49,16 @@ function renderDisplaySettings(){
   <p class="muted small">إعادة الضبط تمسح الإعداد العام وتخصيصات العرض لكل البطاقات والصفحات، وتُبقي ترتيب الأقسام وإعدادات كل جدول المحفوظة لديه. لا يُحذف أي سجل أو بيان.</p>
  </section>`;
 }
+/** لوحة تثبيت التطبيق: زر رسمي عند توفره، وخطوات بديلة دائمًا، وحالة واضحة. */
+function renderInstallPanel(app){
+ const state=app?.pwaInstall?.state?.()||{installed:false,canPrompt:false};
+ const status=state.installed?'التطبيق مثبَّت على هذا الجهاز — يفتح من أيقونته ويعمل دون إنترنت.':state.canPrompt?'جهازك جاهز للتثبيت بنقرة واحدة.':'إن لم يظهر زر التثبيت، استخدم الخطوات اليدوية من قائمة المتصفح (⋮).';
+ return `<section class="panel install-panel"><div class="panel-head"><h3>📲 تثبيت التطبيق على الهاتف</h3><span class="muted small" data-install-state>${state.installed?'مثبَّت':'غير مثبَّت'}</span></div>
+  <p class="muted small">التثبيت يضيف أيقونة مستقلة وشاشة كاملة وفتحًا أسرع — بلا أي نقل لبيانات المكتب خارج الجهاز، وبدون إنترنت بعد التثبيت الأول.</p>
+  <div class="action-stack"><button type="button" class="primary" data-install-app>تثبيت التطبيق الآن</button><button type="button" class="ghost" data-install-help>كيف أثبّته يدويًا؟</button></div>
+  <p class="muted small">${status}</p>
+ </section>`;
+}
 const uxcCountsText=()=>{
  const c=getStyleCounts();
  return `${c.components} عنصرًا بتخصيص مستقل · ${c.types} افتراضي نوع محفوظ · العام: ${c.global?'مخصص':'افتراضي'}`;
@@ -83,6 +93,7 @@ async function renderGeneral(app){
  </section>
  <div class="grid2"><section class="panel"><h3>الإصدار</h3><p>التطبيق: ${esc(app.constants.APP_VERSION)}</p><p>Schema: ${app.constants.SCHEMA_VERSION}</p><p>قاعدة البيانات: ${esc(app.registry.active?.displayName||'')}</p></section>
  <section class="panel"><h3>صيانة (لا تحذف أي بيانات)</h3><div class="action-stack"><button class="ghost" data-maint="preV12">⬇ تنزيل نسخة الأمان التلقائية (قبل ترقية ملف الموكل)</button><button class="ghost" data-maint="index">إعادة بناء فهرس البحث للملفات</button><button class="ghost" data-maint="parties">ترحيل روابط الموكلين القديمة إلى أطراف الملفات</button><button class="ghost" data-maint="seed">استكمال القوائم الافتراضية الناقصة</button></div><p class="muted small" id="maint-status"></p></section>
+ ${renderInstallPanel(app)}
  <section class="panel"><h3>الخصوصية</h3><p>البيانات مخزنة محليًا في متصفح الجهاز. لا توجد خدمة تحليل أو API خارجية في النسخة الأساسية.</p></section>
  <section class="panel"><h3>شريط التنقل العلوي</h3><p class="muted small">التبويبات أعلى البرنامج بعرض الشاشة كاملًا: يمكنك طيّ الشريط ليصبح قصيرًا جدًا (ويُحفظ الطي لهذا المستخدم)، وتخصيص التبويبات نفسها — إظهار وإخفاء وترتيب التبويبات وعناصرها.</p><div class="action-stack"><button type="button" class="ghost" data-sidebar-toggle>طي / توسيع الشريط</button><button type="button" class="ghost" data-nav-cust>تخصيص التبويبات وترتيبها</button></div></section>
  <section class="panel"><h3>البيانات التجريبية</h3><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا معلَّمة بـ〔تجريبي〕 (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية، ومحاكم من بينها قليوب وطوخ وبنها وشبرا. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم، ولا تُمسح تلقائيًا بعد الاختبار.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button></div><p class="muted small" id="demo-status"></p></section>
@@ -191,6 +202,8 @@ export function bindSettings(app){
   finally{btn.disabled=false}
  });
  bindDangerZone(app,root);
+ root.querySelector('[data-install-app]')?.addEventListener('click',()=>import('../ui/install-prompt.js').then(m=>m.installApp(app)));
+ root.querySelector('[data-install-help]')?.addEventListener('click',()=>import('../ui/install-prompt.js').then(m=>m.openInstallHelp()));
 }
 
 /** منطقة المسح: تأكيد مزدوج + سبب مسجَّل + نسخة اختيارية قبل التنفيذ. */

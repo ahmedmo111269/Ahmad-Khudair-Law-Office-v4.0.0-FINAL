@@ -28,17 +28,40 @@ for(const f of js){
 fs.rmSync(tmp,{recursive:true,force:true});
 
 // 2) Relative imports must exist and every named import must be exported by the target module.
+// ملاحظة: تُقرأ الشيفرة بعد إزالة التعليقات، وإلا فكلمة "import" داخل تعليق
+// تُفسَّر خطأً كسطر استيراد (كان يسبب فشلًا وهميًا في js/domain/execution-calendar.js).
+function stripComments(source){
+  let out='';let i=0;let state=null;
+  while(i<source.length){
+    const c=source[i],n=source[i+1];
+    if(state===null){
+      if(c==='/'&&n==='/'){state='line';i+=2;continue}
+      if(c==='/'&&n==='*'){state='block';i+=2;continue}
+      if(c==='\"'||c==="'"||c==='`')state=c;
+      out+=c;i++;continue;
+    }
+    if(state==='line'){if(c==='\n'){state=null;out+='\n'}i++;continue}
+    if(state==='block'){if(c==='*'&&n==='/'){state=null;i+=2;continue}if(c==='\n')out+='\n';i++;continue}
+    if(c==='\\'){out+=c+(n??'');i+=2;continue}
+    if(c===state)state=null;
+    out+=c;i++;continue;
+  }
+  return out;
+}
 const exportsOf=new Map();
+let importsChecked=0;
 function collectExports(file){
   if(exportsOf.has(file))return exportsOf.get(file);
-  const s=fs.readFileSync(file,'utf8');const set=new Set();
+  const s=stripComments(fs.readFileSync(file,'utf8'));const set=new Set();
   for(const m of s.matchAll(/export\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([\w$]+)/g))set.add(m[1]);
   for(const m of s.matchAll(/export\s*\{([^}]*)\}/g))m[1].split(',').map(x=>x.trim()).filter(Boolean).forEach(x=>{const a=x.split(/\s+as\s+/);set.add((a[1]||a[0]).trim())});
   if(/export\s+default/.test(s))set.add('default');
   exportsOf.set(file,set);return set;
 }
-function checkImports(file,source){
-  for(const m of source.matchAll(/import\s*([^'";]*?)\s*from\s*['"](\.\.?\/[^'"]+)['"]/g)){
+function checkImports(file,rawSource){
+  const source=stripComments(rawSource);
+  for(const m of source.matchAll(/(?:^[ \t]*|[;}])\s*import\s+([^'";]*?)\s*from\s*['"](\.\.?\/[^'"]+)['"]/gm)){
+    importsChecked++;
     let target=path.resolve(path.dirname(file),m[2]);if(!path.extname(target))target+='.js';
     if(!fs.existsSync(target)){failures.push(`IMPORT ${rel(file)} -> ${m[2]}`);continue}
     const names=[];const clause=m[1];const braces=clause.match(/\{([^}]*)\}/);
@@ -47,6 +70,12 @@ function checkImports(file,source){
     if(rest)names.push('default');
     const ex=collectExports(target);
     for(const n of names)if(!ex.has(n))failures.push(`EXPORT ${rel(file)} imports "${n}" but ${rel(target)} does not export it`);
+  }
+  // استيراد بلا "from" (تحميل جانبي): يجب أن يكون الملف موجودًا
+  for(const m of source.matchAll(/(?:^[ \t]*|[;}])\s*import\s*['"](\.\.?\/[^'"]+)['"]/gm)){
+    importsChecked++;
+    let target=path.resolve(path.dirname(file),m[1]);if(!path.extname(target))target+='.js';
+    if(!fs.existsSync(target))failures.push(`SIDE-EFFECT IMPORT ${rel(file)} -> ${m[1]}`);
   }
   for(const m of source.matchAll(/import\(\s*['"](\.\.?\/[^'"]+)['"]\s*\)/g)){const target=path.resolve(path.dirname(file),m[1]);if(!fs.existsSync(target))failures.push(`DYNAMIC-IMPORT ${rel(file)} -> ${m[1]}`)}
 }
@@ -72,7 +101,7 @@ const cv=changelog.match(/^#+\s*v?(\d+\.\d+\.\d+[^\s—]*)/m)?.[1];
 if(!vm)failures.push('VERSION APP_VERSION not found in js/core/constants.js');
 else if(cv&&cv!==vm)failures.push(`VERSION constants=${vm} changelog=${cv}`);
 
-const result={timestamp:new Date().toISOString(),version:vm,files:files.length,javascript:js.length,failures,warnings,status:failures.length?'FAIL':'PASS'};
+const result={timestamp:new Date().toISOString(),version:vm,files:files.length,javascript:js.length,relativeImportsChecked:importsChecked,failures,warnings,status:failures.length?'FAIL':'PASS'};
 fs.writeFileSync(path.join(root,'docs/RELEASE-AUDIT.json'),JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify(result,null,2));
 if(failures.length)process.exit(1);

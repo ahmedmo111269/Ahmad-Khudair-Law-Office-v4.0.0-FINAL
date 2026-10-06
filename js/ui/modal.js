@@ -1,9 +1,27 @@
 // نافذة منبثقة موحدة: كل نافذة (بما فيها النماذج) تحمل أزرار رجوع / إغلاق / الرئيسية أعلى اليسار.
 // إتاحة وصول: فخ تركيز داخل النافذة (Tab يدور بين عناصرها) واستعادة التركيز للعنصر الذي فتحها عند الإغلاق.
+// + زر الرجوع في Android: كل نافذة تُسجّل في مكدّس الطبقات العلوية، فيغلق الرجوع أعلى نافذة
+//   وحدها ولا يخرج من التطبيق ولا يفقد ما تحت النافذة.
+import {open as overlayOpen} from './overlay-stack.js';
 const NAV='<div class="modal-nav nav-cluster" role="group" aria-label="التنقل"><button type="button" class="ghost" data-modal-back title="رجوع">↩ رجوع</button><button type="button" class="ghost" data-close title="إغلاق">✕ إغلاق</button><button type="button" class="ghost" data-modal-home title="الرئيسية">⌂ الرئيسية</button></div>';
 const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 let lastTrigger=null,trapHandler=null;
 let openOnTop=false;
+// مدخل حماية في تاريخ المتصفح: زر الرجوع في Android يغلق النافذة العليا أولًا
+// (بلا فقد الصفحة أو النموذج) بدل الخروج من التطبيق. الطبقات المكدسة تشترك
+// في مدخل واحد، ويُعاد تسليحه بعد كل إغلاق حتى تبقى الطبقات محميّة.
+let releaseGuard=null;
+const cardsInRoot=()=>document.querySelectorAll('#modal-root .modal-card').length;
+function armGuard(){
+ if(releaseGuard||!cardsInRoot())return;
+ releaseGuard=overlayOpen('modal',()=>closeTopModal());
+}
+function disarmGuard(){
+ if(cardsInRoot())return;
+ const release=releaseGuard;releaseGuard=null;try{release?.()}catch{/* متجاهَل */}
+}
+/** إعادة تسليح الحماية عند بقاء نافذة مكدسة بعد زر الرجوع. */
+export function syncModalGuard(){armGuard()}
 /** النافذة التالية تُفتح فوق النافذة الحالية بدل استبدالها (خطوة داخل ورقة التسجيل). */
 export function modalOpensOnTop(){openOnTop=true}
 
@@ -14,6 +32,7 @@ export function modal(html,{stacked=false}={}){
  if(!useStacked)root.innerHTML=`<div class="modal-backdrop"><div class="modal-card" role="dialog" aria-modal="true">${NAV}${html}</div></div>`;
  else root.insertAdjacentHTML('beforeend',`<div class="modal-backdrop is-stacked"><div class="modal-card" role="dialog" aria-modal="true">${NAV}${html}</div></div>`);
  const card=root.querySelectorAll('.modal-card')[root.querySelectorAll('.modal-card').length-1];
+ armGuard();
  root.querySelectorAll('[data-close],[data-modal-back]').forEach(b=>b.addEventListener('click',()=>closeModal()));
  root.querySelector('[data-modal-home]')?.addEventListener('click',()=>{closeModal();window.__LAW_OFFICE_APP__?.go('dashboard')});
  // فخ التركيز: Tab / Shift+Tab يدوران داخل النافذة فقط
@@ -46,11 +65,13 @@ export function closeTopModal(){
  const target=cards[cards.length-1];
  if(!target)return false;
  target.closest('.modal-backdrop')?.remove();
+ disarmGuard();
  try{document.dispatchEvent(new CustomEvent('modal:closed'))}catch{}
  return true;
 }
 export function closeAllModals(){
  document.querySelector('#modal-root').innerHTML='';
+ disarmGuard();
  if(trapHandler){document.removeEventListener('keydown',trapHandler,true);trapHandler=null}
  try{if(lastTrigger&&document.contains(lastTrigger))lastTrigger.focus({preventScroll:true})}catch{}
  lastTrigger=null;
@@ -65,10 +86,12 @@ export function closeModal(){
  const topBackdrop=cards.length?cards[cards.length-1].closest('.modal-backdrop'):null;
  if(cards.length>1&&topBackdrop?.classList.contains('is-stacked')){
   topBackdrop.remove();
+  disarmGuard();
   try{document.dispatchEvent(new CustomEvent('modal:closed'))}catch{}
   return;
  }
  root.innerHTML='';
+ disarmGuard();
  if(trapHandler){document.removeEventListener('keydown',trapHandler,true);trapHandler=null}
  try{if(lastTrigger&&document.contains(lastTrigger))lastTrigger.focus({preventScroll:true})}catch{}
  lastTrigger=null;

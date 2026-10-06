@@ -4,6 +4,7 @@
 // حتى تُفتح فوقه حوارات التأجيل/التعديل دون فقدان مكانه. كل البيانات القانونية تُقرأ حيًّا من أصلها.
 // =====================================================================
 import {esc} from './dom.js';
+import {open as overlayOpen} from './overlay-stack.js';
 import {confirmBox} from './modal.js';
 import {toast} from './toast.js';
 import {enhanceCollapsiblePanels} from './collapsible.js';
@@ -62,12 +63,22 @@ function historyHtml(list) {
   return `<ol class="wc-history">${list.map(h => `<li><time datetime="${esc(h.timestamp)}">${esc(formatDateTime(h.timestamp))}</time><span>${esc(h.summary || ACTION_LABEL[h.action] || h.action)}</span><small class="muted">${esc(h.entityType === 'workItems' ? 'مركز العمل' : (ENTITIES[h.entityType]?.label || h.entityType))}</small></li>`).join('')}</ol>`;
 }
 
-let opener = null, keysBound = false;
+let opener = null, keysBound = false, releaseDrawerGuard = null;
+function armDrawerGuard() {
+  if (releaseDrawerGuard) return;
+  releaseDrawerGuard = overlayOpen('work-drawer', () => { closeWorkDrawer(); return true; });
+}
+function disarmDrawerGuard() {
+  const release = releaseDrawerGuard;
+  releaseDrawerGuard = null;
+  try { release?.(); } catch { /* متجاهَل */ }
+}
 export function closeWorkDrawer(root) {
   const host = root || document.querySelector('#wc-drawer-root');
   if (host) { host.innerHTML = ''; host.hidden = true; }
   try { if (opener && document.contains(opener)) opener.focus({preventScroll: true}); } catch { /* العنصر لم يعد موجودًا */ }
   opener = null;
+  disarmDrawerGuard();
   document.dispatchEvent(new CustomEvent('wc:drawer-closed'));
 }
 /** Esc يغلق المجلّد ولو فُقد التركيز، وTab يدور داخله (نافذة modal). يتجاهل الحوارات المفتوحة فوقه. */
@@ -98,6 +109,7 @@ export async function openWorkDrawer(wc, id) {
   if (host.hidden || !opener) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const prevScroll = host.querySelector('.wc-drawer')?.scrollTop || 0;   // إعادة الرسم بعد تعليق/تثبيت لا تقفز بالمستخدم لأعلى
   host.hidden = false;
+  armDrawerGuard(); // زر الرجوع في Android يغلق المجلّد وحده
   host.innerHTML = '<div class="wc-drawer-backdrop" data-wc-close></div><aside class="wc-drawer" role="dialog" aria-modal="true" aria-label="تفاصيل العمل" tabindex="-1"><div class="skel skel-line w70"></div><div class="skel skel-line w90"></div></aside>';
   let item;
   try { item = await getWorkItem(office, id, {config}); } catch (error) { toast(userError(normalizeError(error)), 'error'); closeWorkDrawer(host); return false; }

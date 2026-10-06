@@ -40,6 +40,9 @@ export async function homePage(app){
  const favs=getFavorites().slice(0,8);
  const last=prefs.get('ui:last-route');
  let demoBanner='';
+ // تلميح تثبيت واحد وغير مزعج: يظهر بعد استخدام فعلي فقط، ومرة واحدة، وله «لاحقًا» تُسكِته.
+ let installHint='';
+ try{if(app.pwaInstall?.shouldHint?.()){app.pwaInstall.markHintShown();installHint=`<div class="notice install-hint" role="status"><span><b>📲 تثبيت التطبيق</b> يمكنك تثبيت البرنامج على الهاتف فيعمل من أيقونته الخاصة وبلا إنترنت — بياناتك تبقى على جهازك.</span><span class="install-hint-actions"><button class="primary" type="button" data-install-now>تثبيت الآن</button><button class="ghost" type="button" data-install-later>لاحقًا</button></span></div>`}}catch{}
  try{const meta=await app.office.r.meta.get('demoSeed');if(meta?.seeded)demoBanner=`<div class="notice demo-banner" role="status"><b>بيانات تجريبية</b> السجلات المعلَّمة بـ〔تجريبي〕 للاختبار فقط، ولن تُحذف تلقائيًا. احذفها بنفسك عندما تنتهي.</div>`}catch{}
  const workRow=(route,main,mid,sub,sig)=>`<button class="work-row work-click" data-open-rec="${esc(route)}"><b>${esc(main||'—')}</b><span>${esc(mid||'')}</span><small>${esc(sub||'')}${sig?` · ${esc(sig.text)}`:''}</small></button>`;
  const kpis=[
@@ -51,7 +54,7 @@ export async function homePage(app){
   KPI('f',r.followupsThisWeek.length,'متابعات اتصال','communications?preset=week'),
   KPI('s',r.staleFiles.length,'ملفات بلا نشاط','actionCenter',r.staleFiles.length?'warn':'')
  ];
- return `${demoBanner}<div class="hero hero-home"><div><h2>${g}، مكتب الأستاذ أحمد محمد خضير</h2><p class="hero-date">${longDateAr()}</p></div>
+ return `${demoBanner}${installHint}<div class="hero hero-home"><div><h2>${g}، مكتب الأستاذ أحمد محمد خضير</h2><p class="hero-date">${longDateAr()}</p></div>
   <div class="hero-quick"><button class="primary" data-quick-add>+ إضافة</button><button class="ghost" data-goto="actionCenter">مركز العمل</button><button class="ghost" data-goto="reports?type=hearings&preset=today">تقرير اليوم</button>${last?.route&&last.route!=='dashboard'?`<button class="ghost resume-chip" data-goto="${esc(last.route)}">متابعة: ${esc(last.title||'آخر صفحة')}</button>`:''}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button></div></div>
  ${favs.length?card({icon:'folder',title:'مثبّتات',size:'full',collapsible:true,persistKey:'home:favs',sectionId:'favs',pageId:'dashboard',badge:statusBadge(String(favs.length),'info'),body:`<div class="fav-row">${favs.map(x=>`<button class="recent-chip" data-goto="${esc(x.route)}">${esc(x.title)}</button>`).join('')}</div>`}):''}
  <section class="panel kpi-panel" data-collapse-id="home-kpis" data-section-id="kpis"><div class="panel-head"><h3>ملخص العمل</h3><span class="badge">${kpis.length} مؤشرات</span></div><div class="kpi-strip" role="group" aria-label="ملخص العمل">${kpis.join('')}</div></section>
@@ -82,6 +85,8 @@ export function bindHome(app){
  document.querySelectorAll('[data-kpi]').forEach(b=>b.onclick=()=>app.go(b.dataset.kpi));
  document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>app.go(b.dataset.goto));
  document.querySelector('[data-quick-add]')?.addEventListener('click',()=>import('./quick-add.js').then(m=>m.openQuickAdd(app)));
+ document.querySelector('[data-install-now]')?.addEventListener('click',async()=>{const m=await import('../ui/install-prompt.js');await m.installApp(app);document.querySelector('.install-hint')?.remove()});
+ document.querySelector('[data-install-later]')?.addEventListener('click',()=>{app.pwaInstall?.dismissHint?.();document.querySelector('.install-hint')?.remove()});
  document.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'dashboard'}));
  document.querySelectorAll('[data-open-rec]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.openRec));
  document.querySelectorAll('[data-recent]').forEach(b=>b.onclick=()=>app.go(b.dataset.recent));
