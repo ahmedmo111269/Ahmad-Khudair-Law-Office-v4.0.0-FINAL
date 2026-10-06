@@ -1,32 +1,35 @@
 {
- "name": "tests",
- "version": "1.0.0",
- "description": "",
- "main": "index.js",
- "scripts": {
-  "test": "node run-tests.mjs",
-  "test:grid-browser": "node grid-browser-tests.mjs",
-  "test:execution-browser": "node execution-browser-tests.mjs",
-  "test:execution-feas-browser": "node execution-feas-browser-tests.mjs",
-  "test:execution-simple-browser": "node execution-simple-browser-tests.mjs",
-  "test:offline-sync-browser": "node offline-sync-browser-tests.mjs",
-  "test:quick-notes-browser": "node quick-notes-browser-tests.mjs",
-  "test:execution-print-browser": "node execution-print-browser-tests.mjs",
-  "test:execution-feas-cycle-browser": "node execution-feas-cycle-browser-tests.mjs",
-  "test:execution-practical": "node execution-practical-tests.mjs",
+  "name": "tests",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node run-tests.mjs",
+    "test:grid-browser": "node grid-browser-tests.mjs",
+    "test:execution-browser": "node execution-browser-tests.mjs",
+    "test:execution-feas-browser": "node execution-feas-browser-tests.mjs",
+    "test:execution-simple-browser": "node execution-simple-browser-tests.mjs",
+    "test:offline-sync-browser": "node offline-sync-browser-tests.mjs",
+    "test:quick-notes-browser": "node quick-notes-browser-tests.mjs",
+    "test:execution-print-browser": "node execution-print-browser-tests.mjs",
+    "test:execution-feas-cycle-browser": "node execution-feas-cycle-browser-tests.mjs",
+    "test:execution-practical": "node execution-practical-tests.mjs",
     "test:execution-real-example": "node execution-real-example-tests.mjs",
-  "test:execution-settings-browser": "node execution-settings-browser-tests.mjs"
- },
- "keywords": [],
- "author": "",
- "license": "ISC",
- "dependencies": {
-  "fake-indexeddb": "^4.0.2",
-  "linkedom": "^0.18.13"
- },
- "devDependencies": {
-  "@sparticuz/chromium": "^153.0.0",
-  "pdfjs-dist": "^6.3.289",
-  "playwright": "^1.63.0"
- }
+    "test:execution-settings-browser": "node execution-settings-browser-tests.mjs",
+    "test:android-pwa": "node android-pwa-browser-tests.mjs",
+    "icons:pwa": "node make-pwa-icons.mjs",
+    "screenshots:pwa": "node make-pwa-screenshots.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "fake-indexeddb": "^4.0.2",
+    "linkedom": "^0.18.13"
+  },
+  "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
+    "pdfjs-dist": "^6.3.289",
+    "playwright": "^1.63.0"
+  }
 }

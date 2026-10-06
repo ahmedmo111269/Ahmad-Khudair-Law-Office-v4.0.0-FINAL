@@ -1,7 +1,28 @@
-// Cache-first install of the complete local ES-module graph, followed by network-first updates.
-// Pre-caching only js/app.js is insufficient: the browser fetches its imports as separate requests,
-// so an offline reload immediately after installation otherwise fails before boot.
-const CACHE='ahmad-khudair-law-office-v5.13.5-accrual-after-period-end';
+// =====================================================================
+// Service Worker — قشرة التطبيق الكاملة للعمل دون اتصال (Android/PWA)
+// ---------------------------------------------------------------------
+// الاستراتيجية (وليست "خزّن كل شيء للأبد"):
+//   1) قشرة التطبيق والملفات الثابتة: تُخزَّن كلها مسبقًا (Precache) في كاش
+//      واحد مُرقَّم بإصدار، وتُخدَم من الكاش فورًا — بلا انتظار شبكة ولا
+//      مهلة 2.5 ثانية لكل ملف كما كان سابقًا. التحديث يحدث بترقية رقم
+//      الإصدار أدناه، فيُستبدل الكاش كاملًا مرة واحدة (بلا خليط نسخ).
+//   2) طلب تنقّل غير مخزَّن (رابط مباشر/تحديث الصفحة): شبكة، ثم القشرة.
+//   3) ملفات التطبيق غير المخزَّنة مسبقًا: شبكة ثم كاش (Runtime).
+//   4) أي شيء آخر — صور المعاينة، الطلبات المشفّرة، النطاقات الخارجية،
+//      طلبات Range (تنزيل/طباعة) — لا يُعترض ولا يُخزَّن إطلاقًا.
+//   5) بيانات المكتب (IndexedDB) لا تدخل Cache Storage أبدًا — فصل تام بين
+//      كاش التطبيق وبيانات المستخدم.
+// الترقية الآمنة: التثبيت الأول يستلم السيطرة فورًا (جهاز جديد = Offline من
+// أول استخدام). أما التحديث فوق نسخة قائمة فلا يستولي على جلسة مفتوحة؛
+// يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
+// الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
+// =====================================================================
+const CACHE='ahmad-khudair-law-office-v5.13.6-android-pwa';
+const CACHE_PREFIX='ahmad-khudair-law-office-';
+const SHELL='./index.html';
+const RUNTIME_TIMEOUT_MS=6000;
+// الملفات التي تُخزَّن مسبقًا. تفشُل الملفات الفردية وحدها دون إسقاط التثبيت
+// كله (ملف ناقص واحد لا يجب أن يُبطل العمل دون اتصال).
 const ASSETS=[
   "./",
   "./index.html",
@@ -24,6 +45,7 @@ const ASSETS=[
   "./css/sync.css",
   "./css/quick-notes.css",
   "./css/topnav.css",
+  "./css/mobile-pwa.css",
   "./icons/app-icon.svg",
   "./css/themes.css",
   "./css/ui.css",
@@ -176,6 +198,9 @@ const ASSETS=[
   "./js/ui/execution-horizon-picker.js",
   "./js/ui/execution-summary-card.js",
   "./js/ui/icons.js",
+  "./js/ui/install-prompt.js",
+  "./js/ui/overlay-stack.js",
+  "./js/core/history-nav.js",
   "./js/ui/lookup.js",
   "./js/ui/modal.js",
   "./js/ui/pagination.js",
@@ -184,39 +209,89 @@ const ASSETS=[
   "./js/ui/theme.js",
   "./js/ui/toast.js",
   "./js/modules/timeline-view.js",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "./icons/maskable-192.png",
+  "./icons/maskable-512.png",
+  "./icons/apple-touch-icon.png",
+  "./js/core/storage-persistence.js",
+  "./js/services/pwa-install.js",
 ];
-self.addEventListener('install',e=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
-});
-self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
-});
-const NETWORK_TIMEOUT_MS=2500;
-function isApplicationAsset(url){
-  if(url.pathname.endsWith('/api')||url.pathname.includes('/api/'))return false;
-  if(url.search)return false;
-  return url.pathname==='/'||url.pathname.endsWith('/index.html')||/\.(?:html|js|mjs|css|svg|png|webmanifest)$/.test(url.pathname);
+const PRECACHE=new Set(ASSETS);
+const APP_ASSET=/\.(?:js|mjs|css|svg|png|webmanifest|html|json)$/i;
+
+async function precacheAll(){
+ const cache=await caches.open(CACHE);
+ const results=await Promise.allSettled(ASSETS.map(asset=>cache.add(new Request(asset,{cache:'reload'}))));
+ const failed=ASSETS.filter((asset,index)=>results[index].status==='rejected');
+ if(failed.length)console.warn('[SW] تعذّر تخزين بعض الملفات مسبقًا:',failed);
+ return {total:ASSETS.length,cached:ASSETS.length-failed.length,failed};
 }
-self.addEventListener('fetch',e=>{
-  const req=e.request;
-  if(req.method!=='GET')return;
-  const url=new URL(req.url);
-  if(url.origin!==self.location.origin||!isApplicationAsset(url))return;
-  e.respondWith((async()=>{
-    const controller=new AbortController();
-    const timeout=setTimeout(()=>controller.abort(),NETWORK_TIMEOUT_MS);
-    try{
-      const res=await fetch(req,{signal:controller.signal});
-      if(res&&res.ok&&res.type==='basic'){
-        const cache=await caches.open(CACHE);
-        await cache.put(req,res.clone());
-      }
-      return res;
-    }catch{
-      const cached=await caches.match(req,{ignoreSearch:true});
-      if(cached)return cached;
-      if(req.mode==='navigate')return (await caches.match('./index.html'))||Response.error();
-      return Response.error();
-    }finally{clearTimeout(timeout)}
-  })());
+
+self.addEventListener('install',event=>{
+ event.waitUntil((async()=>{
+  await precacheAll();
+  // تثبيت أول على الجهاز: بلا نسخة نشطة سابقة، فالاستيلاء الفوري آمن ويجعل
+  // أول جلسة قادرة على العمل دون اتصال. أما التحديث فوق نسخة قائمة فينتظر.
+  if(!self.registration.active)await self.skipWaiting();
+ })());
+});
+
+self.addEventListener('activate',event=>{
+ event.waitUntil((async()=>{
+  const keys=await caches.keys();
+  await Promise.all(keys.filter(key=>key!==CACHE&&key.startsWith(CACHE_PREFIX)).map(key=>caches.delete(key)));
+  await self.clients.claim();
+ })());
+});
+
+self.addEventListener('message',event=>{
+ const data=event.data||{};
+ if(data.type==='SKIP_WAITING'){self.skipWaiting();return}
+ if(data.type==='PWA_INFO'&&event.ports&&event.ports[0])event.ports[0].postMessage({version:CACHE,assets:ASSETS.length});
+});
+
+function sameScope(url){
+ try{return url.href.startsWith(self.registration.scope)}catch{return url.origin===self.location.origin}
+}
+
+async function navigationResponse(request){
+ const cache=await caches.open(CACHE);
+ const exact=await cache.match(request,{ignoreSearch:true});
+ if(exact)return exact;
+ const shell=await cache.match(SHELL,{ignoreSearch:true});
+ if(shell)return shell;
+ try{
+  const response=await fetch(request);
+  if(response&&response.ok&&response.type==='basic')cache.put(request,response.clone());
+  return response;
+ }catch{
+  return shell||Response.error();
+ }
+}
+
+async function assetResponse(request){
+ const cache=await caches.open(CACHE);
+ const hit=await cache.match(request,{ignoreSearch:true});
+ if(hit)return hit;
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),RUNTIME_TIMEOUT_MS);
+ try{
+  const response=await fetch(request,{signal:controller.signal});
+  if(response&&response.ok&&response.type==='basic')cache.put(request,response.clone());
+  return response;
+ }catch{
+  return (await cache.match(request,{ignoreSearch:true}))||Response.error();
+ }finally{clearTimeout(timer)}
+}
+
+self.addEventListener('fetch',event=>{
+ const request=event.request;
+ if(request.method!=='GET')return;
+ if(request.headers.get('range'))return; // تنزيل نسخة احتياطية/طباعة: تمرير مباشر
+ const url=new URL(request.url);
+ if(url.origin!==self.location.origin||!sameScope(url))return;
+ if(request.mode==='navigate'){event.respondWith(navigationResponse(request));return}
+ if(url.search||url.pathname.includes('/api/')||!APP_ASSET.test(url.pathname))return;
+ event.respondWith(assetResponse(request));
 });

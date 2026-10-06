@@ -16,6 +16,7 @@
 import {icon} from './icons.js';
 import {prefs} from '../core/preferences.js';
 import {esc} from './dom.js';
+import {open as overlayOpen} from './overlay-stack.js';
 import {
   NAV_GROUPS, NAV_CONFIG_KEY, defaultNavConfig, normalizeNavConfig, orderedGroups, groupItems,
   groupIdForRoute, groupById, planOverflow, countLabel, sectionsLabel
@@ -232,17 +233,32 @@ export function openPanel(id, anchor, {focusFirst = false} = {}) {
   showBackdrop(lock);
   document.body.classList.toggle('tn-lock', lock);
   if (focusFirst) panel.querySelector('.tn-item')?.focus?.({preventScroll: true});
+  // لوحة التنقل على الهاتف طبقة علوية: زر الرجوع في Android يغلقها وحدها ولا يخرج
+  // من التطبيق. (لوحات سطح المكتب تُفتح بالتحويم/النقر خارجها ولا تضيف تاريخًا.)
+  if (openId === id && !isDesktop()) armPanelGuard();
+}
+let releasePanelGuard = null;
+function armPanelGuard() {
+  if (releasePanelGuard) return;
+  releasePanelGuard = overlayOpen('nav-panel', () => { closePanel(); return true; });
+}
+function disarmPanelGuard() {
+  if (openId) return;
+  const release = releasePanelGuard;
+  releasePanelGuard = null;
+  try { release?.(); } catch { /* متجاهَل */ }
 }
 export function closePanel({keepTriggers = false} = {}) {
   const bar = document.querySelector('#sidebar');
   if (bar) bar.querySelectorAll('.tn-panel').forEach(p => { p.hidden = true; });
-  if (!openId && !keepTriggers) return;
+  if (!openId && !keepTriggers) { disarmPanelGuard(); return; }
   openId = null;
   openAnchor = null;
   clearTimeout(leaveTimer);
   if (!keepTriggers) syncTriggers();
   showBackdrop(false);
   document.body.classList.remove('tn-lock');
+  disarmPanelGuard();
 }
 /** موضع اللوحة أسفل زرها مع تقييدها داخل الشاشة (RTL/LTR على حد سواء). */
 function positionPanel(panel, anchor) {

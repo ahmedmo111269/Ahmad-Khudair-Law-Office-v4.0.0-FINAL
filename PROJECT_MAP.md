@@ -1,3 +1,34 @@
+# v5.13.6 — جاهزية Android / PWA (Installable Offline-first Web App)
+
+**2026-10-06 — موجز Android/PWA Production Readiness؛ لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن ولا في منطق الأعمال.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/core/history-nav.js` (جديد) | `RouteHistory` + `hashForRoute`/`routeFromHash`/`routeFromStateOrLocation`. يسجّل كل انتقال في تاريخ المتصفح بحالة `{akl:'route'}` ويكتب المسار في `#/…`؛ مدخل حماية `{akl:'overlay'}` لكل طبقة علوية؛ رجوع برمجي بنمطين (`silent` لتحرير مدخل حماية، `navigate` لزر «رجوع» الداخلي) فلا يُفسَّر كرجوع مستخدم ولا يُخصم العمق مرتين؛ وعند غياب أي مدخل برنامجي يعود السلوك لنظام Android (خروج). |
+| `js/ui/overlay-stack.js` (جديد) | مكدّس الطبقات العلوية: `open(key, closer)`/`release`/`closeTop`/`isOpen` — الطبقة الأولى فقط تضيف مدخل حماية، والطبقات المكدسة تشترك فيه وتُغلق واحدة واحدة، والطبقة اليتيمة تُزال ولا تستهلك ضغطة رجوع. |
+| `js/app.js` | `startHistoryNav()` (ربط `RouteHistory` + `bindOverlayStack`)، `startStorageHardening()` (تخزين دائم + مراقبة مساحة + رسائل أخطاء التخزين على `error`/`unhandledrejection`)، `record()` في كل `go()`، `back()` عبر تاريخ المتصفح، `reloadForUpdate()` لإعادة تحميل واحدة عند قبول التحديث، ومزامنة `aria-expanded` لزر قائمة الهاتف. `App.history` الداخلي بقي كاحتياط فقط. |
+| `js/ui/modal.js` · `js/ui/topnav.js` · `js/ui/work-drawer.js` · `js/ui/datagrid.js` | كل طبقة تسجّل نفسها في المكدّس عند الفتح وتُفرّح نفسها عند الإغلاق: النوافذ وطبقاتها المكدسة · لوحة تنقل الهاتف (`!isDesktop()`) · درج تفاصيل العمل · قوائم الجدول (تصفية عمود/تفاصيل خلية/مظهر الجدول) — فيعمل زر الرجوع في Android كما يعمل زر ✕. |
+| `js/services/pwa-updates.js` | لا استيلاء تلقائي: التحديث المنتظر يُعلَن مرة واحدة بزر «تحديث الآن»، ويُقبل بـ`SKIP_WAITING` ثم إعادة تحميل واحدة، وبعدها رسالة تؤكد أن بيانات المكتب كما هي. |
+| `js/services/pwa-install.js` + `js/ui/install-prompt.js` (جديدان) | التقاط `beforeinstallprompt`، حالة التثبيت (standalone)، زر تثبيت رسمي في الإعدادات، خطوات يدوية بديلة، وتلميح واحد في الشاشة الرئيسية بعد استخدام فعلي (3 زيارات) مع «لاحقًا». بلا تتبّع وبلا إرسال أي بيانات. |
+| `js/core/storage-persistence.js` (جديد) | `ensurePersistentStorage` (طلب تخزين دائم مرة واحدة) · `watchStorage` (تنبيه عند 70/85/95% من الحد) · `storageErrorHint` (رسائل عربية لـQuota/Abort/Version/InvalidState/Blocked). |
+| `js/modules/settings.js` · `js/modules/home.js` | لوحة «📲 تثبيت التطبيق» في الإعدادات (زر رسمي + مساعدة)، وتلميح التثبيت الاختياري في الشاشة الرئيسية. |
+| `sw.js` | استراتيجية مقصودة: قشرة وملفات ثابتة Cache-first من كاش مُرقَّم بالإصدار (`v5.13.6-android-pwa`) · تنقّل غير مخزَّن = شبكة ثم القشرة · ملف تطبيق = شبكة ثم كاش بمهلة 6 ثوانٍ · النطاقات الخارجية وطلبات `Range` و`?query` لا تُعترض ولا تُخزَّن. تثبيت أول يستولي فورًا، وتحديث فوق نسخة قائمة ينتظر `SKIP_WAITING`. الملف الفردي الفاشل في الـprecache لا يُسقط التثبيت. |
+| `manifest.webmanifest` | هوية مستقرة: `id:'./'`، الاسم الرسمي، `lang/dir`، `display:standalone` + `display_override`، `orientation:any`، ألوان الهوية (`#0B0B0B`، ويتبع الثيم الحالي من `theme-color` عند التشغيل)، أيقونات 192/512 PNG + Maskable 192/512 + Apple 180، ولقطتا شاشة للهاتف. |
+| `icons/*.png` (جديدة) + `tools/node-tests/make-pwa-icons.mjs` | توليد أيقونات Android من شعار المشروع نفسه بلا اعتماد خارجي (`npm run icons:pwa`)، مع safe area 20% للأيقونة القابلة للقص. |
+| `css/mobile-pwa.css` (جديد) | مناطق آمنة (`env(safe-area-inset-*)`) · وضع مستقل (`display-mode: standalone`) · أهداف لمس ≈44px محصورة في `(pointer:coarse)` · `scroll-margin-block` للحقول مع لوحة المفاتيح · تنسيقات شاشة الإقلاع وتلميح التثبيت. |
+| `index.html` | `mobile-web-app-capable` · `apple-touch-icon` · أيقونة 192 · شاشة إقلاع بمحتوى حقيقي بدل صفحة فارغة · دعم الفتح المباشر على مسار (`#/…`). |
+| `js/tests/pwa-tests.js` (جديد) | 15 اختبارًا للمنطق الصافي (تاريخ التنقل · الطبقات · حالة الشبكة · رسائل التخزين · التثبيت · التحديث) تُشغَّل من `run-tests.mjs` ومن `tests.html`. |
+| `tools/node-tests/android-pwa-browser-tests.mjs` (جديد) | 28 فحصًا في Chromium بمحاكاة هاتف Android (manifest · `Page.getInstallabilityErrors` · Service Worker وكاش القشرة الكامل · مناطق آمنة · أهداف لمس · **زر الرجوع** · رابط مباشر وتحديث · بقاء البيانات بعد إعادة التشغيل · **إقلاع وتنقّل وكتابة دون اتصال** · **تحديث إصدار آمن** · سطح المكتب بلا تغيير). `npm run test:android-pwa`. |
+| `tools/node-tests/make-pwa-screenshots.mjs` (جديد) | لقطات manifest من تشغيل حقيقي بمقاس 1080×1920 (`npm run screenshots:pwa`) — `screenshots/home-mobile.jpg` و`screenshots/files-mobile.jpg`. |
+| `.nojekyll` (جديد) | يمنع Jekyll على GitHub Pages من استثناء المجلدات التي تبدأ بنقطة، فتُخدَم ملفات مثل `.well-known/assetlinks.json` عند التغليف كـTWA. |
+| `tools/release-audit.mjs` | كان يُفسِّر كلمة `import` داخل تعليق كسطر استيراد فيُفشل الإصدار خطأً (`execution-calendar.js`). صار يُزيل التعليقات قبل الفحص ويكتشف الاستيراد بلا `from` — البوابة **PASS** و1091 استيرادًا مفحوصًا. |
+| `docs/ANDROID-PWA.md` (جديد) | دليل التشغيل على Android: التثبيت، زر الرجوع، العمل دون اتصال، التحديث، مسار التغليف (PWABuilder/TWA)، وحدود التحقق. |
+| `js/core/constants.js` | `APP_VERSION = 5.13.6`. |
+
+**تحقق فعلي منفَّذ:** `run-tests.mjs` **487/487** · `android-pwa-browser` **28/28** · `release-audit` **PASS** (1091 استيرادًا) · `grid-browser` (وضع offline الكامل + تكافؤ الأصل) ناجح · `offline-sync` و`execution-browser` (34/34) و`quick-notes` و`work-center` ناجحة. **NOT VERIFIED:** جهاز Android حقيقي وChrome حقيقي (الاختبار بمحاكاة Chromium موبايل)، ومعاينة الطباعة الأصلية والطباعة الورقية.
+
+---
+
 # v5.13.2 — خريطة «الإعدادات تعمل» وأفق الحساب الصريح
 
 **2026-10-05 — إصلاح محدود فوق v5.13.1 أدناه؛ لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن ولا في مسار FEAS.**

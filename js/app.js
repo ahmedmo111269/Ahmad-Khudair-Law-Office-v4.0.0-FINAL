@@ -45,6 +45,10 @@ import {bindCards} from './ui/card.js';
 import {applyPageDisplay,applyPageLayout} from './ui/page-layout.js';
 import {applyUniversalStyles} from './ui/component-customizer.js';
 import {Clock} from './core/clock.js';
+import {RouteHistory,routeFromHash} from './core/history-nav.js';
+import {bindOverlayStack,isOpen as overlayIsOpen,closeTop as closeTopOverlay,size as overlaySize} from './ui/overlay-stack.js';
+import {ensurePersistentStorage,watchStorage,storageErrorHint} from './core/storage-persistence.js';
+import {PWAInstallService} from './services/pwa-install.js';
 
 // صفحات القوائم العامة (كل كيان له صفحة قائمة بنفس النمط)
 const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','serviceRecords','appointments','communications','caseNotes','expertReports','judgments','execution','fees','feePayments','documentReferences','bailiffs'];
@@ -87,8 +91,28 @@ function recordRoute(route){
 }
 
 class App{
- constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null;this.routeHistory=null;this.storageWatch=null;this.pwaInstall=null}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ /** تاريخ المتصفح: كل انتقال يُسجَّل، وزر الرجوع في Android يغلق الطبقات ثم يرجع بين الشاشات. */
+ startHistoryNav(){
+  bindOverlayStack(this.routeHistory=new RouteHistory({
+   windowRef:window,
+   onNavigate:route=>this.go(route,{fromHistory:true}),
+   onOverlayBack:()=>closeTopOverlay(),
+   hasOverlay:()=>overlayIsOpen(),
+   onError:(scope,error)=>console.error('route history',scope,error)
+  }));
+  this.routeHistory.start(this.route);
+ }
+ /** مرونة التخزين: تخزين دائم + مراقبة المساحة + رسائل أخطاء مفهومة (بلا تغيير أي بيانات). */
+ startStorageHardening(){
+  if(this.storageWatch)return;
+  const warn=message=>toast(message,'warn',{duration:8000});
+  ensurePersistentStorage({warn}).then(state=>{if(state?.persisted===false&&!state.granted)console.info('storage persistence not granted; local data still works but backups matter more.')}).catch(()=>{});
+  try{this.storageWatch=watchStorage({onLevel:health=>{const level=health.level;if(level==='critical'||level==='high')warn(`مساحة التخزين المحلية قاربت حدها (${health.usageMb} من ${health.quotaMb} ميجابايت). أنشئ نسخة احتياطية من صفحة «النسخ الاحتياطي».`)}})}catch{}
+  window.addEventListener('unhandledrejection',event=>{const hint=storageErrorHint(event.reason);if(hint)toast(hint,'error',{duration:9000})});
+  window.addEventListener('error',event=>{const hint=storageErrorHint(event.error);if(hint)toast(hint,'error',{duration:9000})});
+ }
  /** ترقية قواعد المكتب v2 مع حفظ نسخة v1 وسجل الفاعل/التاريخ وإبطال cache. */
  async runExecutionSettingsMigration(){
   try{const {ensureExecutionSettingsV2}=await import('./services/execution-settings.js');return await ensureExecutionSettingsV2(this.office)}
@@ -128,7 +152,10 @@ class App{
   // شريط التنقل العلوي الموحّد v6: يُبنى من تعريف واحد (ui/nav-model.js) كتبويبات
   // أفقية بعرض مساحة البرنامج، مع لوحات منظمة لكل تبويب، وطي، وتخصيص كامل.
   buildSidebar();initSidebarState();
-  $('#mobile-menu').onclick=()=>{isDesktop()?toggleCollapsed():toggleMobile()};
+  const syncMenuState=()=>{const button=$('#mobile-menu');if(!button)return;const panelOpen=Boolean(document.querySelector('#sidebar .tn-panel:not([hidden])'));button.setAttribute('aria-expanded',String(isDesktop()?!document.body.classList.contains('topnav-collapsed'):panelOpen))};
+  $('#mobile-menu').onclick=()=>{isDesktop()?toggleCollapsed():toggleMobile();syncMenuState()};
+  window.addEventListener('resize',()=>syncMenuState(),{passive:true});
+  syncMenuState();
   $('#quick-add').onclick=()=>openQuickAdd(this);
   $('#quick-note-fab')?.addEventListener('click',()=>openQuickNoteCapture(this));
   bindQuickNoteGlobalEvents(this);
@@ -158,8 +185,15 @@ class App{
     }else toast('🟢 عاد الاتصال بالإنترنت.','ok');
    }).catch(()=>toast('🟢 عاد الاتصال بالإنترنت.','ok'));
   },{immediate:true});
-  this.pwaUpdates=new PWAUpdateService({network:networkStatus,notify:(message,type='info')=>toast(message,type,{duration:6000})});
+  this.pwaUpdates=new PWAUpdateService({
+   network:networkStatus,
+   notify:(message,type='info',options={})=>toast(message,type,{duration:6000,...options}),
+   toast:(message,type='info',options={})=>toast(message,type,options),
+   apply:()=>this.reloadForUpdate()
+  });
   this.pwaUpdates.start().catch(error=>console.info('PWA update service unavailable',error));
+  this.pwaInstall=new PWAInstallService({toast:(message,type,options)=>toast(message,type,options)}).start();
+  try{this.pwaInstall.recordVisit()}catch{}
  }
  // اختصارات لوحة المفاتيح: Ctrl+K اللوحة، ? المساعدة، Alt+رقم للتنقل السريع
  initShortcuts(){
@@ -187,15 +221,17 @@ class App{
   if(!this.office&&(this.booting||this.registry.recoveryMode)){if(this.booting)this.pendingRoute=route;return}
   const my=++this.navSeq;
   closeModal();document.querySelectorAll('.dg-pop').forEach(p=>p.remove());
-  if(this.route&&this.route!==route&&!opts.replace)this.history.push(this.route);
+  if(this.route&&this.route!==route&&!opts.replace&&!opts.fromHistory)this.history.push(this.route);
   this.history=this.history.slice(-50);this.route=route;appStore.set({route});
+  // كل انتقال يُسجَّل في تاريخ المتصفح، فيعمل زر الرجوع في Android كما يتوقع المستخدم.
+  this.routeHistory?.record(route,{replace:Boolean(opts.replace)||Boolean(opts.fromHistory)});
   const baseRoute=route.split('?')[0];const query=new URLSearchParams(route.includes('?')?route.split('?')[1]:'');
   const page=recordRoute(baseRoute)||PAGES[baseRoute]||PAGES.dashboard;
   const navKey=page.store||baseRoute; // صفحة السجل تُبرز قائمة كيانها في شريط التنقل العلوي
   setActiveRoute(navKey);
   $('#page-title').textContent=page.title;
   document.title=`${page.title} — ${constants.APP_NAME}`;
-  $('#nav-back').disabled=!this.history.length;
+  $('#nav-back').disabled=!(this.routeHistory?.canGoBack?.()||this.history.length);
   const main=$('#main-content');const scrollTop=opts.replace?window.scrollY:0;
   if(!opts.replace)main.innerHTML='<div class="skel-page" role="status" aria-live="polite" aria-label="جارٍ التحميل"><div class="skel skel-hero"></div><div class="skel-row"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div><div class="skel skel-block"></div><div class="skel skel-block"></div></div>';
   try{
@@ -236,7 +272,13 @@ class App{
   const office=this.office;this.maintenance=runMaintenance(office).catch(e=>console.error('maintenance',e));
  }
  resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__report','__agendaDay','__wc'])delete this[k]}
- back(){const r=this.history.pop()||'dashboard';return this.go(r,{replace:true})}
+ back(){
+  // زر «رجوع» داخل البرنامج: يستخدم تاريخ المتصفح نفسه فيُبقي مدخلات Android متوازنة.
+  if(this.routeHistory?.canGoBack?.())return (this.routeHistory.back(),null);
+  const r=this.history.pop()||'dashboard';return this.go(r,{replace:true});
+ }
+ /** التحديث عبر إعادة تحميل واحدة: لا يلمس IndexedDB ولا التفضيلات. */
+ reloadForUpdate(){try{location.reload()}catch{/* متجاهَل */}}
  refresh(){return this.go(this.route,{replace:true})}
  fail(e){const err=normalizeError(e);console.error(err.code,err,e);const retry=this.route||'dashboard';$('#main-content').innerHTML=`<div class="error-box" role="alert"><h2>تعذر تنفيذ العملية</h2><p>${esc(userError(err))}</p><div class="error-actions"><button class="primary" data-retry>إعادة المحاولة</button><button class="ghost" data-error-home>الرئيسية</button><button class="ghost" data-error-diagnostics>سلامة البيانات</button></div><small class="muted">رمز التشخيص: ${esc(err.code)}</small></div>`;document.querySelector('[data-retry]')?.addEventListener('click',()=>this.go(retry,{replace:true}));document.querySelector('[data-error-home]')?.addEventListener('click',()=>this.go('dashboard'));document.querySelector('[data-error-diagnostics]')?.addEventListener('click',()=>this.go('integrity'))}
 }

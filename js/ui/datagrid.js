@@ -15,8 +15,17 @@ import {toast} from './toast.js';
 import {resolveCollapseState,saveCollapseState,clearCollapseState,getCollapseRecord,isCollapsePinned,getCollapsePreferences} from './collapse-state.js';
 import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
 import {resolveGridDisplay} from '../core/display-prefs.js';
+import {open as overlayOpen} from './overlay-stack.js';
 
 let gridInstance=0;
+// قوائم الجدول المنبثقة (تصفية عمود/تفاصيل خلية/مظهر الجدول) طبقة علوية:
+// زر الرجوع في Android يغلقها وحدها، تمامًا كما يفعل زر ✕.
+let releasePopGuard=null;
+function armPopGuard(){
+ if(releasePopGuard)return;
+ releasePopGuard=overlayOpen('grid-pop',()=>{const x=document.querySelector('.dg-pop .dg-x');if(!x)return false;x.click();return true});
+}
+function disarmPopGuard(){const release=releasePopGuard;releasePopGuard=null;try{release?.()}catch{/* متجاهَل */}}
 
 // أعمدة لا تُصدَّر افتراضيًا (خصوصية الموكلين) إلا باختيار "تصدير كامل"
 const SENSITIVE=/nationalId|idNumber|passport|phone|mobile|email|address|birth|partyName|bailiffName/i;
@@ -522,6 +531,7 @@ export function mountGrid(root,opts){
    drawValues();
   };
   pop.querySelector('.dg-x').onclick=closePop;
+  armPopGuard();
   pop.querySelector('.dg-appear-reset').onclick=()=>{st.appear={};persist();applyAppear();rowH=0;renderBody();drawValues();toast('أُعيد مظهر هذا الجدول إلى الافتراضي — إعدادات الأعمدة والفلاتر كما هي')};
   pop.addEventListener('input',ev=>{
    const r=ev.target.closest('[data-apr]');
@@ -601,7 +611,7 @@ export function mountGrid(root,opts){
 
  // ===== نافذة تصفية العمود =====
  let pop=null;
- const closePop=()=>{pop?.remove();pop=null;document.removeEventListener('mousedown',outside,true)};
+ const closePop=()=>{pop?.remove();pop=null;document.removeEventListener('mousedown',outside,true);disarmPopGuard()};
  const outside=e=>{if(pop&&!pop.contains(e.target))closePop()};
  function place(el,anchor){
   document.body.append(el);
@@ -616,6 +626,7 @@ export function mountGrid(root,opts){
   closePop();pop=document.createElement('div');pop.className='dg-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label',column.label);
   pop.innerHTML=`<div class="dg-pop-head"><b>${esc(column.label)}</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div><ul class="dg-cell-details">${column.items(row).map(item=>`<li><b>${esc(item.text)}</b>${item.detail?`<small>${esc(item.detail)}</small>`:''}</li>`).join('')}</ul>`;
   place(pop,anchor);pop.querySelector('.dg-x').onclick=()=>{closePop();anchor.focus()};
+  armPopGuard();
   pop.addEventListener('keydown',event=>{if(event.key==='Escape'){closePop();anchor.focus()}});pop.querySelector('.dg-x').focus();
  }
  function valueInputs(type,op,v1='',v2=''){
@@ -648,6 +659,7 @@ export function mountGrid(root,opts){
   place(pop,th);
   const q=s=>pop.querySelector(s);
   q('.dg-x').onclick=closePop;
+  armPopGuard();
   pop.querySelectorAll('[data-dir]').forEach(b=>b.onclick=()=>{if(b.dataset.dir==='none')st.sort=st.sort.filter(s=>s.key!==key);else st.sort=[{key,dir:b.dataset.dir}];closePop();changeQuery()});
   pop.querySelectorAll('[data-preset-op]').forEach(b=>b.onclick=()=>{st.filters.set(key,{op:b.dataset.presetOp,v1:'',v2:'',set:null});closePop();st.shown=o.pageSize;changeQuery()});
   q('.dg-checkall').onclick=()=>{pop.querySelectorAll('.dg-checks label:not([hidden]) input').forEach(i=>i.checked=true);q('.dg-allbox').checked=true};
