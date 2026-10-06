@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v5.13.6-android-pwa';
+const CACHE='ahmad-khudair-law-office-v5.14.0-android-pwa';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -45,6 +45,7 @@ const ASSETS=[
   "./css/sync.css",
   "./css/quick-notes.css",
   "./css/topnav.css",
+  "./css/topbar.css",
   "./css/mobile-pwa.css",
   "./icons/app-icon.svg",
   "./css/themes.css",
@@ -125,7 +126,9 @@ const ASSETS=[
   "./js/services/consistency.js",
   "./js/services/dashboard.js",
   "./js/services/demo-seed.js",
+  "./js/services/demo-data.js",
   "./js/services/favorites.js",
+  "./js/ui/demo-cleanup.js",
   "./js/services/entity-query.js",
   "./js/services/grid-relations.js",
   "./js/services/entity-save.js",

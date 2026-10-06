@@ -1,0 +1,165 @@
+/* =====================================================================
+   طبقة تجاوب الشريط العلوي (Topbar) — إصلاح تغطية الأزرار لعناصر الواجهة
+   ---------------------------------------------------------------------
+   المشكلة (مقيسة في متصفح حقيقي — Chromium بمحاكاة الهاتف):
+   • `.topbar` كان بارتفاع ثابت `60px` على الشاشات ≤900px (pro.css) و`72px`
+     على سطح المكتب (layout.css)، بينما محتواه يلتف إلى سطرين على الهاتف
+     (عنوان + شارات ثم صف الأزرار) فيتجاوز ارتفاعه المثبّت ويُرسم فوق ما تحته:
+     عنوان الصفحة «الموكلون» وزر «+ إضافة موكل» وعوامل التصفية.
+   • قاعدتان في هذا الملف نفسه كانت علة إضافية: `.topbar>div` (تُخصّيص 0,1,1)
+     كانت تطابق صف الأزرار `.top-actions` (0,1,0) وتفرض عليه `display:flex`
+     و`flex-grow:1` فتتجاوز قواعده وتكدّس الأزرار عموديًا.
+   • شريط التنقل العلوي `.tn-bar` ارتفاعه متغيّر (`--topnav-h` يُقاس بالجافاسكربت)
+     وشريط الأدوات ملتصق تحته، فأي قياس متأخر/قديم يجعل التداخل يزيد.
+
+   الإصلاح في هذه الطبقة (قواعد إضافية فقط، بلا !important وبلا حذف قاعدة قائمة):
+   1) ارتفاع الشريط تلقائي دائمًا (`min-height` + `height:auto` + `overflow:hidden`
+      كحزام أمان) ⇒ لا يخرج محتواه عن حدوده أبدًا ولا يغطّي ما تحته.
+   2) التفاف `flex-wrap: wrap`، وعلى الهاتف تُرتَّب الأزرار في صفوف متساوية:
+      ثلاثة أزرار رئيسية في شبكة 3 أعمدة + صف مستقل لأزرار التنقل.
+   3) على الهاتف (≤640px) يصبح الشريط `static` بعد أن صار سطرين/ثلاثة —
+      فلا يلتهم ارتفاع الشاشة ولا يغطّي شيئًا، ويبقى شريط التنقل وحده ملتصقًا.
+   4) رأس الصفحة (`.page-head`) يترتب عموديًا على الهاتف بأزرار متساوية.
+   • يُحمَّل هذا الملف آخر ملفات CSS في index.html. سطح المكتب (≥901px) يبقى
+     بتخطيطه الحالي: كتلة العنوان والأزرار في صف واحد والارتفاع الأساسي 72px.
+   ===================================================================== */
+
+/* ---------- 1) الشريط: ارتفاع تلقائي بدل ثابت + منع خروج المحتوى عنه ---------- */
+.topbar{
+ height:auto;              /* بدل 72px الثابتة في layout.css */
+ min-height:fit-content;   /* الارتفاع = المحتوى، بلا رفع الارتفاع على سطح المكتب */
+ overflow:hidden;          /* حزام أمان: لا يرسم أي زر خارج حدود الشريط */
+ flex-wrap:wrap;           /* بدل صف واحد صارم يتجاوز الارتفاع المثبّت */
+ align-content:center;
+ align-items:center;
+ row-gap:6px;
+ position:sticky;
+ top:var(--topnav-h,0px);  /* إزاحة مقيسة (topnav.js → measureHeight) */
+ z-index:10;
+}
+/* كتلة العنوان (أول div في الشريط) — الاستثناء الصريح لصف الأزرار مقصود:
+   `.topbar>div` بلا `:not(.top-actions)` كانت تتجاوزه وتفرض عليه flex. */
+.topbar>div:not(.top-actions){min-width:0}
+/* صف الأزرار: لا يتجاوز العرض، وأزراره لا تتكدّس فوق بعضها */
+.top-actions{flex-wrap:wrap;align-items:center;min-width:0;max-width:100%}
+.top-actions>button,
+.top-actions .nav-cluster>button{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- 2) الأجهزة اللوحية (≤900px): سطران مرتبان ورأس صفحة ثابت النص ---------- */
+@media(max-width:900px){
+ .topbar{padding:8px 12px;min-height:56px;gap:6px;row-gap:6px;align-items:center;overflow:visible}
+ /* كتلة العنوان تتمدّد لتملأ السطر، والعنوان يُقتطع بأمان بدل دفع الأزرار */
+ .topbar>div:not(.top-actions){
+  flex:1 1 auto;
+  min-width:120px;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:2px 8px;
+ }
+ .topbar>div:not(.top-actions) h1{
+  flex:1 1 100%;
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+ }
+ .topbar>div:not(.top-actions) #db-badge,
+ .topbar>div:not(.top-actions) #network-badge{flex:none}
+ .topbar>#mobile-menu{flex:none}
+ /* الأزرار في صف واحد ما دامت تتّسع (تُقلَّص بحد أدنى صفر)، وإن ضاقت المساحة
+    ينزل الصف كاملًا إلى سطر ثانٍ — بلا تجاوز ولا تغطية. */
+ .top-actions{flex:1 1 auto;min-width:0;gap:6px;justify-content:flex-end}
+ .top-actions>button{flex:1 1 auto;min-width:0;justify-content:center}
+ /* ارتفاع ثابت لرأس الصفحة (كان 60px في pro.css فيُقتطع نصّها) */
+ .topbar{height:auto}
+}
+
+/* ---------- 3) الهاتف (≤640px): شريط غير ملتصق + أزرار في صفوف متساوية ---------- */
+@media(max-width:640px){
+ /* الشريط يلتف إلى سطرين أو ثلاثة على الهاتف: يبقى في أعلى الصفحة (static)
+    فلا يلتهم ارتفاع الشاشة ولا يغطّي شيئًا، ويبقى شريط التنقل هو الملتصق. */
+ .topbar{position:static;min-height:0}
+ /* صف الأزرار الرئيسية: ثلاثة أعمدة متساوية، ثم أزرار التنقل في صف مستقل */
+ .top-actions{
+  display:grid;
+  flex:1 1 100%;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px;
+  width:100%;
+  max-width:100%;
+ }
+ .top-actions>button,.top-actions>.nav-cluster{width:100%}
+ .top-actions>button{justify-content:center;padding-inline:6px;font-size:12.5px}
+ .top-actions .nav-cluster{
+  grid-column:1 / -1;
+  display:flex;
+  gap:6px;
+  border:0;
+  margin:0;
+  padding:0;
+ }
+ .top-actions .nav-cluster>button{flex:1 1 0;min-width:0;justify-content:center}
+ /* العنوان: بلا قصّ — اسم البرنامج يلتف على سطرين وشارتا القاعدة والشبكة تحته */
+ .topbar>div:not(.top-actions){row-gap:3px}
+ .topbar>div:not(.top-actions) h1{
+  flex:1 1 100%;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  font-size:15.5px;
+  line-height:1.3;
+ }
+ .topbar>div:not(.top-actions) #db-badge,
+ .topbar>div:not(.top-actions) #network-badge{flex:0 1 auto;max-width:100%}
+ #db-badge,#network-badge{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #network-badge{font-size:.68rem}
+}
+@media(max-width:400px){
+ /* أضيق الشاشات: نفس الصفوف المتساوية بحشو أصغر بدل كسر الترتيب أو قطع النص */
+ .top-actions{gap:4px}
+ .top-actions>button{padding-inline:4px;font-size:12px}
+ .top-actions .nav-cluster{gap:4px}
+ .topbar>div:not(.top-actions) h1{font-size:14.5px}
+}
+
+/* ---------- 4) رأس الصفحة: ترتيب عمودي وأزرار متساوية على الهاتف ---------- */
+@media(max-width:640px){
+ .page-head:not(.exec-head):not(.record-head){
+  flex-direction:column;
+  align-items:stretch;
+  gap:10px;
+  margin-bottom:14px;
+ }
+ .page-head:not(.exec-head):not(.record-head)>div{min-width:0}
+ .page-head:not(.exec-head):not(.record-head) h2{font-size:1.15rem;margin-bottom:4px}
+ .page-head:not(.exec-head):not(.record-head)>.head-actions,
+ .record-head>.head-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  width:100%;
+ }
+ .page-head:not(.exec-head):not(.record-head)>.head-actions>button,
+ .page-head:not(.exec-head):not(.record-head)>.head-actions>[data-customize-page],
+ .record-head>.head-actions>button{
+  flex:1 1 45%;
+  min-width:0;
+  justify-content:center;
+ }
+ .record-head{flex-wrap:wrap;gap:8px}
+}
+
+/* ---------- 5) أدوات القوائم على الهاتف: بحث بعرض كامل وفترات بتمرير أفقي ---------- */
+@media(max-width:640px){
+ .list-controls{gap:6px}
+ .list-controls .list-search{flex:1 1 100%;min-width:0}
+ .list-controls .preset-bar{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;padding-bottom:4px;overscroll-behavior-x:contain}
+ .list-controls .preset-bar .chip{flex:none}
+ .list-controls .custom-range{flex:1 1 100%;flex-wrap:wrap}
+ .panel-head{flex-wrap:wrap}
+ .panel-head>h3{min-width:0}
+}
+
+/* ---------- 6) الطباعة: لا تدخل قواعد هذه الطبقة ---------- */
+@media print{.topbar,.top-actions{position:static!important;min-height:0;height:auto}}

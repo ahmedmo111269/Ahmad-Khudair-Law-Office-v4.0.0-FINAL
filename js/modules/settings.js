@@ -14,6 +14,10 @@ import {applyPageDisplay} from '../ui/page-layout.js';
 import {getStyleCounts,resetUniversalDefaults,resetAllComponentOverrides,applyAllComponentStyles} from '../core/component-style.js';
 import {openGlobalStyleCustomizer,openTypeDefaultCustomizer} from '../ui/component-customizer.js';
 
+/** وحدة حذف البيانات التجريبية (تُحمَّل عند الحاجة فقط) — تُستخدم لتحديث العدّاد بعد أي زرع. */
+let demoCleanup=null;
+const refreshDemoCleanupCount=app=>demoCleanup?.refreshDemoCount?.(app);
+
 const COLLAPSE_DESCRIPTIONS={
  collapsed:'العناصر الجديدة غير المهيأة — الأقسام والبطاقات — تبدأ مطوية؛ تبقى الجداول الرئيسية ظاهرة. الحالات التي اخترتها سابقًا لا تتغير.',
  open:'العناصر الجديدة غير المهيأة — الأقسام والبطاقات — تبدأ مفتوحة؛ تبقى الجداول الرئيسية ظاهرة. الحالات التي اخترتها سابقًا لا تتغير.',
@@ -96,7 +100,7 @@ async function renderGeneral(app){
  ${renderInstallPanel(app)}
  <section class="panel"><h3>الخصوصية</h3><p>البيانات مخزنة محليًا في متصفح الجهاز. لا توجد خدمة تحليل أو API خارجية في النسخة الأساسية.</p></section>
  <section class="panel"><h3>شريط التنقل العلوي</h3><p class="muted small">التبويبات أعلى البرنامج بعرض الشاشة كاملًا: يمكنك طيّ الشريط ليصبح قصيرًا جدًا (ويُحفظ الطي لهذا المستخدم)، وتخصيص التبويبات نفسها — إظهار وإخفاء وترتيب التبويبات وعناصرها.</p><div class="action-stack"><button type="button" class="ghost" data-sidebar-toggle>طي / توسيع الشريط</button><button type="button" class="ghost" data-nav-cust>تخصيص التبويبات وترتيبها</button></div></section>
- <section class="panel"><h3>البيانات التجريبية</h3><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا معلَّمة بـ〔تجريبي〕 (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية، ومحاكم من بينها قليوب وطوخ وبنها وشبرا. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم، ولا تُمسح تلقائيًا بعد الاختبار.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button></div><p class="muted small" id="demo-status"></p></section>
+ <section class="panel demo-data-panel" data-collapse-id="demo-data-panel" data-collapse-default="open"><div class="panel-head"><h3>البيانات التجريبية</h3><span class="badge" data-demo-count>جارٍ الفحص…</span></div><p class="muted small">إضافة 50 ملفًا قانونيًا تجريبيًا معلَّمة بـ〔تجريبي〕 (بكل الأقسام والأنواع والمراحل تقريبًا) مع موكلين وخصوم وجلسات وأعمال وأحكام وأتعاب وإعلانات ومحضرين وعلاقات وملفات رئيسية وفرعية، ومحاكم من بينها قليوب وطوخ وبنها وشبرا. الإضافة بحتة — لا تحذف ولا تعدّل أي سجل قائم.</p><div class="action-stack"><button class="primary" data-demo-seed>+ تحميل البيانات التجريبية الآن</button><button type="button" class="ghost danger" data-demo-cleanup title="حذف كل السجلات التجريبية وكل ما يرتبط بها دفعة واحدة">🗑 حذف كل البيانات التجريبية…</button></div><p class="muted small" id="demo-status"></p><p class="muted small">الحذف دفعة واحدة يحذف السجلات الموسومة بـ〔تجريبي〕 <b>وكل سجل مرتبط بها</b> (جلسات · أعمال · أحكام · أتعاب · إعلانات · ملاحظات · تنفيذ · مركز عمل · أطراف) داخل معاملة واحدة، ويُسجَّل في سجل النشاط، ولا يمس أي سجل حقيقي ولا القوائم والقوالب والإعدادات وترقيم الملفات.</p></section>
  <section class="panel danger-zone"><h3>🗑 مسح البيانات</h3>
    <p class="muted small">يمسح <b>كل</b> سجلات المكتب داخل قاعدة البيانات النشطة (<b>${esc(app.registry.active?.displayName || '')}</b>): الموكلون، الملفات، القضايا، الجلسات، الأعمال، الأحكام، التنفيذ، الأتعاب، الإعلانات، الملاحظات، ومركز العمل. القوائم والإعدادات والقوالب تبقى سليمة، وترقيم الملفات يبدأ من جديد. القاعدة نفسها لا تُحذف — ولن يُعاد زرع البيانات التجريبية تلقائيًا بعدها.</p>
    <div class="action-stack">
@@ -191,16 +195,22 @@ export function bindSettings(app){
  });
  root.querySelector('[data-sidebar-toggle]')?.addEventListener('click',async()=>{const {toggleCollapsed,isDesktop,toggleMobile}=await import('../ui/sidebar.js');isDesktop()?toggleCollapsed():toggleMobile();toast('تم تحديث شريط التنقل')});
  root.querySelector('[data-nav-cust]')?.addEventListener('click',async()=>{const {openNavCustomizer}=await import('../ui/sidebar.js');openNavCustomizer()});
+ const demoStatus=root.querySelector('#demo-status');
  root.querySelector('[data-demo-seed]')?.addEventListener('click',async e=>{
-  const btn=e.currentTarget;const ds=root.querySelector('#demo-status');btn.disabled=true;
+  const btn=e.currentTarget;btn.disabled=true;
   try{
    const {seedDemoData}=await import('../services/demo-seed.js');
-   const rep=await seedDemoData(app.office,{onProgress:({done,total,label})=>{if(ds)ds.textContent=`جارٍ الزرع… ${label} (${done}/${total})`}});
-   if(ds)ds.textContent=`تمت الإضافة: ${rep.files} ملفًا، ${rep.clients} موكلًا، ${rep.hearings} جلسة، ${rep.procedures} عملًا إداريًا، ${rep.judgments} حكمًا، ${rep.fees} أتعابًا، ${rep.serviceRecords} إعلانًا — في ${Math.round(rep.ms/1000)} ثانية.`;
+   const rep=await seedDemoData(app.office,{onProgress:({done,total,label})=>{if(demoStatus)demoStatus.textContent=`جارٍ الزرع… ${label} (${done}/${total})`}});
+   if(demoStatus)demoStatus.textContent=`تمت الإضافة: ${rep.files} ملفًا، ${rep.clients} موكلًا، ${rep.hearings} جلسة، ${rep.procedures} عملًا إداريًا، ${rep.judgments} حكمًا، ${rep.fees} أتعابًا، ${rep.serviceRecords} إعلانًا — في ${Math.round(rep.ms/1000)} ثانية.`;
    toast(`تم تحميل ${rep.files} ملفًا تجريبيًا بنجاح`,'ok',{duration:5000});
-  }catch(err){toast(userError(err),'error');if(ds)ds.textContent='تعذر زرع البيانات: '+userError(err)}
+   refreshDemoCleanupCount(app);
+  }catch(err){toast(userError(err),'error');if(demoStatus)demoStatus.textContent='تعذر زرع البيانات: '+userError(err)}
   finally{btn.disabled=false}
  });
+ // حذف كل البيانات التجريبية دفعة واحدة (مع كل ما يرتبط بها) — بتأكيد يعرض الأعداد
+ if(root.querySelector('[data-demo-cleanup]'))import('../ui/demo-cleanup.js').then(m=>{demoCleanup=m;m.refreshDemoCount(app);
+  m.bindDemoCleanup(app,{statusEl:root.querySelector('[data-demo-count]'),onDone:out=>{if(demoStatus)demoStatus.textContent=`حُذف ${out.removed} سجلًا تجريبيًا وكل ما يرتبط بها${out.shortcuts?` — ونُظّفت ${out.shortcuts} إشارة في «آخر ما فُتح»`:''}.`;return app.refresh()}});
+ }).catch(e=>console.error('demo cleanup',e));
  bindDangerZone(app,root);
  root.querySelector('[data-install-app]')?.addEventListener('click',()=>import('../ui/install-prompt.js').then(m=>m.installApp(app)));
  root.querySelector('[data-install-help]')?.addEventListener('click',()=>import('../ui/install-prompt.js').then(m=>m.openInstallHelp()));

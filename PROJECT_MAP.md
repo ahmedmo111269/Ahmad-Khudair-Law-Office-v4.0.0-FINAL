@@ -1,3 +1,24 @@
+# v5.14.0 — حذف كل البيانات التجريبية بزر واحد + إصلاح تغطية الشريط العلوي
+
+**2026-10-06 — طلب المستخدم: زر واحد يمسح كل البيانات التجريبية دفعة واحدة، وإصلاح تداخل الشريط العلوي (Overlapping UI Header) على الشاشات الصغيرة. لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/demo-data.js` (جديد) | `scanDemoData` (فحص قراءة فقط) · `removeDemoData` (حذف دفعة واحدة) · `hasDemoData` · `demoScanSummary` · `isDemoMarkedRow` · `DEMO_DELETABLE_STORES`/`DEMO_OWNED_STORES`/`DEMO_PROTECTED_STORES`. التعرّف على البيانات التجريبية بأربع قواعد: الوسم 〔تجريبي〕 ← الإشارة المباشرة من أي سجل ← الاستخدام الحصري للسجلات المساعدة ← لحظة الزرع (±90 ثانية). الحذف داخل معاملة واحدة وبالحذف المنطقي (`isDeleted`/`deletionReason`) مع صف Activity Log واحد داخل المعاملة نفسها وبلا بيانات شخصية خام. لا يُمس: القوائم · الإعدادات · التصنيفات · القوالب · ترقيم الملفات · سجل النشاط · المزامنة · أي سجل حقيقي. |
+| `js/ui/demo-cleanup.js` (جديد) | `startDemoCleanup` (فحص ← تأكيد بالأعداد لكل مخزن ← تنفيذ بتقدّم ← إشعار) · `bindDemoCleanup` · `refreshDemoCount`. مسار واحد يخدم الإعدادات والرئيسية ولوحة الأوامر. |
+| `js/modules/settings.js` · `js/modules/home.js` · `js/ui/palette.js` | ثلاث نقاط دخول: لوحة «البيانات التجريبية» في الإعدادات (عدد حي + زر + شرح ما يُحذف وما لا يُمس) · لافتة الرئيسية (تظهر عند وجود `meta.demoSeed.seeded` أو فحص سريع للسجلات الموسومة) · أمر «حذف كل البيانات التجريبية» في لوحة الأوامر. |
+| `js/tests/demo-cleanup-tests.js` (جديد) | 13 اختبارًا: زرع حقيقي بـ`seedDemoData` ثم فحص (تأكيد أنه قراءة فقط) ← حذف ← تدقيق المخازن، سيناريو مختلط يثبت بقاء موكل ومهمة وخصم حقيقيين، وملفات التنفيذ التجريبية وحدها بلا بقايا. |
+| `css/workbench.css` | `.demo-cleanup-panel` و`.demo-data-panel` (صف أفقي على الشاشات الكبيرة، أعمدة بعرض كامل على الهاتف). |
+| `js/services/favorites.js` | `removeFavorite` — تنظيف التثبيتات التي تشير إلى سجلات محذوفة. |
+| `css/topbar.css` (جديد) | طبقة إصلاح التجاوب: ارتفاع تلقائي (`height:auto` + `min-height:fit-content` + `overflow:hidden`) · `flex-wrap:wrap` · استثناء `.top-actions` صراحة من قاعدة كتلة العنوان (كان يُبطل شبكة الهاتف) · شبكة 3 أعمدة للأزرار وصف مستقل لأزرار التنقل ≤640px · الشريط `static` على الهاتف · رأس صفحة عمودي بأزرار متساوية. يُحمَّل آخرًا في `index.html`. |
+| `js/ui/topnav.js` | قياس دقيق لـ`--topnav-h` (`Math.ceil(getBoundingClientRect().height)`) ولا يُكتب إلا إذا كان > 0، مع إعادة قياس على `load`/`resize`/`visualViewport.resize`. |
+| `sw.js` | الكاش `ahmad-khudair-law-office-v5.14.0-android-pwa` + precache: `css/topbar.css` · `js/services/demo-data.js` · `js/ui/demo-cleanup.js`. |
+| `js/core/constants.js` | `APP_VERSION = 5.14.0`. |
+
+**تحقق فعلي منفَّذ:** `run-tests.mjs` **500/500** · `android-pwa-browser` **28/28** · `work-center-browser` **61/61** · `quick-notes-browser` و`offline-sync-browser` **PASS** · تجاوب الشريط: 17 عرضًا × 5 مسارات بلا تداخل وبلا تمرير أفقي (وسطح المكتب مطابق للأساس) · مسار زر الحذف مُختبر في Chromium حتى الإشعار وسجل النشاط وإعادة الزرع · `grid-browser`: نفس حالات الفشل الخمس الموجودة في الأساس `bb657d5` (لا انحدار).
+
+---
+
 # v5.13.6 — جاهزية Android / PWA (Installable Offline-first Web App)
 
 **2026-10-06 — موجز Android/PWA Production Readiness؛ لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن ولا في منطق الأعمال.**

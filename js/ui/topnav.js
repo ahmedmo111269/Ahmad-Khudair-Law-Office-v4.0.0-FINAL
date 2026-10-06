@@ -132,10 +132,20 @@ function allPanelHtml(groups) {
 /* ---------------------------------------------------------------------
    التوزيع والقياس
    --------------------------------------------------------------------- */
-/** قياس ارتفاع الشريط وضبط إزاحة الشريط العلوي (sticky) تحته بدقة. */
+/**
+ * قياس ارتفاع الشريط وضبط إزاحة شريط الأدوات الملتصق تحته بدقة.
+ * • يُقرأ الارتفاع الفعلي (getBoundingClientRect ثم offsetHeight) بكسور مقرّبة لأعلى،
+ *   فالشريط قد يزيد ارتفاعه على الهاتف (أزرار أكبر/خط مختلف/شريط حالة).
+ * • لا نكتب صفرًا أبدًا: قياس فاشل أو شريط غير مرسوم يجب ألا يجعل شريط الأدوات
+ *   يلتصق في أعلى الشاشة فوق شريط التنقل.
+ * يعيد الارتفاع المقيس بالبكسل (0 عند تعذّر القياس).
+ */
 function measureHeight(bar) {
-  const h = (bar || document.querySelector('#sidebar'))?.offsetHeight || 0;
-  if (h) document.documentElement.style.setProperty('--topnav-h', `${h}px`);
+  const el = bar || document.querySelector('#sidebar');
+  if (!el) return 0;
+  const h = Math.ceil(el.getBoundingClientRect?.().height || el.offsetHeight || 0);
+  if (h > 0) document.documentElement.style.setProperty('--topnav-h', `${h}px`);
+  return h;
 }
 /** يوزّع التبويبات بين الشريط و«المزيد» بحسب المساحة المتاحة فعلًا. */
 function layout() {
@@ -533,5 +543,13 @@ export function initSidebarState() {
   }
   window.addEventListener('orientationchange', () => { closePanel(); onFrame(layout); });
   document.fonts?.ready?.then?.(() => layout());
+  // إزاحة شريط الأدوات الملتصق تُعاد قياسها بعد أي تغيير قد يغيّر ارتفاع شريط
+  // التنقل (تحميل الخطوط، تكبير المتصفح، إعادة الرسم على الهاتف) — وإلا بقي
+  // الشريط في موضع قديم فغطّى عنوان الصفحة أو ترك فراغًا.
+  const remeasure = () => measureHeight();
+  window.addEventListener('load', remeasure);
+  window.addEventListener('resize', remeasure, {passive: true});
+  window.visualViewport?.addEventListener?.('resize', remeasure);
+  for (const delay of [0, 120, 400, 1200]) setTimeout(remeasure, delay);
   onFrame(() => layout());
 }

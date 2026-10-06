@@ -43,7 +43,10 @@ export async function homePage(app){
  // تلميح تثبيت واحد وغير مزعج: يظهر بعد استخدام فعلي فقط، ومرة واحدة، وله «لاحقًا» تُسكِته.
  let installHint='';
  try{if(app.pwaInstall?.shouldHint?.()){app.pwaInstall.markHintShown();installHint=`<div class="notice install-hint" role="status"><span><b>📲 تثبيت التطبيق</b> يمكنك تثبيت البرنامج على الهاتف فيعمل من أيقونته الخاصة وبلا إنترنت — بياناتك تبقى على جهازك.</span><span class="install-hint-actions"><button class="primary" type="button" data-install-now>تثبيت الآن</button><button class="ghost" type="button" data-install-later>لاحقًا</button></span></div>`}}catch{}
- try{const meta=await app.office.r.meta.get('demoSeed');if(meta?.seeded)demoBanner=`<div class="notice demo-banner" role="status"><b>بيانات تجريبية</b> السجلات المعلَّمة بـ〔تجريبي〕 للاختبار فقط، ولن تُحذف تلقائيًا. احذفها بنفسك عندما تنتهي.</div>`}catch{}
+ try{
+  const meta=await app.office.r.meta.get('demoSeed');
+  const probe=meta?.seeded?true:await import('../services/demo-data.js').then(m=>m.hasDemoData(app.office)).catch(()=>false);
+  if(probe)demoBanner=`<div class="notice demo-banner" role="status"><b>بيانات تجريبية</b> السجلات المعلَّمة بـ〔تجريبي〕 للاختبار فقط. زر واحد يحذفها كلها مع كل ما يرتبط بها.</div><div class="notice demo-cleanup-panel"><span class="demo-cleanup-txt" data-demo-count>جارٍ فحص البيانات التجريبية…</span><button type="button" class="ghost danger" data-demo-cleanup title="حذف كل السجلات التجريبية وكل ما يرتبط بها دفعة واحدة">🗑 حذف كل البيانات التجريبية</button></div>`}catch{}
  const workRow=(route,main,mid,sub,sig)=>`<button class="work-row work-click" data-open-rec="${esc(route)}"><b>${esc(main||'—')}</b><span>${esc(mid||'')}</span><small>${esc(sub||'')}${sig?` · ${esc(sig.text)}`:''}</small></button>`;
  const kpis=[
   KPI('t',r.todayHearings.length,'جلسات اليوم','hearings?preset=today'),
@@ -80,6 +83,11 @@ export async function homePage(app){
 export function bindHome(app){
  // شارة «مركز العمل» في الشريط الجانبي: عدّاد حي من محرك مركز العمل نفسه (المتأخر + اليوم)، بلا استعلام مكرر.
  import('./work-center.js').then(m=>m.scheduleWorkBadge(app,{force:true})).catch(()=>{});
+ // حذف البيانات التجريبية دفعة واحدة: زر واحد في اللافتة أعلى الصفحة الرئيسية.
+ if(document.querySelector('[data-demo-cleanup]'))import('../ui/demo-cleanup.js').then(m=>{
+  m.refreshDemoCount(app);
+  return m.bindDemoCleanup(app,{statusEl:document.querySelector('[data-demo-count]'),onDone:()=>app.refresh()});
+ }).catch(e=>console.error('demo cleanup',e));
  document.querySelectorAll('[data-dashboard-report]').forEach(b=>b.onclick=()=>{const [type,preset]=b.dataset.dashboardReport.split('|');app.go('reports?type='+encodeURIComponent(type)+'&preset='+encodeURIComponent(preset))});
  document.querySelectorAll('[data-route-report]').forEach(b=>b.onclick=()=>app.go('reports?type='+encodeURIComponent(b.dataset.routeReport)));
  document.querySelectorAll('[data-kpi]').forEach(b=>b.onclick=()=>app.go(b.dataset.kpi));
