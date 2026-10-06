@@ -9,6 +9,12 @@ export function getFavorites(){
  return Array.isArray(v)?v.filter(x=>x&&x.route):[];
 }
 export function isFavorite(route){return getFavorites().some(x=>x.route===route)}
+export async function removeFavorite(route){
+ if(!route)return getFavorites();
+ const next=getFavorites().filter(x=>x.route!==route);
+ await prefs.set(KEY,next);
+ return next;
+}
 export async function toggleFavorite(item){
  if(!item?.route)return false;
  const had=isFavorite(item.route);

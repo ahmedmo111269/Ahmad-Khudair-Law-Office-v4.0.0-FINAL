@@ -108,6 +108,11 @@ export function staticCommands(app){
  }});
  cmds.push({id:'qa:search',label:'بحث موحد شامل',icon:'search',group:'إجراءات سريعة',keywords:'بحث',run:()=>app.go('search')});
  cmds.push({id:'qa:backup',label:'إنشاء نسخة احتياطية الآن',icon:'save',group:'إجراءات سريعة',keywords:'نسخة احتياط',run:()=>app.go('backup')});
+ // تنظيف البيانات التجريبية: نفس المسار المستخدم في الرئيسية والإعدادات (فحص ← تأكيد ← حذف في معاملة واحدة)
+ cmds.push({id:'qa:demo-clean',label:'حذف كل البيانات التجريبية (بتأكيد)',icon:'x',group:'إجراءات سريعة',keywords:'تجريبي بيانات تجريبية حذف مسح تنظيف demo seed',kbd:'تأكيد',run:async()=>{
+  const {startDemoCleanup}=await import('./demo-cleanup.js');
+  return startDemoCleanup(app,{onDone:()=>app.refresh()});
+ }});
  return cmds;
 }
 

@@ -19,6 +19,7 @@ const {runFileNumberTests}=await import(`${R}/tests/file-number-tests.js`);
 const {runCardSidebarTests}=await import(`${R}/tests/card-sidebar-tests.js`);
 const {runTopNavTests}=await import(`${R}/tests/topnav-tests.js`);
 const {runDemoSeedTests}=await import(`${R}/tests/demo-seed-tests.js`);
+const {runDemoCleanupTests}=await import(`${R}/tests/demo-cleanup-tests.js`);
 const {runCollapseStateTests}=await import(`${R}/tests/collapse-state-tests.js`);
 const {runGridProviderTests}=await import(`${R}/tests/grid-provider-tests.js`);
 const {runDisplayPrefsTests}=await import(`${R}/tests/display-prefs-tests.js`);
@@ -58,6 +59,7 @@ await runTopNavTests(test,expect);
 try{await runSearchTableTests(test,expect)}catch(e){test('search-table suite import/setup',()=>{throw e})}
 try{await runGridUpgradeTests(test,expect)}catch(e){test('grid-upgrade suite import/setup',()=>{throw e})}
 await runDemoSeedTests(test,expect);
+await runDemoCleanupTests(test,expect);
 await runCollapseStateTests(test,expect);
 await runGridProviderTests(test,expect);
 runDisplayPrefsTests(test,expect);
