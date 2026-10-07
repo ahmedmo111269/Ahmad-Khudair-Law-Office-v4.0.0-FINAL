@@ -6,6 +6,7 @@ import {icon,ROUTE_ICONS} from './icons.js';
 import {ENTITIES} from '../domain/entities.js';
 import {getRecent} from '../services/recents.js';
 import {closeModal,modal} from './modal.js';
+import {openQuickAdd,contextualQuickActions,runQuickAction} from '../modules/quick-add.js';
 
 // ===== منطق صافي قابل للاختبار =====
 export function highlightMatch(label,q){
@@ -25,6 +26,8 @@ export function scoreCommand(cmd,q){
  if(label.startsWith(n))return 100;
  if(label.includes(n))return 70;
  if(sub.includes(n))return 40;
+ const tokens=n.split(/\s+/).filter(Boolean);
+ if(tokens.length>1&&tokens.every(token=>label.includes(token)||sub.includes(token)))return 30;
  return 0;
 }
 export function filterCommands(commands,q,{limit=14}={}){
@@ -106,6 +109,8 @@ export function staticCommands(app){
   if(!target)return toast('افتح ملفًا أو موكلًا أو قضية أو سجلًا (جلسة/عمل/حكم/إعلان…) لإنشاء مهمة مرتبطة به.','info');
   const {openLinkedTaskForm}=await import('./work-actions.js');openLinkedTaskForm(app,target[0],target[1]);
  }});
+ cmds.push({id:'qa:quick-add',label:'قائمة الإضافة السريعة',icon:'plus',group:'إجراءات سريعة',keywords:'إضافة جديد نموذج',run:()=>openQuickAdd(app)});
+ for(const [index,action] of contextualQuickActions(app).entries())cmds.push({id:`ctx:${index}:${action.kind}`,label:action.label,icon:action.icon,group:'في السياق الحالي',keywords:`إضافة مرتبطة ${action.label}`,run:()=>runQuickAction(app,action.kind,{context:action.context})});
  cmds.push({id:'qa:search',label:'بحث موحد شامل',icon:'search',group:'إجراءات سريعة',keywords:'بحث',run:()=>app.go('search')});
  cmds.push({id:'qa:backup',label:'إنشاء نسخة احتياطية الآن',icon:'save',group:'إجراءات سريعة',keywords:'نسخة احتياط',run:()=>app.go('backup')});
  // تنظيف البيانات التجريبية: نفس المسار المستخدم في الرئيسية والإعدادات (فحص ← تأكيد ← حذف في معاملة واحدة)
@@ -116,8 +121,8 @@ export function staticCommands(app){
  return cmds;
 }
 
-function recentCommands(){
- return getRecent().map(r=>({id:'rec:'+r.route,label:r.title,sub:r.sub||'',iconKey:r.icon||'file',group:'آخر ما فُتح',rec:true,run:()=>window.__LAW_OFFICE_APP__?.go(r.route)}));
+function recentCommands(scope=''){
+ return getRecent(scope).map(r=>({id:'rec:'+r.route,label:r.title,sub:r.sub||'',iconKey:r.icon||'file',group:'آخر ما فُتح',rec:true,run:()=>window.__LAW_OFFICE_APP__?.go(r.route)}));
 }
 
 // ===== الواجهة =====
@@ -158,7 +163,7 @@ export function openPalette(app){
  const runItem=c=>{paletteEl=null;closeModal();try{c.run()}catch(e){console.error('palette action',e);app.fail?.(e)}};
   const build=()=>{
   const q=input.value.trim();
-  const recents=recentCommands().map(c=>({...c,scoreHint:0}));
+  const recents=recentCommands(app.ctx?.profile?.id||'').map(c=>({...c,scoreHint:0}));
   if(q.length>=2){
    const my=++seq;list.innerHTML=`<div class="pal-empty muted">جارٍ البحث…</div>`;
    clearTimeout(timer);

@@ -11,6 +11,8 @@ const {localDate,addDays,isActiveProcedure}=await import(`${R}/core/clock.js`);
 
 const {runTransactionTests}=await import(`${R}/tests/transaction-tests.js`);
 const {runClientFileTests}=await import(`${R}/tests/client-file-tests.js`);
+const {runClientDuplicateTests}=await import(`${R}/tests/client-duplicates-tests.js`);
+const {runQuickActionTests}=await import(`${R}/tests/quick-actions-tests.js`);
 const {runServiceAndRelationsTests}=await import(`${R}/tests/service-and-relations-tests.js`);
 const {runBackupAndIntegrityTests}=await import(`${R}/tests/backup-and-integrity-tests.js`);
 const {runUxTests}=await import(`${R}/tests/ux-tests.js`);
@@ -50,6 +52,8 @@ test('open procedures are active',()=>{expect(isActiveProcedure({status:'open'})
 
 await runTransactionTests(test,expect);
 await runClientFileTests(test,expect);
+await runClientDuplicateTests(test,expect);
+await runQuickActionTests(test,expect);
 await runServiceAndRelationsTests(test,expect);
 await runBackupAndIntegrityTests(test,expect);
 await runUxTests(test,expect);

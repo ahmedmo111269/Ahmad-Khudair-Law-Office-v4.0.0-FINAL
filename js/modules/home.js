@@ -11,7 +11,7 @@ import {localDate,addDays} from '../core/clock.js';
 import {formatDate,formatNumber,longDateAr,greetingKey,GREETINGS} from '../core/format.js';
 import {getRecent} from '../services/recents.js';
 import {getFavorites} from '../services/favorites.js';
-import {prefs} from '../core/preferences.js';
+import {prefs,scopedPreferenceKey} from '../core/preferences.js';
 import {dateSignal} from '../ui/signals.js';
 import {card,cardEmpty,statusBadge} from '../ui/card.js';
 import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
@@ -36,9 +36,10 @@ export async function homePage(app){
  const today=localDate();
  const [h,m]=today.split('-').map(Number);
  const g=GREETINGS[greetingKey()];
- const recents=getRecent().slice(0,8);
- const favs=getFavorites().slice(0,8);
- const last=prefs.get('ui:last-route');
+ const scope=app.ctx?.profile?.id||app.office?.ctx?.profile?.id||'';
+ const recents=getRecent(scope).slice(0,8);
+ const favs=getFavorites(scope).slice(0,8);
+ const last=prefs.get(scopedPreferenceKey('ui:last-route',scope));
  let demoBanner='';
  // تلميح تثبيت واحد وغير مزعج: يظهر بعد استخدام فعلي فقط، ومرة واحدة، وله «لاحقًا» تُسكِته.
  let installHint='';

@@ -298,25 +298,26 @@ function deletedRow(row, now, reason) {
 }
 
 /** تنظيف الإشارات إلى سجلات محذوفة من «آخر ما فُتح» و«المثبّتات» وآخر مسار. */
-async function pruneUserShortcuts(deletedIds) {
+async function pruneUserShortcuts(office,deletedIds) {
   if (!deletedIds.size) return 0;
   const stale = route => {
     const parts = String(route || '').split(/[/:?#&=]+/).filter(Boolean);
     return parts.some(part => deletedIds.has(decodeURIComponent(part)));
   };
   let removed = 0;
+  const scope=office?.ctx?.profile?.id||'';
   try {
     const {getRecent, removeRecent} = await import('./recents.js');
-    for (const item of getRecent()) if (stale(item?.route)) { removeRecent(item.route); removed += 1; }
+    for (const item of getRecent(scope)) if (stale(item?.route)) { removeRecent(item.route,scope); removed += 1; }
   } catch { /* تفضيلات غير متاحة */ }
   try {
     const {getFavorites, removeFavorite} = await import('./favorites.js');
-    for (const item of getFavorites()) if (stale(item?.route)) { await removeFavorite(item.route); removed += 1; }
+    for (const item of getFavorites(scope)) if (stale(item?.route)) { await removeFavorite(item.route,scope); removed += 1; }
   } catch { /* تفضيلات غير متاحة */ }
   try {
-    const {prefs} = await import('../core/preferences.js');
-    const last = prefs.get('ui:last-route', null);
-    if (last?.route && stale(last.route)) await prefs.set('ui:last-route', null);
+    const {prefs,scopedPreferenceKey} = await import('../core/preferences.js');
+    const key=scopedPreferenceKey('ui:last-route',scope),last = prefs.get(key, null);
+    if (last?.route && stale(last.route)) await prefs.set(key, null);
   } catch { /* تفضيلات غير متاحة */ }
   return removed;
 }
@@ -381,7 +382,7 @@ export async function removeDemoData(office, {reason = '', onProgress = null} = 
     const {clearExecutionCache} = await import('./execution-cache.js');
     clearExecutionCache('حذف البيانات التجريبية');
   } catch { /* الكاش غير محمّل */ }
-  const shortcuts = await pruneUserShortcuts(new Set([...tree.ids].map(String)));
+  const shortcuts = await pruneUserShortcuts(office,new Set([...tree.ids].map(String)));
 
   events.emit('demo:removed', {total: tree.total, marked: tree.markedCount, related: tree.relatedCount, at: now});
   events.emit('entity:changed', {entityType: '*', id: 'removeDemoData'});

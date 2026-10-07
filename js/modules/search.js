@@ -57,8 +57,8 @@ export async function renderSearch(app){
  </section>`;
 }
 
-function recentsHtml(){
- const rows=getRecent().slice(0,6);
+function recentsHtml(app){
+ const rows=getRecent(app.ctx?.profile?.id||'').slice(0,6);
  if(!rows.length)return '';
  return `<section class="search-group"><div class="section-head"><h3>آخر ما فُتح</h3></div><div class="recents-chips">${rows.map(x=>`<button class="recent-chip" data-search-open="${esc(x.route)}"><span aria-hidden="true">↗</span> ${esc(x.title)}</button>`).join('')}</div></section>`;
 }
@@ -67,10 +67,10 @@ function syntaxHint(){
   <code>أحمد محمد</code> كلمتان معًا (AND) · <code>2/2026</code> رقم ملف رئيسي أو فرعي · <code>29001011201234</code> رقم قومي · <code>1545</code> رقم قضية رسمية · <code>أحمد 2026</code> اسم وسنة
  </div><p class="muted small">اكتب حرفين على الأقل. النتائج مصنفة بالمصدر، والنقر على أي نتيجة يفتح سجلها مباشرة.</p></div>`;
 }
-function idleHtml(){
+function idleHtml(app){
  const hist=getHistory();
  return `${hist.length?`<section class="search-group"><div class="section-head"><h3>بحوثك الأخيرة</h3><button class="link" data-clear-history>مسح السجل</button></div><div class="recents-chips">${hist.map(h=>`<button class="recent-chip" data-hist="${esc(h.q)}"><span aria-hidden="true">⏱</span> ${esc(h.q)}</button>`).join('')}</div></section>`:''}
- ${recentsHtml()}${syntaxHint()}`;
+ ${recentsHtml(app)}${syntaxHint()}`;
 }
 function rowHtml(it,q){
  return `<button class="search-result" data-search-open="${esc(it.route)}"><span class="sr-ic" aria-hidden="true">${icon(it.icon||'file')}</span>
@@ -119,7 +119,7 @@ export function bindSearch(app){
  drawSaved();
 
  const renderGroups=async(groups,q,{withMore=false,my=seq}={})=>{disposeResults();out.innerHTML=groups.map(g=>groupHtml(g,q,{withMore})).join('')||`<div class="empty"><h3>لا نتائج مطابقة</h3><p>جرّب كلمات أقل أو جزءًا من الاسم، أو تحقق من الكتابة (أ/إ وة/ه تُعامل تلقائيًا كواحدة).</p></div>`;enhanceCollapsiblePanels(out,'search:results',{bulk:false});enhanceCollapsiblePanels(root,'search');await Promise.all(groups.map(group=>mountResultGrid(group,q,out.querySelector(`[data-group="${CSS.escape(group.store)}"] [data-search-grid]`),my)))};
- const renderIdle=()=>{disposeResults();out.innerHTML=idleHtml();enhanceCollapsiblePanels(out,'search:idle',{bulk:false});enhanceCollapsiblePanels(root,'search')};
+ const renderIdle=()=>{disposeResults();out.innerHTML=idleHtml(app);enhanceCollapsiblePanels(out,'search:idle',{bulk:false});enhanceCollapsiblePanels(root,'search')};
 
  const run=async()=>{
   const q=input.value.trim();st.q=q;

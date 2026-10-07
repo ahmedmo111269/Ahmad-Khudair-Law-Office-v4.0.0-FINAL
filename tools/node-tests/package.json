@@ -17,6 +17,7 @@
     "test:execution-real-example": "node execution-real-example-tests.mjs",
     "test:execution-settings-browser": "node execution-settings-browser-tests.mjs",
     "test:android-pwa": "node android-pwa-browser-tests.mjs",
+    "test:legal-context-browser": "node legal-context-browser-tests.mjs",
     "icons:pwa": "node make-pwa-icons.mjs",
     "screenshots:pwa": "node make-pwa-screenshots.mjs"
   },

@@ -10,10 +10,12 @@ import {resolveRefs} from '../services/entity-query.js';
 import {saveEntity} from '../services/entity-save.js';
 import {fileParties} from '../services/legal-files.js';
 import {Clock} from '../core/clock.js';
+import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {userError,normalizeError} from '../core/errors.js';
 import {workItemFieldOverrides} from '../domain/work-items.js';
 import {getWorkConfig} from '../services/work-config.js';
 import {ensureWorkStatuses} from '../services/work-statuses.js';
+import {findPotentialClientDuplicates,clientDuplicateKey} from '../services/client-duplicates.js';
 
 const SEARCH_INDEX={clients:'fullNameNormalized',files:'titleNormalized',cases:'caseNumber',opponents:'nameNormalized'};
 let dl=0;
@@ -152,6 +154,7 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
   <form class="entity-form" novalidate data-store="${esc(store)}">
    ${groupedHtml(fields,values,ctx,{collapsed:false})}
    ${typeBlock}
+   ${store==='clients'&&isNew?'<div class="client-duplicate-slot" data-client-duplicate-slot hidden></div>':''}
    <div class="form-actions"><button class="primary" type="submit">${store==='files'&&isNew?'إنشاء الملف':'حفظ'}</button><button class="ghost" type="button" data-modal-back>رجوع</button></div>
   </form>`);
  const form=card.querySelector('form');
@@ -192,6 +195,45 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
  form.querySelector('input:not([type=hidden]):not([readonly]),select,textarea')?.focus();
  // حفظ سريع بـ Ctrl+Enter من أي حقل
  card.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();if(!form.querySelector('[type=submit]')?.disabled)form.requestSubmit()}});
+ const duplicateSlot=form.querySelector('[data-client-duplicate-slot]');
+ const duplicateState={key:'',ackKey:'',items:[],seq:0,timer:0};
+ const duplicateInput=()=>({fullName:form.querySelector('[name="fullName"]')?.value||'',nationalId:form.querySelector('[name="nationalId"]')?.value||''});
+ const renderClientDuplicates=()=>{
+  if(!duplicateSlot)return;
+  const {key,items}=duplicateState;
+  if(!items.length){duplicateSlot.hidden=true;duplicateSlot.replaceChildren();return}
+  const exactId=items.some(x=>x.nationalIdMatch);
+  duplicateSlot.hidden=false;
+  duplicateSlot.innerHTML=`<div class="notice client-duplicate-warning" role="alert" aria-live="polite"><div><b>${exactId?'رقم قومي مطابق لموكل موجود':'قد يكون هذا الموكل مسجلًا بالفعل'}</b><p class="small">راجع النتائج قبل الحفظ. يمكنك فتح سجل قائم، أو المتابعة لإنشاء سجل مستقل بإقرارك.</p></div><ul>${items.map(c=>`<li><span><b>${esc(c.fullName||'موكل بلا اسم')}</b><small>${esc(c.reason)}${c.clientCode?` · ${esc(c.clientCode)}`:''}${c.nationalIdSuffix?` · رقم ينتهي بـ ${esc(c.nationalIdSuffix)}`:''}</small></span><button type="button" class="link" data-client-duplicate-open="${esc(c.id)}">فتح الموجود</button></li>`).join('')}</ul><div class="client-duplicate-actions"><button type="button" class="primary" data-client-duplicate-continue>${duplicateState.ackKey===key?'متابعة الإنشاء مؤكدة':'متابعة إنشاء موكل جديد'}</button><button type="button" class="ghost" data-client-duplicate-dismiss>إخفاء التحذير</button></div><small class="muted">لن تُنسخ بيانات أي موكل إلى سجل النشاط.</small></div>`;
+ };
+ const refreshClientDuplicates=async({force=false}={})=>{
+  if(store!=='clients'||!isNew||!duplicateSlot)return [];
+  const values=duplicateInput(),key=clientDuplicateKey(values),digits=normalizeDigits(values.nationalId).replace(/\D/g,'');
+  duplicateState.key=key;
+  if(!force&&normalizeArabic(values.fullName).length<3&&digits.length<4){duplicateState.items=[];renderClientDuplicates();return []}
+  const seq=++duplicateState.seq;
+  const items=await findPotentialClientDuplicates(office,{...values,limit:5});
+  if(seq!==duplicateState.seq||key!==clientDuplicateKey(duplicateInput()))return duplicateState.items;
+  duplicateState.items=items;
+  renderClientDuplicates();
+  return items;
+ };
+ if(store==='clients'&&isNew){
+  const scheduleClientDuplicateCheck=()=>{
+   const key=clientDuplicateKey(duplicateInput());
+   if(duplicateState.ackKey&&duplicateState.ackKey!==key)duplicateState.ackKey='';
+   clearTimeout(duplicateState.timer);
+   duplicateState.timer=setTimeout(()=>refreshClientDuplicates().catch(()=>{}),220);
+  };
+  form.querySelector('[name="fullName"]')?.addEventListener('input',scheduleClientDuplicateCheck);
+  form.querySelector('[name="nationalId"]')?.addEventListener('input',scheduleClientDuplicateCheck);
+  form.addEventListener('click',e=>{
+   const open=e.target.closest('[data-client-duplicate-open]');
+   if(open){const id=open.dataset.clientDuplicateOpen;closeModal();app.go(`client:${id}`);return}
+   if(e.target.closest('[data-client-duplicate-dismiss]')){duplicateSlot.hidden=true;return}
+   if(e.target.closest('[data-client-duplicate-continue]')){duplicateState.ackKey=clientDuplicateKey(duplicateInput());renderClientDuplicates();form.querySelector('[type="submit"]')?.click()}
+  });
+ }
  form.addEventListener('submit',async e=>{
   e.preventDefault();
   const btn=form.querySelector('[type=submit]');btn.disabled=true;
@@ -200,9 +242,21 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
    const tf=typeFields?allTypeFieldsOf(fileTypeGroup(form.querySelector('[name="fileType"]')?.value??values.fileType)):[];
    const data={...preset,...readFields(form,[...fields,...tf])};
    if(store==='fileParties'){if(data.partyKind!=='client')data.clientId='';if(data.partyKind!=='opponent')data.opponentId=''}
+   const currentDuplicateKey=store==='clients'&&isNew?clientDuplicateKey(data):'';
+   if(store==='clients'&&isNew){
+    if(duplicateState.ackKey&&duplicateState.ackKey!==currentDuplicateKey)duplicateState.ackKey='';
+    await refreshClientDuplicates({force:true});
+    if(duplicateState.items.length&&duplicateState.ackKey!==currentDuplicateKey){btn.disabled=false;duplicateSlot.scrollIntoView?.({behavior:'smooth',block:'center'});duplicateSlot.querySelector('[data-client-duplicate-continue]')?.focus();return}
+   }
    let row;
-   try{row=await saveEntity(office,store,data,old?.id||null,old?.version??null)}
+   try{row=await saveEntity(office,store,data,old?.id||null,old?.version??null,{allowDuplicate:store==='clients'&&isNew&&duplicateState.ackKey===currentDuplicateKey})}
    catch(err){
+    if(store==='clients'&&isNew&&err?.details?.duplicateClient){
+     duplicateState.ackKey='';
+     duplicateState.items=await findPotentialClientDuplicates(office,{...duplicateInput(),limit:5});
+     duplicateState.key=clientDuplicateKey(duplicateInput());renderClientDuplicates();btn.disabled=false;
+     duplicateSlot.scrollIntoView?.({behavior:'smooth',block:'center'});duplicateSlot.querySelector('[data-client-duplicate-continue]')?.focus();return;
+    }
     if(store!=='fileParties'||!err?.details?.duplicateParty)throw err;
     const allowed=await confirmBox('هذا الموكل مسجل بالفعل في الملف بالصفة نفسها. قد يكون التكرار مقصودًا في بعض الوقائع؛ هل تريد إضافة رابط طرف مكرر؟',{okText:'إضافة رغم التكرار'});
     if(!allowed){btn.disabled=false;return}

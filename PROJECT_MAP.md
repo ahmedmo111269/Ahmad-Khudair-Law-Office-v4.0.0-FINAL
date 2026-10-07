@@ -1,3 +1,24 @@
+# v5.14.1 — سياق العمل والمعاينة وكشف تكرار الموكلين
+
+**2026-10-07 — طبقة UX وخدمات فوق المعمارية الحالية. لا تغيير مخطط: `SCHEMA_VERSION=18` ومخازن IndexedDB كما هي؛ لا تغيير على Backup/Restore.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/core/preferences.js` | `scopedPreferenceKey(name, scope)` لإنشاء مفاتيح تفضيل مقيّدة بمعرّف قاعدة المكتب، دون جدول تفضيلات جديد. |
+| `js/services/recents.js` · `js/services/favorites.js` · `js/app.js` · `js/modules/home.js` · `js/modules/search.js` · `js/modules/record-page.js` · `js/modules/file-page.js` | «آخر ما فُتح» والمفضّلة والمسار الأخير تعمل لكل قاعدة مكتب نشطة؛ تنظيف روابط البيانات التجريبية يستخدم النطاق ذاته. لوحة الأوامر تقرأ recents الخاصة بالنطاق. |
+| `js/modules/quick-add.js` | إجراءات سياقية للموكل/الملف/القضية + كل الأنواع التي عرضتها القائمة السابقة؛ فلترة عربية متعددة الكلمات وتنقل لوحة مفاتيح. يعيد الاستخدام إلى `openLegalFileWizard` و`openEntityForm` و`openQuickNoteCapture` و`openLinkedTaskForm`. ملفات الموكل المتعددة تمر بمُنتقٍ محدود قبل الربط. |
+| `js/ui/palette.js` | أمر لفتح الإضافة السريعة وإجراءات مرتبطة بالصفحة الحالية؛ مطابقة جميع كلمات البحث وترتيب recents ضمن قاعدة المكتب الحالية. |
+| `js/ui/record-preview.js` · `js/modules/list-page.js` · `js/ui/datagrid.js` | معاينة اختيارية من قائمة إجراءات الصف في DataGrid، مع روابط للسجلات المرتبطة وإجراءات سياقية؛ استبعاد الحقول الحساسة وتهريب النصوص قبل HTML. لا جدول جديد. |
+| `js/services/client-duplicates.js` · `js/ui/form.js` | اقتراح تكرار للموكل بالرقم القومي الدقيق/الاسم المطبع باستخدام فهارس prefix/exact وحدود للقراءة والنتائج؛ لا يقرر الدمج ولا ينسخ بيانات شخصية إلى النشاط. |
+| `js/services/office.js` · `js/services/entity-save.js` | منع تعارض الرقم القومي داخل معاملة حفظ `clients` عبر cursor للمؤشر `nationalId`؛ قبول `allowDuplicate` فقط كخيار خدمة صريح، مع حذفه من بيانات الموكل. لا تغييرات على معاملة Activity Log أو مخطط IndexedDB. |
+| `sw.js` · `js/core/constants.js` | `APP_VERSION=5.14.1` وكاش PWA جديد؛ precache للخدمتين/الواجهتين الجديدتين كي تبقى الوظيفة متاحة دون اتصال. |
+| `js/tests/client-duplicates-tests.js` · `js/tests/quick-actions-tests.js` · `js/tests/ux-tests.js` · `tools/node-tests/run-tests.mjs` · `tests.html` | تغطية نطاق التفضيلات، البحث والإضافة السياقية، المعاينة الآمنة، كشف التكرار، علم التجاوز، عبء السجلات المحذوفة، وسيناريو التعارض المتزامن في Node والمتصفح. |
+| `tools/node-tests/legal-context-browser-tests.mjs` | 7 اختبارات Chromium لتدفقات الإضافة من صفحة الموكل والملف، اختيار ملف صحيح، وراثة المرحلة، أوامر Ctrl+K السياقية، معاينة DataGrid الآمنة بين Light/Dark، وإقرار كشف التكرار. `npm run test:legal-context-browser`. |
+
+**التحقق المنفذ:** `node tools/node-tests/run-tests.mjs` **513/513** · `legal-context-browser` **7/7** · `android-pwa-browser` **28/28** في محاكاة هاتف، بما فيها العمل دون اتصال وتحديث الكاش بأمان (197 أصلًا مخزّنًا مسبقًا) · `release-audit` **PASS** (311 ملفًا/1,132 استيرادًا؛ تحذير مراجعة واحد حول `location.reload`) · `git diff --check` بلا مخالفات. لا تغيير في `SCHEMA_VERSION`؛ لم يُجرَ اختبار على جهاز Android فعلي ولا ادعاء بوقت تحميل/سرعة رقمي.
+
+---
+
 # v5.14.0 — حذف كل البيانات التجريبية بزر واحد + إصلاح تغطية الشريط العلوي
 
 **2026-10-06 — طلب المستخدم: زر واحد يمسح كل البيانات التجريبية دفعة واحدة، وإصلاح تداخل الشريط العلوي (Overlapping UI Header) على الشاشات الصغيرة. لا تغيير في `SCHEMA_VERSION=18` ولا في المخازن.**

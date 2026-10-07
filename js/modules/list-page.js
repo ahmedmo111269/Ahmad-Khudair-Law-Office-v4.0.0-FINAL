@@ -147,7 +147,7 @@ function yesterday(){const d=new Date();d.setDate(d.getDate()-1);return `${d.get
 
 const QA_KEY='ui:qa-actions';
 const QA_ALL=[
- ['open','فتح السجل'],['file','فتح الملف'],['client','فتح الموكل'],
+ ['preview','معاينة سريعة'],['open','فتح السجل'],['file','فتح الملف'],['client','فتح الموكل'],
  ['add-hearing','إضافة جلسة'],['add-procedure','إضافة عمل إداري'],['add-note','إضافة ملاحظة'],
  ['add-service','إضافة إعلان/محضر'],['add-judgment','إضافة حكم'],['relations','فتح العلاقات'],['copy','نسخ الرقم']
 ];
@@ -156,6 +156,7 @@ export function rowMenuFor(store,row){
  const allow=qaAllowed();
  const items=[];
  const add=(id,label,danger=false)=>{if(!allow||allow.has(id))items.push({id,label,danger})};
+ add('preview','معاينة سريعة');
  add('open',store==='files'?'فتح الملف':'فتح السجل');
  if(row.fileId&&store!=='files')add('file','فتح الملف');
  if(row.clientId)add('client','فتح الموكل');
@@ -180,6 +181,7 @@ async function copyText(v){
 }
 async function handleRowAction(app,store,id,row,reload){
  const fid=fileIdOf(store,row);
+ if(id==='preview'){const {openRecordPreview}=await import('../ui/record-preview.js');return openRecordPreview(app,store,row)}
  if(id==='open')return openRow(app,store,row);
  if(id==='file'&&fid)return app.go('file:'+fid);
  if(id==='client'&&row.clientId)return app.go('client:'+row.clientId);
