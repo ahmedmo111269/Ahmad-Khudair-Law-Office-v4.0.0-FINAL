@@ -32,6 +32,16 @@ const clean=()=>{
 };
 const ensureModalRoot=()=>{if(!document.querySelector('#modal-root')){const m=document.createElement('div');m.id='modal-root';document.body.append(m)}};
 const tick=(ms=30)=>new Promise(r=>setTimeout(r,ms));
+const cssColorMatches=(value,hex)=>{
+ const actual=String(value||'').toLowerCase().replace(/\s+/g,'');
+ const source=String(hex||'').trim().toLowerCase();
+ if(actual.includes(source)||actual.includes(source.replace(/^#/,'')))return true;
+ let digits=source.replace(/^#/,'');
+ if(digits.length===3)digits=[...digits].map(char=>char+char).join('');
+ if(!/^[0-9a-f]{6}$/.test(digits))return false;
+ const channels=[0,2,4].map(index=>parseInt(digits.slice(index,index+2),16));
+ return actual.includes(`rgb(${channels.join(',')})`)||actual.includes(`rgba(${channels.join(',')},1)`);
+};
 
 export function runComponentStyleTests(test,expect){
  // ===== التطبيع والحدود التقنية الآمنة =====
@@ -158,7 +168,7 @@ export function runComponentStyleTests(test,expect){
   applyComponentStyle(b,'card:b',{type:'card',pageId:''});
   expect(a.style.getPropertyValue('--uxc-primaryValue-fs')).toBe('20px');
   expect(a.style.getPropertyValue('--uxc-primaryValue-color')).toBe('#ff0000');
-  expect(a.style.getPropertyValue('background')).toContain('123456');
+  expect(cssColorMatches(a.style.getPropertyValue('background'),'#123456')).toBe(true);
   expect(a.style.getPropertyValue('border-radius')).toBe('18px');
   expect(a.dataset.uxcHas.includes('primaryValue.fs')).toBe(true);
   expect(a.dataset.uxcHas.includes('box.bg')).toBe(true);
@@ -198,7 +208,7 @@ export function runComponentStyleTests(test,expect){
   setComponentStyle('stage:s1',{box:{bg:'#0000ff',accent:'#ffcc00',radius:20},text:{legalNumber:{color:'#00ff00'}}},{type:'stage'});
   applyComponentStyle(li,'stage:s1',{type:'stage',pageId:''});
   const btn=li.querySelector('button');
-  expect(btn.style.getPropertyValue('background')).toContain('0000ff');
+  expect(cssColorMatches(btn.style.getPropertyValue('background'),'#0000ff')).toBe(true);
   expect(btn.style.getPropertyValue('border-radius')).toBe('20px');
   expect(li.style.getPropertyValue('background')).toBe(''); // li نفسه بلا صندوق
   expect(li.style.getPropertyValue('--uxc-accent')).toBe('#ffcc00');
@@ -338,7 +348,7 @@ export function runComponentStyleTests(test,expect){
   main.innerHTML='<div class="panel-plain" data-section-id="s"><div class="panel-head"><h3>قسم</h3></div></div>';
   setComponentStyle('page:pp',{box:{bg:'#123456'},text:{mainTitle:{color:'#abcabc'}}},{type:'page'});
   applyUniversalStyles(main,'pp');
-  expect(main.style.getPropertyValue('background')).toContain('123456');
+  expect(cssColorMatches(main.style.getPropertyValue('background'),'#123456')).toBe(true);
   expect(main.style.getPropertyValue('--uxc-mainTitle-color')).toBe('#abcabc');
   expect(main.dataset.uxcHas.includes('mainTitle.color')).toBe(true);
   // قسم داخل الصفحة يرث مستوى الصفحة في الحل (JS) عند تخصيصه لاحقًا

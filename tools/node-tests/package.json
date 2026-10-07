@@ -18,6 +18,7 @@
     "test:execution-settings-browser": "node execution-settings-browser-tests.mjs",
     "test:android-pwa": "node android-pwa-browser-tests.mjs",
     "test:legal-context-browser": "node legal-context-browser-tests.mjs",
+    "test:html-browser": "node tests-html-browser-tests.mjs",
     "icons:pwa": "node make-pwa-icons.mjs",
     "screenshots:pwa": "node make-pwa-screenshots.mjs"
   },

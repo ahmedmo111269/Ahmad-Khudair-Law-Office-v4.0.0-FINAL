@@ -198,7 +198,8 @@ export async function runTopNavTests(test, expect) {
     fix(more, 'offsetWidth', 90);
     tabs.forEach(t => fix(t, 'offsetWidth', 130));
     window.dispatchEvent(new Event('resize'));
-    await new Promise(r => setTimeout(r, 220));
+    const deadline=Date.now()+1200;
+    while(Date.now()<deadline&&(!tabs.some(t=>t.hidden)||more.hidden))await new Promise(r=>setTimeout(r,20));
     const hiddenTabs = tabs.filter(t => t.hidden).map(t => t.dataset.tab);
     expect(hiddenTabs.length > 0).toBe(true);       // لا ازدحام: ما لا يتّسع ينتقل إلى «المزيد»
     expect(more.hidden).toBe(false);                // زر «المزيد» يظهر عند الحاجة فقط

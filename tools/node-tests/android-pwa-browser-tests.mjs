@@ -404,6 +404,24 @@ const counts=page=>page.evaluate(async()=>{
   }finally{
    await fs.writeFile(swPath,original); // استعادة الملف كما هو (لا تغيير في المستودع)
   }
+  // استعادة عامل الإنتاج بعد اختبار نسخة e2e المؤقتة: أعِد قراءة sw.js بعد استرجاعه،
+  // فعّل النسخة الأصلية صراحةً، ثم أكّد أن بقية الرحلات لا تبدأ بعامل اختبار قديم.
+  await page.evaluate(async()=>{
+   const registration=await navigator.serviceWorker.getRegistration();
+   if(!registration)return;
+   await registration.update();
+   const deadline=Date.now()+60000;
+   while(!registration.waiting&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,200));
+   if(!registration.waiting)throw new Error('restored production worker was not discovered after the A→B test');
+   const changed=new Promise(resolve=>{
+    navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true});
+    registration.waiting.postMessage({type:'SKIP_WAITING'});
+    setTimeout(resolve,20000);
+   });
+   await changed;
+  });
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller),null,{timeout:60000});
   await page.close();
  });
 
@@ -481,14 +499,28 @@ const counts=page=>page.evaluate(async()=>{
   const before=await counts(p);
   const removed=await p.evaluate(async()=>{const keys=await caches.keys();for(const key of keys)await caches.delete(key);return keys.length});
   assert.ok(removed>0,'there was an application cache to remove');
-  await p.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
+  // Clear conditional browser responses as well: otherwise a 304 may reuse the prior
+  // module graph without exercising the Service Worker's recovery fetch path.
+  const recoveryCdp=await context.newCDPSession(p);
+  await recoveryCdp.send('Network.clearBrowserCache');
+  await recoveryCdp.detach();
+  // reload() is intentional here: goto(index.html) can be a same-URL no-op in the SPA,
+  // which would skip the online boot and leave the cache-recovery assertion meaningless.
+  await p.reload({waitUntil:'domcontentloaded'});
   await p.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
   await p.evaluate(()=>{const app=window.__LAW_OFFICE_APP__;return app.go('files')});
   await p.waitForTimeout(3000);
-  const healed=await p.evaluate(async()=>{const keys=await caches.keys();if(!keys.length)return {keys:0,entries:0};const cache=await caches.open(keys[0]);return {keys:keys.length,entries:(await cache.keys()).length,key:keys[0]}});
+  const healed=await p.evaluate(async()=>{
+   const keys=await caches.keys(),cachesState=[];
+   for(const key of keys)cachesState.push({key,entries:(await(await caches.open(key)).keys()).length});
+   const controller=navigator.serviceWorker.controller;
+   const active=controller?await new Promise(resolve=>{const channel=new MessageChannel();channel.port1.onmessage=event=>resolve(event.data);controller.postMessage({type:'PWA_INFO'},[channel.port2]);setTimeout(()=>resolve(null),700)}):null;
+   const selected=cachesState[0]||{key:'',entries:0};
+   return {keys:keys.length,entries:selected.entries,key:selected.key,caches:cachesState,activeVersion:active?.version||null,controller:controller?.scriptURL||null};
+  });
   const after=await counts(p);
   assert.deepEqual(after,before,'office data is intact after losing the whole application cache');
-  assert.ok(healed.entries>60,`the cache did not rebuild itself while online (entries: ${healed.entries})`);
+  assert.ok(healed.entries>60,`the cache did not rebuild itself while online: ${JSON.stringify(healed)}`);
   assert.ok(healed.key.startsWith('ahmad-khudair-law-office-'),`unexpected cache name: ${healed.key}`);
   report.cacheRecovery={removed,healed,before,after};
  });

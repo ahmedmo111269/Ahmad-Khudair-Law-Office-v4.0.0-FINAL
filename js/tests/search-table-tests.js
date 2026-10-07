@@ -228,12 +228,18 @@ export function runGridUpgradeTests(test,expect){
   g.remove();
  });
  test('الجدول: التمرير الافتراضي لا يرسم كل الصفوف',()=>{
+  // tests.html intentionally loads no application stylesheet; constrain the scroll viewport
+  // here so the virtual-window assertion matches the real DataGrid layout in every runner.
+  const style=document.createElement('style');
+  style.textContent='.dg-scroll{height:320px!important;max-height:320px!important;overflow:auto!important}';
+  document.head.append(style);
   const g=document.createElement('div');document.body.append(g);
-  const rows=Array.from({length:800},(_,i)=>({id:String(i),t:'صف '+i}));
-  mountGrid(g,{rows,columns:[{key:'t',label:'T'}],storageKey:''});
-  expect(g.querySelectorAll('tbody tr[data-i]').length<800).toBe(true);
-  expect(g.querySelectorAll('tbody tr[data-i]').length>0).toBe(true);
-  g.remove();
+  try{
+   const rows=Array.from({length:800},(_,i)=>({id:String(i),t:'صف '+i}));
+   mountGrid(g,{rows,columns:[{key:'t',label:'T'}],storageKey:''});
+   expect(g.querySelectorAll('tbody tr[data-i]').length<800).toBe(true);
+   expect(g.querySelectorAll('tbody tr[data-i]').length>0).toBe(true);
+  }finally{g.remove();style.remove()}
  });
  test('الجدول: بحث سريع يميّز النتائج مع التطبيع (خالد/خالدة)',async()=>{
   const g=document.createElement('div');document.body.append(g);
