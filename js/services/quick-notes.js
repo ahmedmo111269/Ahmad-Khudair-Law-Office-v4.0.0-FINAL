@@ -166,6 +166,7 @@ export function parseQuickNoteQuery(raw = '') {
     else if (['متاخر', 'overdue'].includes(key)) query.states.add('OVERDUE');
     else if (['اليوم', 'today'].includes(key)) query.states.add('TODAY');
     else if (['مؤجل', 'snoozed'].includes(key)) query.states.add('SNOOZED');
+    else if (['مثبت', 'pinned'].includes(key)) query.states.add('PINNED');
     else if (['منتهي', 'منجزة', 'منجز', 'done'].includes(key)) query.states.add('DONE');
     else if (['مرتبط', 'linked'].includes(key)) query.states.add('LINKED');
     else if (['بلا_ربط', 'بلا-ربط', 'بلا ربط', 'unlinked'].includes(key)) query.states.add('UNLINKED');
@@ -187,6 +188,7 @@ export function matchesQuickNoteQuery(note, parsed, at = nowIso(), {includeDelet
   for (const flag of parsed.states) {
     if (flag === 'DONE' && state !== 'DONE') return false;
     if (flag === 'SNOOZED' && state !== 'SNOOZED') return false;
+    if (flag === 'PINNED' && !note.isPinned) return false;
     if (flag === 'OVERDUE' && !(note.dueAt && note.dueAt < today && note.lifecycle === NOTE_LIFECYCLES.OPEN)) return false;
     if (flag === 'TODAY' && note.dueAt !== today) return false;
     if (flag === 'LINKED' && !note.sourceId && !note.fileId && !note.caseId && !note.clientId) return false;
@@ -407,6 +409,11 @@ function decodeManualCursor(value) {
 
 const manualKeyOf = row => row?.sortKey || `\u0000${row?.createdAt || row?.updatedAt || row?.id || ''}::${row?.id || ''}`;
 
+/** ملاحظة «لم تُفرز بعد»: بلا وسم/موعد/ربط/إشارة فرز — أساس صندوق الالتقاط. */
+function isInboxRow(row) {
+  return !row?.triagedAt && !row?.tagIds?.length && !row?.dueAt && !row?.sourceId && !row?.fileId && !row?.caseId && !row?.clientId;
+}
+
 /**
  * Manual ordering compatibility stream.
  *
@@ -489,7 +496,10 @@ export async function pageQuickNotes(office, {query = '', status = 'ACTIVE', sor
       if (status === 'ARCHIVED' && state !== 'ARCHIVED') return false;
       if (status === 'DONE' && state !== 'DONE') return false;
       if (status === 'SNOOZED' && state !== 'SNOOZED') return false;
-      if (status === 'INBOX' && (row.triagedAt || row.tagIds?.length || row.dueAt || row.sourceId || row.fileId || row.caseId || row.clientId)) return false;
+      // صندوق الالتقاط = ملاحظة مفتوحة لم تُفرز بعد. قبل v5.15 كانت أي ملاحظة بلا
+      // إشارة فرز تظهر هنا حتى لو كانت منجزة/مؤرشفة، فيشوّه العدّاد وينتقل المستخدم
+      // إلى صندوق يحتوي عملًا منتهيًا.
+      if (status === 'INBOX' && (state !== 'ACTIVE' || !isInboxRow(row))) return false;
       if (status === 'ACTIVE' && !['ACTIVE', 'SNOOZED'].includes(state)) return false;
     }
     return !filter || filter(row, state);
@@ -511,6 +521,102 @@ export async function countQuickNotes(office, {status = 'ACTIVE', query = ''} = 
     if (count > 100000) break;
   } while (cursor);
   return count;
+}
+
+/**
+ * عدّ كل الصناديق في مسحة واحدة بدل أربع مسحات كاملة متوازية (توفير كبير على المخازن الكبيرة).
+ * كل مفتاح يطابق ما يعيده العرض المقابل تمامًا (ACTIVE = مفتوحة + مؤجلة، INBOX = مفتوحة لم تُفرز)،
+ * و`capped` تعني أن المسحة بلغت سقف الصفحات فالأعداد الحقيقية أكبر ويُعرض لها علامة +.
+ */
+export async function quickNotesStats(office, {pageLimit = 100, maxRows = 20000} = {}) {
+  const counts = {INBOX: 0, ACTIVE: 0, DONE: 0, SNOOZED: 0, ARCHIVED: 0, TRASH: 0, ALL: 0, capped: false};
+  let cursor = null, scanned = 0;
+  do {
+    const page = await office.r.caseNotes.page({index: 'updatedAt', cursor, limit: Math.min(Math.max(1, Number(pageLimit) || 100), MAX_PAGE), direction: 'prev', includeDeleted: true});
+    for (const row of page.items) {
+      scanned += 1;
+      counts.ALL += 1;
+      const state = effectiveNoteState(row);
+      if (state === 'TRASH') counts.TRASH += 1;
+      else if (state === 'ACTIVE') { counts.ACTIVE += 1; if (isInboxRow(row)) counts.INBOX += 1; }
+      else if (state === 'SNOOZED') { counts.ACTIVE += 1; counts.SNOOZED += 1; }
+      else counts[state] += 1; // DONE / ARCHIVED
+      if (scanned >= maxRows) { counts.capped = true; break; }
+    }
+    cursor = counts.capped ? null : (page.hasMore ? page.nextCursor : null);
+  } while (cursor);
+  return counts;
+}
+
+/** إفراغ السلة: جلسة واحدة تمسح حتى `limit` ملاحظة محذوفة وروابطها نهائيًا، بلا حذف خارج السلة. */
+export async function emptyQuickNoteTrash(office, {limit = 200} = {}) {
+  const cap = Math.min(Math.max(1, Number(limit) || 1), 500);
+  const page = await pageQuickNotes(office, {status: 'TRASH', limit: cap});
+  const ids = page.rows.map(row => row.id);
+  if (!ids.length) return {purged: 0};
+  await transaction(office.ctx, [NOTE_STORE, LINK_STORE, STORE.activityLog], async tx => {
+    const notes = tx.objectStore(NOTE_STORE), links = tx.objectStore(LINK_STORE);
+    for (const id of ids) {
+      await request(notes.delete(id));
+      const rows = await request(links.index('noteId').getAll(IDBKeyRange.only(id)));
+      for (const link of rows) await request(links.delete(link.id));
+    }
+    await request(tx.objectStore(STORE.activityLog).add(activity(office, 'bulk', 'purged', null)));
+  }, {captureChanges: true});
+  events.emit('entity:changed', {entityType: NOTE_STORE, id: 'bulk'});
+  return {purged: ids.length};
+}
+
+/** إضافة وسم واحد إلى مجموعة ملاحظات في معاملة واحدة (دمج مع وسوم كل ملاحظة دون مساس بالباقي). */
+export async function addTagToQuickNotes(office, ids = [], tag = '') {
+  const value = clean(tag, 80).trim();
+  if (!value) throw new AppError(ERR.VALIDATION, 'اكتب نص الوسم أولًا.');
+  const unique = [...new Set(ids.filter(Boolean))].slice(0, 500);
+  if (!unique.length) return {count: 0};
+  const rows = await office.r.caseNotes.getManyRaw(unique);
+  const updated = rows
+    .filter(row => !row.deletedAt && !row.isDeleted && !(row.tagIds || []).includes(value))
+    .map(row => normalizeInput({...row, tagIds: [...(row.tagIds || []), value]}, row, {id: row.id}));
+  if (!updated.length) return {count: 0};
+  await transaction(office.ctx, [NOTE_STORE, STORE.activityLog], async tx => {
+    for (const row of updated) await request(tx.objectStore(NOTE_STORE).put(row));
+    await request(tx.objectStore(STORE.activityLog).add(activity(office, 'bulk', 'tagged', null)));
+  });
+  events.emit('entity:changed', {entityType: NOTE_STORE, id: 'bulk'});
+  return {count: updated.length};
+}
+
+/**
+ * التذكيرات: مسحتان محدودتان على فهرسي remindAt وdueAt تُعيدان القسمتين
+ * «مستحقة الآن» و«القادمة خلال horizonDays» معًا — أساس شارة الجرس وصفحة التذكيرات.
+ * لا تُحمّل المخزن كله ولا تشمل السلة/الأرشفة/المنجز/المؤجل (state مشتق لا يُكتب).
+ */
+export async function dueReminders(office, {now = nowIso(), horizonDays = 7, limit = 200} = {}) {
+  const today = localDate(dateNow());
+  const horizon = addDays(today, Math.max(1, Number(horizonDays) || 7));
+  const horizonIso = `${horizon}T23:59:59.999Z`;
+  const cap = Math.min(Math.max(1, Number(limit) || 1), 500);
+  const qualify = row => !['TRASH', 'ARCHIVED', 'DONE', 'SNOOZED'].includes(effectiveNoteState(row, now));
+  const [reminders, dues] = await Promise.all([
+    office.r.caseNotes.reportRange({index: 'remindAt', lower: '', upper: horizonIso, direction: 'next', limit: cap, filter: qualify}).catch(() => []),
+    // dueAt يُخزَّن '' بلا موعد — والسلة الفارغة مفتاح صالح في الفهرس، فيبدأ النطاق من أول تاريخ صحيح.
+    office.r.caseNotes.reportRange({index: 'dueAt', lower: '0000-01-01', upper: horizon, direction: 'next', limit: cap, filter: qualify}).catch(() => [])
+  ]);
+  const byId = new Map();
+  const earliestOf = row => {
+    const times = [row.remindAt ? String(row.remindAt) : '', row.dueAt ? `${row.dueAt}T00:00:00.000Z` : ''].filter(Boolean).sort();
+    return times[0] || '';
+  };
+  for (const row of [...reminders, ...dues]) if (!byId.has(row.id)) byId.set(row.id, row);
+  const isDueNow = row => Boolean((row.remindAt && String(row.remindAt) <= now) || (row.dueAt && row.dueAt <= today));
+  const rows = [...byId.values()].map(row => ({...row, reminderDueNow: isDueNow(row), reminderAt: earliestOf(row)}));
+  const rank = row => (row.reminderDueNow ? '0' : '1') + row.reminderAt;
+  rows.sort((a, b) => rank(a).localeCompare(rank(b)));
+  return {
+    due: rows.filter(row => row.reminderDueNow).slice(0, cap),
+    upcoming: rows.filter(row => !row.reminderDueNow).slice(0, cap),
+    capped: reminders.length >= cap || dues.length >= cap
+  };
 }
 
 export async function noteAgenda(office, {from = localDate(), to = addDays(localDate(), 7), limit = 200} = {}) {

@@ -1,3 +1,23 @@
+# v5.15.0 — تطوير الملاحظات السريعة والأعمال الإدارية + قسم التذكيرات
+
+**2026-10-07 — طبقة واجهة/خدمات فوق المعمارية الحالية. لا تغيير مخطط: `SCHEMA_VERSION=18` ومخازن IndexedDB كما هي؛ لا تغيير على Backup/Restore.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/quick-notes.js` | `quickNotesStats` (عدّادات بمسح واحد)، `emptyQuickNoteTrash`، `addTagToQuickNotes` (تعدّ ما وُسم فعلًا)، `dueReminders` (مستحقة/قادمة لقسم التذكيرات)، وتصحيح فلتر الوارد INBOX. حد تقرير الاستحقاق يبقى `0000-01-01`. |
+| `js/modules/quick-notes.js` · `css/quick-notes.css` | ستة صناديق إحصاء، شريط إجراءات جماعية (وسم/إفراغ السلة/نسخ/موعد)، بطاقة ملاحظة بهوية لونية وأيقونة أولوية وشارة «مثبت». |
+| `js/modules/list-page.js` | سجل الإضافات `registerListExtras` ونقطة تركيب `#list-extras` (مفتوحة افتراضيًا) وتركيب فلترة الحالة بمنطق AND مع فلتر الفترة. |
+| `js/modules/procedures-extras.js` · `css/ui.css` | إضافات «الأعمال الإدارية»: عدّادات مفهرسة، رقائق حالة، أعمدة 14 يومًا، لوحة Kanban كسولة (60 بطاقة/عمود، نقل بـ`saveEntity`)، و`procedureStatusFilter` النقية. |
+| `js/modules/reminders.js` | قسم «التذكيرات» الجديد: شارة الجرس `#reminders-btn` (99+)، صفحة مستحقة/قادمة، تأجيل وإنهاء، تكامل مع `caseNotes`، وتحديث دوري/عند الظهور. |
+| `js/app.js` · `js/ui/nav-model.js` · `js/ui/icons.js` · `js/ui/palette.js` · `index.html` | تسجيل المسار (المجموعة اليومية)، أيقونة الجرس، أمر لوحة الأوامر، وزر الشريط العلوي — الشريط صار **30 مسارًا**. |
+| `js/modules/work-center.js` · `css/work-center.css` | إضافات فقط: شريط تقدم اليوم، «تصدير العرض الحالي (CSV)» و«نسخ خلاصة اليوم» في نهاية قائمة «المزيد» (فهارس العناصر القديمة ثابتة)، تحديث عند الظهور بعد 60 ثانية، اختصار `r`، و`content-visibility:auto` للبطاقات (الطباعة مستثناة). |
+| `js/core/constants.js` · `sw.js` | `APP_VERSION=5.15.0` وكاش `ahmad-khudair-law-office-v5.15.0-reminders-suite` مع إضافة الوحدتين الجديدتين إلى precache. |
+| `js/tests/quick-notes-tests.js` · `js/tests/procedures-extras-tests.js` · `js/tests/topnav-tests.js` · `tests.html` · `tools/node-tests/run-tests.mjs` | 5 اختبارات ملاحظات (منها انحدار الوارد)، 4 اختبارات منطق الأعمال الإدارية، ومسار التذكيرات ضمن 30 مسارًا؛ المجموعتان موصولتان في Node و`tests.html`. |
+
+**التحقق المنفذ:** `node tools/node-tests/run-tests.mjs` **522/522** · `tests.html` في Chromium **495/495** · `quick-notes-browser` **8/8** بلا أخطاء كونسول · `work-center-browser` **61/61** (يشمل سيناريو الأداء والعمل دون اتصال وprecache الإصدار الجديد) · `grid-browser` **38 فحصًا · 0 خطأ** · فحوص `node --check` و`git diff --check` نظيفة. رُصد إخفاق توقيتي متقطع في اختبار «ضيق المساحة» أثناء حِمل عالٍ فرُفعت مهلته إلى 4000مللي بلا إخفاء أي تدقيق. لم يُختبر جهاز Android فعليًا هذه الدورة؛ لا ادعاء بأزمنة تحميل رقمية.
+
+---
+
 # v5.14.2 — سياق العمل والمعاينة وكشف التكرار واختبارات المتصفح
 
 **2026-10-07 — طبقة UX وخدمات فوق المعمارية الحالية. لا تغيير مخطط: `SCHEMA_VERSION=18` ومخازن IndexedDB كما هي؛ لا تغيير على Backup/Restore.**

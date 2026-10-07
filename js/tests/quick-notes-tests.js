@@ -196,4 +196,103 @@ export async function runQuickNotesTests(test, expect) {
       expect(await QN.getQuickNoteDraft(e.office, 'file:test')).toBe(undefined);
     } finally { close(e); }
   });
+
+  test('ملاحظات سريعة/صندوق الالتقاط: المنجزة والمؤرشفة بلا فرز لا تدخل الصندوق بعد إصلاح v5.15', async () => {
+    const e = await env();
+    try {
+      const inbox = await QN.saveQuickNote(e.office, {content: 'فكرة بلا فرز'});
+      const doneRaw = await QN.saveQuickNote(e.office, {content: 'انتهت بلا فرز'});
+      await QN.completeQuickNote(e.office, doneRaw.id);
+      const archivedRaw = await QN.saveQuickNote(e.office, {content: 'مؤرشفة بلا فرز'});
+      await QN.archiveQuickNote(e.office, archivedRaw.id);
+      const rows = await QN.pageQuickNotes(e.office, {status: 'INBOX', limit: 50});
+      expect(rows.rows.some(row => row.id === inbox.id)).toBe(true);
+      expect(rows.rows.some(row => row.id === doneRaw.id)).toBe(false);
+      expect(rows.rows.some(row => row.id === archivedRaw.id)).toBe(false);
+      const stats = await QN.quickNotesStats(e.office);
+      expect(stats.INBOX).toBe(1);
+      expect(stats.DONE).toBe(1);
+      expect(stats.ARCHIVED).toBe(1);
+      expect(stats.ALL).toBe(3);
+      expect(stats.capped).toBe(false);
+    } finally { close(e); }
+  });
+
+  test('ملاحظات سريعة/إحصاء: quickNotesStats يطابق عدّ كل صندوق في مسحة واحدة', async () => {
+    const e = await env();
+    try {
+      await QN.saveQuickNote(e.office, {content: 'مفتوحة عادية'});
+      await QN.saveQuickNote(e.office, {content: 'عاجلة', priority: 'URGENT', tagIds: 'مهم'});
+      const doneNote = await QN.saveQuickNote(e.office, {content: 'منجزة'});
+      await QN.completeQuickNote(e.office, doneNote.id);
+      const snoozedNote = await QN.saveQuickNote(e.office, {content: 'مؤجلة'});
+      await QN.snoozeQuickNote(e.office, snoozedNote.id, '2099-05-05T09:00:00.000Z');
+      const trashedNote = await QN.saveQuickNote(e.office, {content: 'في السلة'});
+      await QN.deleteQuickNote(e.office, trashedNote.id);
+      const stats = await QN.quickNotesStats(e.office);
+      const byBox = {};
+      for (const status of ['INBOX', 'ACTIVE', 'DONE', 'SNOOZED', 'TRASH']) byBox[status] = await QN.countQuickNotes(e.office, {status});
+      expect(stats.INBOX).toBe(byBox.INBOX);
+      expect(stats.ACTIVE).toBe(byBox.ACTIVE);
+      expect(stats.DONE).toBe(byBox.DONE);
+      expect(stats.SNOOZED).toBe(byBox.SNOOZED);
+      expect(stats.TRASH).toBe(byBox.TRASH);
+      expect(stats.ALL).toBe(5);
+      expect(Boolean(stats.capped)).toBe(false);
+    } finally { close(e); }
+  });
+
+  test('ملاحظات سريعة/وسوم وسلة: إضافة وسم جماعي بمعاملة واحدة وإفراغ السلة بلا المساس بالباقي', async () => {
+    const e = await env();
+    try {
+      const first = await QN.saveQuickNote(e.office, {content: 'أولى', tagIds: 'قديم'});
+      const second = await QN.saveQuickNote(e.office, {content: 'ثانية'});
+      const third = await QN.saveQuickNote(e.office, {content: 'تبقى'});
+      const tagged = await QN.addTagToQuickNotes(e.office, [first.id, second.id], 'مراجعة');
+      expect(tagged.count).toBe(2);
+      expect((await QN.getQuickNote(e.office, first.id)).tagIds.join(',')).toBe('قديم,مراجعة');
+      expect((await QN.getQuickNote(e.office, second.id)).tagIds.join(',')).toBe('مراجعة');
+      const repeat = await QN.addTagToQuickNotes(e.office, [first.id], 'مراجعة');
+      expect(repeat.count).toBe(0);
+      await QN.deleteQuickNote(e.office, first.id);
+      await QN.deleteQuickNote(e.office, second.id);
+      const purged = await QN.emptyQuickNoteTrash(e.office, {limit: 100});
+      expect(purged.purged).toBe(2);
+      expect((await QN.pageQuickNotes(e.office, {status: 'TRASH'})).rows.length).toBe(0);
+      expect(Boolean(await QN.getQuickNote(e.office, third.id))).toBe(true);
+      expect((await e.office.r.caseNotes.getManyRaw([first.id])).length).toBe(0);
+    } finally { close(e); }
+  });
+
+  test('ملاحظات سريعة/مفتاح البحث مثبت: يطابق المثبّتة فقط دون تغيير النص', () => {
+    const parsed = QN.parseQuickNoteQuery('مثبت ملف');
+    expect(parsed.states.has('PINNED')).toBe(true);
+    const pinned = {id: 'p', isPinned: true, tagIds: [], searchTextNormalized: 'ملف مهم'};
+    const plain = {id: 'n', isPinned: false, tagIds: [], searchTextNormalized: 'ملف مهم'};
+    expect(QN.matchesQuickNoteQuery(pinned, parsed)).toBe(true);
+    expect(QN.matchesQuickNoteQuery(plain, parsed)).toBe(false);
+  });
+
+  test('ملاحظات سريعة/تذكيرات: dueReminders يقسم المستحق والقادم ويشطب المنجز والمؤجل', async () => {
+    const e = await env();
+    try {
+      const now = new Date();
+      const past = new Date(now.getTime() - 3600 * 1000).toISOString();
+      const future = new Date(now.getTime() + 3600 * 1000).toISOString();
+      const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const dueReminder = await QN.saveQuickNote(e.office, {content: 'تذكير منتهٍ', remindAt: past});
+      const upcoming = await QN.saveQuickNote(e.office, {content: 'تذكير قادم', remindAt: future});
+      const dueToday = await QN.saveQuickNote(e.office, {content: 'استحقاق اليوم', dueAt: todayIso});
+      const doneNote = await QN.saveQuickNote(e.office, {content: 'منجز', remindAt: past});
+      await QN.completeQuickNote(e.office, doneNote.id);
+      const snoozed = await QN.saveQuickNote(e.office, {content: 'مؤجلة', remindAt: past});
+      await QN.snoozeQuickNote(e.office, snoozed.id, '2099-01-01T00:00:00.000Z');
+      const data = await QN.dueReminders(e.office);
+      expect(data.due.some(row => row.id === dueReminder.id)).toBe(true);
+      expect(data.upcoming.some(row => row.id === upcoming.id)).toBe(true);
+      expect(data.due.some(row => row.id === dueToday.id)).toBe(true);
+      expect(data.due.some(row => row.id === doneNote.id)).toBe(false);
+      expect(data.due.some(row => row.id === snoozed.id)).toBe(false);
+    } finally { close(e); }
+  });
 }

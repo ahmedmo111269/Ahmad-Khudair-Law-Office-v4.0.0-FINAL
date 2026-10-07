@@ -18,6 +18,7 @@ import {clientPage,bindClientPage,opponentPage,bindOpponentPage,recordPage,bindR
 import {filePage,bindFilePage} from './modules/file-page.js';
 import {openQuickAdd} from './modules/quick-add.js';
 import {quickNotesPage,bindQuickNotes,openQuickNoteCapture,bindQuickNoteGlobalEvents} from './modules/quick-notes.js';
+import {remindersPage,bindReminders,initReminders,scheduleRemindersBadge} from './modules/reminders.js';
 import {renderDatabases,bindDatabases,renderBackup,bindBackup,renderRecovery,bindRecovery} from './modules/databases.js';
 import {reportsPage,bindReports} from './modules/reports.js';
 import {renderSearch,bindSearch} from './modules/search.js';
@@ -58,6 +59,7 @@ const PAGES={
  reports:{title:'التقارير',render:(app,q)=>reportsPage(app,q),bind:app=>bindReports(app)},
  actionCenter:{title:'مركز العمل',render:(app,q)=>workCenterPage(app,q),bind:(app,q)=>bindWorkCenter(app,q)},
  quickNotes:{title:'الملاحظات السريعة',render:(app,q)=>quickNotesPage(app,q),bind:(app,q)=>bindQuickNotes(app,q),layoutId:'quickNotes',store:'caseNotes'},
+ reminders:{title:'التذكيرات',render:(app,q)=>remindersPage(app,q),bind:(app,q)=>bindReminders(app,q),layoutId:'reminders',store:'reminders'},
  executionCenter:{title:'مركز التنفيذ',render:app=>executionCenterPage(app),bind:app=>bindExecutionCenter(app),layoutId:'executionCenter'},
  analytics:{title:'الإحصاءات',render:(app,q)=>analyticsPage(app,q),bind:app=>bindAnalytics(app)},
  integrity:{title:'سلامة البيانات والتدقيق',render:app=>integrityPage(app),bind:app=>bindIntegrity(app)},
@@ -92,7 +94,7 @@ function recordRoute(route){
 
 class App{
  constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null;this.routeHistory=null;this.storageWatch=null;this.pwaInstall=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route)}catch(e){this.booting=false;this.fail(e)}}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true})}catch(e){this.booting=false;this.fail(e)}}
  /** تاريخ المتصفح: كل انتقال يُسجَّل، وزر الرجوع في Android يغلق الطبقات ثم يرجع بين الشاشات. */
  startHistoryNav(){
   bindOverlayStack(this.routeHistory=new RouteHistory({
@@ -159,6 +161,7 @@ class App{
   $('#quick-add').onclick=()=>openQuickAdd(this);
   $('#quick-note-fab')?.addEventListener('click',()=>openQuickNoteCapture(this));
   bindQuickNoteGlobalEvents(this);
+  initReminders(this);
   initCombobox();
   $('#command-btn').innerHTML=`${icon('search')} <span>لوحة الأوامر</span> <kbd>Ctrl K</kbd>`;
   $('#command-btn').onclick=()=>openPalette(this);
@@ -211,7 +214,7 @@ class App{
   });
  }
  showShortcutsHelp(){
-  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['R','مركز العمل: تحديث البيانات'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],
 ['Ctrl + Shift + T','بطاقة تنفيذ: فتح ورقة التسجيل (+ تسجيل)'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
   modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
@@ -255,6 +258,7 @@ class App{
    closeMobile(); // على الهاتف: تُغلق لوحة التنقل تلقائيًا بعد اختيار الصفحة
    if(baseRoute!=='dashboard')prefs.set(scopedPreferenceKey('ui:last-route',this.ctx?.profile?.id),{route,title:page.title,at:Date.now()});
    if(baseRoute!=='actionCenter'&&!/^rec:workItems:/.test(baseRoute))scheduleWorkBadge(this);
+  if(baseRoute!=='reminders')scheduleRemindersBadge(this);
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}
  }

@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v5.14.2-context-stability';
+const CACHE='ahmad-khudair-law-office-v5.15.0-reminders-suite';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -107,6 +107,8 @@ const ASSETS=[
   "./js/modules/list-page.js",
   "./js/modules/quick-add.js",
   "./js/modules/quick-notes.js",
+  "./js/modules/reminders.js",
+  "./js/modules/procedures-extras.js",
   "./js/modules/record-page.js",
   "./js/modules/repair.js",
   "./js/modules/reports.js",

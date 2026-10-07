@@ -213,3 +213,44 @@
  .dg-toolbar .dg-group-lbl{flex:1 1 100%}
 }
 @media print{.nav-cluster,.tabs,.dg-toolbar,.sec-actions,.list-controls{display:none!important}.dg-scroll{max-height:none;overflow:visible}}
+
+/* ===== v5.15 — ملحقات قوائم سريعة (الأعمال الإدارية): عدّادات وشرائح وأجندة ولوحة حالات ===== */
+.list-extras-panel{margin-bottom:12px}
+.list-extras-panel .panel-head{gap:8px;flex-wrap:wrap}
+.px-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-bottom:10px}
+.px-stat{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);cursor:pointer;text-align:start}
+.px-stat b{font-size:20px;font-variant-numeric:tabular-nums;color:var(--primary)}
+.px-stat span{font-size:11px;color:var(--text-muted)}
+.px-stat:hover,.px-stat:focus-visible,.px-stat.on{border-color:var(--primary);outline:none}
+.px-stat--danger b{color:var(--danger)}
+.px-stat--warn b{color:var(--warn)}
+.px-toolbar-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:10px}
+.px-chips{display:flex;flex-wrap:wrap;gap:5px}
+.px-chip{cursor:pointer}
+.px-chip.on{background:var(--primary);border-color:var(--primary);color:var(--text)}
+.px-bars{display:flex;align-items:flex-end;gap:4px;height:86px;padding:14px 6px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);margin-bottom:8px;overflow-x:auto}
+.px-bar{flex:1;min-width:18px;height:100%;position:relative;display:flex;align-items:flex-end;justify-content:center}
+.px-bar::before{content:'';width:72%;height:var(--h,8%);max-height:100%;background:var(--primary);opacity:.72;border-radius:3px 3px 0 0}
+.px-bar.empty::before{height:3px;background:var(--border);opacity:1}
+.px-bar b{position:absolute;top:-2px;font-size:10px;color:var(--text);font-variant-numeric:tabular-nums}
+.px-bar i{position:absolute;bottom:-14px;font-style:normal;font-size:9px;color:var(--text-muted)}
+.px-foot{margin-top:2px}
+.px-board{margin-top:10px}
+.px-board[hidden]{display:none!important}
+.px-board-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.px-col{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);display:flex;flex-direction:column;min-width:0}
+.px-col>header{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px}
+.px-col>header h4{margin:0;font-size:13px;flex:1}
+.px-count{background:var(--surface2);border-radius:999px;padding:1px 7px;font-size:11px;color:var(--text-muted)}
+.px-col-body{display:grid;gap:6px;padding:8px;max-height:430px;overflow:auto;align-content:start}
+.px-col-body.is-over{outline:2px dashed var(--primary);outline-offset:-2px;background:var(--surface2)}
+.px-card{border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 9px;background:var(--surface);display:grid;gap:4px;cursor:grab}
+.px-card.is-dragging{opacity:.45}
+.px-card-title{border:0;background:none;padding:0;text-align:start;font-weight:700;color:var(--text);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.px-card-title:hover,.px-card-title:focus-visible{text-decoration:underline;color:var(--primary);outline:none}
+.px-card small{font-size:10px}
+.px-card-acts{display:flex;gap:3px;flex-wrap:wrap}
+.px-card-acts button{padding:2px 6px;font-size:11px}
+.px-empty{padding:6px;text-align:center;font-size:11px;margin:0}
+@media (max-width:800px){.px-stats{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}.px-stat b{font-size:17px}}
+@media print{.px-toolbar-row,.px-board,.px-bars{display:none!important}}

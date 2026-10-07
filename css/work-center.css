@@ -243,3 +243,10 @@
 
 /* ---------- طباعة ---------- */
 @media print{.wc-quick-bar,.wc-tabs,.wc-toolbar,.wc-filters,.wc-card-tools,.wc-drawer-root,.wc-notify,.wc-quicktime,.wc-move,.wc-check{display:none!important}.wc-card{break-inside:avoid;box-shadow:none}}
+
+/* ===== v5.15 — شريط إنجاز اليوم + أداء رسم البطاقات الطويلة ===== */
+.wc-dayprogress{height:8px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);overflow:hidden;margin:8px 0 4px}
+.wc-dayprogress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .3s ease}
+.wc-dayprogress-label{margin:0 0 4px;font-variant-numeric:tabular-nums}
+.wc-card{content-visibility:auto;contain-intrinsic-size:auto 110px}
+@media print{.wc-card{content-visibility:visible;contain-intrinsic-size:auto}.wc-dayprogress{display:none}}

@@ -1,5 +1,6 @@
 // أيقونات خطية متناسقة بأسلوب Lucide (MIT) — تُلوَّن تلقائيًا بـ currentColor.
 const P={
+ bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
  scale:'<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
  home:'<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
  target:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
@@ -41,7 +42,7 @@ const P={
  refreshCw:'<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.64 9A8 8 0 0 1 19.07 5.93L20 7M4 17l.93 1.07A8 8 0 0 0 18.36 15"/>'
 };
 export const icon=(name,cls='')=>P[name]?`<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name]}</svg>`:'';
-export const ROUTE_ICONS={dashboard:'home',actionCenter:'target',files:'folder',clients:'users',opponents:'userX',cases:'gavel',powersOfAttorney:'stamp',hearings:'calendar',procedures:'clipboard',serviceRecords:'send',bailiffs:'userCheck',appointments:'clock',communications:'phone',caseNotes:'note',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',search:'search',reports:'report',analytics:'chart',integrity:'shield',repair:'wrench',databases:'database',backup:'save',sync:'refreshCw',settings:'settings'};
+export const ROUTE_ICONS={dashboard:'home',actionCenter:'target',files:'folder',clients:'users',opponents:'userX',cases:'gavel',powersOfAttorney:'stamp',hearings:'calendar',procedures:'clipboard',serviceRecords:'send',bailiffs:'userCheck',appointments:'clock',communications:'phone',caseNotes:'note',reminders:'bell',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',search:'search',reports:'report',analytics:'chart',integrity:'shield',repair:'wrench',databases:'database',backup:'save',sync:'refreshCw',settings:'settings'};
 export function decorateNav(){
  document.querySelectorAll('#main-nav button[data-route],#sidebar .tn-item[data-route]').forEach(b=>{if(!b.querySelector('svg')){const i=ROUTE_ICONS[b.dataset.route];if(i)b.insertAdjacentHTML('afterbegin',icon(i))}});
  const mark=document.querySelector('.brand-mark,.tn-brand-mark');if(mark&&!mark.innerHTML)mark.innerHTML=icon('scale');

@@ -198,6 +198,13 @@ export async function bindWorkCenter(app, q) {
   rt.onSettingsChanged = async () => { await Promise.all([rt.reload(), refreshStats()]); renderFilters(); };
 
   // ---------- الرأس والعدّادات ----------
+  /** شريط إنجاز اليوم (عرض فقط، بلا استعلام إضافي — يقرأ من الملخص نفسه). */
+  const dayProgressHtml = s => {
+    const total = (s.todayCount || 0) + (s.doneToday || 0);
+    if (!total) return '';
+    const pct = Math.min(100, Math.round(((s.doneToday || 0) / total) * 100));
+    return `<div class="wc-dayprogress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="إنجاز مجدول اليوم"><div class="wc-dayprogress-fill" style="width:${pct}%"></div></div><p class="wc-dayprogress-label muted small">أُنجز <b>${s.doneToday || 0}</b> من <b>${total}</b> مجدول لاليوم — ${pct}%${s.overdue ? ` · و<b>${s.overdue}${s.overdueCapped ? '+' : ''}</b> متأخر` : ''}</p>`;
+  };
   async function refreshStats() {
     let s;
     try { s = await workSummary(office, {signal: null}); } catch (error) { if (error?.name !== 'AbortError') console.error('work summary', error); return; }
@@ -209,7 +216,7 @@ export async function bindWorkCenter(app, q) {
       body: `<div class="wc-stats" role="group" aria-label="عدّادات مركز العمل" data-uxc-id="wc:stats" data-uxc-type="component" data-uxc-title="بطاقات العدّادات">
        ${stat('todayCount', s.todayCount, 'اليوم', 'info', exactThrough(s.today))}${stat('overdue', s.overdue, 'متأخر', s.overdue ? 'danger' : '', s.overdueCapped)}${stat('tomorrow', s.tomorrow, 'غدًا', '', exactThrough(addDays(s.today, 1)))}
        ${stat('hearingsNext7', s.hearingsNext7, 'جلسات خلال 7 أيام', s.hearingsToday ? 'info' : '', exactThrough(addDays(s.today, 7)))}${stat('inProgress', s.inProgress, 'قيد التنفيذ', '', any)}${stat('waiting', s.waiting, 'بانتظار', '', any)}
-       ${stat('postponed', s.postponed, 'مؤجل', '', any)}${stat('undated', s.undated, 'بلا موعد', '', s.undatedCapped)}${stat('doneToday', s.doneToday, 'منجز اليوم', 'ok')}${stat('pinned', s.pinned, 'مثبّت', '', any)}</div>`});
+       ${stat('postponed', s.postponed, 'مؤجل', '', any)}${stat('undated', s.undated, 'بلا موعد', '', s.undatedCapped)}${stat('doneToday', s.doneToday, 'منجز اليوم', 'ok')}${stat('pinned', s.pinned, 'مثبّت', '', any)}</div>${dayProgressHtml(s)}`});
     bindCards(root.querySelector('#wc-stats'));
     enhanceCollapsiblePanels(root.querySelector('#wc-stats'), PAGE_ID, {bulk: false});
     bindCustomizableComponents(root.querySelector('#wc-stats'));
@@ -329,7 +336,9 @@ export async function bindWorkCenter(app, q) {
       ['+ متابعة اتصال', () => openEntityForm(app, 'communications', {preset: {followUpDate: addDays(rt.today(), 1)}, onSaved: async () => { await rt.onChanged({}); }})],
       ['ترتيب العناصر', () => openSort()], ['إعادة ضبط العرض', () => resetAll()],
       ['مراجعة نهاية اليوم', () => openDailyReview(rt)], ['مراجعة الأسبوع', () => openWeeklyReview(rt)],
-      ['العروض المحفوظة', () => openSavedViews(rt)], ['ترتيب الأقسام وعرض الصفحة', () => rt.openLayout()], ['⚙ إعدادات مركز العمل', () => openWorkSettings(rt)]
+      ['العروض المحفوظة', () => openSavedViews(rt)], ['ترتيب الأقسام وعرض الصفحة', () => rt.openLayout()], ['⚙ إعدادات مركز العمل', () => openWorkSettings(rt)],
+      // يُضاف الجديد في نهاية القائمة حتى لا تتحرك فهارس العناصر القديمة (تعتمد عليها الاختبارات).
+      ['تصدير العرض الحالي (CSV)', () => exportCurrentView(rt)], ['نسخ خلاصة اليوم', () => copyDaySummary(rt)]
     ];
     const box = modal(`<h2 class="modal-title">المزيد من إجراءات مركز العمل</h2><div class="wc-sheet" role="menu">${list.map(([l], i) => `<button type="button" role="menuitem" class="wc-sheet-btn" data-i="${i}">${esc(l)}</button>`).join('')}</div>`);
     box.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => { closeModal(); list[Number(b.dataset.i)][1](); }));
@@ -378,6 +387,20 @@ export async function bindWorkCenter(app, q) {
     }, 600);
   });
 
+  // ---------- تحديث صامت عند العودة إلى التبويب (مرة كل دقيقة كحد أدنى) ----------
+  if (!app.__wcVisibleBound) {
+    app.__wcVisibleBound = true;
+    let lastAuto = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const live = app.__wc?.rt;
+      if (!live?.root?.isConnected) return;
+      if (Date.now() - Math.max(live.lastLocalChange || 0, lastAuto) < 60000) return;
+      lastAuto = Date.now();
+      live.onChanged({auto: 'visibility'}).catch?.(() => {});
+    });
+  }
+
   // ---------- اختصارات لوحة المفاتيح (خارج الحقول فقط، بلا Ctrl/Alt) ----------
   if (!app.__wcKeys) {
     app.__wcKeys = true;
@@ -388,7 +411,7 @@ export async function bindWorkCenter(app, q) {
       if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable) return;
       if (document.querySelector('#modal-root .modal-card') || document.querySelector('.dg-pop,.dg-ctx')) return;
       const key = e.key.toLowerCase();
-      const map = {n: () => live.root.querySelector('[data-wc-new]')?.click(), t: () => live.setState({range: 'today'}), w: () => live.setState({range: 'week'}), m: () => live.setState({range: 'month'})};
+      const map = {n: () => live.root.querySelector('[data-wc-new]')?.click(), t: () => live.setState({range: 'today'}), w: () => live.setState({range: 'week'}), m: () => live.setState({range: 'month'}), r: () => live.root.querySelector('[data-wc-refresh]')?.click()};
       if (map[key]) { e.preventDefault(); map[key](); }
     });
   }
@@ -400,6 +423,69 @@ export async function bindWorkCenter(app, q) {
   if (shared.openItemId) { const id = shared.openItemId; shared.openItemId = ''; await rt.openItem(id); }
   const review = q?.get?.('review');
   if (review === 'day') openDailyReview(rt); else if (review === 'week') openWeeklyReview(rt);
+}
+
+// ---------- تصدير ونسخ خلاصة (بلا استعلامات جديدة: من خريطة العرض الحالية والملخص المحفوظ) ----------
+function csvCell(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+export function buildWorkItemsCsv(items, {priorities = [], statuses = []} = {}) {
+  const priLabel = Object.fromEntries(priorities.map(p => [p.key, p.label]));
+  const statusLabel = item => {
+    if (item.statusLabel) return item.statusLabel;
+    const hit = statuses.find(s => s.key === item.status);
+    return hit ? `${hit.icon} ${hit.label}` : item.status || '';
+  };
+  const header = ['العنوان', 'السياق / الوصف', 'المصدر', 'الحالة', 'الأولوية', 'موعد التنفيذ', 'الوقت', 'الوسوم', 'مرات التأجيل'];
+  const lines = [header.map(csvCell).join(',')];
+  for (const item of items) {
+    lines.push([
+      item.title, item.subtitle || '', item.sourceLabel || '', statusLabel(item),
+      priLabel[item.priority] || item.priority || '', item.dueDate || '', item.dueTime || '',
+      (item.tags || []).join(' | '), item.postponeCount || 0
+    ].map(csvCell).join(','));
+  }
+  return '\uFEFF' + lines.join('\r\n');
+}
+function downloadTextFile(text, filename, type) {
+  const blob = new Blob([text], {type});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename;
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+export function exportCurrentView(rt) {
+  const items = [...rt.items.values()];
+  if (!items.length) return toast('لا عناصر في العرض الحالي للتصدير.', 'info');
+  const config = rt.config();
+  const csv = buildWorkItemsCsv(items, {priorities: mergePriorities(config), statuses: mergeStatuses(config)});
+  downloadTextFile(csv, `مركز-العمل-${rt.today()}.csv`, 'text/csv;charset=utf-8');
+  toast(`صُدّر ${items.length} عنصرًا إلى ملف CSV.`, 'ok');
+}
+async function copyDaySummary(rt) {
+  try {
+    const s = rt.summary || await workSummary(rt.office);
+    const lines = [
+      `مركز العمل — ${longDateAr()}`,
+      `اليوم: ${s.todayCount} · متأخر: ${s.overdue}${s.overdueCapped ? '+' : ''} · منجز اليوم: ${s.doneToday} · جلسات اليوم: ${s.hearingsToday}`,
+      ''
+    ];
+    const page = await rt.fetch(rt.spec({range: 'today'}), {limit: 80});
+    if (!page.items.length) lines.push('لا عناصر مجدولة لليوم.');
+    else for (const item of page.items.slice(0, 80)) {
+      const mark = item.isDone ? '✓' : (item.dueDate && item.dueDate < rt.today() && item.isOpen ? '⚠' : '•');
+      lines.push(`${mark} ${item.title}${item.dueTime ? ` (${item.dueTime})` : ''}${item.sourceLabel ? ` — ${item.sourceLabel}` : ''}`);
+    }
+    const text = lines.join('\n');
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    else throw new Error('no clipboard');
+    toast('نُسخت خلاصة اليوم إلى الحافظة.', 'ok');
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = 'مركز العمل'; document.body.append(area); area.select();
+    try { document.execCommand('copy'); toast('تعذر نسخ الخلاصة الكاملة على هذا الجهاز.', 'warn'); }
+    catch { toast('تعذر النسخ على هذا الجهاز.', 'error'); }
+    area.remove();
+  }
 }
 
 let badgeTimer = 0, badgeAt = 0;

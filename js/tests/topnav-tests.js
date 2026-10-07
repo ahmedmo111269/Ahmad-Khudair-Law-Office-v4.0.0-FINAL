@@ -14,13 +14,13 @@ import {icon} from '../ui/icons.js';
 import {prefs} from '../core/preferences.js';
 
 const SHELL = '<div id="app"><nav id="sidebar" class="tn-bar" data-nav="top"></nav><main><section id="main-content"></section></main></div><div id="modal-root"></div>';
-const ALL_ROUTES = ['dashboard', 'actionCenter', 'files', 'clients', 'opponents', 'cases', 'powersOfAttorney', 'hearings', 'procedures', 'serviceRecords', 'bailiffs', 'appointments', 'communications', 'caseNotes', 'judgments', 'expertReports', 'execution', 'fees', 'documentReferences', 'search', 'reports', 'analytics', 'integrity', 'repair', 'databases', 'backup', 'sync', 'settings'];
+const ALL_ROUTES = ['dashboard', 'actionCenter', 'files', 'clients', 'opponents', 'cases', 'powersOfAttorney', 'hearings', 'procedures', 'serviceRecords', 'bailiffs', 'appointments', 'communications', 'caseNotes', 'reminders', 'judgments', 'expertReports', 'execution', 'fees', 'documentReferences', 'search', 'reports', 'analytics', 'integrity', 'repair', 'databases', 'backup', 'sync', 'settings'];
 const fresh = () => { document.body.innerHTML = SHELL; return buildTopNav(); };
 
 export async function runTopNavTests(test, expect) {
-  test('تنقل علوي: كل عناصر القائمة السابقة محفوظة مع مسار المزامنة (29 مسارًا)', () => {
+  test('تنقل علوي: كل عناصر القائمة السابقة محفوظة مع مسار المزامنة (30 مسارًا)', () => {
     expect(new Set(NAV_ROUTES).size).toBe(NAV_ROUTES.length);
-    expect(NAV_ROUTES.length).toBe(29);
+    expect(NAV_ROUTES.length).toBe(30);
     for (const r of ALL_ROUTES) expect(NAV_ROUTES.includes(r)).toBe(true);
     expect(NAV_GROUPS.length).toBe(6);
   });
@@ -35,7 +35,7 @@ export async function runTopNavTests(test, expect) {
     expect(orderedTabIds(cfg).length).toBe(6);
     const groups = orderedGroups(cfg);
     expect(groups.length).toBe(6);
-    expect(groups.flatMap(g => g.items.map(i => i.route)).length).toBe(29);
+    expect(groups.flatMap(g => g.items.map(i => i.route)).length).toBe(30);
   });
   test('تنقل علوي: تطبيع التخصيص يتجاهل المجهول ويحمي من الإخفاء الكامل', () => {
     const bad = normalizeNavConfig({tabOrder: ['system', 'ghost', 'general', 'system'], hiddenTabs: ['ghost'], hiddenItems: ['ghostRoute'], itemOrder: {data: ['clients', 'ghostRoute']}});
@@ -198,7 +198,8 @@ export async function runTopNavTests(test, expect) {
     fix(more, 'offsetWidth', 90);
     tabs.forEach(t => fix(t, 'offsetWidth', 130));
     window.dispatchEvent(new Event('resize'));
-    const deadline=Date.now()+1200;
+    // مهلة متسامحة قليلًا مع كتم الحوسبة العالية حتى لا يفشل الاختبار لسبب توقيتي.
+    const deadline=Date.now()+4000;
     while(Date.now()<deadline&&(!tabs.some(t=>t.hidden)||more.hidden))await new Promise(r=>setTimeout(r,20));
     const hiddenTabs = tabs.filter(t => t.hidden).map(t => t.dataset.tab);
     expect(hiddenTabs.length > 0).toBe(true);       // لا ازدحام: ما لا يتّسع ينتقل إلى «المزيد»

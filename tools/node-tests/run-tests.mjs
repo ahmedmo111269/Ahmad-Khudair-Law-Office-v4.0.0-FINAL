@@ -33,6 +33,7 @@ const {runExecutionSimpleTests,runExecutionCardTests,runExecutionPrintDocumentTe
 const {runExecutionUiTests}=await import(`${R}/tests/execution-ui-tests.js`);
 const {runSyncTests}=await import(`${R}/tests/sync-tests.js`);
 const {runQuickNotesTests}=await import(`${R}/tests/quick-notes-tests.js`);
+const {runProceduresExtrasTests}=await import(`${R}/tests/procedures-extras-tests.js`);
 const {runPwaTests}=await import(`${R}/tests/pwa-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
@@ -78,6 +79,7 @@ await runExecutionSupersedeTests(test,expect);
 await runExecutionUiTests(test,expect);
 await runSyncTests(test,expect);
 await runQuickNotesTests(test,expect);
+await runProceduresExtrasTests(test,expect);
 await runPwaTests(test,expect);
 
 const r=await run();
