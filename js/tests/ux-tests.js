@@ -1,6 +1,7 @@
 // اختبارات طبقة تجربة الاستخدام (v4.6): آخر ما فُتح، لوحة الأوامر، التحية والتاريخ، الخط الزمني، الإشعارات، ومذكّرة البحث.
 import {trackRecent,getRecent,removeRecent,clearRecent,_resetRecentsCache} from '../services/recents.js';
-import {highlightMatch,scoreCommand,filterCommands} from '../ui/palette.js';
+import {highlightMatch,scoreCommand,filterCommands,staticCommands} from '../ui/palette.js';
+import {getFavorites,toggleFavorite,removeFavorite} from '../services/favorites.js';
 import {greetingKey,longDateAr,GREETINGS} from '../core/format.js';
 import {timelineHtml,timelineSummary,bindTimeline} from '../modules/timeline-view.js';
 import {toast,clearToasts} from '../ui/toast.js';
@@ -21,6 +22,19 @@ export function runUxTests(test,expect){
   expect(getRecent().length).toBe(1);
   clearRecent();
   expect(getRecent().length).toBe(0);
+ });
+ test('آخر ما فُتح والمفضلة: معزولان بين ملفات المكتب النشطة',async()=>{
+  _resetRecentsCache();clearRecent('office-a');clearRecent('office-b');
+  trackRecent('client:a','موكل أ',{scope:'office-a'});trackRecent('client:b','موكل ب',{scope:'office-b'});
+  expect(getRecent('office-a').map(item=>item.route)).toContain('client:a');
+  expect(getRecent('office-a').some(item=>item.route==='client:b')).toBe(false);
+  await removeFavorite('file:a','office-a');await removeFavorite('file:b','office-b');
+  await toggleFavorite({route:'file:a',title:'ملف أ'},'office-a');
+  await toggleFavorite({route:'file:b',title:'ملف ب'},'office-b');
+  expect(getFavorites('office-a').some(item=>item.route==='file:a')).toBe(true);
+  expect(getFavorites('office-a').some(item=>item.route==='file:b')).toBe(false);
+  await removeFavorite('file:a','office-a');await removeFavorite('file:b','office-b');
+  clearRecent('office-a');clearRecent('office-b');_resetRecentsCache();
  });
  test('آخر ما فُتح: حد أقصى 12 عنصرًا وتجاهل غير الصالح',()=>{
   _resetRecentsCache();clearRecent();
@@ -59,6 +73,15 @@ export function runUxTests(test,expect){
   expect(empty.length).toBe(6); // بدون بحث: تُعرض كل الأوامر
   const limited=filterCommands(cmds,'ال', {limit:3});
   expect(limited.length).toBe(3);
+ });
+ test('لوحة الأوامر: تبحث عن جميع كلمات العبارة دون اشتراط تتابعها',()=>{
+  expect(scoreCommand({label:'جلسة جديدة',sub:'ملف موكل'},'جلسة موكل')>0).toBe(true);
+ });
+ test('لوحة الأوامر: تعرض إجراءات سريعة مرتبطة بالملف الحالي',()=>{
+  const app={route:'file:file-test',go(){}};
+  const cmds=staticCommands(app);
+  expect(cmds.some(command=>command.group==='في السياق الحالي'&&command.label==='جلسة في الملف')).toBe(true);
+  expect(cmds.some(command=>command.id==='qa:quick-add')).toBe(true);
  });
  test('التحية حسب الوقت والتاريخ العربي الكامل',()=>{
   expect(greetingKey(7)).toBe('morning');

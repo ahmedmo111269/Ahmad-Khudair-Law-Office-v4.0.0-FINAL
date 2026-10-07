@@ -332,8 +332,12 @@ function bindTopNav() {
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId) closePanel(); });
   }
   bar.addEventListener('focusout', e => { const to = e.relatedTarget; if (openId && (!to || !bar.contains(to))) closePanel(); });
-  window.addEventListener('resize', onViewportChange);
+  if (!bindTopNav._resizeBound) {
+    bindTopNav._resizeBound = true;
+    window.addEventListener('resize', onViewportChange);
+  }
   if (typeof ResizeObserver === 'function') {
+    try { ro?.disconnect(); } catch { /* detached navigation bar */ }
     ro = new ResizeObserver(() => layout());
     ro.observe(bar);
   }

@@ -35,7 +35,7 @@ import {runMaintenance} from './services/maintenance.js';
 import {initTheme} from './ui/theme.js';
 import {bindThemeMenu} from './ui/theme-menu.js';
 import {enhanceCollapsiblePanels} from './ui/collapsible.js';
-import {prefs} from './core/preferences.js';
+import {prefs,scopedPreferenceKey} from './core/preferences.js';
 import {decorateNav} from './ui/icons.js';
 import {installDateInputs} from './ui/date-input.js';
 import {openPalette,closePalette,paletteOpen} from './ui/palette.js';
@@ -253,7 +253,7 @@ class App{
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
    closeMobile(); // على الهاتف: تُغلق لوحة التنقل تلقائيًا بعد اختيار الصفحة
-   if(baseRoute!=='dashboard')prefs.set('ui:last-route',{route,title:page.title,at:Date.now()});
+   if(baseRoute!=='dashboard')prefs.set(scopedPreferenceKey('ui:last-route',this.ctx?.profile?.id),{route,title:page.title,at:Date.now()});
    if(baseRoute!=='actionCenter'&&!/^rec:workItems:/.test(baseRoute))scheduleWorkBadge(this);
    if(opts.replace)window.scrollTo(0,scrollTop);else window.scrollTo(0,0);
   }catch(e){if(my===this.navSeq)this.fail(e)}

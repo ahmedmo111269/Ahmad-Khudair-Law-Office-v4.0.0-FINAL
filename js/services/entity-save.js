@@ -16,10 +16,10 @@ import {saveExecutionPoa} from './execution-poa.js';
 const OPERATIONAL=['hearings','procedures','appointments','communications','caseNotes'];
 const JUDICIAL=['witnesses','expertReports','judgments','execution'];
 
-export async function saveEntity(office,store,data,id=null,expectedVersion=null){
+export async function saveEntity(office,store,data,id=null,expectedVersion=null,options={}){
  let row;
  switch(store){
-  case 'clients':row=await office.saveClient(data,id,expectedVersion);await refreshPersonFiles(office,'clientId',row.id);break;
+  case 'clients':row=await office.saveClient(data,id,expectedVersion,options);await refreshPersonFiles(office,'clientId',row.id);break;
   case 'opponents':{if(!String(data.name||'').trim())throw new AppError(ERR.VALIDATION,'اسم الخصم مطلوب.',{name:'اسم الخصم مطلوب'});row=await saveGeneric(office,'opponents',opponentData(data),id);await refreshPersonFiles(office,'opponentId',row.id);break}
   case 'files':row=id?await office.saveFile(data,id,expectedVersion):await createLegalFile(office,data);if(id)await refreshFileSearchText(office,row.id);break;
   case 'cases':{

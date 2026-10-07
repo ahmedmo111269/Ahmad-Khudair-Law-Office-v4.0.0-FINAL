@@ -85,11 +85,44 @@ kbd{display:inline-block;padding:2px 7px;border:1px solid var(--border);border-b
 
 /* ---------- 6) الإضافة السريعة ---------- */
 .quick-card .qa-filter{width:100%;padding:11px 13px;margin-bottom:4px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
+.qa-options{display:grid;gap:14px;max-height:min(56vh,560px);overflow:auto;padding-inline:2px}
+.quick-context,.quick-primary,.quick-more{display:grid;gap:7px}
+.quick-context h3,.quick-primary h3,.quick-more h3{margin:0;color:var(--text-muted);font-size:.82rem;font-weight:650}
 .quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.quick-item{display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);padding:14px 8px;cursor:pointer;transition:border-color var(--transition),background var(--transition)}
-.quick-item:hover{border-color:var(--primary);background:var(--primary-soft)}
+.quick-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:78px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);padding:12px 8px;cursor:pointer;transition:border-color var(--transition),background var(--transition);text-align:center}
+.quick-item:hover,.quick-item.on,.quick-item[aria-selected="true"]{border-color:var(--primary);background:var(--primary-soft)}
 .quick-ic .ic{width:24px;height:24px;color:var(--primary)}
-@media(max-width:640px){.quick-grid{grid-template-columns:repeat(3,1fr)}}
+.quick-more-toggle{justify-self:start;margin-top:8px}
+.qa-empty{padding:10px;color:var(--text-muted)}
+@media(max-width:640px){.qa-options{max-height:58vh}.quick-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.quick-item{min-height:72px;padding:10px 5px}}
+
+.record-preview-card{width:min(720px,calc(100vw - 24px))}
+.record-preview{display:grid;gap:14px}
+.rp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.rp-head .modal-title{margin-bottom:3px}
+.rp-code{direction:ltr;unicode-bidi:isolate;white-space:nowrap;border:1px solid var(--border);background:var(--surface2);border-radius:var(--radius-sm);padding:5px 9px;font-variant-numeric:tabular-nums}
+.rp-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+.rp-fields>div{min-width:0;border:1px solid var(--border-subtle);background:var(--surface2);border-radius:var(--radius-sm);padding:9px 11px}
+.rp-fields dt{font-size:.75rem;color:var(--text-muted)}
+.rp-fields dd{margin:3px 0 0;overflow-wrap:anywhere;font-weight:600}
+.rp-links,.rp-actions{display:grid;gap:7px}
+.rp-links h3,.rp-actions h3{margin:0;font-size:.85rem;color:var(--text-muted)}
+.rp-links>div,.rp-actions>div{display:flex;gap:7px;flex-wrap:wrap}
+.rp-links button{display:grid;text-align:start;gap:2px;max-width:100%}
+.rp-links button span{font-size:.73rem;color:var(--text-muted)}
+.rp-links button b{overflow-wrap:anywhere}
+.rp-footer{justify-content:flex-start;margin-top:0}
+@media(max-width:540px){.rp-fields{grid-template-columns:1fr}.rp-head{flex-direction:column}.rp-code{align-self:flex-start}.rp-footer>*{flex:1 1 100%}}
+
+.client-duplicate-slot{margin-block:4px 12px}
+.client-duplicate-warning{display:grid;gap:10px;border-inline-start:4px solid var(--warn);background:color-mix(in srgb,var(--warn) 8%,var(--surface));padding:13px 15px}
+.client-duplicate-warning p{margin:4px 0 0}
+.client-duplicate-warning ul{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+.client-duplicate-warning li{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--border-subtle);padding-top:7px}
+.client-duplicate-warning li span{display:grid;min-width:0;gap:2px}
+.client-duplicate-warning li small{color:var(--text-muted);overflow-wrap:anywhere}
+.client-duplicate-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:540px){.client-duplicate-warning li{align-items:flex-start;flex-direction:column}.client-duplicate-actions>*{flex:1 1 100%}}
 
 /* ---------- 7) الخط الزمني الموحد ---------- */
 .tl-panel .tl-summary{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}

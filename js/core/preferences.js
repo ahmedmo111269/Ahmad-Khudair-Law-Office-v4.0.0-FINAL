@@ -3,6 +3,8 @@
 const DB='akl-preferences',STORE='prefs',MIRROR='akl:prefs:';
 /** بادئة مرآة localStorage — تُصدَّر حتى تقرأها طبقة تفضيلات العرض المركزية فقط. */
 export const MIRROR_PREFIX=MIRROR;
+/** Namespaces a user preference by the active office database without creating a parallel data store. */
+export const scopedPreferenceKey=(name,scope)=>scope===null||scope===undefined||scope===''?String(name):`${name}:scope:${encodeURIComponent(String(scope))}`;
 const userId=(()=>{try{let u=localStorage.getItem('akl:userId');if(!u){u='user-'+Math.random().toString(36).slice(2,10);localStorage.setItem('akl:userId',u)}return u}catch{return 'local-user'}})();
 const cache=new Map();
 let dbp=null;

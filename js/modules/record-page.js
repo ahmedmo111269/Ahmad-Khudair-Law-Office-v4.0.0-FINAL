@@ -63,7 +63,7 @@ async function confirmDelete(app,store,id){
 export async function clientPage(app,id){
  const c=await app.office.r.clients.get(id);
  if(!c||c.isDeleted)return notFound('الموكل');
- trackRecent('client:'+id,c.fullName||'موكل',{icon:'users',sub:c.clientCode?formatFileNumber(c.clientCode):''});
+ trackRecent('client:'+id,c.fullName||'موكل',{icon:'users',sub:c.clientCode?formatFileNumber(c.clientCode):'',scope:app.ctx?.profile?.id||''});
  app.__rec={store:'clients',id,related:await clientRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[c],ENTITIES.clients.fields);
@@ -103,7 +103,7 @@ export async function bindClientPage(app,id){
 export async function opponentPage(app,id){
  const o=await app.office.r.opponents.get(id);
  if(!o||o.isDeleted)return notFound('الخصم');
- trackRecent('opponent:'+id,o.name||'خصم',{icon:'userX',sub:o.capacity||''});
+ trackRecent('opponent:'+id,o.name||'خصم',{icon:'userX',sub:o.capacity||'',scope:app.ctx?.profile?.id||''});
  app.__rec={store:'opponents',id,related:await opponentRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[o],ENTITIES.opponents.fields);
@@ -161,7 +161,7 @@ export async function recordPage(app,store,id){
  const quickNotes=noteEntityType?await notesForEntity(app.office,noteEntityType,id,{limit:100}):[];
  const caseTimeline=store==='cases'?await buildCaseTimeline(app.office,id):null;
  app.__rec={store,id,row,children,activity,hearingSequence,serviceSequence,caseTimeline,quickNotes,noteEntityType};
- trackRecent(`rec:${store}:${id}`,ent.title(row)||ent.label,{icon:{hearings:'calendar',appointments:'clock',communications:'phone',fees:'wallet',judgments:'landmark',procedures:'clipboard',caseNotes:'note',serviceRecords:'file',expertReports:'microscope',execution:'hammer'}[store]||'file',sub:ent.label});
+ trackRecent(`rec:${store}:${id}`,ent.title(row)||ent.label,{icon:{hearings:'calendar',appointments:'clock',communications:'phone',fees:'wallet',judgments:'landmark',procedures:'clipboard',caseNotes:'note',serviceRecords:'file',expertReports:'microscope',execution:'hammer'}[store]||'file',sub:ent.label,scope:app.ctx?.profile?.id||''});
  const parentBtns=ent.fields.filter(f=>f.ref&&row[f.k]).map(f=>`<button class="ghost" data-open-ref="${esc(f.ref)}:${esc(row[f.k])}">فتح ${esc(f.l.replace(/\s*\(.*\)/,''))}: ${esc(refs.get(row[f.k])||'')}</button>`).join('');
  const extraBtns=[
   store==='hearings'?'<button class="ghost" data-show-hearing-cycle>عرض دورة الجلسات</button><button class="ghost" data-next-hearing>+ الجلسة التالية</button><button class="ghost" data-hearing-service>+ إعلان مرتبط بالجلسة</button>':'',

@@ -971,7 +971,12 @@ async function perf() {
     await gen('procedures', cfg.procedures, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, description: `عمل أداء ${i}`, type: 'متابعة', internalDueDate: i % 11 === 0 ? '' : dayAt(rnd(-400, 200)), status: ['open', 'open', 'pending', 'done', 'done', 'cancelled'][i % 6], priority: ['normal', 'urgent', 'critical'][i % 3], ...common}; });
     await gen('appointments', cfg.appointments, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, clientId: clients[k % clients.length].id, title: `موعد أداء ${i}`, date: dayAt(rnd(-200, 200)), time: '11:00', status: i % 4 === 0 ? 'تم' : 'مجدول', ...common}; });
     await gen('communications', cfg.communications, (_, i) => { const k = rnd(0, files.length - 1); return {id: uid(), fileId: files[k].id, clientId: clients[k % clients.length].id, subject: `اتصال أداء ${i}`, date: dayAt(rnd(-100, 0)), followUpDate: i % 3 === 0 ? dayAt(rnd(-60, 60)) : '', followUpRequired: i % 6 === 0 ? false : (i % 3 === 0 ? true : undefined), ...common}; });
-    await gen('workItems', cfg.natives, (_, i) => { const k = rnd(0, files.length - 1), id = uid(); return {id, kind: 'native', sourceType: 'task', sourceId: id, title: `مهمة أداء ${i}`, description: '', type: 'مهمة', dueDate: i % 10 === 0 ? '' : dayAt(rnd(-200, 200)), dueTime: '', status: ['notStarted', 'inProgress', 'waiting', 'done'][i % 4], priority: ['urgent', 'high', 'medium', 'low'][i % 4], tags: [], fileId: files[k].id, caseId: '', clientId: '', opponentId: '', relatedType: '', relatedId: '', originalDueDate: '', postponeCount: 0, commentCount: 0, pinnedAt: null, quadrant: null, completedAt: i % 4 === 3 ? new Date().toISOString() : null, completedBy: null, archivedAt: null, ...common}; });
+    await gen('workItems', cfg.natives, (_, i) => {
+      // Keep the file-number search workload deterministic: guarantee related, in-range
+      // work items for the sample file instead of letting random linking yield zero hits.
+      const k = i < 20 ? 7 : rnd(0, files.length - 1), id = uid();
+      return {id, kind: 'native', sourceType: 'task', sourceId: id, title: `مهمة أداء ${i}`, description: '', type: 'مهمة', dueDate: i < 20 ? dayAt(0) : (i % 10 === 0 ? '' : dayAt(rnd(-200, 200))), dueTime: '', status: ['notStarted', 'inProgress', 'waiting', 'done'][i % 4], priority: ['urgent', 'high', 'medium', 'low'][i % 4], tags: [], fileId: files[k].id, caseId: '', clientId: '', opponentId: '', relatedType: '', relatedId: '', originalDueDate: '', postponeCount: 0, commentCount: 0, pinnedAt: null, quadrant: null, completedAt: i % 4 === 3 ? new Date().toISOString() : null, completedBy: null, archivedAt: null, ...common};
+    });
     return {total: cfg.clients + cfg.files * 4 + cfg.hearings + cfg.procedures + cfg.appointments + cfg.communications + cfg.natives, sampleClient: clients[7].fullName, sampleFile: files[7].fileNumber};
   }, target);
   report.metrics.seed = {...target, totalRecords: seeded.total, seconds: Math.round((Date.now() - t0) / 100) / 10};
@@ -987,6 +992,8 @@ async function perf() {
     return {ms, io};
   };
   const total = seeded.total;
+  const minDenseResults = Math.min(50, Math.max(5, Math.floor(50 * perfScale)));
+  const cursorBudget = share => Math.max(total * share, 12_000); // حد عملي للسيناريوهات المصغرة؛ المقاييس الكبيرة تحكمها النسبة.
   await verify(`الأداء والدقة: ملخص الرأس على ${Math.round(total / 1000)} ألف سجل بقراءة محدودة، وأرقام اليوم صحيحة ولا يحجبها تراكم المتأخر القديم`, async () => {
     const r = await measure('summary', () => page.evaluate(async () => {
       const m = await import('/js/services/work-query.js'); const office = window.__LAW_OFFICE_APP__.office;
@@ -996,24 +1003,24 @@ async function perf() {
       return {todayCount: s.todayCount, tomorrow: s.tomorrow, overdue: s.overdue, overdueCapped: s.overdueCapped, forwardCapped: s.forwardCapped, todayExact: todayAll.items.length, tomorrowExact: tomorrowAll.items.length};
     }), 9000);
     const m = report.metrics.summary;
-    assert.ok(m.todayExact > 50, `بيانات اليوم قليلة جدًا للاختبار: ${m.todayExact}`);
-    assert.ok(m.forwardCapped, 'النافذة الأمامية بلغت سقفها (بيانات كثيفة) وتُعلن ذلك');
+    assert.ok(m.todayExact >= minDenseResults, `بيانات اليوم أقل من كثافة السيناريو: ${m.todayExact} < ${minDenseResults}`);
+    if (perfScale >= 1) assert.ok(m.forwardCapped, 'النافذة الأمامية بلغت سقفها (بيانات كثيفة) وتُعلن ذلك');
     assert.equal(m.todayCount, m.todayExact, 'رقم اليوم في الملخص لا يطابق القراءة المباشرة'); assert.equal(m.tomorrow, m.tomorrowExact);
-    assert.ok(m.overdueCapped && m.overdue === 1000, 'المتأخر الكثير يُعرض مسقوفًا (1000+) ولا يؤثر على أرقام اليوم');
-    assert.ok(r.io.cursorSteps < total * 0.08, `قراءة مفرطة: ${r.io.cursorSteps}`);
+    if (perfScale >= 1) assert.ok(m.overdueCapped && m.overdue === 1000, 'المتأخر الكثير يُعرض مسقوفًا (1000+) ولا يؤثر على أرقام اليوم');
+    assert.ok(r.io.cursorSteps < cursorBudget(0.08), `قراءة مفرطة: ${r.io.cursorSteps}`);
   });
   await verify('الأداء: فتح مركز العمل (اليوم) كاملًا على الشاشة (بطاقات + عدّادات) بقراءة أقل من 8% من السجلات ودون getAll', async () => {
     const r = await measure('open_today', async () => { await page.evaluate(() => window.__LAW_OFFICE_APP__.go('actionCenter')); await page.waitForSelector('#wc-root'); await ready(page); await page.waitForSelector('.wc-stat'); return {cards: await page.locator('.wc-card').count()}; }, 8000);
-    assert.ok(r.io.cursorSteps < total * 0.08, `قراءة مفرطة لفتح اليوم: ${r.io.cursorSteps}`);
+    assert.ok(r.io.cursorSteps < cursorBudget(0.08), `قراءة مفرطة لفتح اليوم: ${r.io.cursorSteps}`);
     assert.ok(r.io.getAllRows < total * 0.01, `getAll مفرط: ${r.io.getAllRows}`);
-    assert.ok(report.metrics.open_today.cards > 50);
+    assert.ok(report.metrics.open_today.cards >= minDenseResults);
     await shot(page, 'perf-today.png');
   });
   const q = async (label, spec, opts = {}, limitMs = 2500) => measure(label, () => page.evaluate(async ([s, o]) => { const m = await import('/js/services/work-query.js'); const r = await m.queryWorkItems(window.__LAW_OFFICE_APP__.office, s, o); return {items: r.items.length, hasMore: r.hasMore, scanned: r.scanned}; }, [spec, opts]), limitMs);
   await verify('الأداء: الاستعلامات المفهرسة (اليوم/الأسبوع/الشهر/المتأخر/الكل/نطاق مخصص/غير مؤرّخ) بصفحات ثابتة الحجم', async () => {
     for (const [label, spec] of [['q_today', {range: 'today'}], ['q_week', {range: 'week'}], ['q_month', {range: 'month'}], ['q_year', {range: 'year'}], ['q_overdue', {range: 'overdue'}], ['q_all', {range: 'all', undated: true}], ['q_custom', {range: 'custom', from: addDays(today(), 100), to: addDays(today(), 130)}]]) {
       const r = await q(label, spec, {limit: 50});
-      assert.ok(r.io.cursorSteps < total * 0.05, `${label}: خطوات مؤشر كثيرة ${r.io.cursorSteps}`);
+      assert.ok(r.io.cursorSteps < cursorBudget(0.05), `${label}: خطوات مؤشر كثيرة ${r.io.cursorSteps}`);
       assert.ok((report.metrics[label].items || 0) <= 50);
     }
   });
@@ -1032,7 +1039,9 @@ async function perf() {
   await verify('الأداء: البحث النصي (اسم موكل/رقم ملف) داخل نطاق الشهر والسنة بقراءة محدودة', async () => {
     const byClient = await q('search_client_month', {range: 'month', q: seeded.sampleClient}, {limit: 25}, 6000);
     const byFile = await q('search_file_year', {range: 'year', q: seeded.sampleFile}, {limit: 25}, 12000);
-    assert.ok(byClient.io.cursorSteps < total * 0.2 && byFile.io.cursorSteps < total * 0.5);
+    assert.ok(byClient.io.cursorSteps < cursorBudget(0.2) && byFile.io.cursorSteps < cursorBudget(0.5));
+    assert.ok(report.metrics.search_client_month.items > 0, 'بحث الموكل يجب أن يعيد سجلات مرتبطة');
+    assert.ok(report.metrics.search_file_year.items > 0, 'بحث رقم الملف يجب أن يعيد سجلات مرتبطة بالملف المطابق');
   });
   await verify('الأداء: عروض الواجهة الكبيرة (كانبان/مصفوفة/قائمة DataGrid/تقويم/متأخر/يحتاج انتباهي) تُرسم بحدود زمنية', async () => {
     for (const [view, limit] of [['kanban', 8000], ['matrix', 8000], ['list', 8000], ['calendar', 8000], ['overdue', 8000], ['attention', 12000], ['priorities', 8000]]) {
