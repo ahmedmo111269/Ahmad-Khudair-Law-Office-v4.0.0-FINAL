@@ -39,6 +39,7 @@ const {runSearchCancelTests}=await import(`${R}/tests/search-cancel-tests.js`);
 const {runSearchCacheTests}=await import(`${R}/tests/search-cache-tests.js`);
 const {runMaintenanceBootTests}=await import(`${R}/tests/maintenance-boot-tests.js`);
 const {runAttentionTests}=await import(`${R}/tests/attention-tests.js`);
+const {runHomeFocusTests}=await import(`${R}/tests/home-focus-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -98,6 +99,7 @@ await runSearchCancelTests(test,expect);
 await runSearchCacheTests(test,expect);
 await runMaintenanceBootTests(test,expect);
 await runAttentionTests(test,expect);
+await runHomeFocusTests(test,expect);
 await runPwaTests(test,expect);
 
 // ===== حراسة الإقلاع: قائمة Precache في Service Worker تغطي كل وحدات الإقلاع =====

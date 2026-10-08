@@ -24,7 +24,8 @@
     "test:wave3-bench": "node wave3-bench.mjs",
     "verify:cross-platform": "node ../verify-cross-platform.mjs",
     "test:wave3-features-browser": "node wave3-features-browser-tests.mjs",
-    "test:wave6-context-browser": "node wave6-context-browser-tests.mjs"
+    "test:wave6-context-browser": "node wave6-context-browser-tests.mjs",
+    "test:home-focus-browser": "node home-focus-browser-tests.mjs"
   },
   "keywords": [],
   "author": "",

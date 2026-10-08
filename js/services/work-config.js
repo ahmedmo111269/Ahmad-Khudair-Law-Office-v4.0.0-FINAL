@@ -148,3 +148,65 @@ export async function removeWorkView(id) {
   await prefs.set(WORK_VIEWS_KEY, list);
   return list;
 }
+
+// ---------- مكتب اليوم: نصوص الأسباب والإجراءات (مصدر واحد) ----------
+// كل نص يظهر على الرئيسية أو مركز العمل يأتي من هنا فقط، ولا تُكرَّر الشروط أو النصوص داخل المكوّنات.
+// reasonCode يُشتق من بيانات موجودة فعلًا (لا حقول مخترعة)، ويُحدَّد في focus-engine.js.
+export const REASON_TEXT = Object.freeze({
+  SESSION_TODAY: Object.freeze({title: 'جلسة اليوم', why: 'موعدها اليوم ولم تُسجَّل نتيجتها بعد'}),
+  SESSION_SOON: Object.freeze({title: 'جلسة قادمة', why: 'موعدها خلال {days} يوم'}),
+  SESSION_DONE: Object.freeze({title: 'جلسة مسجّلة', why: 'سُجّلت نتيجتها'}),
+  OVERDUE: Object.freeze({title: 'عمل متأخر', why: 'تجاوز موعده الداخلي بـ {days} يوم'}),
+  HIGH_PRIORITY: Object.freeze({title: 'أولوية عاجلة', why: 'مصنّف عاجلًا ويقترب موعده'}),
+  DUE_SOON: Object.freeze({title: 'عمل قريب', why: 'موعده الداخلي خلال {days} يوم'}),
+  APPT_TODAY: Object.freeze({title: 'موعد اليوم', why: 'موعد مسجّل لليوم'}),
+  APPT_SOON: Object.freeze({title: 'موعد قادم', why: 'موعده خلال {days} يوم'}),
+  FOLLOWUP_DUE: Object.freeze({title: 'متابعة مستحقة', why: 'تاريخ متابعة الاتصال خلال {days} يوم'}),
+  EXECUTION_URGENT: Object.freeze({title: 'تنفيذ يحتاج قرارًا', why: 'إجراء تنفيذ مستحق أو متأخر'}),
+  POA_EXPIRED: Object.freeze({title: 'توكيل منتهٍ', why: 'انتهى بتاريخ {date}'}),
+  POA_EXPIRING: Object.freeze({title: 'توكيل قريب الانتهاء', why: 'ينتهي خلال {days} يوم'}),
+  STALE_FILE: Object.freeze({title: 'ملف راكد', why: 'لا نشاط فيه منذ أكثر من {days} يومًا'}),
+  CONFLICT: Object.freeze({title: 'تعارض في الموعد', why: '{count} عناصر تبدأ في {time}'})
+});
+
+/** نص السبب لعرضه: يملأ {params} من focus-engine. مفتاح غير معروف ⇒ سطر فارغ (لا تخمين). */
+export function reasonText(code, params = {}) {
+  const row = REASON_TEXT[code];
+  if (!row) return {title: '', why: ''};
+  const fill = text => String(text).replace(/\{(\w+)\}/g, (_, key) => (params[key] ?? '') === '' ? '—' : String(params[key]));
+  return {title: row.title, why: fill(row.why)};
+}
+
+/**
+ * خريطة الإجراء الموحدة: كل عنصر في الطابور/الخطوة التالية يأخذ إجراءه من هنا.
+ * لا إجراء إلا ما تدعمه حالة السجل فعلًا (جلسة بلا نتيجة ⇒ تسجيل النتيجة، لا غير).
+ */
+export const ACTION_LABEL = Object.freeze({
+  recordResult: 'تسجيل النتيجة',
+  openHearing: 'فتح الجلسة',
+  openProcedure: 'تنفيذ',
+  openAppointment: 'فتح الموعد',
+  openFollowup: 'فتح المتابعة',
+  openPoa: 'فتح التوكيل',
+  reviewFile: 'مراجعة الملف',
+  openExecution: 'تنفيذ',
+  openItem: 'فتح'
+});
+/** اختيار مفتاح الإجراء من نوع العنصر وحالته فقط (نقية). */
+export function actionKeyFor(kind, state = {}) {
+  if (kind === 'hearing') return state.today && !state.done ? 'recordResult' : 'openHearing';
+  if (kind === 'procedure') return 'openProcedure';
+  if (kind === 'poa') return 'openPoa';
+  if (kind === 'appointment') return 'openAppointment';
+  if (kind === 'followup') return 'openFollowup';
+  if (kind === 'file') return 'reviewFile';
+  if (kind === 'execution') return 'openExecution';
+  return 'openItem';
+}
+
+/** حدود العرض في مكتب اليوم (إعدادات config لا قواعد قانونية). */
+export const HOME_LIMITS = Object.freeze({
+  queuePerGroup: 5,          // أعلى عدد في كل طبقة من الطابور قبل «عرض الكل»
+  sinceLastVisit: 15,        // أقصى عدد تغييرات في «منذ آخر زيارة»
+  postponeReviewAt: 3        // عدد التأجيلات الذي ينقل العمل إلى «يحتاج مراجعة» (إشارة تشغيلية فقط)
+});

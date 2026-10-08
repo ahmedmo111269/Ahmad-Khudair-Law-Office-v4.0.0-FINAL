@@ -12,7 +12,7 @@ import {esc,$} from './ui/dom.js';
 import {closeModal,modal} from './ui/modal.js';
 import {normalizeError,userError} from './core/errors.js';
 import {ENTITIES} from './domain/entities.js';
-import {homePage,bindHome} from './modules/home.js';
+import {homePage,bindHome,leaveHome} from './modules/home.js';
 import {listPage,bindListPage} from './modules/list-page.js';
 import {clientPage,bindClientPage,opponentPage,bindOpponentPage,recordPage,bindRecordPage} from './modules/record-page.js';
 import {filePage,bindFilePage} from './modules/file-page.js';
@@ -248,7 +248,10 @@ class App{
   const my=++this.navSeq;
   closeModal();document.querySelectorAll('.dg-pop').forEach(p=>p.remove());
   if(this.route&&this.route!==route&&!opts.replace&&!opts.fromHistory)this.history.push(this.route);
-  this.history=this.history.slice(-50);this.route=route;appStore.set({route});
+  this.history=this.history.slice(-50);
+  // مغادرة «مكتب اليوم» تسجّل وقت الزيارة لعرض «منذ آخر زيارة» لاحقًا (تفضيلات فقط).
+  if(this.route==='dashboard'&&route.split('?')[0]!=='dashboard')leaveHome(this);
+  this.route=route;appStore.set({route});
   // كل انتقال يُسجَّل في تاريخ المتصفح، فيعمل زر الرجوع في Android كما يتوقع المستخدم.
   this.routeHistory?.record(route,{replace:Boolean(opts.replace)||Boolean(opts.fromHistory)});
   const baseRoute=route.split('?')[0];const query=new URLSearchParams(route.includes('?')?route.split('?')[1]:'');

@@ -54,6 +54,7 @@ const ASSETS=[
   "./css/ui.css",
   "./js/app.js",
   "./js/services/focus-engine.js",
+  "./js/services/home-visit.js",
   "./js/ui/cockpit.js",
   "./js/services/client-workspace.js",
   "./js/core/clock.js",

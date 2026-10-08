@@ -24,13 +24,16 @@ import {dateSignal} from '../ui/signals.js';
 import {card,cardEmpty,statusBadge} from '../ui/card.js';
 import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
 import {buildFocusModel} from '../services/focus-engine.js';
-import {focusHtml,attentionHtml,timelineHtml,activityHtml,bindCockpit} from '../ui/cockpit.js';
+import {focusHtml,attentionHtml,timelineHtml,activityHtml,sinceHtml,bindCockpit} from '../ui/cockpit.js';
+import {HOME_LIMITS} from '../services/work-config.js';
+import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.js';
 
 // أقسام الصفحة في نظام ترتيب الأقسام المركزي (ترتيب/إظهار من «تخصيص الصفحة»).
 registerPageLayout({pageId:'dashboard',title:'مكتب اليوم',sections:[
  {id:'focus',title:'الآن — الخطوة التالية',icon:'◉'},
  {id:'today',title:'جدول اليوم',icon:'◷'},
  {id:'attention',title:'يحتاج انتباهك',icon:'⚑'},
+ {id:'since',title:'منذ آخر زيارة',icon:'⟲'},
  {id:'kpis',title:'ملخص العمل',icon:'◈'},
  {id:'activity',title:'ما الذي حدث؟',icon:'≋'},
  {id:'favs',title:'مثبّتات',icon:'★'},
@@ -39,6 +42,27 @@ registerPageLayout({pageId:'dashboard',title:'مكتب اليوم',sections:[
  {id:'recents',title:'آخر ما فُتح',icon:'🕘'}]});
 
 let __lastBrief=null;
+// «منذ آخر زيارة»: خط الأساس يُحسب مرة عند دخول مكتب اليوم، لا عند كل إعادة رسم داخل الصفحة نفسها.
+let homeSession=null; // {scope, baseline}
+let leaveApp=null, leaveBound=false;
+export const homeScope=app=>app?.ctx?.profile?.id||app?.office?.ctx?.profile?.id||'';
+function homeBaseline(scope){
+ if(!homeSession||homeSession.scope!==scope)homeSession={scope,baseline:readStoredSeen(scope)};
+ return homeSession.baseline;
+}
+/** يُستدعى عند مغادرة مكتب اليوم (تنقل داخلي أو إخفاء التبويب): يسجل وقت الزيارة في التفضيلات فقط. */
+export async function leaveHome(app){
+ const scope=homeScope(app);
+ homeSession=null;
+ await markHomeSeen(scope).catch(()=>false);
+}
+function bindHomeLeave(app){
+ leaveApp=app;
+ if(leaveBound)return;leaveBound=true;
+ const hide=()=>{if(leaveApp?.route==='dashboard')leaveHome(leaveApp)};
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')hide()});
+ window.addEventListener('pagehide',hide);
+}
 const KPI=(k,n,txt,route,accent='')=>`<button class="kpi${accent?` kpi-${accent}`:''}" data-kpi="${esc(route)}"><b>${formatNumber(n)}${n>=100?'+':''}</b><span>${esc(txt)}</span></button>`;
 
 export async function homePage(app){
@@ -52,6 +76,10 @@ export async function homePage(app){
  const favs=getFavorites(scope).slice(0,8);
  const last=prefs.get(scopedPreferenceKey('ui:last-route',scope));
  const focus=buildFocusModel(r,{today,now:nowHM});
+ // «منذ آخر زيارة»: أول تشغيل بلا خط أساس ⇒ لا قسم. لا كتابة هنا؛ الكتابة عند المغادرة فقط.
+ const sinceBase=homeBaseline(scope);
+ const sinceRaw=sinceBase?await app.office.r.activityLog.reportRange({index:'timestamp',lower:sinceBase,upper:'\uffff',direction:'prev',limit:HOME_LIMITS.sinceLastVisit+1}).catch(()=>[]):[];
+ const since=sinceChanges(sinceRaw,sinceBase);
  // «ما الذي حدث؟» — آخر تحركات السجل (قراءة محدودة بالفهرس الزمني، بلا مسح كامل).
  const activity=await app.office.r.activityLog.reportRange({index:'timestamp',lower:'0000-01-01',upper:'\uffff',direction:'prev',limit:6}).catch(()=>[]);
  let demoBanner='';
@@ -102,6 +130,7 @@ export async function homePage(app){
   ${timelineHtml(focus,{dayLabel:`يوم ${fmtDate(today)}`})}
  </div>
  ${attentionHtml(focus)}
+ ${sinceHtml(since)}
  <section class="panel kpi-panel" data-collapse-id="home-kpis" data-section-id="kpis"><div class="panel-head"><h3>ملخص العمل</h3><span class="badge">${kpis.length} مؤشرات</span></div><div class="kpi-strip" role="group" aria-label="ملخص العمل">${kpis.join('')}</div></section>
  ${activityHtml(activity)}
 ${card({icon:'report',title:'تقارير العمل السريع',size:'full',cls:'daily-shortcuts',collapsible:true,persistKey:'home:shortcuts',sectionId:'shortcuts',pageId:'dashboard',
@@ -116,6 +145,7 @@ ${card({icon:'report',title:'تقارير العمل السريع',size:'full',c
 export function bindHome(app){
  // شريط الأعداد والطابور: فلترة بالأهمية بلا إعادة رسم.
  bindCockpit(document.querySelector('#main-content'),app);
+ bindHomeLeave(app);
  // شارة «مركز العمل» في الشريط الجانبي: عدّاد حي من محرك مركز العمل نفسه (المتأخر + اليوم)، بلا استعلام مكرر.
  import('../ui/work-badge.js').then(m=>m.scheduleWorkBadge(app,{force:true})).catch(()=>{});
  // حذف البيانات التجريبية دفعة واحدة: زر واحد في اللافتة أعلى الصفحة الرئيسية.

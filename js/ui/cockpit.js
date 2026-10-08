@@ -10,7 +10,8 @@
 //   • كل عنصر يحمل data-route فيتولاه التنقل المركزي في app.js.
 // =====================================================================
 import {esc} from './dom.js';
-import {SEVERITY} from '../services/focus-engine.js';
+import {SEVERITY,QUEUE_GROUPS} from '../services/focus-engine.js';
+import {reasonText,HOME_LIMITS} from '../services/work-config.js';
 import {formatDateTime} from '../core/format.js';
 import {ENTITIES} from '../domain/entities.js';
 import {toast} from './toast.js';
@@ -20,8 +21,6 @@ import {completeItem} from '../services/work-items.js';
 import {overlayId} from '../domain/work-items.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {money} from './execution-work-view.js';
-
-const ATTN_LIMIT=12;
 
 /** البطاقة الكبيرة: «الآن» — الخطوة التالية المقترحة مع إجراء واحد واضح. */
 export function focusHtml(model,{dayLabel=''}={}){
@@ -40,6 +39,7 @@ export function focusHtml(model,{dayLabel=''}={}){
   <header class="cp-focus-head"><span class="cp-eyebrow">الآن · الخطوة التالية</span><span class="cp-chip cp-chip--${esc(sev.tone||'neutral')}">${esc(sev.label)}</span></header>
   <h2 id="cp-focus-title">${esc(next.title)}</h2>
   <p class="cp-meta"><b>${esc(next.when)}</b>${next.meta?` <span aria-hidden="true">·</span> ${esc(next.meta)}`:''}</p>
+  ${whyLine(next)}
   <div class="cp-actions">
    <button class="primary cp-primary" type="button" data-route="${esc(next.route)}">${esc(next.actionLabel)} <span aria-hidden="true">←</span></button>
    ${doneBtn(next)}
@@ -47,6 +47,13 @@ export function focusHtml(model,{dayLabel=''}={}){
   </div>
   ${upcoming.length?`<div class="cp-then"><span class="cp-then-label">ثم</span><ol>${upcoming.map(x=>`<li><button type="button" data-route="${esc(x.route)}"><span class="cp-dot cp-dot--${esc(x.severity)}" aria-hidden="true"></span><span>${esc(x.title)}</span><small>${esc(x.when)}</small></button></li>`).join('')}</ol></div>`:''}
  </section>`;
+}
+
+/** «لماذا الآن؟» — نص السبب من الجدول المركزي في work-config.js، لا من المكوّن. */
+function whyLine(x){
+ if(!x.reasonCode)return '';
+ const r=reasonText(x.reasonCode,x.reasonParams);
+ return r.why?`<p class="cp-why"><span class="cp-why-label">لماذا الآن؟</span> ${esc(r.why)}</p>`:'';
 }
 
 /** زر «✓ تم» للأعمال الإدارية فقط (الجلسات تُسجَّل نتيجتها داخل بطاقتها). */
@@ -68,26 +75,35 @@ export function countsHtml(model){
 }
 
 /**
- * بنود التنفيذ التي لم تعد تظهر في أول ATTN_LIMIT صفًا من الطابور.
- * وجودها يعني أن الطابور مقصوص، فيلزم طريق واضح من «مكتب اليوم» إلى التنفيذ
- * الذي يحتاج قرارًا (Wave 6.1) — بلا تغيير في ترتيب الأولوية أو سقف الشدة.
+ * طابور «يحتاج انتباهك» مقسّمًا إلى ثلاث طبقات: يتطلب إجراء · يحتاج مراجعة · للمتابعة.
+ * كل طبقة تعرض أول HOME_LIMITS.queuePerGroup عنصرًا، ثم «عرض الكل» إلى مركز العمل (عرض الانتباه).
+ * الطبقة الفارغة لا تظهر. opts.title/tools للتخصيص حسب الشاشة.
  */
-const hiddenExecutions = model => (model?.attention || []).slice(ATTN_LIMIT).filter(item => item.kind === 'execution');
-
-/** طابور «يحتاج انتباهك» مرتبًا حسب الأهمية ثم الزمن. opts.title/tools للتخصيص حسب الشاشة. */
-export function attentionHtml(model,{title='طابور القرارات',eyebrow='يحتاج انتباهك',tools=true}={}){
- const rows=model.attention.slice(0,ATTN_LIMIT);
- const rest=model.attention.length-rows.length;
+export function attentionHtml(model,{title='طابور القرارات',eyebrow='يحتاج انتباهك',tools=true,perGroup=HOME_LIMITS.queuePerGroup}={}){
+ const groups=(model.groups||QUEUE_GROUPS.map(g=>({...g,items:model.attention.filter(x=>x.group===g.key)}))).filter(g=>g.items.length);
+ const body=groups.length?groups.map(g=>{
+   const shown=g.items.slice(0,perGroup),more=g.items.length-shown.length;
+   return `<section class="cp-grp cp-grp--${esc(g.key)}" aria-label="${esc(g.label)}">
+    <h3 class="cp-grp-title">${esc(g.label)} <span class="cp-grp-n">${g.items.length}</span></h3>
+    <ul class="cp-list">${shown.map(attnRow).join('')}</ul>
+    ${more>0?`<p class="cp-grp-more"><button type="button" class="link" data-route="actionCenter?view=attention">عرض الكل (${g.items.length})</button></p>`:''}
+   </section>`;
+  }).join(''):'';
  return `<section class="cp-attn" data-section-id="attention" aria-labelledby="cp-attn-title">
   <header class="cp-attn-head">
    <div><span class="cp-eyebrow">${esc(eyebrow)}</span><h2 id="cp-attn-title">${esc(title)}</h2></div>
    ${tools?`<div class="cp-attn-tools"><button type="button" class="ghost small" data-route="reports?type=procedures&amp;preset=overdue">تقرير المتأخرات</button><button type="button" class="ghost small" data-route="powersOfAttorney">التوكيلات</button></div>`:''}
   </header>
   ${countsHtml(model)}
-  ${rows.length?`<ul class="cp-list" data-attn-list>${rows.map(attnRow).join('')}</ul>
-   ${rest>0?`<p class="cp-more muted small">+${rest} عنصر آخر${hiddenExecutions(model).length?` (منها ${esc(String(hiddenExecutions(model).length))} تنفيذ يحتاج قرارًا — <button type="button" class="link" data-route="executionCenter">مركز التنفيذ</button>)`:''} — استخدم الفلاتر أو <button type="button" class="link" data-route="actionCenter">مركز العمل</button> لعرض الكل.</p>`:''}`
+  ${body?`<div data-attn-list>${body}</div>${execFooterHtml(groups,perGroup)}`
    :`<div class="cp-empty"><span aria-hidden="true">✓</span><p>لا توجد عناصر تحتاج انتباهك الآن.</p></div>`}
  </section>`;
+}
+
+/** بنود التنفيذ المخفية خلف «عرض الكل» تظل ظاهرة كطريق واضح إلى مركز التنفيذ (لا تُخفى صامتة). */
+function execFooterHtml(groups,perGroup){
+ const hiddenExec=groups.flatMap(g=>g.items.slice(perGroup)).filter(x=>x.kind==='execution').length;
+ return hiddenExec?`<p class="cp-more muted small">+${esc(String(hiddenExec))} تنفيذ يحتاج قرارًا — <button type="button" class="link" data-route="executionCenter">مركز التنفيذ</button></p>`:'';
 }
 
 function attnRow(x){
@@ -107,11 +123,12 @@ function attnRow(x){
 /** جدول اليوم الزمني. */
 export function timelineHtml(model,{dayLabel='',empty='لا جلسات ولا مواعيد اليوم. يوم مناسب للمتابعات والأعمال المتأخرة.'}={}){
  const rows=model.timeline;
+ const conflicts=(model.conflicts||[]).length;
  return `<section class="cp-day" data-section-id="today" aria-labelledby="cp-day-title">
-  <header class="cp-day-head"><div><span class="cp-eyebrow">جدول اليوم</span><h2 id="cp-day-title">${esc(dayLabel)}</h2></div><span class="cp-chip">${rows.length} عنصر</span></header>
-  ${rows.length?`<ol class="cp-tl">${rows.map(x=>`<li class="${x.past?'is-past':''}${x.kind==='hearing'?' is-hearing':''}">
+  <header class="cp-day-head"><div><span class="cp-eyebrow">جدول اليوم</span><h2 id="cp-day-title">${esc(dayLabel)}</h2></div><span class="cp-day-chips">${conflicts?`<span class="cp-chip cp-chip--warn">تعارض ${conflicts}</span>`:''}<span class="cp-chip">${rows.length} عنصر</span></span></header>
+  ${rows.length?`<ol class="cp-tl">${rows.map(x=>`<li class="${x.past?'is-past':''}${x.kind==='hearing'?' is-hearing':''}${x.done?' is-done':''}${x.conflict?' is-conflict':''}">
     <time>${esc(x.time||'—')}</time>
-    <button type="button" data-route="${esc(x.route)}"><b>${esc(x.title)}</b><small>${esc(kindLabel(x.kind))}${x.meta?` · ${esc(x.meta)}`:''}</small></button>
+    <button type="button" data-route="${esc(x.route)}"><b>${esc(x.title)}</b><small>${esc(kindLabel(x.kind))}${x.meta?` · ${esc(x.meta)}`:''}${x.done?' · <span class="cp-done-mark">✓ سُجّلت</span>':''}${x.conflict?' · <span class="cp-conflict-mark">تعارض في الوقت</span>':''}</small></button>
    </li>`).join('')}</ol>`
    :`<div class="cp-empty cp-empty--soft"><span aria-hidden="true">◌</span><p>${esc(empty)}</p></div>`}
  </section>`;
@@ -129,6 +146,27 @@ export function activityHtml(rows){
     return `<li>${r.fileId?`<button type="button" data-route="file:${esc(r.fileId)}">${inner}</button>`:`<div>${inner}</div>`}</li>`;
    }).join('')}</ol>`:`<div class="cp-empty cp-empty--soft"><span aria-hidden="true">◌</span><p>لا توجد تحركات مسجلة بعد.</p></div>`}
  </section>`;
+}
+
+/**
+ * منذ آخر زيارة: تغييرات السجل منذ مغادرة المكتب آخر مرة (قراءة فقط).
+ * change = sinceChanges(...) من services/home-visit.js. لا شيء ⇒ لا يُعرض القسم أصلًا.
+ */
+export function sinceHtml(change){
+ if(!change||!change.total)return '';
+ const rows=change.rows||[];
+ const head=change.capped?`أكثر من ${rows.length} تغييرًا`:`${rows.length} تغييرًا`;
+ return `<section class=\"cp-since\" data-section-id=\"since\" aria-labelledby=\"cp-since-title\">
+  <header class=\"cp-day-head\"><div><span class=\"cp-eyebrow\">منذ آخر زيارة</span><h2 id=\"cp-since-title\">${esc(head)}</h2></div></header>
+  <ol class=\"cp-tl cp-tl--log\">${rows.map(logRowHtml).join('')}</ol>
+ </section>`;
+}
+
+/** صف سجل نشاط واحد (مشترك بين «ما الذي حدث؟» و«منذ آخر زيارة»). */
+function logRowHtml(r){
+ const ent=ENTITIES[r.entityType]?.label||'';
+ const inner=`<time>${esc(formatDateTime(r.timestamp)||'')}</time><span class="cp-log-txt">${esc(r.summary||'نشاط')}${ent?`<small>${esc(ent)}</small>`:''}</span>`;
+ return `<li>${r.fileId?`<button type="button" data-route="file:${esc(r.fileId)}">${inner}</button>`:`<div>${inner}</div>`}</li>`;
 }
 
 /** آخر ما أُنجز — يغلق الحلقة: ما تم، بجانب ما هو قائم. */
