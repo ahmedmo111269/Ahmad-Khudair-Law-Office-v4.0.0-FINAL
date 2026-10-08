@@ -51,7 +51,7 @@ const PAGES={
  actionCenter:{title:'مركز العمل',render:async(app,q)=>(await import('./modules/work-center.js')).workCenterPage(app,q),bind:async(app,q)=>(await import('./modules/work-center.js')).bindWorkCenter(app,q)},
  quickNotes:{title:'الملاحظات السريعة',render:(app,q)=>quickNotesPage(app,q),bind:(app,q)=>bindQuickNotes(app,q),layoutId:'quickNotes',store:'caseNotes'},
  reminders:{title:'التذكيرات',render:(app,q)=>remindersPage(app,q),bind:(app,q)=>bindReminders(app,q),layoutId:'reminders',store:'reminders'},
- executionCenter:{title:'مركز التنفيذ',render:async app=>(await import('./modules/execution-center.js')).executionCenterPage(app),bind:async app=>(await import('./modules/execution-center.js')).bindExecutionCenter(app),layoutId:'executionCenter'},
+ executionCenter:{title:'مركز التنفيذ',render:async(app,q)=>(await import('./modules/execution-center.js')).executionCenterPage(app,q),bind:async(app,q)=>(await import('./modules/execution-center.js')).bindExecutionCenter(app,q),layoutId:'executionCenter'},
  analytics:{title:'الإحصاءات',render:async(app,q)=>(await import('./modules/analytics.js')).analyticsPage(app,q),bind:async app=>(await import('./modules/analytics.js')).bindAnalytics(app)},
  integrity:{title:'سلامة البيانات والتدقيق',render:async app=>(await import('./modules/integrity.js')).integrityPage(app),bind:async app=>(await import('./modules/integrity.js')).bindIntegrity(app)},
  repair:{title:'مركز الإصلاح والاسترداد',render:async app=>(await import('./modules/repair.js')).repairPage(app),bind:async app=>(await import('./modules/repair.js')).bindRepair(app)},

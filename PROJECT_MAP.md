@@ -1,3 +1,24 @@
+# v6.2.1 — الموجة 6.1: سياق التنفيذ في الملف والموكل · Schema 18 بلا تغيير
+
+**2026-10-08 — إغلاق فجوة الموجة 6: الموكل ← الملف ← التنفيذ في شاشة العمل نفسها، وشريط سياقي واحد لا نسخة ثانية من مركز التنفيذ.** لا تغيير مخطط ولا مخازن ولا `APP_VERSION`، ولا على Backup/Restore.
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/execution-work.js` | `executionsForClient(office,clientId,{today,limit})`: قراءة واحدة بلا نموذج ثانٍ — فهرس `clientId` على التنفيذ، ثم ملفات الموكل (`fileClients`/`fileParties`) بتنفيذات كل ملف بفهرس `fileId` لتغطية السجلات القديمة؛ بلا صف مكرر وبسقف ثابت (300 رابط ملف). `executionContextSummary(items)`: نفس `sortItems` ونفس `countQueue` — لا منطق ترتيبٍ ثانٍ. |
+| `js/ui/cockpit.js` | `executionStripHtml({summary,route,scope,fileLabelOf,emptyHint})`: شريط سياقي واحد يخدم كوكبيت الملف ومركز الموكل (نبضة عدّادات + حتى 3 صفوف + «+n … اعرض الكل») — **عرض فقط، بلا نماذج وبلا كتابة**؛ `hiddenExecutions(model)` تُظهر في «مكتب اليوم» عدد التنفيذات التي قصّها `ATTN_LIMIT` مع رابط «مركز التنفيذ» بلا مساس بالترتيب أو سقف الشدة؛ `clientWorkspaceHtml` يقبل `clientId`/`executions`/`fileLabelOf`. |
+| `js/services/client-workspace.js` | يجمع `executionsForClient` مع بقية بيانات الموكل في نفس `Promise.all`، ويعيدها مع `fileLabels` — الشريط لا يقرأ من قاعدة البيانات بنفسه. |
+| `js/modules/file-page.js` | `executionsForFile` تُقرأ داخل `Promise.all` مع الأطراف والمراحل والجلسات، والشريط يُركَّب بعد `fileCockpitHtml` برابط `executionCenter?fileId=…`. |
+| `js/modules/client-file.js` | يمرِّر `clientId` والتنفيذات ووسوم الملفات إلى `clientWorkspaceHtml` فيظهر سياق التنفيذ أعلى شاشة الموكل. |
+| `js/modules/execution-center.js` | النطاق: `scopeFromRoute` من `?fileId=`/`?clientId=`، `rowInScope` في مُصفّي الطابور والجدول، شريط «مقصور على …» + «✕ اعرض كل التنفيذات»، وسطر عدّاد يعلن النطاق، و`paintScopeLabel` يقرأ اسم الملف/الموكل من سجله فقط. ثبات الجلسة: `st.run/st.open/st.selected` تُصفَّر عند كل دخول، و`Esc` في وضع التشغيل يخرج منه مباشرة. |
+| `js/app.js` | `executionCenter` يستقبل `query` في `render`/`bind` — قراءة الرابط فقط، بلا راوتر جديد. |
+| `css/cockpit.css` · `css/exec-workcenter.css` | `.cp-exec*` (شبكة الصف، لون الشدة على المبلغ، الاختفاء التدريجي لـ«فتح ←»، عمودان على الهاتف) و`.wc-scope*` (شريط النطاق) — كلها بمتغيرات الثيم، والحركة تحترم `prefers-reduced-motion`. |
+| `tools/node-tests/wave6-context-browser-tests.mjs` (جديد) | 54 فحص Chromium حقيقي: الشريط في الملف والموكل (داكن/فاتح · 1440/390)، الطي، فلاتر الأهمية، `Open → Execute → Save` (0 → 1) ثم `Undo` (شطب لا حذف)، التنقل التنفيذ ← الملف ← الموكل ← الرئيسية، صفر أخطاء JS، وتنظيف بيانات الفحص. `npm run test:wave6-context-browser`، واللقطات في `.cache/wave6-context/`. |
+| `sw.js` | الكاش `ahmad-khudair-law-office-v6.2.1-wave6.1-context` (لا وحدات جديدة ⇒ لا إضافة إلى precache). |
+
+**التحقق:** `wave6-context-browser` **54/54** · `run-tests.mjs` **563/563** · تباين داكن/فاتح ≥ 4.61 · بلا تمرير أفقي على 390px · بلا أخطاء كونسول. **NOT VERIFIED:** متصفحات غير Chromium، وجهاز Android فعلي.
+
+---
+
 # v5.17.0 — الموجة 3: فهرس بحث في الجلسة + صيانة مؤجَّلة · Schema 18 بلا تغيير
 
 **2026-10-08 — طبقة بحث/صيانة وميزتان ناقصتان. لا تغيير مخطط ولا على Backup/Restore.** الأرقام في [docs/PERFORMANCE-WAVE3.md](docs/PERFORMANCE-WAVE3.md).

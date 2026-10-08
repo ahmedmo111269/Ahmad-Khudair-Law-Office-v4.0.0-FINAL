@@ -70,7 +70,7 @@ export async function clientFilePage(app,clientId,query){
   try{
    const d=await clientWorkspaceData(app.office,{clientId,clientName:fresh.fullName,summary:s});
    const model=buildFocusModel(d.brief,{today:d.today,now:new Date().toTimeString().slice(0,5)});
-   ws=clientWorkspaceHtml({model,recentDone:d.recentDone,clientName:fresh.fullName,dayLabel:longDateAr()});
+   ws=clientWorkspaceHtml({model,recentDone:d.recentDone,clientName:fresh.fullName,dayLabel:longDateAr(),clientId,executions:d.executions,fileLabelOf:id=>d.fileLabels?.get(id)||''});
   }catch(e){console.error('client workspace',e)}
  }
  if(!cat){

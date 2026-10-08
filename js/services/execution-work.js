@@ -4,7 +4,8 @@
 // يحوّل التنفيذات إلى «عمل مطلوب»: لكل تنفيذ خطوة واحدة واضحة (Next Step)
 // بأولوية، وترتيب موحّد للطابور. لا كتابة هنا أبدًا.
 //  • الحساب المالي كله من خدمة التنفيذ المبسّطة (hydrateSimpleRows) — لا منطق مالي مكرر.
-//  • كل شاشة تعرض الطابور (مركز التنفيذ، الجدول، «مكتب اليوم»، ملف القضية) تقرأ من هنا.
+//  • كل شاشة تعرض الطابور (مركز التنفيذ، الجدول، «مكتب اليوم»، ملف القضية، الموكل) تقرأ من هنا:
+//    الشريط السياقي في الملف/الموكل يستعمل `executionsForFile`/`executionsForClient` + الملخص نفسه.
 //  • لا قواعد قانونية: الأولوية تعتمد على «متأخرات مسجّلة» و«موعد إجراء مسجّل» فقط.
 // =====================================================================
 import {localDate, addDays} from '../core/clock.js';
@@ -265,4 +266,43 @@ export async function executionsForFile(office, fileId, {today = localDate(), li
   if (!fileId) return [];
   const rows = await office.r.execution.byIndex('fileId', fileId, limit).catch(() => []);
   return describeExecutions(office, rows.filter(row => !row.isDeleted), {today});
+}
+
+/** سقف قراءات ربط الموكل بالملفات (فهارس قائمة، بحد ثابت للأداء). */
+const CLIENT_FILE_LINKS = 300;
+
+/**
+ * تنفيذات موكل واحد — قراءة فقط، مصدران معًا بلا منطق مكرر:
+ *  1) فهرس `clientId` على التنفيذ نفسه (المسار الحديث).
+ *  2) ملفات الموكل (fileClients/fileParties بفهرس clientId) ثم تنفيذات كل ملف
+ *     بفهرس fileId — لتغطية السجلات القديمة التي رُبطت بالملف وحده.
+ * أي سجل يُقرأ مرة واحدة (لا تكرار)، والسقف ثابت فيفشل الطلب بأمان بلا مسح شامل.
+ */
+export async function executionsForClient(office, clientId, {today = localDate(), limit = 100} = {}) {
+  if (!clientId) return [];
+  const seen = new Map();
+  const add = rows => { for (const row of rows || []) if (row && !row.isDeleted && !seen.has(row.id)) seen.set(row.id, row); };
+  add(await office.r.execution.byIndex('clientId', clientId, limit).catch(() => []));
+  if (seen.size < limit) {
+    const [links, parties] = await Promise.all([
+      office.r.fileClients.byIndex('clientId', clientId, CLIENT_FILE_LINKS).catch(() => []),
+      office.r.fileParties.byIndex('clientId', clientId, CLIENT_FILE_LINKS).catch(() => [])
+    ]);
+    const fileIds = [...new Set([...links, ...parties].map(row => row.fileId).filter(Boolean))];
+    for (let index = 0; index < fileIds.length && seen.size < limit; index += 10) {
+      const part = await Promise.all(fileIds.slice(index, index + 10).map(id => office.r.execution.byIndex('fileId', id, limit).catch(() => [])));
+      part.forEach(add);
+    }
+  }
+  return describeExecutions(office, [...seen.values()].slice(0, limit), {today});
+}
+
+/**
+ * ملخّص سياقي لشريط التنفيذ في الملف/الموكل — بلا منطق ثانٍ:
+ * نفس ترتيب الطابور (`sortItems`) ونفس العدّادات (`countQueue`)، وأهم عنصر أولًا.
+ * @returns {{items, counts, next, total}}
+ */
+export function executionContextSummary(items = []) {
+  const list = sortItems(items, 'urgent');
+  return {items: list, counts: countQueue(items), next: list[0] || null, total: list.length};
 }
