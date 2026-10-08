@@ -132,6 +132,14 @@ export function buildFocusModel(brief,{today,now=''}={}){
    route:`file:${f.id}`,actionLabel:'مراجعة الملف',daysLeft:null});
  }
 
+ // ---- التنفيذ: ما يحتاج قرارًا الآن (مصدره مركز التنفيذ). السقف «مهم» حتى لا يتقدم على جلسات اليوم.
+ for(const e of b.executionAttention||[]){
+  add({id:`e:${e.id}`,kind:'execution',severity:'high',date:e.date,
+   title:e.title||'تنفيذ',meta:e.label||'',
+   when:e.overdueMinor>0?'متأخرات تنفيذ':'إجراء تنفيذ',
+   route:`exc:${e.id}`,actionLabel:e.actionLabel||'تنفيذ',daysLeft:e.date?diffDays(today,e.date):null});
+ }
+
  const attention=items.slice().sort((a,b)=>
   (SEVERITY[b.severity].rank-SEVERITY[a.severity].rank)||
   (a.sort<b.sort?-1:a.sort>b.sort?1:0));

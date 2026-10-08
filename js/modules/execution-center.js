@@ -23,6 +23,9 @@ import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import * as S from '../services/execution-simple.js';
+import {executionWorkQueue, describeExecutions, countQueue, matchesLane, searchableText, queueSections, refreshExecutionItem} from '../services/execution-work.js';
+import {executionSettings, actionKindOptions, collectionMethodOptions} from '../services/execution-settings.js';
+import * as VIEW from '../ui/execution-work-view.js';
 import * as EX from '../services/execution.js';
 import * as DF from '../services/execution-differences.js';
 import {seedFamilyExecutionExample, familyExecutionExampleState} from '../services/execution-demo.js';
@@ -98,58 +101,20 @@ export const EXECUTION_LIST_COLUMNS = Object.freeze([
   {key: 'openedDate', label: 'تاريخ الفتح', type: 'date', width: 110, get: row => row.openedDate || '', text: row => dateText(row.openedDate)}
 ]);
 
-/* ==================== قراءات مساعدة للصفوف القديمة ====================
-   بعض التنفيذات المسجلة قبل التبسيط لا تحتوي أطرافًا ولا بنود قيمة (تُعرض
-   فارغة بلا معنى). هنا نُكمل العرض من العلاقة القائمة (المرحلة → الملف →
-   الموكل) بلا أي كتابة أو تعديل على البيانات نفسها. */
-const lookupCache = (app, key) => (app.__execLookup = app.__execLookup || {clients: new Map(), cases: new Map(), files: new Map()})[key];
-async function cacheGet(app, store, id) {
-  if (!id) return null;
-  const cache = lookupCache(app, store);
-  if (cache.has(id)) return cache.get(id);
-  const row = await app.office.r[store].get(id).catch(() => null);
-  cache.set(id, row || null);
-  return row || null;
-}
-async function decorateLegacyRows(app, rows) {
-  const caseIds = [...new Set(rows.map(row => row.caseId).filter(Boolean))];
-  const cases = new Map(await Promise.all(caseIds.map(async id => [id, await cacheGet(app, 'cases', id)])));
-  const fileIds = [...new Set([...rows.map(row => row.fileId), ...[...cases.values()].map(item => item?.fileId)].filter(Boolean))];
-  const files = new Map(await Promise.all(fileIds.map(async id => [id, await cacheGet(app, 'files', id)])));
-  const clientIds = [...new Set([...rows.map(row => row.clientId), ...[...files.values()].map(item => item?.clientId)].filter(Boolean))];
-  const clients = new Map(await Promise.all(clientIds.map(async id => [id, await cacheGet(app, 'clients', id)])));
-  return rows.map(row => {
-    const caseRow = row.caseId ? cases.get(row.caseId) : null;
-    const fileRow = (row.fileId ? files.get(row.fileId) : null) || (caseRow?.fileId ? files.get(caseRow.fileId) : null) || null;
-    const clientRow = (row.clientId ? clients.get(row.clientId) : null) || (fileRow?.clientId ? clients.get(fileRow.clientId) : null) || null;
-    return {caseRow, fileRow, clientRow};
-  });
-}
-const legacyNumber = row => {
-  if (row.executionNumber) return `${row.executionNumber}${row.executionYear ? `/${row.executionYear}` : ''}`;
-  return '';
-};
-
-const COUNTERS = Object.freeze([
-  {key: 'running', label: 'جارٍ', hint: 'مفتوح بلا تأخر'},
-  {key: 'overdue', label: 'عليه متأخرات', hint: 'فترة انتهت ولم تُسدد'},
-  {key: 'needsFollowUp', label: 'يحتاج متابعة', hint: 'إجراء تالٍ أو بيانات ناقصة'},
-  {key: 'completed', label: 'مكتمل السداد', hint: 'لا متبقٍ'}
-]);
-
-const searchableText = row => [row.internalNumber, row.officialNumber, row.clientName, row.opponentName, row.fileNumber, row.searchText, row.billNumber, row.petitionNumber]
-  .filter(Boolean).join(' ').toLowerCase();
-
-const counterMatches = (key, row) => {
-  if (!key || key === 'all') return true;
-  if (key === 'needsFollowUp') return Boolean(row.nextActionLabel) || Boolean(row.needsFollowUp);
-  return row.derivedStatus === key;
-};
-
+/* ==================== حالة مركز التنفيذ (طابور + عدّادات + تشغيل) ==================== */
+const SORT_KEY = 'ui:exec:sort:v1';
 const listState = app => (app.__execCenter = app.__execCenter || {
-  count: prefs.get(COUNT_KEY, 'all'), search: prefs.get('ui:exec:q', ''), counts: null, counted: 0, scannedAll: false, ready: false
+  count: prefs.get(COUNT_KEY, 'all'), search: prefs.get('ui:exec:q', ''), sort: prefs.get(SORT_KEY, 'urgent'),
+  items: null, counts: null, counted: 0, scannedAll: true, ready: false, today: localDate(),
+  open: null, selected: new Set(), run: null, demoSeedAttempted: false
 });
 const cardState = app => (app.__execSimple = app.__execSimple || {});
+/** تاريخ ISO بعد عدد أيام من تاريخ مرجعي (بالتقويم المحلي، بلا انزياح منطقة زمنية). */
+const offsetDate = (today, days) => {
+  const d = new Date(`${today}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 /**
  * ربط **كل** العناصر المطابقة لخطاف واحد.
@@ -162,40 +127,81 @@ const bindAll = (container, selector, handler) => {
   return nodes.length;
 };
 
-/* ============================ صفحة القائمة ============================ */
+/* ============================ صفحة مركز التنفيذ ============================ */
+/**
+ * مركز التنفيذ = «ماذا أفعل الآن؟» قبل «ما السجلات؟»:
+ *  1) الآن: أول تنفيذ يحتاج قرارًا + إجراءات سياقية + «ثم» للتالي.
+ *  2) العدّادات كفلاتر للطابور (لا كأرقام صامتة) + شريط الأرقام الحرجة.
+ *  3) الطابور: أقسام (يحتاج قرارك / قريب / جارٍ / موقوف / مكتمل) بصفوف فيها الخطوة والمتبقي.
+ *     التحصيل والإجراء يُسجَّلان داخل الصف دون مودال، ويُعاد حساب الصف وحده.
+ *  4) وضع التشغيل: يعرض خطوة واحدة، يسجّل، ثم ينتقل تلقائيًا للتالي (Focus Mode).
+ *  5) الجدول الكامل (DataGrid) يبقى للفرز والتصدير والأعمدة.
+ */
 export function executionCenterPage(app) {
   registerPageLayout({
     pageId: 'executionCenter', title: 'مركز التنفيذ',
     sections: [
-      {id: 'numbers', title: 'عدّادات سريعة'},
-      {id: 'filters', title: 'بحث'},
-      {id: 'grid', title: 'جدول التنفيذات', canHide: false}
+      {id: 'hero', title: 'الآن — الخطوة التالية'},
+      {id: 'numbers', title: 'عدّادات الطابور'},
+      {id: 'filters', title: 'بحث وترتيب'},
+      {id: 'queue', title: 'الطابور', canHide: false},
+      {id: 'grid', title: 'الجدول الكامل'}
     ]
   });
   const st = listState(app);
-  return `<div class="page-head exec-head"><div><h2>مركز التنفيذ</h2>
-    <p class="muted small">كل شيء في مكان واحد: أنشئ تنفيذًا، سجّل ما تم (تحصيل · إجراء · مصروف · حكم لاحق)، واقرأ المطلوب والمدفوع والمتبقي فورًا.</p></div>
-    <div class="head-actions">
-      <button class="ghost" data-help>؟ مساعدة</button>
-      <button class="ghost" data-settings>⚙ إعدادات التنفيذ</button>
-      <button class="ghost" data-customize-page>⚙ تخصيص الصفحة</button>
-      <button class="ghost" data-exec-trash>🗑 سلة التنفيذ</button>
-      <button class="ghost" data-demo-example>🧪 مثال عملي جاهز</button>
-      <button class="ghost" data-exec-demo>📁 ملفات تنفيذ تجريبية</button>
-      <button class="ghost danger" data-exec-clear>🗑 مسح بيانات التنفيذ</button>
-      <button class="primary" data-new-execution>+ تنفيذ جديد</button>
-    </div></div>
-  <section class="panel exec-counters" data-section-id="numbers">
-    <div class="counter-grid" data-counters><div class="muted small">جارٍ الحساب…</div></div>
-    <p class="muted small" data-counter-note></p>
-  </section>
-  <section class="panel exec-search" data-section-id="filters">
-    <div class="exec-controls">
-      <input type="search" data-search value="${esc(st.search)}" placeholder="بحث: رقم التنفيذ · الموكل · المنفذ ضده · رقم الملف" aria-label="بحث التنفيذ">
-      <button type="button" class="ghost" data-clear-search>مسح</button>
+  const desktop = typeof window !== 'undefined' && window.matchMedia?.('(min-width: 900px)')?.matches;
+  return `<div class="wc-page" data-wc>
+    <div class="page-head exec-head wc-head"><div>
+      <h2>مركز التنفيذ</h2>
+      <p class="muted small">ما الذي يحتاج قرارك الآن؟ نفّذ الخطوة، سجّل النتيجة، ثم انتقل تلقائيًا إلى التالي.</p>
     </div>
-  </section>
-  <section data-section-id="grid"><div id="exec-grid"></div></section>`;
+    <div class="head-actions">
+      <button class="primary" type="button" data-run-start="queue" data-run-count>▶ ابدأ التشغيل</button>
+      <button class="ghost" type="button" data-new-execution>+ تنفيذ جديد</button>
+      <details class="wc-tools">
+        <summary class="ghost">⋯ أدوات</summary>
+        <div class="wc-tools-menu" role="menu">
+          <button type="button" class="ghost" data-help>؟ مساعدة</button>
+          <button type="button" class="ghost" data-settings>⚙ إعدادات التنفيذ</button>
+          <button type="button" class="ghost" data-customize-page>⚙ تخصيص الصفحة</button>
+          <button type="button" class="ghost" data-exec-trash>🗑 سلة التنفيذ</button>
+          <button type="button" class="ghost" data-demo-example>🧪 مثال عملي جاهز</button>
+          <button type="button" class="ghost" data-exec-demo>📁 ملفات تنفيذ تجريبية</button>
+          <button type="button" class="ghost danger" data-exec-clear>🗑 مسح بيانات التنفيذ</button>
+        </div>
+      </details>
+    </div></div>
+    <div class="wc-stage" data-stage hidden></div>
+    <div class="wc-main">
+      <div data-section-id="hero" data-hero-host class="wc-hero-host"><div class="wc-hero wc-hero--calm"><p class="muted small">جارٍ تجهيز «الآن»…</p></div></div>
+      <section class="panel exec-counters wc-lanes-panel" data-section-id="numbers">
+        <div data-pulse></div>
+        <div class="counter-grid wc-lanes" data-counters><div class="muted small">جارٍ حساب الطابور…</div></div>
+        <p class="muted small" data-counter-note></p>
+      </section>
+      <section class="panel wc-toolbar" data-section-id="filters">
+        <div class="exec-controls">
+          <input type="search" data-search value="${esc(st.search)}" placeholder="بحث: رقم التنفيذ · الموكل · المنفذ ضده · رقم الملف" aria-label="بحث التنفيذ">
+          <button type="button" class="ghost" data-clear-search>مسح</button>
+          <select data-sort aria-label="ترتيب الطابور">
+            <option value="urgent"${st.sort === 'urgent' ? ' selected' : ''}>ترتيب: الأعلى أولوية</option>
+            <option value="remaining"${st.sort === 'remaining' ? ' selected' : ''}>ترتيب: الأكبر متبقيًا</option>
+            <option value="recent"${st.sort === 'recent' ? ' selected' : ''}>ترتيب: الأحدث فتحًا</option>
+          </select>
+          <button type="button" class="ghost" data-select-visible>تحديد المعروض</button>
+        </div>
+        <p class="wc-keys muted small" aria-label="اختصارات لوحة المفاتيح">${desktop ? '<kbd>/</kbd> بحث · <kbd>J</kbd>/<kbd>K</kbd> تنقل · <kbd>C</kbd> تحصيل · <kbd>A</kbd> إجراء · <kbd>X</kbd> تحديد · <kbd>R</kbd> تشغيل · <kbd>Enter</kbd> فتح البطاقة' : 'اضغط الصف للتسجيل، أو ⋯ للمزيد'}</p>
+      </section>
+      <div data-bulk-host></div>
+      <section class="wc-queue" data-section-id="queue" aria-label="طابور التنفيذ" data-queue>
+        <div class="wc-loading muted">جارٍ حساب الطابور من سجلات التنفيذ…</div>
+      </section>
+      <details class="wc-table panel" data-section-id="grid" data-collapse-default="${desktop ? 'open' : 'collapsed'}"${desktop ? ' open' : ''}>
+        <summary>الجدول الكامل — كل التنفيذات (أعمدة وفرز وتصدير)</summary>
+        <div id="exec-grid"></div>
+      </details>
+    </div>
+  </div>`;
 }
 
 /**
@@ -224,46 +230,25 @@ async function maybeSeedExecutionDemo(app, reload) {
 export async function bindExecutionCenter(app) {
   const st = listState(app);
   const root = document.querySelector('#main-content');
-  if (!root) return false;
+  const wc = root?.querySelector('[data-wc]');
+  if (!root || !wc) return false;
   let grid = null;
+  st.today = localDate();
 
+  const find = id => (st.items || []).find(item => item.id === id) || null;
+  const persist = () => { prefs.set('ui:exec:q', st.search); prefs.set(COUNT_KEY, st.count); prefs.set(SORT_KEY, st.sort); };
+  let pendingFocus = false;
+
+  /* ---------- الجدول الكامل (DataGrid) — نفس المصدر، وصف موحّد ---------- */
   const provider = createIndexedDbDataProvider(app.office.r.execution, {
     resolveScope: () => ({
       index: 'openedDate', direction: 'prev',
       filter: row => !row.isDeleted,
-      preparedFilter: row => counterMatches(st.count, row) && (!st.search || searchableText(row).includes(String(st.search).trim().toLowerCase()))
+      preparedFilter: row => matchesLane(st.count, row) && (!st.search || searchableText(row).includes(String(st.search).trim().toLowerCase()))
     }),
     prepareRows: async rows => {
-      const [hydrated, legacy] = await Promise.all([
-        S.hydrateSimpleRows(app.office, rows),
-        decorateLegacyRows(app, rows).catch(() => rows.map(() => ({})))
-      ]);
-      const today = localDate();
-      rows.forEach((row, index) => {
-        const item = hydrated[index] || null;
-        const extra = legacy[index] || {};
-        const fileNumber = row.fileNumber || extra.fileRow?.fileNumber || extra.caseRow?.fileNumber || '';
-        row.displayNumber = row.internalNumber || row.officialNumber || legacyNumber(row) || '';
-        row.clientName = item?.creditor?.name || extra.clientRow?.fullName || '';
-        row.opponentName = item?.debtor?.name || '';
-        row.fileNumber = fileNumber;
-        row.dueUntilToday = item?.summary?.dueMinor || 0;
-        row.paidTotal = item?.summary?.paidMinor || 0;
-        row.remainingTotal = item?.summary?.remainingMinor || 0;
-        row.creditTotal = item?.summary?.creditMinor || 0;
-        row.lastActionLabel = item?.lastActionLabel || '';
-        row.nextActionLabel = item?.nextActionLabel || '';
-        row.statusLabel = item?.status?.label || '';
-        row.derivedStatus = item?.status?.key || 'running';
-        row.periods = item?.schedule?.rows?.length || 0;
-        row.valueState = row.periods ? 'set' : (item?.slices?.length || item?.judgments?.length ? 'missing' : 'missing');
-        row.needsFollowUp = !row.periods
-          || (item?.schedule?.rows || []).some(period => period.status !== PERIOD_STATUS.PAID && period.toDate < today)
-          || Boolean(item?.nextAction);
-        row.executionTypeLabel = EXECUTION_TYPE_LABELS[row.executionType] || '';
-        row.authority = row.authority || row.executionOffice || '';
-        row.openedDate = row.openedDate || String(row.createdAt || '').slice(0, 10);
-      });
+      const items = await describeExecutions(app.office, rows, {today: st.today});
+      rows.forEach((row, index) => Object.assign(row, items[index] || {}));
     }
   });
 
@@ -280,6 +265,7 @@ export async function bindExecutionCenter(app) {
         {id: 'collection', label: 'تسجيل تحصيل'},
         ...(row.valueState === 'missing' ? [{id: 'value', label: '⚠ أدخل قيمة النفقة والدورية'}] : []),
         {id: 'action', label: 'تسجيل إجراء'},
+        {id: 'follow', label: '⏰ متابعة لاحقًا (مهمة)'},
         {id: 'duration', label: '🧮 احسب مدة'},
         {id: 'statement', label: '🖨 كشف / توكيل'},
         {id: 'edit', label: 'تعديل بيانات التنفيذ'},
@@ -292,6 +278,7 @@ export async function bindExecutionCenter(app) {
         if (id === 'collection') return simpleCollectionDialog(app, row.id);
         if (id === 'value') return valueSetupDialog(app, row.id);
         if (id === 'action') return simpleActionDialog(app, row.id);
+        if (id === 'follow') return followUpQuick(row.id, {fromGrid: true});
         if (id === 'duration') return durationDialog(app, row.id, {lockExecution: true});
         if (id === 'statement') return statementDialog(app, row.id);
         if (id === 'edit') return executionDialog(app, {execution: row});
@@ -303,62 +290,503 @@ export async function bindExecutionCenter(app) {
         const note = root.querySelector('[data-counter-note]');
         if (!note) return;
         if (phase === 'error') { note.textContent = 'تعذر تحميل جزء من الصفوف — راجع الاتصال أو أعد المحاولة.'; return; }
-        if (st.ready && st.counts) note.textContent = st.counted.toLocaleString('en-US') + ' تنفيذ' + (st.scannedAll ? ' (كل السجل)' : ' (أول ' + st.counted.toLocaleString('en-US') + ')') + (meta?.hasMore ? ' — توجد صفحات أخرى في الجدول.' : '');
+        if (st.ready && st.counts) note.textContent = queueNote() + (meta?.hasMore ? ' — توجد صفحات أخرى في الجدول.' : '');
       }
     });
     return grid;
   };
-
-  const renderCounters = () => {
-    const host = root.querySelector('[data-counters]');
-    if (!host) return;
-    host.innerHTML = COUNTERS.map(counter => `<button type="button" class="counter${st.count === counter.key ? ' is-active' : ''}" data-count="${counter.key}" aria-pressed="${st.count === counter.key}">
-        <b>${st.counts ? Number(st.counts[counter.key] || 0).toLocaleString('en-US') : '…'}</b>
-        <span>${counter.label}</span><small class="muted">${counter.hint}</small>
-      </button>`).join('');
-    host.querySelectorAll('[data-count]').forEach(button => button.addEventListener('click', async () => {
-      st.count = st.count === button.dataset.count ? 'all' : button.dataset.count;
-      prefs.set(COUNT_KEY, st.count);
-      renderCounters();
-      await reload();
-    }));
-  };
-
-  const reload = async () => {
+  const reloadGrid = async () => {
     const instance = ensureGrid();
-    if (!instance) return;
-    await instance.reload({resetPage: true});
+    if (instance) await instance.reload({resetPage: true});
   };
 
-  const scanCounters = async () => {
-    const batch = 100, cap = 300;
-    const items = [];
-    let cursor = null, hasMore = false;
-    do {
-      const page = await app.office.r.execution.page({index: 'openedDate', direction: 'prev', cursor, limit: batch});
-      items.push(...(page.items || []).filter(row => !row.isDeleted));
-      cursor = page.nextCursor || null;
-      hasMore = Boolean(page.hasMore);
-    } while (cursor && hasMore && items.length < cap);
-    const counts = {running: 0, overdue: 0, needsFollowUp: 0, completed: 0};
-    const today = localDate();
-    for (let index = 0; index < items.length; index += 25) {
-      const chunk = items.slice(index, index + 25);
-      const hydrated = await S.hydrateSimpleRows(app.office, chunk).catch(() => []);
-      for (const item of hydrated) {
-        const key = item?.status?.key || 'running';
-        if (counts[key] !== undefined) counts[key] += 1;
-        const schedule = item?.schedule;
-        const needs = !schedule?.rows?.length
-          || schedule.rows.some(period => period.status !== PERIOD_STATUS.PAID && period.toDate < today)
-          || Boolean(item?.nextAction);
-        if (needs && counts.needsFollowUp !== undefined) counts.needsFollowUp += 1;
+  const queueNote = () => `${st.counted.toLocaleString('en-US')} تنفيذ في الطابور${st.scannedAll ? ' (كل السجل)' : ` (الأحدث ${st.counted.toLocaleString('en-US')} — ابحث في الجدول للبقية)`}`;
+
+  /* ---------- بناء الطابور ---------- */
+  /** الهيرو: أول ما يحتاج قرارًا الآن، وإلا أول «القريب» (حتى لا يقول «لا شيء» وفي الطابور بنود). */
+  const heroPool = () => {
+    const sections = queueSections(st.items || [], {lane: 'all', sort: 'urgent'});
+    return sections.now.length ? {pool: sections.now, urgent: true} : {pool: sections.soon, urgent: false};
+  };
+  const heroItem = () => heroPool().pool[0] || null;
+
+  const panelFor = (item, mode) => {
+    if (!item || !mode) return '';
+    const settings = executionSettings(app.office);
+    if (mode === 'collect') return VIEW.collectFormHtml(item, {today: st.today, methods: collectionMethodOptions(settings)});
+    if (mode === 'action') return VIEW.actionFormHtml(item, {today: st.today, kinds: actionKindOptions(settings), plannedKind: plannedKindFor(item, settings)});
+    if (mode === 'follow') return VIEW.followFormHtml(item, {today: st.today});
+    if (mode === 'menu') return VIEW.menuHtml(item);
+    return '';
+  };
+  const plannedKindFor = (item, settings) => {
+    const text = String(item.nextActionText || '').trim();
+    if (!text) return '';
+    const hit = actionKindOptions(settings).find(([, label]) => label === text);
+    return hit ? hit[1] : '';
+  };
+  /** اللوحة المفتوحة تظهر في موضعها: الهيرو أو الصف (لا في الاثنين معًا). */
+  const openPanelHtml = (item, where) => (st.open && st.open.id === item.id && (st.open.from === 'hero') === (where === 'hero')) ? panelFor(item, st.open.mode) : '';
+
+  const renderHero = () => {
+    const host = root.querySelector('[data-hero-host]');
+    if (!host) return;
+    if (!st.items) return;
+    const {pool, urgent} = heroPool();
+    const item = pool[0] || null;
+    host.innerHTML = VIEW.heroHtml(item, {
+      position: pool.length ? 1 : 0, total: pool.length, next: pool.slice(1, 4),
+      caption: urgent ? 'يحتاج قرارًا' : 'قريب — خلال 7 أيام',
+      panel: item ? openPanelHtml(item, 'hero') : ''
+    });
+  };
+
+  const renderLanes = () => {
+    const host = root.querySelector('[data-counters]');
+    if (host) {
+      host.innerHTML = VIEW.laneHtml(st.counts, st.count);
+      const setLane = async lane => {
+        st.count = lane;
+        st.open = null;
+        persist();
+        renderAll();
+        await reloadGrid();
+      };
+      host.querySelectorAll('[data-count]').forEach(button => button.addEventListener('click', () => setLane(st.count === button.dataset.count ? 'all' : button.dataset.count)));
+      host.querySelector('[data-lane-all]')?.addEventListener('click', () => setLane('all'));
+    }
+    const pulse = root.querySelector('[data-pulse]');
+    if (pulse) pulse.innerHTML = st.counts ? VIEW.pulseHtml(st.counts, st.items?.length || 0) : '';
+    const note = root.querySelector('[data-counter-note]');
+    if (note && st.ready) note.textContent = queueNote();
+  };
+
+  const rowsOf = sections => [
+    ['now', 'يحتاج قرارك الآن', 'عاجل أو مستحق', false],
+    ['soon', 'قريب', 'خلال 7 أيام أو بيانات ناقصة', false],
+    ['calm', 'جارٍ — بلا مطالبة الآن', 'خطوة مجدولة لاحقًا أو لا خطوة', false],
+    ['paused', 'موقوف أو مغلق', 'لا يُحسب إلا بعد إعادة التشغيل', true],
+    ['done', 'مكتمل السداد', 'للمراجعة فقط', true]
+  ].map(([key, title, hint, collapsed]) => VIEW.sectionHtml(key, title, hint,
+    sections[key].map(item => VIEW.rowHtml(item, {
+      selected: st.selected.has(item.id), open: Boolean(st.open && st.open.id === item.id && st.open.from !== 'hero'),
+      panel: openPanelHtml(item, 'row') || (st.open && st.open.id === item.id && st.open.from !== 'hero' && st.open.mode === 'menu' ? panelFor(item, 'menu') : '')
+    })), {collapsed, tone: key === 'now' ? 'is-now' : ''}));
+
+  const renderQueue = () => {
+    const host = root.querySelector('[data-queue]');
+    if (!host) return;
+    if (!st.items) return;
+    const sections = queueSections(st.items, {lane: st.count, query: st.search, sort: st.sort});
+    const markup = rowsOf(sections).join('');
+    host.innerHTML = markup || VIEW.emptyQueueHtml(st.items.length > 0, st.count);
+  };
+
+  const renderBulk = () => {
+    const host = root.querySelector('[data-bulk-host]');
+    if (host) host.innerHTML = VIEW.bulkBarHtml(st.selected.size);
+  };
+
+  const renderRunner = () => {
+    const stage = root.querySelector('[data-stage]');
+    if (!stage || !st.run) return;
+    wc.classList.add('is-run');
+    stage.hidden = false;
+    const run = st.run;
+    // تخطّي تلقائي للعناصر التي لم تعد تحتاج خطوة (أُنجزت أو أُوقفت أثناء التشغيل)
+    while (run.index < run.ids.length) {
+      const item = find(run.ids[run.index]);
+      if (item && item.step.code !== 'done' && item.step.code !== 'paused') break;
+      run.index += 1;
+    }
+    if (run.index >= run.ids.length) {
+      const remaining = queueSections(st.items || [], {lane: 'all'}).now.length;
+      stage.innerHTML = VIEW.runHeaderHtml() + VIEW.runSummaryHtml(run, remaining);
+      return;
+    }
+    const item = find(run.ids[run.index]);
+    let panel;
+    if (item.step.code === 'collect') panel = panelFor(item, 'collect');
+    else if (item.step.code === 'value') panel = `<div class="wc-run-value"><p>لا يمكن تسجيل التحصيل قبل إدخال قيمة النفقة والدورية.</p><div class="wc-hero-actions"><button type="button" class="primary" data-act="value" data-id="${esc(item.id)}" data-from="run">⚙ أدخل القيمة الآن</button></div></div>`;
+    else panel = panelFor(item, 'action');
+    stage.innerHTML = VIEW.runHeaderHtml() + VIEW.runStepHtml(item, panel, {progress: VIEW.runProgressHtml(run)});
+    stage.querySelector('[data-first]')?.focus?.();
+  };
+
+  const renderAll = () => {
+    if (!wc.isConnected) return;
+    if (st.run) { renderRunner(); return; }
+    wc.classList.remove('is-run');
+    const stage = root.querySelector('[data-stage]');
+    if (stage) { stage.hidden = true; stage.innerHTML = ''; }
+    renderHero();
+    renderLanes();
+    renderQueue();
+    renderBulk();
+    if (pendingFocus) {
+      pendingFocus = false;
+      const scope = st.open && st.open.from === 'hero' ? '[data-hero-host]' : '[data-queue]';
+      root.querySelector(`${scope} form[data-form] [data-first]`)?.focus?.();
+    }
+  };
+
+  const loadQueue = async () => {
+    try {
+      st.today = localDate();
+      const out = await executionWorkQueue(app.office, {today: st.today});
+      st.items = out.items; st.counts = out.counts; st.counted = out.counted; st.scannedAll = out.scannedAll; st.ready = true;
+      st.selected = new Set([...st.selected].filter(id => out.items.some(item => item.id === id)));
+    } catch (error) {
+      console.info('execution queue unavailable', error);
+      st.items = st.items || [];
+      st.ready = true;
+      const note = root.querySelector('[data-counter-note]');
+      if (note) note.textContent = 'تعذر حساب الطابور — الجدول الكامل يعمل والبحث متاح.';
+      toast(userError(error), 'error');
+    }
+    renderAll();
+  };
+
+  /** بعد أي كتابة: إعادة وصف الصف المتأثر وحده، ثم تحديث العدّادات والجدول. */
+  const afterWrite = async executionId => {
+    const fresh = await refreshExecutionItem(app.office, executionId, {today: st.today}).catch(() => null);
+    if (st.items) {
+      const index = st.items.findIndex(item => item.id === executionId);
+      if (fresh) { if (index >= 0) st.items[index] = fresh; else st.items.push(fresh); }
+      else if (index >= 0) st.items.splice(index, 1);
+      st.counts = countQueue(st.items);
+      st.counted = st.items.length;
+    }
+    st.open = null;
+    renderAll();
+    grid?.reload?.({resetPage: false}).catch?.(() => null);
+  };
+
+  /* ---------- تنفيذ الكتابات ---------- */
+  const kindKeyOf = (label, settings) => {
+    const hit = actionKindOptions(settings).find(([, text]) => text === label);
+    return hit ? hit[0] : String(label || '').trim();
+  };
+
+  const withUndo = (message, undo) => toast(message, 'ok', {
+    actionLabel: 'تراجع', action: async () => { await undo(); toast('تم التراجع — السجل مشطوب بسبب ولم يُحذف'); }
+  });
+
+  async function submitForm(form) {
+    const kind = form.dataset.form;
+    const id = form.dataset.id;
+    const item = find(id);
+    if (!item) { toast('هذا التنفيذ لم يعد في الطابور — حدّث الصفحة', 'error'); return; }
+    const values = Object.fromEntries(new FormData(form).entries());
+    const save = form.querySelector('[data-save]');
+    if (save) save.disabled = true;
+    const inRun = Boolean(st.run) && Boolean(form.closest('[data-run-item]'));
+    try {
+      if (kind === 'collect') {
+        const out = await S.recordSimpleCollection(app.office, {
+          executionId: id, amount: values.amount, date: values.date, paymentMethod: values.paymentMethod,
+          reference: values.reference, target: 'auto', asOf: st.today
+        });
+        const receiptId = out?.receipt?.id;
+        const note = out?.preview?.remainingAfterMinor != null ? ` — المتبقي الآن ${money(out.preview.remainingAfterMinor, item.currency)}` : '';
+        withUndo(`تم تسجيل التحصيل${note}`, async () => {
+          if (receiptId) await S.voidSimpleRecord(app.office, {kind: 'receipt', id: receiptId, reason: 'تراجع فوري من مركز التنفيذ'});
+          await afterWrite(id);
+        });
+      } else if (kind === 'action') {
+        const settings = executionSettings(app.office);
+        const out = await S.recordSimpleAction(app.office, {
+          executionId: id, kind: kindKeyOf(values.kind, settings), date: values.date, result: values.result,
+          nextAction: values.nextAction, nextActionDate: values.nextActionDate
+        });
+        const actionId = out?.id;
+        withUndo('تم تسجيل الإجراء' + (values.nextActionDate ? ` — المتابعة التالية ${values.nextActionDate}` : ''), async () => {
+          if (actionId) await S.voidSimpleRecord(app.office, {kind: 'action', id: actionId, reason: 'تراجع فوري من مركز التنفيذ'});
+          await afterWrite(id);
+        });
+      } else if (kind === 'follow') {
+        const workItem = await S.createExecutionFollowUp(app.office, {
+          execution: {id, fileId: item.fileId, internalNumber: item.internalNumber, officialNumber: item.officialNumber},
+          action: {nextAction: 'متابعة التنفيذ', nextActionDate: values.date, date: st.today, kindLabel: 'متابعة'}
+        });
+        toast(workItem ? 'أُضيفت المتابعة إلى مركز العمل ✓' : 'تعذر إنشاء المتابعة', workItem ? 'ok' : 'error');
+        if (!workItem) { if (save) save.disabled = false; return; }
+      }
+      if (inRun) { await runAdvance(id, true); return; }
+      await afterWrite(id);
+    } catch (error) {
+      toast(userError(error), 'error');
+      if (save) save.disabled = false;
+    }
+  }
+
+  /** نموذج «متابعة لاحقًا» بدون نموذج ظاهر (من قائمة الجدول) — نفس المسار. */
+  function followUpQuick(id) {
+    const item = find(id);
+    if (!item) { return toast('افتح الطابور أولًا لاختيار هذا التنفيذ', 'error'); }
+    st.open = {id, mode: 'follow', from: 'row'};
+    pendingFocus = true;
+    renderAll();
+    return undefined;
+  }
+
+  /* ---------- وضع التشغيل ---------- */
+  const startRun = (source = 'queue') => {
+    if (!st.items) return;
+    let ids;
+    if (source === 'selection') {
+      const order = queueSections(st.items, {lane: 'all', sort: st.sort});
+      ids = [...order.now, ...order.soon, ...order.calm].filter(item => st.selected.has(item.id)).map(item => item.id);
+      if (!ids.length) return toast('حدّد تنفيذًا أو أكثر من الطابور أولًا', 'error');
+    } else {
+      const sections = queueSections(st.items, {lane: st.count, query: st.search, sort: st.sort});
+      ids = [...sections.now, ...sections.soon].filter(item => item.step.code !== 'done').map(item => item.id);
+      if (!ids.length) return toast('لا شيء يحتاج قرارًا في هذا العرض — جرّب «الكل»', 'ok');
+    }
+    st.run = {ids, index: 0, saved: [], skipped: [], startedAt: Date.now()};
+    st.open = null;
+    st.selected = new Set();
+    renderAll();
+    wc.scrollIntoView?.({block: 'start'});
+    if (ids.length === 1) toast('تشغيل خطوة واحدة');
+  };
+  const runAdvance = async (id, saved) => {
+    if (!st.run || !id) return;
+    const run = st.run;
+    if (saved) run.saved.push(id);
+    else run.skipped.push(id);
+    run.index += 1;
+    // بعد الحفظ نُعيد وصف الصف المتأثر (سيدخل قسم «مكتمل» أو يتغيّر خطوته)
+    if (saved) {
+      const fresh = await refreshExecutionItem(app.office, id, {today: st.today}).catch(() => null);
+      if (st.items) {
+        const index = st.items.findIndex(item => item.id === id);
+        if (fresh && index >= 0) st.items[index] = fresh;
+        st.counts = countQueue(st.items);
       }
     }
-    return {counts, counted: items.length, scannedAll: !hasMore};
+    renderAll();
+    root.querySelector('[data-stage]')?.scrollIntoView?.({block: 'start'});
+  };
+  const exitRun = () => {
+    st.run = null;
+    renderAll();
+    grid?.reload?.({resetPage: false}).catch?.(() => null);
   };
 
-  bindAll(root, '[data-new-execution]', () => newExecutionDialog(app));
+  /* ---------- إجراء موحّد على المحدد ---------- */
+  const openBulkAction = () => {
+    const ids = [...st.selected];
+    if (!ids.length) return;
+    const settings = executionSettings(app.office);
+    const card = modal(`<h2 class="modal-title">إجراء موحّد — ${ids.length} تنفيذ</h2>
+      <p class="muted small">يُسجَّل الإجراء نفسه على كل تنفيذ محدد في عملية واحدة: إما ينجح الكل أو لا يُسجَّل شيء. التحصيل يبقى فرديًا لأنه يعتمد على مبلغ كل تنفيذ.</p>
+      <form class="simple-form" data-form="bulk">
+        <div class="form-grid">
+          <label class="field">النوع <b class="req">*</b><input name="kind" list="bulk-kinds" placeholder="اكتب أو اختر" required><datalist id="bulk-kinds">${actionKindOptions(settings).map(([, label]) => `<option value="${esc(label)}"></option>`).join('')}</datalist></label>
+          <label class="field">التاريخ <b class="req">*</b><input name="date" type="date" value="${esc(st.today)}" required></label>
+          <label class="field">النتيجة<select name="result">${VIEW.ACTION_RESULTS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label>
+          <label class="field">الإجراء التالي<input name="nextAction" placeholder="اختياري"></label>
+          <label class="field span2">تاريخ الإجراء التالي<input name="nextActionDate" type="date"></label>
+        </div>
+        <div class="form-actions"><button type="submit" class="primary" data-save>تسجيل على ${ids.length} تنفيذ</button><button type="button" class="ghost" data-close>إلغاء</button></div>
+      </form>`);
+    const form = card.querySelector('[data-form="bulk"]');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const values = Object.fromEntries(new FormData(form).entries());
+      const kind = kindKeyOf(values.kind, settings);
+      if (!kind) return toast('اكتب نوع الإجراء', 'error');
+      const save = form.querySelector('[data-save]');
+      save.disabled = true;
+      try {
+        const out = await S.recordSimpleActionsBulk(app.office, {executionIds: ids, kind, date: values.date, result: values.result, nextAction: values.nextAction, nextActionDate: values.nextActionDate});
+        closeModal();
+        st.selected = new Set();
+        toast(`سُجّل الإجراء على ${out.count} تنفيذ`);
+        await loadQueue();
+        await reloadGrid();
+      } catch (error) { save.disabled = false; toast(userError(error), 'error'); }
+    });
+    return card;
+  };
+
+  /* ---------- تفويض الأحداث (مرة واحدة لكل عرض) ---------- */
+  const onClick = event => {
+    const target = event.target;
+    const actEl = target.closest?.('[data-act]');
+    if (actEl && wc.contains(actEl)) { event.preventDefault(); event.stopPropagation(); return handleAct(actEl.dataset.act, actEl.dataset.id, actEl.dataset.from || 'row'); }
+    if (target.closest?.('[data-new-execution]')) return newExecutionDialog(app);
+    const routeEl = target.closest?.('[data-route]');
+    if (routeEl && wc.contains(routeEl)) return app.go(routeEl.dataset.route);
+    const runEl = target.closest?.('[data-run-start]');
+    if (runEl && wc.contains(runEl)) return startRun(runEl.dataset.runStart || 'queue');
+    if (target.closest?.('[data-run-exit]')) return exitRun();
+    if (target.closest?.('[data-run-skip]')) return runAdvance(st.run?.ids[st.run.index], false);
+    if (target.closest?.('[data-run-retry]')) { st.run = {...st.run, ids: st.run.skipped.slice(), index: 0, skipped: []}; return renderAll(); }
+    const openEl = target.closest?.('[data-open]');
+    if (openEl && wc.contains(openEl)) return app.go(`exc:${openEl.dataset.open}`);
+    if (target.closest?.('[data-close-panel]') || target.closest?.('[data-cancel]')) { st.open = null; return renderAll(); }
+    const dateEl = target.closest?.('[data-date-offset]');
+    if (dateEl) {
+      const form = dateEl.closest('form');
+      const input = form?.querySelector('[name="nextActionDate"]') || form?.querySelector('[name="date"]');
+      if (input) input.value = offsetDate(st.today, Number(dateEl.dataset.dateOffset));
+      return undefined;
+    }
+    const focusEl = target.closest?.('[data-focus-item]');
+    if (focusEl) return focusRow(focusEl.dataset.focusItem);
+    if (target.closest?.('[data-bulk-action]')) return openBulkAction();
+    if (target.closest?.('[data-clear-selection]')) { st.selected = new Set(); return renderAll(); }
+    if (target.closest?.('[data-select-visible]')) {
+      const sections = queueSections(st.items || [], {lane: st.count, query: st.search, sort: st.sort});
+      [...sections.now, ...sections.soon, ...sections.calm, ...sections.paused].slice(0, 300).forEach(item => st.selected.add(item.id));
+      return renderAll();
+    }
+    if (target.closest?.('[data-clear-search]')) {
+      st.search = ''; persist();
+      const input = root.querySelector('[data-search]'); if (input) input.value = '';
+      renderAll();
+      return reloadGrid();
+    }
+    return undefined;
+  };
+
+  function handleAct(act, id, from) {
+    const item = find(id);
+    if (!item) return toast('هذا التنفيذ لم يعد في الطابور — حدّث الصفحة', 'error');
+    if (act === 'open') return app.go(`exc:${id}`);
+    if (act === 'value') return valueSetupDialog(app, id).catch(error => toast(userError(error), 'error'));
+    if (act === 'statement') return statementDialog(app, id);
+    if (act === 'duration') return durationDialog(app, id, {lockExecution: true});
+    if (act === 'menu') {
+      st.open = st.open && st.open.id === id && st.open.mode === 'menu' ? null : {id, mode: 'menu', from: 'row'};
+      renderAll();
+      return undefined;
+    }
+    if (['collect', 'action', 'follow'].includes(act)) {
+      st.open = {id, mode: act, from: from === 'hero' ? 'hero' : 'row'};
+      pendingFocus = true;
+      renderAll();
+      if (from === 'run') return undefined;
+      root.querySelector(`[data-row="${CSS.escape(id)}"]`)?.scrollIntoView?.({block: 'nearest'});
+      return undefined;
+    }
+    return undefined;
+  }
+
+  function focusRow(id) {
+    const row = root.querySelector(`[data-row="${CSS.escape(id)}"]`);
+    if (!row) return;
+    const details = row.closest('details');
+    if (details) details.open = true;
+    row.scrollIntoView?.({block: 'center'});
+    row.focus?.({preventScroll: true});
+  }
+
+  const onSubmit = event => {
+    const form = event.target;
+    if (!form?.matches?.('form[data-form]') || !wc.contains(form)) return;
+    event.preventDefault();
+    submitForm(form);
+  };
+  const onInput = event => {
+    const form = event.target.closest?.('form[data-form="collect"]');
+    if (!form) return;
+    clearTimeout(form._previewTimer);
+    form._previewTimer = setTimeout(() => renderCollectPreview(form).catch(() => null), 200);
+  };
+  const renderCollectPreview = async form => {
+    const host = form.querySelector('[data-preview]');
+    const item = find(form.dataset.id);
+    if (!host || !item) return;
+    const amount = form.querySelector('[name="amount"]').value.trim();
+    if (!amount || !(Number(amount.replace(',', '.')) > 0)) { host.innerHTML = '<span class="muted small">اكتب المبلغ لتظهر معاينة التوزيع…</span>'; return; }
+    try {
+      const preview = await S.previewSimpleCollection(app.office, {executionId: item.id, amount, date: form.querySelector('[name="date"]').value, asOf: st.today, target: 'auto'});
+      const lines = preview.lines || [];
+      host.innerHTML = `<b>سيُخصَّص:</b> ${lines.length ? lines.map(line => `${esc(line.label)} ${money(line.amountMinor, item.currency)}`).join(' · ') : '<span class="muted">لا استحقاق بعد — يُحفظ رصيدًا دائنًا</span>'}
+        <span class="wc-preview-left">المتبقي بعد التحصيل: <b>${money(preview.remainingAfterMinor, item.currency)}</b></span>${preview.creditMinor > 0 ? ` <span class="cp-chip cp-chip--ok">رصيد دائن: ${money(preview.creditMinor, item.currency)}</span>` : ''}`;
+    } catch (error) { host.innerHTML = `<span class="muted small">${esc(userError(error))}</span>`; }
+  };
+  const onKeydownForm = event => {
+    const form = event.target.closest?.('form[data-form]');
+    if (!form || !wc.contains(form)) return;
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); form.requestSubmit?.(); }
+    else if (event.key === 'Escape') { event.preventDefault(); st.open = null; renderAll(); }
+  };
+  wc.addEventListener('click', onClick);
+  wc.addEventListener('submit', onSubmit);
+  wc.addEventListener('input', onInput);
+  wc.addEventListener('keydown', onKeydownForm);
+  wc.addEventListener('change', event => {
+    const box = event.target.closest?.('[data-select]');
+    if (box) {
+      if (box.checked) st.selected.add(box.dataset.select); else st.selected.delete(box.dataset.select);
+      renderBulk();
+      root.querySelector(`[data-row="${CSS.escape(box.dataset.select)}"]`)?.classList.toggle('is-selected', box.checked);
+      return;
+    }
+    if (event.target.matches?.('[data-sort]')) { st.sort = event.target.value; persist(); renderQueue(); }
+  });
+  // نقرة مربع التحديد لا تفتح الصف (المربع يُبدَّل بسلوكه الأصلي)
+  wc.addEventListener('click', event => { if (event.target.closest?.('.wc-check')) event.stopPropagation(); }, true);
+
+  /* ---------- اختصارات لوحة المفاتيح ---------- */
+  const rowsVisible = () => [...wc.querySelectorAll('.wc-row')].filter(row => !row.closest('details:not([open])') && !row.closest('[hidden]'));
+  const onKey = event => {
+    if (!wc.isConnected) { document.removeEventListener('keydown', onKey); return; }
+    if (document.querySelector('#modal-root .modal-card')) return;
+    const typing = /INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable;
+    if (event.key === 'Escape' && !typing) {
+      if (st.run) return exitRun();
+      if (st.open) { st.open = null; return renderAll(); }
+      if (st.selected.size) { st.selected = new Set(); return renderAll(); }
+      return undefined;
+    }
+    if (typing || event.ctrlKey || event.metaKey || event.altKey || st.run) return undefined;
+    const active = document.activeElement;
+    const row = active?.closest?.('.wc-row') || null;
+    const focusedId = row?.dataset.row || '';
+    switch (event.key) {
+      case '/': {
+        event.preventDefault();
+        root.querySelector('[data-search]')?.focus();
+        return undefined;
+      }
+      case 'j': case 'ArrowDown': case 'k': case 'ArrowUp': {
+        if (active && active !== document.body && !row && !wc.contains(active)) return undefined;
+        const list = rowsVisible();
+        if (!list.length) return undefined;
+        const delta = event.key === 'j' || event.key === 'ArrowDown' ? 1 : -1;
+        const index = row ? list.indexOf(row) : -1;
+        const next = list[Math.min(list.length - 1, Math.max(0, index + delta))] || list[0];
+        event.preventDefault();
+        next.focus({preventScroll: false});
+        next.scrollIntoView?.({block: 'nearest'});
+        return undefined;
+      }
+      case 'Enter': if (row) { event.preventDefault(); app.go(`exc:${focusedId}`); } return undefined;
+      case 'c': case 'a': {
+        const id = focusedId || heroItem()?.id || '';
+        if (!id) return undefined;
+        event.preventDefault();
+        return handleAct(event.key === 'c' ? 'collect' : 'action', id, focusedId ? 'row' : 'hero');
+      }
+      case 'x': case ' ': {
+        if (!row) return undefined;
+        event.preventDefault();
+        const box = row.querySelector('[data-select]');
+        if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change', {bubbles: true})); }
+        return undefined;
+      }
+      case 'r': event.preventDefault(); return startRun(st.selected.size ? 'selection' : 'queue');
+      default: return undefined;
+    }
+  };
+  document.addEventListener('keydown', onKey);
+
+  /* ---------- أزرار الترويسة والأدوات (تبقى كما كانت) ---------- */
   bindAll(root, '[data-demo-example]', async event => {
     const button = event.currentTarget;
     const label = button.textContent;
@@ -390,13 +818,13 @@ export async function bindExecutionCenter(app) {
           const out = await admin.seedExecutionDemoFiles(app.office);
           toast(`حُمِّل ${out.count} ملف تنفيذ تجريبي إضافي`);
           button.disabled = false;
-          await reload();
+          await loadQueue(); await reloadGrid();
           return;
         }
         const removed = await admin.removeExecutionDemoFiles(app.office);
         toast(`حُذف ${removed.removed} ملف تنفيذ تجريبي`, 'ok');
         button.disabled = false;
-        await reload();
+        await loadQueue(); await reloadGrid();
         return;
       }
       const out = await admin.seedExecutionDemoFiles(app.office);
@@ -419,41 +847,21 @@ export async function bindExecutionCenter(app) {
       await app.refresh();
     } catch (error) { toast(userError(error), 'error'); }
   });
+
+  /* ---------- البحث والترتيب ---------- */
   let searchTimer = 0;
   root.querySelectorAll('[data-search]').forEach(input => input.addEventListener('input', event => {
     st.search = event.target.value;
-    prefs.set('ui:exec:q', st.search);
+    persist();
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => reload().catch(error => app.fail(error)), 250);
+    searchTimer = setTimeout(() => { renderQueue(); reloadGrid().catch(error => app.fail(error)); }, 250);
   }));
-  bindAll(root, '[data-clear-search]', async () => {
-    st.search = ''; prefs.set('ui:exec:q', '');
-    const input = root.querySelector('[data-search]');
-    if (input) input.value = '';
-    await reload();
-  });
 
-  // العدّادات تُحسب عند كل دخول للصفحة: كانت تُحسب مرة واحدة لكل جلسة (st.ready)
-  // فتظل تعرض أصفارًا قديمة بعد أي إضافة أو حذف أو إلغاء حتى إعادة تحميل التطبيق.
-  const refreshCounters = async () => {
-    try {
-      const out = await scanCounters();
-      st.counts = out.counts; st.counted = out.counted; st.scannedAll = out.scannedAll; st.ready = true;
-      if (!root.isConnected) return;
-      renderCounters();
-      const note = root.querySelector('[data-counter-note]');
-      if (note) note.textContent = `العدّادات محسوبة على ${out.counted.toLocaleString('en-US')} ${out.scannedAll ? 'تنفيذ (كل السجل)' : 'تنفيذ (الأحدث)'} — والكتابة في الجدول تعرض كل الصفحات بالبحث.`;
-    } catch {
-      if (!root.isConnected) return;
-      const note = root.querySelector('[data-counter-note]');
-      if (note) note.textContent = 'تعذر حساب العدّادات — الجدول يعمل والبحث متاح.';
-    }
-  };
-
-  renderCounters();
-  await reload();
-  await maybeSeedExecutionDemo(app, reload).catch(() => null);
-  refreshCounters();
+  // أول رسم فوري بالحالة المعروفة، ثم مسح الطابور (العدّادات تُحسب عند كل دخول).
+  renderAll();
+  await loadQueue();
+  await maybeSeedExecutionDemo(app, async () => { await loadQueue(); await reloadGrid(); }).catch(() => null);
+  await reloadGrid();
   return true;
 }
 

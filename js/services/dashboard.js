@@ -1,6 +1,8 @@
 import {localDate,addDays,isActiveProcedure} from '../core/clock.js';
 import {isClosedFile} from '../domain/entities.js';
 
+import {executionAttentionBrief} from './execution-work.js';
+
 export async function dashboardBrief(office){
  const today=localDate();
  const add=addDays;
@@ -35,5 +37,7 @@ export async function dashboardBrief(office){
   const byId=new Map(clients.map(c=>[c.id,c.fullName||'']));
   for(const p of [...expiringPoa,...expiredPoa])p.clientName=byId.get(p.clientId)||'';
  }
- return {todayHearings,upcomingHearings,overdueProcedures,upcomingProcedures,appointmentsNext3,followupsThisWeek,staleFiles,expiringPoa,expiredPoa,periods:{today,tomorrow,weekEnd,d3,monday,nextMonday,nextSunday,monthStart,nextMonth}};
+ // التنفيذ: ما يحتاج قرارًا الآن فقط (عاجل/مستحق) — قراءة مفهرسة محدودة، ولا يفشل المكتب إن تعذّرت.
+ const executionAttention=await executionAttentionBrief(office,{today}).catch(()=>[]);
+ return {todayHearings,upcomingHearings,overdueProcedures,upcomingProcedures,appointmentsNext3,followupsThisWeek,staleFiles,expiringPoa,expiredPoa,executionAttention,periods:{today,tomorrow,weekEnd,d3,monday,nextMonday,nextSunday,monthStart,nextMonth}};
 }
