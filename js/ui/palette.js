@@ -54,6 +54,7 @@ export function staticCommands(app){
  nav('appointments','المواعيد',ROUTE_ICONS.appointments,'مواعيد');
  nav('communications','الاتصالات',ROUTE_ICONS.communications,'هاتف اتصال');
   nav('quickNotes','الملاحظات السريعة',ROUTE_ICONS.caseNotes,'ملاحظات سريعة التقاط inbox');
+ nav('reminders','التذكيرات',ROUTE_ICONS.reminders,'تذكير تنبيه إشعار جرس reminder bell');
  nav('judgments','الأحكام',ROUTE_ICONS.judgments,'أحكام');
  nav('expertReports','الخبراء',ROUTE_ICONS.expertReports,'خبراء تقارير');
  nav('execution','التنفيذ',ROUTE_ICONS.execution,'تنفيذ');

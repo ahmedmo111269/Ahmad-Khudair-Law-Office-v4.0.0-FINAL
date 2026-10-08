@@ -29,7 +29,8 @@ export const NAV_GROUPS = [
     {route: 'bailiffs', label: 'دليل المحضرين', icon: 'userCheck'},
     {route: 'appointments', label: 'المواعيد', icon: 'clock'},
     {route: 'communications', label: 'الاتصالات', icon: 'phone'},
-    {route: 'caseNotes', label: 'الملاحظات السريعة', icon: 'note'}]},
+    {route: 'caseNotes', label: 'الملاحظات السريعة', icon: 'note'},
+    {route: 'reminders', label: 'التذكيرات', icon: 'bell'}]},
   {id: 'judicial', label: 'القضائي والمالي', tab: 'القضائي والمالي', icon: 'landmark', items: [
     {route: 'judgments', label: 'الأحكام', icon: 'landmark'},
     {route: 'expertReports', label: 'تقارير الخبراء', icon: 'microscope'},

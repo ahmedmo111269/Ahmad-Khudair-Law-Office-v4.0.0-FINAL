@@ -14,13 +14,17 @@ import {
   getQuickNote, saveQuickNote, completeQuickNote, reopenQuickNote, archiveQuickNote, unarchiveQuickNote,
   deleteQuickNote, restoreQuickNote, snoozeQuickNote, toggleQuickNoteFlag, toggleQuickNoteChecklist, linkQuickNote,
   unlinkQuickNote, linksForNote, noteAgenda, smartCaptureProposals, saveQuickNoteDraft,
-  getQuickNoteDraft, deleteQuickNoteDraft, countQuickNotes, needsActionNotes, reorderQuickNotes, quickNoteTypes, normalizeSearch
+  getQuickNoteDraft, deleteQuickNoteDraft, quickNotesStats, emptyQuickNoteTrash, addTagToQuickNotes,
+  bulkUpdateQuickNotes, needsActionNotes, reorderQuickNotes, quickNoteTypes, normalizeSearch
 } from '../services/quick-notes.js';
 import {saveWorkItemFromQuickNote} from '../services/work-items.js';
+import {openEntityForm} from '../ui/form.js';
 
 const ACTION_LABEL = Object.freeze({complete: 'إنجاز', reopen: 'إعادة فتح', archive: 'أرشفة', delete: 'حذف', restore: 'استعادة', work: 'تحويل إلى متابعة'});
 const PRIORITY_LABEL = Object.freeze({LOW: 'منخفضة', NORMAL: 'عادية', HIGH: 'مرتفعة', URGENT: 'عاجلة'});
 const STATE_LABEL = Object.freeze({ACTIVE: 'مفتوحة', DONE: 'منجزة', SNOOZED: 'مؤجلة', ARCHIVED: 'مؤرشفة', TRASH: 'السلة'});
+const PRI_ICON = Object.freeze({LOW: '⬇ ', NORMAL: '• ', HIGH: '⬆ ', URGENT: '🔥 '});
+const NOTE_ACCENT = Object.freeze({YELLOW: '#eab308', BLUE: '#3b82f6', GREEN: '#22c55e', RED: '#ef4444', ORANGE: '#f97316', PURPLE: '#a855f7', GRAY: '#94a3b8'});
 const ENTITY_LABEL = Object.freeze({CLIENT: 'موكل', LEGAL_FILE: 'ملف', CASE: 'قضية', PARTY: 'طرف', HEARING: 'جلسة', PROCEDURE: 'عمل إداري', JUDGMENT: 'حكم', EXECUTION: 'تنفيذ', POA: 'توكيل', SERVICE_RECORD: 'إعلان / محضر', EXPERT_REPORT: 'تقرير خبير', APPOINTMENT: 'موعد', COMMUNICATION: 'اتصال', FEE: 'أتعاب', DOCUMENT_REFERENCE: 'مستند', WORK_ITEM: 'متابعة', QUICK_NOTE: 'ملاحظة'});
 
 function contextFromRoute(app) {
@@ -74,12 +78,15 @@ export function quickNotesPage(app, query) {
         <button type="button" class="ghost" data-quick-fab-copy>التقاط الآن</button>
         <button type="button" class="ghost" data-quick-refresh>⟳ تحديث</button>
         <button type="button" class="ghost" data-quick-print>طباعة العرض</button>
+        <button type="button" class="ghost danger" data-quick-empty-trash hidden>🗑 إفراغ السلة</button>
       </div>
     </section>
     <section class="quick-notes-stats" aria-label="ملخص الملاحظات">
       <button type="button" class="qn-stat" data-status="INBOX"><b data-count="INBOX">—</b><span>صندوق الالتقاط</span></button>
       <button type="button" class="qn-stat" data-status="ACTIVE"><b data-count="ACTIVE">—</b><span>مفتوحة</span></button>
       <button type="button" class="qn-stat" data-status="DONE"><b data-count="DONE">—</b><span>منجزة</span></button>
+      <button type="button" class="qn-stat" data-status="SNOOZED"><b data-count="SNOOZED">—</b><span>مؤجلة</span></button>
+      <button type="button" class="qn-stat" data-status="ARCHIVED"><b data-count="ARCHIVED">—</b><span>مؤرشفة</span></button>
       <button type="button" class="qn-stat" data-status="TRASH"><b data-count="TRASH">—</b><span>السلة</span></button>
     </section>
     <section class="panel quick-notes-toolbar" data-collapse-default="open" aria-label="تصفية الملاحظات">
@@ -89,8 +96,19 @@ export function quickNotesPage(app, query) {
         <label>الترتيب<select data-quick-sort><option value="updated">الأحدث تعديلًا</option><option value="newest">الأحدث إضافة</option><option value="oldest">الأقدم</option><option value="due">موعد الاستحقاق</option><option value="manual">الترتيب اليدوي</option></select></label>
         <label class="qn-check"><input type="checkbox" data-quick-needs> يحتاج إجراء</label>
       </div>
-      <div class="qn-filter-hints" aria-live="polite">مفاتيح البحث: <code>وسم: مهم</code> <code>أولوية: عاجلة</code> <code>متأخر</code> <code>مؤجل</code> <code>بلا_ربط</code></div>
+      <div class="qn-filter-hints" aria-live="polite">مفاتيح البحث: <code>وسم: مهم</code> <code>أولوية: عاجلة</code> <code>متأخر</code> <code>مؤجل</code> <code>مثبت</code> <code>بلا_ربط</code></div>
     </section>
+    <div class="qn-bulkbar" data-qn-bulkbar hidden role="toolbar" aria-label="إجراءات جماعية على الملاحظات المحددة">
+      <span class="qn-bulkcount" data-qn-bulkcount aria-live="polite">0 محددة</span>
+      <button type="button" class="ghost small" data-bulk="done">✓ إنجاز</button>
+      <button type="button" class="ghost small" data-bulk="reopen">↺ إعادة فتح</button>
+      <button type="button" class="ghost small" data-bulk="archive">أرشفة</button>
+      <button type="button" class="ghost small" data-bulk="trash">نقل للسلة</button>
+      <button type="button" class="ghost small" data-bulk="restore">استعادة</button>
+      <label class="qn-bulk-pri"><span>الأولوية</span><select data-bulk-priority aria-label="أولوية للمحدد"><option value="">— اختر —</option>${priorityOptions()}</select></label>
+      <button type="button" class="ghost small" data-bulk="tag">+ وسم</button>
+      <button type="button" class="ghost small" data-bulk="clear">إلغاء التحديد</button>
+    </div>
     <div class="quick-notes-layout">
       <main class="panel quick-notes-list-panel" data-collapse-default="open"><div class="panel-head"><h3>الملاحظات</h3><span class="muted small" data-quick-result>جارٍ التحميل…</span></div><div data-quick-list role="list" aria-live="polite" aria-busy="true"></div><div class="qn-more"><button type="button" class="ghost" data-quick-more hidden>تحميل المزيد</button></div></main>
       <aside class="panel quick-notes-side" data-collapse-default="open"><div class="panel-head"><h3>📅 الأجندة</h3><button type="button" class="ghost small" data-agenda-refresh>تحديث</button></div><div data-quick-agenda><p class="muted">جارٍ التحميل…</p></div><div class="panel-head qn-side-head"><h3>يحتاج إجراء</h3></div><div data-quick-needs-list><p class="muted">جارٍ التحميل…</p></div></aside>
@@ -102,7 +120,7 @@ export function quickNotesPage(app, query) {
 export async function bindQuickNotes(app, query) {
   const root = document.querySelector('#quick-notes-root');
   if (!root) return;
-  const rt = {app, office: app.office, root, query: query?.get('q') || '', status: query?.get('status') || 'INBOX', sort: 'updated', cursor: null, busy: false, needs: false, links: contextFromRoute(app)};
+  const rt = {app, office: app.office, root, query: query?.get('q') || '', status: query?.get('status') || 'INBOX', sort: 'updated', cursor: null, busy: false, needs: false, links: contextFromRoute(app), selected: new Set()};
   app.__quickNotes = rt;
   const qInput = root.querySelector('[data-quick-query]');
   const statusInput = root.querySelector('[data-quick-status]');
@@ -112,7 +130,7 @@ export async function bindQuickNotes(app, query) {
   const renderPage = async ({append = false} = {}) => {
     if (rt.busy) return;
     rt.busy = true; list.setAttribute('aria-busy', 'true');
-    if (!append) { rt.cursor = null; list.replaceChildren(); }
+    if (!append) { rt.cursor = null; list.replaceChildren(); rt.selected.clear(); syncBulkBar(); }
     try {
       const page = await pageQuickNotes(rt.office, {query: rt.query, status: rt.status, sort: rt.sort, limit: 40, cursor: append ? rt.cursor : null, direction: 'prev', filter: rt.needs ? needsActionPredicate : null});
       rt.cursor = page.nextCursor;
@@ -120,7 +138,6 @@ export async function bindQuickNotes(app, query) {
       root.querySelector('[data-quick-more]').hidden = !page.hasMore;
       root.querySelector('[data-quick-result]').textContent = `${list.children.length}${page.hasMore ? '+' : ''} نتيجة · ${STATE_LABEL[rt.status] || 'كل الحالات'}`;
       if (!page.rows.length && !append) list.append(emptyNotes(rt.status));
-      updateCountLabel(root, rt.status, list.children.length);
     } catch (error) {
       if (!append) list.append(errorNotes(normalizeError(error)));
       toast(normalizeError(error), 'error');
@@ -146,16 +163,33 @@ export async function bindQuickNotes(app, query) {
     } catch (error) { host.replaceChildren(textNode(normalizeError(error))); }
   };
   const renderCounts = async () => {
-    // كل عداد استعلام مستقل ومحدود؛ لا تُحمّل الملاحظات كلها في الذاكرة.
-    for (const status of ['INBOX', 'ACTIVE', 'DONE', 'TRASH']) {
-      countQuickNotes(rt.office, {status}).then(value => { const el = root.querySelector(`[data-count="${status}"]`); if (el) el.textContent = String(value); }).catch(() => {});
-    }
+    // مسحة واحدة تُحدث كل الصناديق (بدل أربع مسحات كاملة)؛ لا تُحمّل الملاحظات في الذاكرة.
+    try {
+      const stats = await quickNotesStats(rt.office);
+      for (const key of ['INBOX', 'ACTIVE', 'DONE', 'SNOOZED', 'ARCHIVED', 'TRASH']) {
+        const el = root.querySelector(`[data-count="${key}"]`);
+        if (el) el.textContent = `${stats[key] ?? 0}${stats.capped ? '+' : ''}`;
+      }
+    } catch { /* العدّادات تجمّيلي: فشلها لا يمنع عرض القائمة */ }
   };
-  const refresh = async () => { await Promise.all([renderPage(), renderAgenda(), renderNeeds(), renderCounts()]); };
+  /** تفعيل صندوق الإحصاء المقابل للصناديق الحالية + إظهار «إفراغ السلة» في وضع السلة فقط. */
+  function syncStatsChrome() {
+    root.querySelectorAll('.qn-stat[data-status]').forEach(b => b.classList.toggle('on', b.dataset.status === rt.status));
+    const trashBtn = root.querySelector('[data-quick-empty-trash]');
+    if (trashBtn) trashBtn.hidden = rt.status !== 'TRASH';
+  }
+  function syncBulkBar() {
+    const bar = root.querySelector('[data-qn-bulkbar]');
+    if (!bar) return;
+    bar.hidden = rt.selected.size === 0;
+    const count = root.querySelector('[data-qn-bulkcount]');
+    if (count) count.textContent = `${rt.selected.size} محددة`;
+  }
+  const refresh = async () => { await Promise.all([renderPage(), renderAgenda(), renderNeeds(), renderCounts()]); syncStatsChrome(); };
   rt.refresh = refresh;
 
   qInput.addEventListener('input', debounce(() => { rt.query = qInput.value.slice(0, 200); renderPage(); }, 220));
-  statusInput.addEventListener('change', () => { rt.status = statusInput.value; renderPage(); });
+  statusInput.addEventListener('change', () => { rt.status = statusInput.value; syncStatsChrome(); renderPage(); });
   sortInput.addEventListener('change', () => { rt.sort = sortInput.value; renderPage(); });
   root.querySelector('[data-quick-needs]').addEventListener('change', e => { rt.needs = e.target.checked; renderPage(); });
   root.querySelector('[data-quick-more]').addEventListener('click', () => renderPage({append: true}));
@@ -181,15 +215,81 @@ export async function bindQuickNotes(app, query) {
     catch (error) { toast(normalizeError(error), 'error'); await renderPage(); }
     draggedId = '';
   });
-  root.querySelectorAll('[data-status]').forEach(button => button.addEventListener('click', () => { statusInput.value = button.dataset.status; rt.status = button.dataset.status; renderPage(); }));
+  root.querySelectorAll('[data-status]').forEach(button => button.addEventListener('click', () => { statusInput.value = button.dataset.status; rt.status = button.dataset.status; syncStatsChrome(); renderPage(); }));
   root.querySelectorAll('[data-quick-new]').forEach(button => button.addEventListener('click', () => openQuickNoteCapture(app, {context: rt.links, onSaved: refresh})));
   root.querySelector('[data-quick-fab-copy]').addEventListener('click', () => openQuickNoteCapture(app, {context: rt.links, onSaved: refresh}));
   root.querySelector('[data-quick-refresh]').addEventListener('click', refresh);
   root.querySelector('[data-agenda-refresh]').addEventListener('click', renderAgenda);
   root.querySelector('[data-quick-print]').addEventListener('click', () => window.print());
+  // ---------- إجراءات جماعية (حدّ ثم طبّق) ----------
+  root.querySelector('[data-quick-empty-trash]')?.addEventListener('click', async () => {
+    const confirmed = await confirmBox('إفراغ السلة نهائيًا؟ ستُحذف ملاحظات السلة وروابطها بلا إمكانية استعادة. الملاحظات خارج السلة لا تتأثر.', {okText: 'إفراغ نهائي'});
+    if (!confirmed) return;
+    try {
+      const {purged} = await emptyQuickNoteTrash(rt.office, {limit: 500});
+      toast(purged ? `أُفرغت ${purged} ملاحظة من السلة نهائيًا.` : 'السلة فارغة بالفعل.', purged ? 'ok' : 'info');
+      await refresh();
+    } catch (error) { toast(normalizeError(error), 'error'); }
+  });
+  root.querySelector('[data-qn-bulkbar]')?.addEventListener('click', async event => {
+    const button = event.target.closest('[data-bulk]');
+    if (!button) return;
+    const action = button.dataset.bulk;
+    const ids = [...rt.selected];
+    if (action === 'clear') { rt.selected.clear(); syncBulkBar(); list.querySelectorAll('[data-qn-select]:checked').forEach(box => { box.checked = false; }); return; }
+    if (!ids.length) return toast('حدّد ملاحظة أو أكثر أولًا.', 'info');
+    try {
+      const nowStamp = new Date().toISOString();
+      if (action === 'done') await bulkUpdateQuickNotes(rt.office, ids, {lifecycle: 'DONE'}, 'completed');
+      else if (action === 'reopen') await bulkUpdateQuickNotes(rt.office, ids, {lifecycle: 'OPEN'}, 'reopened');
+      else if (action === 'archive') await bulkUpdateQuickNotes(rt.office, ids, {archivedAt: nowStamp}, 'archived');
+      else if (action === 'trash') {
+        if (!await confirmBox(`نقل ${ids.length} ملاحظة إلى السلة؟ يمكن استعادتها لاحقًا.`)) return;
+        await bulkUpdateQuickNotes(rt.office, ids, {deletedAt: nowStamp, isDeleted: true}, 'deleted');
+      } else if (action === 'restore') await bulkUpdateQuickNotes(rt.office, ids, {deletedAt: null, isDeleted: false}, 'restored');
+      else if (action === 'tag') {
+        const answer = await confirmBox('وسم جديد يُضاف إلى المحدد:', {okText: 'إضافة', input: true, label: 'الوسم', placeholder: 'مهم، مراجعة…'});
+        if (!answer.ok || !String(answer.value || '').trim()) return;
+        const out = await addTagToQuickNotes(rt.office, ids, answer.value);
+        toast(`أُضيف الوسم إلى ${out.count} ملاحظة.`, 'ok');
+      }
+      rt.selected.clear();
+      toast('تم تنفيذ الإجراء على المحدد.', 'ok');
+      await refresh();
+    } catch (error) { toast(normalizeError(error), 'error'); }
+  });
+  root.querySelector('[data-bulk-priority]')?.addEventListener('change', async event => {
+    const value = event.target.value;
+    event.target.value = '';
+    if (!value) return;
+    const ids = [...rt.selected];
+    if (!ids.length) return toast('حدّد ملاحظة أو أكثر أولًا.', 'info');
+    try {
+      await bulkUpdateQuickNotes(rt.office, ids, {priority: value}, 'bulk-priority');
+      rt.selected.clear();
+      toast('تم تحديث أولوية المحدد.', 'ok');
+      await refresh();
+    } catch (error) { toast(normalizeError(error), 'error'); }
+  });
+  list.addEventListener('change', event => {
+    const box = event.target.closest?.('[data-qn-select]');
+    if (!box) return;
+    const id = box.dataset.qnSelect;
+    if (box.checked) rt.selected.add(id); else rt.selected.delete(id);
+    syncBulkBar();
+  });
   list.addEventListener('click', async event => {
-    const button = event.target.closest?.('[data-note-action]');
+    if (event.target.closest?.('[data-qn-select]')) return; // مربع التحديد لا يفتح المحرر
+    const tagChip = event.target.closest?.('[data-qn-tag]');
     const card = event.target.closest?.('[data-note-id]');
+    if (tagChip && card) { // نقر الوسم: تصفية فورية بهذا الوسم
+      event.preventDefault(); event.stopPropagation();
+      qInput.value = `وسم: ${tagChip.dataset.qnTag}`;
+      rt.query = qInput.value; rt.status = 'ALL'; statusInput.value = 'ALL'; syncStatsChrome();
+      await renderPage();
+      return;
+    }
+    const button = event.target.closest?.('[data-note-action]');
     if (!card) return;
     const id = card.dataset.noteId;
     if (!button || button.dataset.noteAction === 'open') { openQuickNoteEditor(app, id, {onSaved: refresh}); return; }
@@ -204,6 +304,30 @@ export async function bindQuickNotes(app, query) {
       else if (action === 'restore') await restoreQuickNote(rt.office, id);
       else if (action === 'pin' || action === 'star') { const note = await getQuickNote(rt.office, id); await toggleQuickNoteFlag(rt.office, id, action === 'pin' ? 'isPinned' : 'isStarred', !(action === 'pin' ? note.isPinned : note.isStarred)); }
       else if (action === 'snooze') await snoozeQuickNote(rt.office, id, addDays(localDate(new Date()), 1) + 'T09:00:00.000Z');
+      else if (action === 'copy') {
+        const note = await getQuickNote(rt.office, id);
+        await copyNoteText(note);
+        return; // النسخ لا يغيّر البيانات: بلا تحديث للقائمة
+      }
+      else if (action === 'appt') {
+        const note = await getQuickNote(rt.office, id);
+        await openEntityForm(app, 'appointments', {
+          preset: {
+            title: note.title || String(note.content || 'تذكير').slice(0, 90),
+            date: note.dueAt || localDate(new Date()),
+            fileId: note.fileId || undefined,
+            clientId: note.clientId || undefined,
+            notes: String(note.content || '').slice(0, 500)
+          },
+          title: 'موعد من ملاحظة سريعة',
+          onSaved: async row => {
+            await linkQuickNote(rt.office, id, {entityType: 'APPOINTMENT', entityId: row.id});
+            toast('تم إنشاء الموعد وربطه بالملاحظة.', 'ok');
+            await refresh();
+          }
+        });
+        return;
+      }
       else if (action === 'work') {
         const note = await getQuickNote(rt.office, id); const result = await saveWorkItemFromQuickNote(rt.office, note);
         if (!note.workItemIds?.includes(result.row.id)) await saveQuickNote(rt.office, {...note, workItemIds: [...(note.workItemIds || []), result.row.id]}, {id: note.id});
@@ -219,14 +343,19 @@ export async function bindQuickNotes(app, query) {
 
 function makeNoteCard(note, rt) {
   const card = document.createElement('article'); card.className = `qn-card qn-${String(note.effectiveState || effectiveNoteState(note)).toLowerCase()}`; card.dataset.noteId = note.id; card.setAttribute('role', 'listitem'); if (rt.sort === 'manual') { card.draggable = true; card.setAttribute('aria-label', 'اسحب لإعادة ترتيب الملاحظة'); }
+  // لون الملاحظة المختار يظهر على الحافة دون أن يطغى على ألوان الحالات (منجزة/سلة…).
+  const accent = NOTE_ACCENT[note.colorToken];
+  if (accent) card.style.setProperty('--qn-accent', accent);
+  const words = highlightWords(rt.query);
   const head = document.createElement('div'); head.className = 'qn-card-head';
+  const select = document.createElement('input'); select.type = 'checkbox'; select.className = 'qn-select'; select.dataset.qnSelect = note.id; select.setAttribute('aria-label', `تحديد ملاحظة: ${note.title || note.content?.slice(0, 30) || ''}`); select.title = 'تحديد لإجراءات جماعية'; head.append(select);
   const pin = button(note.isPinned ? '📌' : '☆', note.isPinned ? 'إلغاء التثبيت' : 'تثبيت', 'pin');
   const star = button(note.isStarred ? '★' : '☆', note.isStarred ? 'إلغاء النجمة' : 'تمييز بنجمة', 'star');
   head.append(pin, star);
-  const title = document.createElement('button'); title.type = 'button'; title.className = 'qn-title'; title.dataset.noteAction = 'open'; title.textContent = note.title || 'ملاحظة بلا عنوان'; head.append(title);
-  const meta = document.createElement('span'); meta.className = 'qn-meta'; meta.textContent = `${STATE_LABEL[note.effectiveState] || ''} · ${PRIORITY_LABEL[note.priority] || ''}`; head.append(meta);
+  const title = document.createElement('button'); title.type = 'button'; title.className = 'qn-title'; title.dataset.noteAction = 'open'; appendHighlighted(title, note.title || 'ملاحظة بلا عنوان', words); head.append(title);
+  const meta = document.createElement('span'); meta.className = 'qn-meta'; meta.textContent = `${STATE_LABEL[note.effectiveState] || ''} · ${PRI_ICON[note.priority] || ''}${PRIORITY_LABEL[note.priority] || ''}`; head.append(meta);
   card.append(head);
-  const body = document.createElement('p'); body.className = 'qn-body'; body.textContent = note.content || '—'; card.append(body);
+  const body = document.createElement('p'); body.className = 'qn-body'; appendHighlighted(body, note.content || '—', words); card.append(body);
   if (Array.isArray(note.checklist) && note.checklist.length) {
     const checklist = document.createElement('div'); checklist.className = 'qn-checklist';
     const completed = note.checklist.filter(item => item.done).length;
@@ -239,7 +368,7 @@ function makeNoteCard(note, rt) {
   if (note.remindAt) chips.append(chip(`🔔 ${dateTimeInputValue(note.remindAt).replace('T', ' ')}`, 'reminder'));
   if (note.snoozedUntil && note.effectiveState === 'SNOOZED') chips.append(chip('💤 مؤجلة', 'snoozed'));
   if (note.sourceId) chips.append(chip(`${ENTITY_LABEL[note.sourceType] || note.sourceType}: ${note.sourceId}`, 'link'));
-  (note.tagIds || []).slice(0, 8).forEach(tag => chips.append(chip(`#${tag}`, 'tag')));
+  (note.tagIds || []).slice(0, 8).forEach(tag => { const c = button(`#${tag}`, `تصفية بهذا الوسم: ${tag}`, 'tag'); c.classList.add('qn-chip', 'tag'); c.dataset.qnTag = tag; chips.append(c); });
   card.append(chips);
   const actions = document.createElement('div'); actions.className = 'qn-actions';
   const state = note.effectiveState;
@@ -251,18 +380,85 @@ function makeNoteCard(note, rt) {
     actions.append(button('تعديل', 'تعديل', 'open', 'ghost'));
     actions.append(button('متابعة', 'تحويل إلى متابعة', 'work', 'ghost'));
     if (state !== 'SNOOZED') actions.append(button('غفوة', 'تأجيل إلى الغد', 'snooze', 'ghost'));
+    if (state !== 'ARCHIVED') actions.append(button('موعد', 'تحويل إلى موعد في قسم المواعيد مع ربطه بالملاحظة', 'appt', 'ghost'));
     if (state !== 'ARCHIVED') actions.append(button('أرشفة', 'أرشفة', 'archive', 'ghost'));
+    actions.append(button('نسخ', 'نسخ نص الملاحظة', 'copy', 'ghost'));
     actions.append(button('سلة', 'نقل إلى السلة', 'delete', 'danger'));
   }
   card.append(actions); return card;
 }
+
+/** كلمات البحث الخام (بلا مفاتيح وسم:) لتسلييط النتائج في العنوان والنص. */
+function highlightWords(query) {
+  return String(query || '').trim().split(/[\s،,;؛]+/).flatMap(word => {
+    const pair = /^([^:：]+)[:：](.+)$/.exec(word);
+    if (pair) return [pair[2]];
+    if (/[:：]$/.test(word)) return [];
+    return [word];
+  }).filter(word => word.length > 0).slice(0, 12);
+}
+
+/** إضافة نص الملاحظة إلى عنصر مع تضييق كلمات البحث — textContent و<mark> فقط، بلا HTML غير الموثوق. */
+function appendHighlighted(parent, text, words) {
+  const value = String(text ?? '');
+  if (!words || !words.length) { parent.textContent = value; return; }
+  const lower = value.toLowerCase();
+  const ranges = [];
+  for (const word of words) {
+    const needle = word.toLowerCase();
+    if (!needle) continue;
+    let at = lower.indexOf(needle);
+    while (at !== -1 && ranges.length < 200) { ranges.push([at, at + needle.length]); at = lower.indexOf(needle, at + needle.length); }
+  }
+  if (!ranges.length) { parent.textContent = value; return; }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  parent.replaceChildren();
+  let cursor = 0;
+  for (const [from, to] of merged) {
+    if (from > cursor) parent.append(document.createTextNode(value.slice(cursor, from)));
+    const mark = document.createElement('mark'); mark.textContent = value.slice(from, to); parent.append(mark);
+    cursor = to;
+  }
+  if (cursor < value.length) parent.append(document.createTextNode(value.slice(cursor)));
+}
+
+/** نسخ الملاحظة كنص منسّق (عنوان/نص/وسوم/مواعيد) مع بديل execCommand للأجهزة بلا Clipboard API. */
+async function copyNoteText(note) {
+  if (!note) return toast('الملاحظة غير موجودة.', 'error');
+  const lines = [
+    note.title || '',
+    '',
+    note.content || '',
+    note.tagIds?.length ? `وسوم: ${note.tagIds.join('، ')}` : '',
+    note.dueAt ? `الاستحقاق: ${note.dueAt}` : '',
+    note.remindAt ? `التذكير: ${dateTimeInputValue(note.remindAt).replace('T', ' ')}` : ''
+  ].filter((line, index) => line || index === 1);
+  const text = lines.join('\n').trim();
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    else throw new Error('no clipboard');
+    toast('نُسخ نص الملاحظة.', 'ok');
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text; document.body.append(area); area.select();
+    try { document.execCommand('copy'); toast('نُسخ نص الملاحظة.', 'ok'); }
+    catch { toast('تعذر النسخ على هذا الجهاز.', 'error'); }
+    area.remove();
+  }
+}
+
 function button(label, aria, action, className = '') { const b = document.createElement('button'); b.type = 'button'; b.className = `qn-action ${className}`; b.dataset.noteAction = action; b.title = aria; b.setAttribute('aria-label', aria); b.textContent = label; return b; }
 function chip(label, className = '') { const span = document.createElement('span'); span.className = `qn-chip ${className}`; span.textContent = label; return span; }
 function textNode(value) { const node = document.createElement('p'); node.className = 'muted small'; node.textContent = String(value); return node; }
 function emptyNotes(status) { const node = textNode(status === 'INBOX' ? 'صندوق الالتقاط فارغ. استخدم Ctrl+Shift+N لالتقاط فكرة جديدة.' : 'لا توجد ملاحظات في هذا العرض.'); node.className = 'qn-empty muted'; return node; }
 function errorNotes(value) { const node = textNode(value); node.className = 'qn-empty error'; return node; }
 function makeAgendaItem(note, {compact = false} = {}) { const item = document.createElement('button'); item.type = 'button'; item.className = `qn-agenda-item${compact ? ' compact' : ''}`; item.dataset.noteId = note.id; const title = document.createElement('b'); title.textContent = note.title || note.content?.slice(0, 50) || 'ملاحظة'; const date = document.createElement('small'); date.textContent = `${note.dueAt || 'بدون موعد'} · ${PRIORITY_LABEL[note.priority] || ''}`; item.append(title, date); item.addEventListener('click', () => { const event = new CustomEvent('quick-note:open', {detail: note.id}); document.dispatchEvent(event); }); return item; }
-function updateCountLabel(root, status, value) { const el = root.querySelector(`[data-count="${status}"]`); if (el && el.textContent === '—') el.textContent = String(value); }
 function debounce(fn, wait) { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), wait); }; }
 
 export async function openQuickNoteCapture(app, {context = null, onSaved = null, initialText = ''} = {}) {

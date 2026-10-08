@@ -13,6 +13,18 @@ import {fmtDate} from '../domain/entities.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {prefs} from '../core/preferences.js';
 import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
+import {PROCEDURES_EXTRAS} from './procedures-extras.js';
+
+// ===== سجل إضافات القائمة =====
+// صفحة قائمة عامة تستضيف لوحات مخصصة فوق الجدول (ملخص/إحصاء/لوحة حالات)
+// دون تحويل listPage إلى كود خاص بكياان. الوحدة تصدّر كائن extras وتُسجّل هنا،
+// ولا تستورد list-page (لا حلقات استيراد).
+const LIST_EXTRAS = new Map();
+export function registerListExtras(store, extras) {
+  if (store && extras) LIST_EXTRAS.set(store, extras);
+}
+export function listExtrasFor(store) { return LIST_EXTRAS.get(store) || null; }
+registerListExtras('procedures', PROCEDURES_EXTRAS);
 
 export function columnsFor(store,refs,{extra=[],relations=null}={}){
  const ent=ENTITIES[store];
@@ -45,18 +57,20 @@ export async function sectionGrid(app,el,store,rows,{storageKey,title,extra=[],c
 
 const LIST_VIEW_KEY=store=>`ui:list-view:${store}`;
 const state=app=>(app.__lists=app.__lists||{});
-function listFilterCount(st){return (String(st.q||'').trim()?1:0)+(st.preset&&st.preset!=='all'?1:0)}
-function saveListView(store,st){prefs.set(LIST_VIEW_KEY(store),{q:st.q||'',preset:st.preset||'all',from:st.from||'',to:st.to||'',showCal:Boolean(st.showCal)})}
+function listFilterCount(st){return (String(st.q||'').trim()?1:0)+(st.preset&&st.preset!=='all'?1:0)+(st.status&&st.status!=='all'?1:0)}
+function saveListView(store,st){prefs.set(LIST_VIEW_KEY(store),{q:st.q||'',preset:st.preset||'all',from:st.from||'',to:st.to||'',showCal:Boolean(st.showCal),status:st.status||'all'})}
 
 
 export function listPage(app,store,query){
  const ent=ENTITIES[store];
+ const extras=listExtrasFor(store);
  // اشتراك القائمة في نظام ترتيب الأقسام المركزي (تعريف واحد يعمل لكل القوائم)
  registerPageLayout({pageId:store,title:ent.plural,sections:[
+  ...(extras?[{id:'extras',title:extras.title||'ملخص وإجراءات سريعة',icon:extras.icon||'◈'}]:[]),
   {id:'filters',title:'عوامل التصفية والفترات'},
   {id:'grid',title:'جدول السجلات',canHide:false}]});
  const saved=prefs.get(LIST_VIEW_KEY(store),{})||{};
- const st=state(app)[store]=state(app)[store]||{q:saved.q||'',preset:saved.preset||'all',from:saved.from||'',to:saved.to||'',showCal:saved.showCal??Boolean(ent.calendar)};
+ const st=state(app)[store]=state(app)[store]||{q:saved.q||'',preset:saved.preset||'all',from:saved.from||'',to:saved.to||'',showCal:saved.showCal??Boolean(ent.calendar),status:saved.status||'all'};
  if(query?.get('preset')){st.preset=query.get('preset');st.from=query.get('from')||'';st.to=query.get('to')||''}
  if(query?.get('q')!==null&&query?.get('q')!==undefined)st.q=query.get('q');
  saveListView(store,st);
@@ -64,6 +78,7 @@ export function listPage(app,store,query){
  const presetLabel=store==='procedures'?[...PRESETS.slice(0,1),['overdue','المتأخرة'],...PRESETS.slice(1)]:PRESETS;
  return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
   <div class="head-actions"><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-qa-custom title="إظهار أو إخفاء إجراءات الصف">إجراءات الصف</button><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
+ ${extras?`<section class="panel list-extras-panel" data-section-id="extras" data-collapse-id="list-extras-${esc(store)}" data-collapse-default="open"><div class="panel-head"><h3>${esc(extras.heading||'◈ ملخص سريع')}</h3><span class="muted small">${esc(extras.hint||'')}</span></div><div id="list-extras" aria-live="polite"><p class="muted small">جارٍ تحميل الملخص…</p></div></section>`:''}
  <section class="panel list-filter-panel" data-section-id="filters" data-collapse-id="list-filters-${esc(store)}"><div class="panel-head"><h3>🔍 عوامل التصفية والفترات</h3><span class="badge" data-list-filter-count>${listFilterCount(st)?`${listFilterCount(st)} فلاتر نشطة`:'لا توجد فلاتر نشطة'}</span></div>
  <div class="list-controls">
   <input id="list-q" type="search" class="list-search" value="${esc(st.q)}" placeholder="بحث فوري شامل…" autocomplete="off" aria-label="بحث">
@@ -78,6 +93,8 @@ export function listPage(app,store,query){
 
 export function bindListPage(app,store){
  const ent=ENTITIES[store];const st=state(app)[store];
+ const extras=listExtrasFor(store);
+ if(!st.status)st.status='all';
  const root=document.querySelector('#main-content');
  let grid=null;
  const gridRefs=new Map(); // تسميات المراجع؛ سجلات العلاقات تبقى في WeakMap مستقلة
@@ -85,9 +102,16 @@ export function bindListPage(app,store){
  const status=root.querySelector('.list-status');
  const filterBadge=root.querySelector('[data-list-filter-count]');
  const syncFilterSummary=()=>{const n=listFilterCount(st);if(filterBadge)filterBadge.textContent=n?`${n} فلاتر نشطة`:'لا توجد فلاتر نشطة'};
+ // مرشّح الحالة (شرائح الملخص) يُركّب مع مرشّح الفترة دون إلغاء أحدهما للآخر.
+ const statusFilter=()=>{
+  if(!extras?.statusFilter||!st.status||st.status==='all')return null;
+  try{return extras.statusFilter(st.status)}catch{return null}
+ };
  const currentScope=()=>{
   const [from,to]=st.preset==='overdue'?['0000-01-01',yesterday()]:presetRange(st.preset,st.from,st.to);
-  const filter=st.preset==='overdue'?(row=>!row.status||['open','pending'].includes(row.status)):null;
+  const presetFilter=st.preset==='overdue'?(row=>!row.status||['open','pending'].includes(row.status)):null;
+  const extraFilter=statusFilter();
+  const filter=presetFilter||extraFilter?(row=>(!presetFilter||presetFilter(row))&&(!extraFilter||extraFilter(row))):null;
   return {from,to,filter};
  };
  const scopeSummary=()=>{
@@ -140,6 +164,12 @@ export function bindListPage(app,store){
   mountCalendar(root.querySelector('#list-calendar'),{selected:st.preset==='custom'&&st.from&&st.from===st.to?st.from:undefined,
    onMonthChange:async(y,m)=>{const first=`${y}-${String(m).padStart(2,'0')}-01`,last=`${y}-${String(m).padStart(2,'0')}-31`;const {rows}=await scan(app.office,store,{index:ent.dateIndex||ent.dateField,lower:first,upper:last+'\uffff',limit:3000,direction:'next'});const mm=new Map();for(const r of rows){const d=String(r[ent.dateField]||'').slice(0,10);mm.set(d,(mm.get(d)||0)+1)}return mm},
    onSelect:d=>{st.preset='custom';st.from=d;st.to=d;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset==='custom'));const cr=root.querySelector('.custom-range');cr.hidden=false;cr.querySelector('#list-from').value=d;cr.querySelector('#list-to').value=d;saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err))}});
+ }
+ if(extras?.mount){
+  const host=root.querySelector('#list-extras');
+  const setStatus=value=>{st.status=value||'all';saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err))};
+  const ctx={app,office:app.office,st,reload:()=>load().catch(err=>app.fail(err)),setStatus,root};
+  Promise.resolve(extras.mount(host,ctx)).catch(error=>{console.error('list extras',error);if(host)host.innerHTML=`<p class="muted small">تعذر تحميل الملخص السريع. ${esc(error?.message||'')}</p>`});
  }
  load().catch(err=>app.fail(err));
 }
