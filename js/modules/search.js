@@ -87,7 +87,9 @@ export function bindSearch(app){
  const root=document.querySelector('#main-content');
  const input=root.querySelector('#advanced-q'),out=root.querySelector('#advanced-results'),status=root.querySelector('#advanced-status'),clear=root.querySelector('#search-clear');
  const st=state(app);
- let seq=0,timer=0;
+ let seq=0,timer=0,abortCtl=null;
+ // كل بحث جديد يُلغي المسح السابق فورًا (لا تتراكم مؤشرات IndexedDB عند الكتابة السريعة)
+ const beginRun=()=>{abortCtl?.abort();abortCtl=new AbortController();return abortCtl.signal};
  const resultGrids=new Map();
  const disposeResults=()=>{resultGrids.forEach(grid=>grid.destroy());resultGrids.clear()};
  const periodFilter=it=>st.period==='all'||inPeriod(it.row,ENTITIES[it.store]?.dateField||'createdAt',st.period==='y'?`${localDate().slice(0,4)}-01-01`:st.from,st.period==='y'?`${localDate().slice(0,4)}-12-31`:st.to);
@@ -124,8 +126,10 @@ export function bindSearch(app){
  const run=async()=>{
   const q=input.value.trim();st.q=q;
   const my=++seq;
+  const signal=beginRun();
   drawSaved();
   if(q.length<2){
+   beginRun();
    status.textContent='اكتب حرفين على الأقل لبدء البحث الشامل — أو انتقل بالأسهم و Enter.';
    renderIdle();
    return;
@@ -135,16 +139,16 @@ export function bindSearch(app){
   const per=scoped?24:8;
   status.textContent='جارٍ البحث في '+(scoped?ENTITIES[st.scope]?.plural:'الأقسام الرئيسية')+'…';
   disposeResults();out.innerHTML='<div class="loading small">…</div>';
-  let r=await searchAll(app.office,q,{stores,perStore:per});
-  if(my!==seq)return;
+  let r=await searchAll(app.office,q,{stores,perStore:per,signal});
+  if(my!==seq||signal.aborted)return;
   const groups=r.groups.map(g=>({...g,items:g.items.filter(periodFilter)})).filter(g=>g.items.length);
   await renderGroups(groups,q,{withMore:true,my});
   if(my!==seq)return;
   if(!scoped){
    const rest=allSearchStores().filter(s=>!PRIMARY_STORES.includes(s));
    status.textContent=`${groups.reduce((n,g)=>n+g.items.length,0)} نتيجة أولية — نتابع الآن في باقي الأقسام…`;
-   r=await searchAll(app.office,q,{stores:rest,perStore:6});
-   if(my!==seq)return;
+   r=await searchAll(app.office,q,{stores:rest,perStore:6,signal});
+   if(my!==seq||signal.aborted)return;
    for(const g of r.groups.map(g=>({...g,items:g.items.filter(periodFilter)})).filter(g=>g.items.length))groups.push(g);
    await renderGroups(groups,q,{withMore:true,my});
    if(my!==seq)return;

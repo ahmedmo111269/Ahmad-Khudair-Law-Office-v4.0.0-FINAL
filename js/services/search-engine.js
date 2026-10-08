@@ -10,6 +10,8 @@
 //   قبل اللجوء للمسح الاحتوائي.
 // - البحث متعدد الكلمات = كل الكلمات موجودة (AND) مع تطبيع عربي مرن (أ/إ/آ، ة/ه، ى/ي، الأرقام).
 // - rowText مذكّرة لكل صف (WeakMap) فلا يعاد تطبيع الصف نفسه مع كل ضغطة مفتاح.
+// - إلغاء البحث: كل استعلام يقبل AbortSignal؛ عند تغيّر نص البحث يُجهَض مؤشر IndexedDB
+//   القديم فورًا (tx.abort) بدل أن يكمل المسح في الخلفية ويستهلك الوقت والذاكرة.
 // ============================================================
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {ENTITIES} from '../domain/entities.js';
@@ -17,6 +19,10 @@ import {rowText} from './entity-query.js';
 import {prefs} from '../core/preferences.js';
 import {formatFileNumber as fileNumber} from '../core/file-number.js';
 import {parseQuickNoteQuery, matchesQuickNoteQuery} from './quick-notes.js';
+
+// ===== 0) الإلغاء =====
+export function abortError(){const e=new Error('تم إلغاء البحث لأن النص تغيّر.');e.name='AbortError';return e}
+export function isAbortError(e){return Boolean(e&&e.name==='AbortError')}
 
 // ===== 1) منطق صافٍ قابل للاختبار =====
 export function tokenizeQuery(q){
@@ -106,10 +112,11 @@ function rowMatches(src,r,tokens,code,numDigits){
  return matchTokens(tokens,rowText(r));
 }
 
-async function prefixFast(office,store,tokens,code,numDigits,limit){
+async function prefixFast(office,store,tokens,code,numDigits,limit,signal=null){
  const specs=FAST_INDEXES[store];if(!specs)return new Map();
  const out=new Map();
  for(const [idx,kind] of specs){
+  if(signal?.aborted)throw abortError();
   let q='';
   if(kind==='code'&&code)q=codeValue(code);
   else if(kind==='digits'&&(numDigits||code))q=numDigits||digitsOf(code);
@@ -119,23 +126,30 @@ async function prefixFast(office,store,tokens,code,numDigits,limit){
    for(const r of await office.r[store].prefix(idx,q,limit)){
     if(rowMatches(SRC[store],r,tokens,code,numDigits))out.set(r.id,r);
    }
-  }catch{/* فهرس غير متاح في بيانات قديمة: نتجاهل ونكمل */}
+  }catch(error){if(isAbortError(error))throw error;/* فهرس غير متاح في بيانات قديمة: نتجاهل ونكمل */}
  }
  return out;
 }
 
 /** مسح محدود بتوقف مبكر: يكفي أن تكتمل النتائج ليتوقف المؤشر */
-function boundedScan(office,store,{tokens,code,numDigits,limit,predicate=null}){
+function boundedScan(office,store,{tokens,code,numDigits,limit,predicate=null,signal=null}){
  const src=SRC[store];
+ if(signal?.aborted)return Promise.reject(abortError());
  const tx=office.ctx.db.transaction(store,'readonly');
  const os=tx.objectStore(store);
  return new Promise((resolve,reject)=>{
-  const hits=[];let stopped=false;
+  const hits=[];let stopped=false,settled=false;
+  // الإلغاء يُجهض المعاملة نفسها: يتوقف المؤشر فورًا حتى لو كان ينتظر قرص IndexedDB.
+  const onAbort=()=>{try{tx.abort()}catch{}finish(()=>reject(abortError()))};
+  const finish=action=>{if(settled)return;settled=true;signal?.removeEventListener?.('abort',onAbort);action()};
+  signal?.addEventListener?.('abort',onAbort,{once:true});
   const c=os.openCursor(null,'prev');
-  c.onerror=()=>reject(c.error);
+  c.onerror=()=>finish(()=>reject(signal?.aborted?abortError():c.error));
   c.onsuccess=()=>{
+   if(settled)return;
+   if(signal?.aborted){onAbort();return}
    const cur=c.result;
-   if(!cur||hits.length>=limit){if(cur)stopped=true;resolve({hits,stopped});return}
+   if(!cur||hits.length>=limit){if(cur)stopped=true;finish(()=>resolve({hits,stopped}));return}
    const r=cur.value;
    if((predicate ? predicate(r) : rowMatches(src,r,tokens,code,numDigits)))hits.push(r);
    cur.continue();
@@ -147,8 +161,9 @@ function boundedScan(office,store,{tokens,code,numDigits,limit,predicate=null}){
  * بحث قسم واحد: مسار سريع بالفهارس + مسح احتوائي محدود، دمج وإزالة تكرار.
  * يرجع {items, more}
  */
-export async function searchStore(office,store,raw,{limit=8}={}){
+export async function searchStore(office,store,raw,{limit=8,signal=null}={}){
  const src=SRC[store];if(!src||!office?.r?.[store])return {items:[],more:false};
+ if(signal?.aborted)throw abortError();
  const parsedNotes = store === 'caseNotes' ? parseQuickNoteQuery(raw) : null;
  const tokens=parsedNotes ? tokenizeQuery(parsedNotes.text.join(' ')) : tokenizeQuery(raw);
  const code=tokens.map(t=>looksLikeCode(t)?t:'').filter(Boolean)[0]||'';
@@ -156,8 +171,8 @@ export async function searchStore(office,store,raw,{limit=8}={}){
  if(!tokens.length&&!code&&!numDigits&&!(parsedNotes&&(parsedNotes.states.size||parsedNotes.tag||parsedNotes.file||parsedNotes.client||parsedNotes.priority||parsedNotes.color||parsedNotes.type)))return {items:[],more:false};
  const ent=ENTITIES[store]||{};
  let prefixMap=new Map(),scanHits=[],stopped=false,scanError=false;
- try{prefixMap=await prefixFast(office,store,tokens,code,numDigits,limit);if(parsedNotes)prefixMap=new Map([...prefixMap].filter(([,row])=>matchesQuickNoteQuery(row,parsedNotes)))}catch{}
- try{const r=await boundedScan(office,store,{tokens,code,numDigits,limit,predicate:parsedNotes?row=>matchesQuickNoteQuery(row,parsedNotes):null});scanHits=r.hits;stopped=r.stopped}catch{scanError=true}
+ try{prefixMap=await prefixFast(office,store,tokens,code,numDigits,limit,signal);if(parsedNotes)prefixMap=new Map([...prefixMap].filter(([,row])=>matchesQuickNoteQuery(row,parsedNotes)))}catch(error){if(isAbortError(error))throw error}
+ try{const r=await boundedScan(office,store,{tokens,code,numDigits,limit,signal,predicate:parsedNotes?row=>matchesQuickNoteQuery(row,parsedNotes):null});scanHits=r.hits;stopped=r.stopped}catch(error){if(isAbortError(error))throw error;scanError=true}
  // دمج: نتائج الفهارس أولًا (أعلى ترتيبًا) ثم المسح، مع إزالة التكرار
  const merged=[...new Map([...prefixMap,...scanHits.map(r=>[r.id,r])]).values()].slice(0,limit);
  const items=merged.map(r=>{
@@ -172,13 +187,18 @@ export async function searchStore(office,store,raw,{limit=8}={}){
  * البحث الشامل في كل الأقسام (أو مجموعة محددة).
  * يرجع مجموعات مرتبة حسب الأهمية وعدد النتائج.
  */
-export async function searchAll(office,raw,{stores=allSearchStores(),perStore=8}={}){
+export async function searchAll(office,raw,{stores=allSearchStores(),perStore=8,signal=null}={}){
  const t0=(typeof performance!=='undefined'&&performance.now?performance.now():Date.now());
  const list=stores.filter(s=>SRC[s]);
  const results=await Promise.all(list.map(async store=>{
-  try{return {store,...await searchStore(office,store,raw,{limit:perStore})}}
-  catch{return {store,items:[],more:false,partial:true}}
+  try{return {store,...await searchStore(office,store,raw,{limit:perStore,signal})}}
+  catch(error){
+   if(isAbortError(error))return {store,items:[],more:false,aborted:true};
+   return {store,items:[],more:false,partial:true};
+  }
  }));
+ // بحث أُلغي (نص جديد أو إغلاق الشاشة): لا نُرجع نتائج قديمة أبدًا
+ if(signal?.aborted)return {groups:[],total:0,tookMs:0,partial:false,aborted:true};
  const groups=results.filter(r=>r.items.length)
   .map(r=>{const src=SRC[r.store];return {store:r.store,label:SRC[r.store].label||ENTITIES[r.store]?.plural||r.store,icon:src.icon,note:src.note||'',items:r.items,more:r.more,partial:r.partial}})
   .sort((a,b)=>(SRC[b.store].weight-SRC[a.store].weight)||(b.items.length-a.items.length));
