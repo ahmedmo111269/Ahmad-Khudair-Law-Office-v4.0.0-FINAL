@@ -15,8 +15,11 @@ import {formatDateTime} from '../core/format.js';
 import {ENTITIES} from '../domain/entities.js';
 import {toast} from './toast.js';
 import {userError} from '../core/errors.js';
+import {executionContextSummary} from '../services/execution-work.js';
 import {completeItem} from '../services/work-items.js';
 import {overlayId} from '../domain/work-items.js';
+import {formatFileNumber} from '../core/file-number.js';
+import {money} from './execution-work-view.js';
 
 const ATTN_LIMIT=12;
 
@@ -64,6 +67,13 @@ export function countsHtml(model){
  </div>`;
 }
 
+/**
+ * بنود التنفيذ التي لم تعد تظهر في أول ATTN_LIMIT صفًا من الطابور.
+ * وجودها يعني أن الطابور مقصوص، فيلزم طريق واضح من «مكتب اليوم» إلى التنفيذ
+ * الذي يحتاج قرارًا (Wave 6.1) — بلا تغيير في ترتيب الأولوية أو سقف الشدة.
+ */
+const hiddenExecutions = model => (model?.attention || []).slice(ATTN_LIMIT).filter(item => item.kind === 'execution');
+
 /** طابور «يحتاج انتباهك» مرتبًا حسب الأهمية ثم الزمن. opts.title/tools للتخصيص حسب الشاشة. */
 export function attentionHtml(model,{title='طابور القرارات',eyebrow='يحتاج انتباهك',tools=true}={}){
  const rows=model.attention.slice(0,ATTN_LIMIT);
@@ -75,7 +85,7 @@ export function attentionHtml(model,{title='طابور القرارات',eyebrow
   </header>
   ${countsHtml(model)}
   ${rows.length?`<ul class="cp-list" data-attn-list>${rows.map(attnRow).join('')}</ul>
-   ${rest>0?`<p class="cp-more muted small">+${rest} عنصر آخر — استخدم الفلاتر أو <button type="button" class="link" data-route="actionCenter">مركز العمل</button> لعرض الكل.</p>`:''}`
+   ${rest>0?`<p class="cp-more muted small">+${rest} عنصر آخر${hiddenExecutions(model).length?` (منها ${esc(String(hiddenExecutions(model).length))} تنفيذ يحتاج قرارًا — <button type="button" class="link" data-route="executionCenter">مركز التنفيذ</button>)`:''} — استخدم الفلاتر أو <button type="button" class="link" data-route="actionCenter">مركز العمل</button> لعرض الكل.</p>`:''}`
    :`<div class="cp-empty"><span aria-hidden="true">✓</span><p>لا توجد عناصر تحتاج انتباهك الآن.</p></div>`}
  </section>`;
 }
@@ -134,12 +144,17 @@ export function doneListHtml(rows){
  * مركز عمل الموكل: الخطوة التالية عبر كل ملفاته + جدول اليوم + طابور الموكل + آخر الإنجازات.
  * model: buildFocusModel(...) لبيانات الموكل، recentDone: صفوف منجزة.
  */
-export function clientWorkspaceHtml({model,recentDone=[],clientName='',dayLabel=''}){
+export function clientWorkspaceHtml({model,recentDone=[],clientName='',dayLabel='',clientId='',executions=[],fileLabelOf=null}){
  return `<div class="cp-client-ws" aria-label="مركز عمل الموكل ${esc(clientName)}">
   <div class="cp-stage">
    ${focusHtml(model,{dayLabel})}
    ${timelineHtml(model,{dayLabel:'مواعيد الموكل اليوم',empty:'لا جلسات ولا مواعيد لهذا الموكل اليوم.'})}
   </div>
+  ${executionStripHtml({
+    summary:executionContextSummary(executions),scope:'client',fileLabelOf:fileLabelOf||null,
+    route:`executionCenter${clientId?`?clientId=${encodeURIComponent(clientId)}`:''}`,
+    emptyHint:'لا يوجد تنفيذ مرتبط بملفات هذا الموكل بعد.'
+  })}
   ${attentionHtml(model,{title:'ما يحتاج قرارًا أو متابعة',eyebrow:'مركز الموكل',tools:false})}
   ${doneListHtml(recentDone)}
  </div>`;
@@ -189,6 +204,53 @@ export function fileCockpitHtml({hearings=[],procedures=[],stages=[],parties=[],
 }
 
 function fmt(d){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));return m?`${m[3]}/${m[2]}/${m[1]}`:''}
+
+/**
+ * شريط التنفيذ السياقي (Wave 6.1) — مكوّن واحد يخدم كوكبيت الملف ومركز الموكل.
+ * ---------------------------------------------------------------------
+ * ليس نسخة من مركز التنفيذ: لا طابور ولا نماذج ولا كتابة.
+ *   • الحالة: كم تنفيذًا، ما يحتاج قرارًا، المتأخرات، المتبقي (نفس عدّادات الطابور).
+ *   • الخطوة التالية: أهم تنفيذ واحد مع خطوته الجاهزة من خدمات التنفيذ.
+ *   • الوصول: كل صف يفتح بطاقة التنفيذ، والزر يفتح مركز التنفيذ مقصورًا على هذا
+ *     الملف/الموكل (`?fileId=` / `?clientId=`) — علاقة Client ← File ← Execution واضحة
+ *     بلا تكرار لوظائف المركز.
+ * @param {object} o
+ * @param {{items:Array,counts:object,total:number}} o.summary  ناتج executionContextSummary
+ * @param {string} o.route   Face route لمركز التنفيذ في نطاق هذا السياق
+ * @param {'file'|'client'} o.scope
+ * @param {number} [o.limit] عدد الصفوف المعروضة (الباقي بإشارة واحدة)
+ * @param {function} [o.fileLabelOf] لإظهار اسم الملف على كل صف في سياق الموكل
+ */
+export function executionStripHtml({summary={},route='executionCenter',scope='file',limit=3,fileLabelOf=null,emptyHint=''}={}){
+ const items=summary.items||[],counts=summary.counts||null;
+ const rows=items.slice(0,limit),more=Math.max(0,items.length-rows.length);
+ const fileIdOf=item=>String(item.fileId||'');
+ const row=x=>{
+  const amount=Number(x.overdueMinor||0)>0?{value:x.overdueMinor,label:'متأخر'}:{value:x.remainingTotal,label:'المتبقي'};
+  const fileLabel=scope==='client'?(fileLabelOf?.(fileIdOf(x))||x.fileNumberText||(x.fileNumber?formatFileNumber(x.fileNumber):'')):'';
+  const fileNote=scope==='client'?[fileLabel?`ملف ${fileLabel}`:'',x.executionTypeLabel].filter(Boolean).join(' · '):(x.executionTypeLabel||x.authority||'');
+  return `<li class="cp-exec-row cp-exec-row--${esc(x.severity)}">
+   <button type="button" class="cp-exec-main" data-route="exc:${esc(x.id)}" aria-label="فتح بطاقة التنفيذ ${esc(x.displayNumber||'')}">
+    <span class="cp-dot cp-dot--${esc(x.severity)}" aria-hidden="true"></span>
+    <span class="cp-exec-text">
+     <b>${esc(x.displayNumber||'تنفيذ بلا رقم')}${x.clientName?` — ${esc(x.clientName)}`:''}${x.opponentName?` <span class="muted">ضد</span> ${esc(x.opponentName)}`:''}</b>
+     <small>${x.step?`<span>${esc(x.step.label)}</span>`:''}${fileNote?`<span class="cp-exec-chip">${esc(fileNote)}</span>`:''}</small>
+    </span>
+    <span class="cp-exec-money"><b>${money(amount.value,x.currency)}</b><small>${amount.label}</small></span>
+    <span class="cp-exec-go" aria-hidden="true">فتح ←</span>
+   </button></li>`;
+ };
+ const pulse=counts?`<p class="cp-exec-pulse"><span><b>${counts.all}</b> تنفيذ</span><span class="${counts.attention?'is-alert':''}"><b>${counts.attention}</b> يحتاج قرارًا</span><span class="${Number(counts.overdueMinor||0)?'is-alert':''}">متأخرات <b>${money(counts.overdueMinor||0)}</b></span><span>المتبقي <b>${money(counts.remainingMinor||0)}</b></span></p>`:'';
+ return `<section class="cp-exec" data-section-id="execution" data-exec-strip aria-label="سياق التنفيذ">
+  <header class="cp-exec-head">
+   <div><span class="cp-eyebrow">التنفيذ</span><h3 class="cp-exec-title">${esc(scope==='client'?'تنفيذ الموكل':'التنفيذ المرتبط بهذا الملف')}</h3></div>
+   <button type="button" class="ghost small" data-route="${esc(route)}">مركز التنفيذ <span aria-hidden="true">←</span></button>
+  </header>
+  ${rows.length?`${pulse}<ul class="cp-exec-list">${rows.map(row).join('')}</ul>
+   ${more?`<p class="cp-exec-more muted small">+${more} ${more===1?'تنفيذ آخر':'تنفيذات أخرى'} — <button type="button" class="link" data-route="${esc(route)}">اعرض الكل في مركز التنفيذ</button></p>`:''}`
+  :`<p class="cp-exec-empty muted small">${esc(emptyHint||(scope==='client'?'لا يوجد تنفيذ مرتبط بملفات هذا الموكل بعد.':'لا يوجد تنفيذ مرتبط بهذا الملف بعد.'))} <button type="button" class="link" data-route="${esc(route)}">مركز التنفيذ</button></p>`}
+ </section>`;
+}
 
 /**
  * سلوك مشترك لكل شاشة فيها كوكبيت/طابور:

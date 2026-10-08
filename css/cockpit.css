@@ -170,3 +170,37 @@
 .cp-focus-head,.cp-day-head,.cp-attn-head{padding-inline-end:34px}
 /* قوائم السجل (ما الذي حدث / ما أُنجز) عمود واحد على كل الأحجام — لا تُضغط بعمود الوقت */
 .cp-tl--log li,.cp-done-list .cp-tl li{grid-template-columns:minmax(0,1fr)!important}
+
+/* ---------- Wave 6.1: شريط التنفيذ السياقي (ملف · موكل) ---------- */
+/* ملخص فقط + رابط للمركز: لا نماذج ولا طابور — مركز التنفيذ يبقى المكان الوحيد للتنفيذ. */
+.cp-exec{display:grid;gap:10px;margin:0 0 14px;padding:16px 18px;border-radius:var(--radius-lg);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.cp-exec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-inline-end:34px}
+.cp-exec-title{margin:2px 0 0;font-size:1.02rem;color:var(--text-strong)}
+.cp-exec-pulse{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0;font-size:.86rem;color:var(--text-muted)}
+.cp-exec-pulse b{color:var(--text-strong);font-variant-numeric:tabular-nums}
+.cp-exec-pulse .is-alert b{color:var(--danger)}
+.cp-exec-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.cp-exec-main{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:10px 14px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid transparent;color:var(--text);text-align:start;transition:border-color .15s,transform .15s}
+.cp-exec-main:hover{border-color:var(--border);transform:translateX(-2px)}
+.cp-exec-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cp-exec-text b{color:var(--text-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-exec-text small{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;color:var(--text-muted);min-width:0}
+.cp-exec-text small span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-exec-chip{padding:1px 8px;border-radius:var(--radius-pill);background:var(--surface);border:1px solid var(--border-subtle,var(--border));font-size:.76rem}
+.cp-exec-money{display:flex;flex-direction:column;align-items:flex-end;text-align:end;white-space:nowrap}
+.cp-exec-money b{color:var(--text-strong);font-variant-numeric:tabular-nums;font-size:.95rem}
+.cp-exec-money small{color:var(--text-muted);font-size:.72rem}
+.cp-exec-row--critical .cp-exec-money b{color:var(--danger)}
+.cp-exec-row--high .cp-exec-money b{color:var(--warn)}
+.cp-exec-go{font-size:.8rem;font-weight:700;color:var(--primary);white-space:nowrap;opacity:0;transition:opacity .15s}
+.cp-exec-main:hover .cp-exec-go,.cp-exec-main:focus-visible .cp-exec-go{opacity:1}
+.cp-exec-more,.cp-exec-empty{margin:0;line-height:1.7}
+@media (max-width:600px){
+  .cp-exec{padding:14px}
+  .cp-exec-main{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;padding:9px 10px}
+  .cp-exec-go{display:none}
+  .cp-exec-money b{font-size:.88rem}
+}
+@media (prefers-reduced-motion:reduce){
+  .cp-exec-main{transition:none}
+}

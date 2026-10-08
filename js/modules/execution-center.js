@@ -23,7 +23,7 @@ import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {EXECUTION_TYPE_LABELS} from '../domain/execution.js';
 import * as S from '../services/execution-simple.js';
-import {executionWorkQueue, describeExecutions, countQueue, matchesLane, searchableText, queueSections, refreshExecutionItem} from '../services/execution-work.js';
+import {executionWorkQueue, describeExecutions, countQueue, matchesLane, searchableText, queueSections, refreshExecutionItem, executionsForFile, executionsForClient, QUEUE_SCAN_CAP} from '../services/execution-work.js';
 import {executionSettings, actionKindOptions, collectionMethodOptions} from '../services/execution-settings.js';
 import * as VIEW from '../ui/execution-work-view.js';
 import * as EX from '../services/execution.js';
@@ -106,8 +106,14 @@ const SORT_KEY = 'ui:exec:sort:v1';
 const listState = app => (app.__execCenter = app.__execCenter || {
   count: prefs.get(COUNT_KEY, 'all'), search: prefs.get('ui:exec:q', ''), sort: prefs.get(SORT_KEY, 'urgent'),
   items: null, counts: null, counted: 0, scannedAll: true, ready: false, today: localDate(),
-  open: null, selected: new Set(), run: null, demoSeedAttempted: false
+  open: null, selected: new Set(), run: null, demoSeedAttempted: false,
+  // النطاق (Wave 6.1): فتح المركز من الملف أو الموكل يقصر الطابور والجدول عليه — نفس الشاشة بلا نسخة ثانية.
+  scope: {fileId: '', clientId: ''}
 });
+/** نطاق الطلب من رابط الصفحة (?fileId= / ?clientId=) — قراءة فقط، والفارغ يعني «كل التنفيذات». */
+const scopeFromRoute = query => ({fileId: String(query?.get?.('fileId') || ''), clientId: String(query?.get?.('clientId') || '')});
+const scopeActive = scope => Boolean(scope?.fileId || scope?.clientId);
+const rowInScope = (scope, row) => (!scope.fileId || row.fileId === scope.fileId) && (!scope.clientId || row.clientId === scope.clientId);
 const cardState = app => (app.__execSimple = app.__execSimple || {});
 /** تاريخ ISO بعد عدد أيام من تاريخ مرجعي (بالتقويم المحلي، بلا انزياح منطقة زمنية). */
 const offsetDate = (today, days) => {
@@ -137,7 +143,7 @@ const bindAll = (container, selector, handler) => {
  *  4) وضع التشغيل: يعرض خطوة واحدة، يسجّل، ثم ينتقل تلقائيًا للتالي (Focus Mode).
  *  5) الجدول الكامل (DataGrid) يبقى للفرز والتصدير والأعمدة.
  */
-export function executionCenterPage(app) {
+export function executionCenterPage(app, query) {
   registerPageLayout({
     pageId: 'executionCenter', title: 'مركز التنفيذ',
     sections: [
@@ -149,6 +155,8 @@ export function executionCenterPage(app) {
     ]
   });
   const st = listState(app);
+  st.scope = scopeFromRoute(query);
+  const scoped = scopeActive(st.scope);
   const desktop = typeof window !== 'undefined' && window.matchMedia?.('(min-width: 900px)')?.matches;
   return `<div class="wc-page" data-wc>
     <div class="page-head exec-head wc-head"><div>
@@ -171,6 +179,10 @@ export function executionCenterPage(app) {
         </div>
       </details>
     </div></div>
+    ${scoped ? `<div class="wc-scope" data-scope-bar role="status">
+      <span class="wc-scope-chip">🔎 مقصور على <b data-scope-label>${st.scope.fileId ? 'ملف محدد' : 'موكل محدد'}</b></span>
+      <button type="button" class="ghost small" data-route="executionCenter">✕ اعرض كل التنفيذات</button>
+    </div>` : ''}
     <div class="wc-stage" data-stage hidden></div>
     <div class="wc-main">
       <div data-section-id="hero" data-hero-host class="wc-hero-host"><div class="wc-hero wc-hero--calm"><p class="muted small">جارٍ تجهيز «الآن»…</p></div></div>
@@ -227,13 +239,19 @@ async function maybeSeedExecutionDemo(app, reload) {
   }
 }
 
-export async function bindExecutionCenter(app) {
+export async function bindExecutionCenter(app, query) {
   const st = listState(app);
   const root = document.querySelector('#main-content');
   const wc = root?.querySelector('[data-wc]');
   if (!root || !wc) return false;
   let grid = null;
   st.today = localDate();
+  st.scope = scopeFromRoute(query);
+  // حالة الجلسة تُبدأ نظيفة عند كل دخول: وضع التشغيل واللوحة المفتوحة والتحديد
+  // تخصّ هذه الزيارة — فلا تعود الشاشة فارغة أو بنصف حالة من زيارة سابقة.
+  st.run = null; st.open = null; st.selected = new Set();
+  wc.classList.remove('is-run');
+  const scope = () => st.scope;
 
   const find = id => (st.items || []).find(item => item.id === id) || null;
   const persist = () => { prefs.set('ui:exec:q', st.search); prefs.set(COUNT_KEY, st.count); prefs.set(SORT_KEY, st.sort); };
@@ -241,11 +259,15 @@ export async function bindExecutionCenter(app) {
 
   /* ---------- الجدول الكامل (DataGrid) — نفس المصدر، وصف موحّد ---------- */
   const provider = createIndexedDbDataProvider(app.office.r.execution, {
-    resolveScope: () => ({
-      index: 'openedDate', direction: 'prev',
-      filter: row => !row.isDeleted,
-      preparedFilter: row => matchesLane(st.count, row) && (!st.search || searchableText(row).includes(String(st.search).trim().toLowerCase()))
-    }),
+    resolveScope: () => {
+      const bound = scope();
+      const scopedRange = bound.fileId ? {index: 'fileId', key: bound.fileId} : bound.clientId ? {index: 'clientId', key: bound.clientId} : null;
+      return {
+        ...(scopedRange || {index: 'openedDate', direction: 'prev'}),
+        filter: row => !row.isDeleted,
+        preparedFilter: row => rowInScope(bound, row) && matchesLane(st.count, row) && (!st.search || searchableText(row).includes(String(st.search).trim().toLowerCase()))
+      };
+    },
     prepareRows: async rows => {
       const items = await describeExecutions(app.office, rows, {today: st.today});
       rows.forEach((row, index) => Object.assign(row, items[index] || {}));
@@ -300,7 +322,16 @@ export async function bindExecutionCenter(app) {
     if (instance) await instance.reload({resetPage: true});
   };
 
-  const queueNote = () => `${st.counted.toLocaleString('en-US')} تنفيذ في الطابور${st.scannedAll ? ' (كل السجل)' : ` (الأحدث ${st.counted.toLocaleString('en-US')} — ابحث في الجدول للبقية)`}`;
+  const queueNote = () => scopeActive(scope())
+    ? `${st.counted.toLocaleString('en-US')} تنفيذ في نطاق ${scope().fileId ? 'هذا الملف' : 'هذا الموكل'} — للتوسيع اضغط «اعرض كل التنفيذات».`
+    : `${st.counted.toLocaleString('en-US')} تنفيذ في الطابور${st.scannedAll ? ' (كل السجل)' : ` (الأحدث ${st.counted.toLocaleString('en-US')} — ابحث في الجدول للبقية)`}`;
+  /** الطابور في نطاق ملف/موكل: نفس الوصف والعدّادات، ومصدر قراءة واحد من خدمة عمل التنفيذ. */
+  const loadScopedQueue = async bound => {
+    const items = bound.fileId
+      ? await executionsForFile(app.office, bound.fileId, {today: st.today, limit: QUEUE_SCAN_CAP})
+      : await executionsForClient(app.office, bound.clientId, {today: st.today, limit: QUEUE_SCAN_CAP});
+    return {items, counts: countQueue(items), counted: items.length, scannedAll: true};
+  };
 
   /* ---------- بناء الطابور ---------- */
   /** الهيرو: أول ما يحتاج قرارًا الآن، وإلا أول «القريب» (حتى لا يقول «لا شيء» وفي الطابور بنود). */
@@ -433,7 +464,8 @@ export async function bindExecutionCenter(app) {
   const loadQueue = async () => {
     try {
       st.today = localDate();
-      const out = await executionWorkQueue(app.office, {today: st.today});
+      const bound = scope();
+      const out = scopeActive(bound) ? await loadScopedQueue(bound) : await executionWorkQueue(app.office, {today: st.today});
       st.items = out.items; st.counts = out.counts; st.counted = out.counted; st.scannedAll = out.scannedAll; st.ready = true;
       st.selected = new Set([...st.selected].filter(id => out.items.some(item => item.id === id)));
     } catch (error) {
@@ -570,6 +602,7 @@ export async function bindExecutionCenter(app) {
   };
   const exitRun = () => {
     st.run = null;
+    st.open = null; // لا تُترك لوحة مفتوحة من خطوة تشغيل سابقة على طابور عاد للظهور
     renderAll();
     grid?.reload?.({resetPage: false}).catch?.(() => null);
   };
@@ -713,7 +746,14 @@ export async function bindExecutionCenter(app) {
     const form = event.target.closest?.('form[data-form]');
     if (!form || !wc.contains(form)) return;
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); form.requestSubmit?.(); }
-    else if (event.key === 'Escape') { event.preventDefault(); st.open = null; renderAll(); }
+    else if (event.key === 'Escape') {
+      event.preventDefault();
+      // «Esc للخروج» وعدٌ مكتوب في شريط التشغيل: داخل وضع التشغيل يخرج منه مباشرة،
+      // وفي الوضع العادي يغلق اللوحة المفتوحة فقط.
+      if (st.run) return exitRun();
+      st.open = null;
+      renderAll();
+    }
   };
   wc.addEventListener('click', onClick);
   wc.addEventListener('submit', onSubmit);
@@ -856,6 +896,23 @@ export async function bindExecutionCenter(app) {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { renderQueue(); reloadGrid().catch(error => app.fail(error)); }, 250);
   }));
+
+  // اسم النطاق في الشريط: قراءة مباشرة للسجل المطلوب فقط (لا مسح ولا كتابة).
+  const paintScopeLabel = async () => {
+    const host = root.querySelector('[data-scope-label]');
+    if (!host) return;
+    const bound = scope();
+    try {
+      if (bound.fileId) {
+        const file = await app.office.r.files.get(bound.fileId).catch(() => null);
+        host.textContent = file ? `الملف ${formatFileNumber(file.fileNumber) || ''} — ${file.title || ''}`.trim() : 'ملف غير موجود';
+      } else if (bound.clientId) {
+        const client = await app.office.r.clients.get(bound.clientId).catch(() => null);
+        host.textContent = client ? `الموكل ${client.fullName || ''}`.trim() : 'موكل غير موجود';
+      }
+    } catch { host.textContent = 'نطاق محدد'; }
+  };
+  paintScopeLabel();
 
   // أول رسم فوري بالحالة المعروفة، ثم مسح الطابور (العدّادات تُحسب عند كل دخول).
   renderAll();

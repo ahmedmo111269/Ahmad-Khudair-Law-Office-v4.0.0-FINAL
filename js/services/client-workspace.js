@@ -5,9 +5,12 @@
 // (focus-engine) دون منطق مكرر. القراءة كلها عبر الفهارس الموجودة
 // (fileId / clientId)، بحدود ثابتة لكل موكل (MAX_FILES) لضمان الأداء.
 // لا كتابة هنا، ولا منطق قانوني: الأهلية والتواريخ من الحقول القائمة فقط.
+// التنفيذ يأتي من خدمة عمل التنفيذ نفسها (executionsForClient) — لا نموذج ثانٍ،
+// ولا نسخة من طابور مركز التنفيذ: الشريط السياقي يعرض الملخص فقط.
 // =====================================================================
 import {localDate,addDays,isActiveProcedure} from '../core/clock.js';
 import {formatFileNumber} from '../core/file-number.js';
+import {executionsForClient} from './execution-work.js';
 
 const MAX_FILES=60;
 const HORIZON_DAYS=30;
@@ -20,12 +23,13 @@ export async function clientWorkspaceData(office,{clientId,clientName='',summary
  const fileIds=files.map(f=>f.id);
  const labelOf=new Map(files.map(f=>[f.id,[formatFileNumber(f.fileNumber),f.title].filter(Boolean).join(' — ')]));
 
- const [hearingParts,procParts,appts,comms,poas]=await Promise.all([
+ const [hearingParts,procParts,appts,comms,poas,executions]=await Promise.all([
   Promise.all(fileIds.map(id=>office.r.hearings.byIndex('fileId',id,200))),
   Promise.all(fileIds.map(id=>office.r.procedures.byIndex('fileId',id,300))),
   office.r.appointments.byIndex('clientId',clientId,300),
   office.r.communications.byIndex('clientId',clientId,300),
-  office.r.powersOfAttorney.byIndex('clientId',clientId,100)
+  office.r.powersOfAttorney.byIndex('clientId',clientId,100),
+  executionsForClient(office,clientId,{today}).catch(()=>[])
  ]);
  const hearings=hearingParts.flat().filter(h=>!h.isDeleted).map(h=>({...h,__fileLabel:labelOf.get(h.fileId)||''}));
  const procs=procParts.flat().filter(p=>!p.isDeleted).map(p=>({...p,__fileLabel:labelOf.get(p.fileId)||''}));
@@ -55,7 +59,7 @@ export async function clientWorkspaceData(office,{clientId,clientName='',summary
 
  return {
   brief:{todayHearings,upcomingHearings,overdueProcedures,upcomingProcedures,appointmentsNext3,followupsThisWeek,staleFiles,expiringPoa,expiredPoa},
-  recentDone,today,
+  recentDone,today,executions,fileLabels:labelOf,
   truncated:(summary?.files?.length||0)>MAX_FILES
  };
 }

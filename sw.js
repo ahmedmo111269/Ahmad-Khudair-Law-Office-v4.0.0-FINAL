@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.2.0-wave6-work-center';
+const CACHE='ahmad-khudair-law-office-v6.2.1-wave6.1-context';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;

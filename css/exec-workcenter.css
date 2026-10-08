@@ -192,3 +192,13 @@
   .wc-run,.wc-run-summary{animation:none}
   .wc-sec>summary::before,.wc-row{transition:none}
 }
+
+/* ---------- نطاق الطابور (Wave 6.1): فتح المركز من الملف أو الموكل ---------- */
+.wc-scope{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:var(--radius);background:var(--primary-soft,var(--surface2));border:1px dashed var(--primary-border,var(--border));color:var(--text)}
+.wc-scope-chip{font-size:.9rem;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wc-scope-chip b{color:var(--primary-strong,var(--primary))}
+.wc-scope .ghost{margin-inline-start:auto}
+@media (max-width:600px){
+  .wc-scope{padding:9px 12px;font-size:.86rem}
+  .wc-scope .ghost{margin-inline-start:0;width:100%}
+}
