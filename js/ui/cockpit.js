@@ -107,7 +107,7 @@ export function timelineHtml(model,{dayLabel='',empty='لا جلسات ولا م
  </section>`;
 }
 
-const kindLabel=k=>({hearing:'جلسة',appointment:'موعد',followup:'متابعة اتصال'})[k]||'';
+const kindLabel=k=>({hearing:'جلسة',appointment:'موعد',followup:'متابعة اتصال',execution:'تنفيذ'})[k]||'';
 
 /** ما الذي حدث؟ — آخر تحركات السجل (قراءة فقط). */
 export function activityHtml(rows){

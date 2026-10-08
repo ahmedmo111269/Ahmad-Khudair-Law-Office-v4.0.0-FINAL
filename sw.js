@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.1.0-wave5-workspace';
+const CACHE='ahmad-khudair-law-office-v6.2.0-wave6-work-center';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -42,6 +42,7 @@ const ASSETS=[
   "./css/component-style.css",
   "./css/work-center.css",
   "./css/execution.css",
+  "./css/exec-workcenter.css",
   "./css/sync.css",
   "./css/quick-notes.css",
   "./css/topnav.css",
@@ -156,6 +157,7 @@ const ASSETS=[
   "./js/services/execution-migration.js",
   "./js/services/execution-period-migration.js",
   "./js/services/execution-simple.js",
+  "./js/services/execution-work.js",
   "./js/services/execution-settings.js",
   "./js/services/execution-cache.js",
   "./js/services/data-admin.js",
@@ -205,6 +207,7 @@ const ASSETS=[
   "./js/ui/dom.js",
   "./js/ui/form.js",
   "./js/ui/record-preview.js",
+  "./js/ui/execution-work-view.js",
   "./js/ui/execution-forms.js",
   "./js/ui/execution-simple-forms.js",
   "./js/ui/execution-horizon-picker.js",

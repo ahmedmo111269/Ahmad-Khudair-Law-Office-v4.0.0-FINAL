@@ -341,12 +341,13 @@ export async function hydrateSimpleRows(office, executions = []) {
     const status = derivedStatus(execution, schedule, today);
     const creditor = parties.find(party => party.side === 'creditor') || null;
     const debtor = parties.find(party => party.side === 'debtor') || null;
+    const hasValue = slices.some(slice => !slice.isDeleted && !['cancelled', 'superseded'].includes(String(slice.status || '')));
     const sortedActions = [...actions].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
     const lastAction = sortedActions.find(action => String(action.date || '') <= today) || sortedActions[0] || null;
     const planned = [...actions].filter(action => action.nextActionDate).sort((a, b) => String(a.nextActionDate).localeCompare(String(b.nextActionDate)));
     const nextAction = planned.find(action => String(action.nextActionDate) >= today) || planned.at(-1) || null;
     return {
-      execution, schedule, status, creditor, debtor, lastAction, nextAction,
+      execution, schedule, status, creditor, debtor, lastAction, nextAction, hasValue,
       nextActionLabel: nextAction ? `${nextAction.nextAction || 'إجراء'} ${nextAction.nextActionDate}` : '',
       lastActionLabel: lastAction ? `${lastAction.kindLabel || lastAction.kind || 'إجراء'} ${lastAction.date || ''}` : '',
       summary: schedule.totals
@@ -693,15 +694,13 @@ export async function recordSimpleCollection(office, input = {}) {
 }
 
 /** إجراء تنفيذ: الإلزامي النوع والتاريخ. «الإجراء التالي» اختياري ولا ترتيب إلزامي. */
-export async function recordSimpleAction(office, input = {}) {
-  office.ctx.assert();
-  const execution = await requireExecution(office, input.executionId);
-  const settings = executionSettings(office);
+/** صف الإجراء (شكل واحد لكل مسارات التسجيل: فردي ومجمّع). يتحقق من الحقول الإلزامية. */
+function buildActionRow(office, execution, input = {}, settings = executionSettings(office)) {
   const kind = String(input.kind || '').trim();
   if (!kind) throw new AppError(ERR.VALIDATION, 'نوع الإجراء مطلوب.', {kind: 'مطلوب'});
   if (!isCivilDate(input.date)) throw new AppError(ERR.VALIDATION, 'تاريخ الإجراء مطلوب.', {date: 'مطلوب'});
   const kindLabel = (settings.lists.actionKinds.find(([key]) => key === kind) || [kind, kind])[1];
-  const row = {
+  return {
     id: uid(), executionId: execution.id, fileId: execution.fileId || '', clientId: execution.clientId || '',
     kind, kindLabel, date: input.date,
     referenceNumber: String(input.referenceNumber || '').trim(),
@@ -713,9 +712,16 @@ export async function recordSimpleAction(office, input = {}) {
     documentReferenceId: String(input.documentReferenceId || '').trim(),
     status: 'posted', createdBy: office.ctx?.profile?.id || 'user', createdAt: now(), updatedAt: now(), version: 1, isDeleted: false
   };
+}
+
+export async function recordSimpleAction(office, input = {}) {
+  office.ctx.assert();
+  const execution = await requireExecution(office, input.executionId);
+  const settings = executionSettings(office);
+  const row = buildActionRow(office, execution, input, settings);
   await transaction(office.ctx, [STORE.executionActions, STORE.activityLog], async tx => {
     await request(tx.objectStore(STORE.executionActions).add(row));
-    await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, row.id, 'create', `إجراء تنفيذ: ${kindLabel} بتاريخ ${row.date}${row.referenceNumber ? ` — ${row.referenceNumber}` : ''}`, execution.fileId || '')));
+    await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, row.id, 'create', `إجراء تنفيذ: ${row.kindLabel} بتاريخ ${row.date}${row.referenceNumber ? ` — ${row.referenceNumber}` : ''}`, execution.fileId || '')));
   });
   emitChanged(STORE.executionActions, row.id);
   emitChanged(STORE.execution, execution.id);
@@ -724,6 +730,28 @@ export async function recordSimpleAction(office, input = {}) {
     workItem = await createExecutionFollowUp(office, {execution, action: row}).catch(() => null);
   }
   return {...row, workItem};
+}
+
+/**
+ * تسجيل إجراء واحد موحّد على عدة تنفيذات دفعةً واحدة (Unit of Work):
+ * إما تُسجَّل كلها في معاملة واحدة أو لا يُسجَّل شيء. لا تُنشأ متابعات مهام تلقائيًا.
+ */
+export async function recordSimpleActionsBulk(office, input = {}) {
+  office.ctx.assert();
+  const ids = [...new Set((input.executionIds || []).map(String).filter(Boolean))];
+  if (!ids.length) throw new AppError(ERR.VALIDATION, 'اختر تنفيذًا واحدًا على الأقل.', {executionIds: 'مطلوب'});
+  if (ids.length > 200) throw new AppError(ERR.VALIDATION, 'الحد الأقصى 200 تنفيذ في العملية الواحدة.', {executionIds: 'تجاوز الحد'});
+  const executions = await Promise.all(ids.map(id => requireExecution(office, id)));
+  const settings = executionSettings(office);
+  const rows = executions.map(execution => buildActionRow(office, execution, input, settings));
+  await transaction(office.ctx, [STORE.executionActions, STORE.activityLog], async tx => {
+    for (const row of rows) {
+      await request(tx.objectStore(STORE.executionActions).add(row));
+      await request(tx.objectStore(STORE.activityLog).add(activityRow(office, STORE.executionActions, row.id, 'create', `إجراء تنفيذ (دفعة): ${row.kindLabel} بتاريخ ${row.date}`, row.fileId)));
+    }
+  });
+  for (const row of rows) { emitChanged(STORE.executionActions, row.id); emitChanged(STORE.execution, row.executionId); }
+  return {count: rows.length, actionIds: rows.map(row => row.id), executionIds: rows.map(row => row.executionId)};
 }
 
 /** متابعة في مركز العمل — تُنشأ بطلب صريح من المستخدم فقط (لا تلقائيًا). */
