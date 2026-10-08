@@ -1,0 +1,172 @@
+/* =====================================================================
+   مكتب اليوم + كوكبيت الملف (Wave 4)
+   ---------------------------------------------------------------------
+   ألوان ومسافات من متغيرات الثيم فقط (themes.css) — تعمل مع كل الثيمات
+   الفاتحة والداكنة. RTL أصلي (المنطق بالـ inline-start/end عند الإمكان).
+   ===================================================================== */
+
+/* ---------- الأساسيات المشتركة ---------- */
+.cp-eyebrow{display:inline-block;font-size:.72rem;letter-spacing:.06em;font-weight:700;color:var(--primary);text-transform:none}
+.cp-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:var(--radius-pill);font-size:.74rem;font-weight:700;background:var(--surface2);color:var(--text-muted);white-space:nowrap}
+.cp-chip--danger{background:var(--danger-soft);color:var(--danger)}
+.cp-chip--warn{background:var(--warn-soft);color:var(--warn)}
+.cp-chip--info{background:var(--info-soft,var(--surface2));color:var(--info)}
+.cp-chip--ok{background:var(--success-soft,var(--surface2));color:var(--success)}
+.cp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.cp-meta{margin:6px 0 0;color:var(--text-muted);line-height:1.6}
+.cp-meta b{color:var(--text-strong)}
+
+.cp-dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none;background:var(--text-muted);box-shadow:0 0 0 3px color-mix(in srgb,currentColor 12%,transparent)}
+.cp-dot--critical{background:var(--danger);color:var(--danger)}
+.cp-dot--high{background:var(--warn);color:var(--warn)}
+.cp-dot--normal{background:var(--info);color:var(--info)}
+.cp-dot--info{background:var(--text-muted);color:var(--text-muted)}
+
+.cp-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;text-align:center;color:var(--text-muted)}
+.cp-empty span{font-size:1.5rem;color:var(--success)}
+.cp-empty--soft span{color:var(--text-muted);opacity:.7}
+.cp-empty p{margin:0}
+
+/* ---------- الرأس: الهوية + سطر الحالة + الإجراءات ---------- */
+.cp-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;margin:4px 0 18px;padding:20px 22px;border-radius:var(--radius-lg);background:
+  radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--primary) 14%,transparent),transparent 60%),var(--surface);
+  border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.cp-hero-text h2{margin:4px 0 2px;font-size:clamp(1.25rem,2.2vw,1.6rem);color:var(--text-strong)}
+.cp-hero .hero-date{margin:0;color:var(--text-muted);font-size:.9rem}
+.cp-summary{margin:12px 0 0;display:flex;flex-wrap:wrap;gap:4px 6px;color:var(--text);font-size:.95rem}
+.cp-summary b{color:var(--text-strong);font-variant-numeric:tabular-nums}
+.cp-summary b.is-warn{color:var(--warn)}
+.cp-hero-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;align-self:center}
+
+/* ---------- الشبكة الرئيسية: الآن + جدول اليوم ---------- */
+.cp-stage{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:stretch}
+
+/* بطاقة «الآن» */
+.cp-focus{position:relative;overflow:hidden;padding:22px 24px;border-radius:var(--radius-lg);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-md)}
+.cp-focus::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--primary)}
+.cp-focus--critical::before{background:var(--danger)}
+.cp-focus--high::before{background:var(--warn)}
+.cp-focus--normal::before{background:var(--info)}
+.cp-focus--calm::before{background:var(--success)}
+.cp-focus-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cp-focus h2{margin:10px 0 0;font-size:clamp(1.15rem,2vw,1.45rem);line-height:1.45;color:var(--text-strong)}
+.cp-primary{font-size:1rem;padding:10px 18px}
+.cp-primary span{display:inline-block;transition:transform .15s}
+.cp-primary:hover span{transform:translateX(-3px)}
+.cp-then{margin-top:18px;padding-top:14px;border-top:1px dashed var(--border)}
+.cp-then-label{font-size:.74rem;font-weight:700;color:var(--text-muted);letter-spacing:.04em}
+.cp-then ol{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.cp-then button{width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid transparent;text-align:start;color:var(--text)}
+.cp-then button:hover{border-color:var(--border)}
+.cp-then button span:nth-child(2){flex:1;font-weight:600}
+.cp-then small{color:var(--text-muted);white-space:nowrap}
+
+/* جدول اليوم */
+.cp-day,.cp-attn,.cp-activity{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
+.cp-day{display:flex;flex-direction:column;min-width:0}
+.cp-day-head,.cp-attn-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.cp-day-head h2,.cp-attn-head h2{margin:2px 0 0;font-size:1.08rem;color:var(--text-strong)}
+.cp-tl{list-style:none;margin:0;padding:0;position:relative;display:grid;gap:4px}
+.cp-tl li{display:grid;grid-template-columns:58px minmax(0,1fr);gap:10px;align-items:stretch;position:relative}
+.cp-tl time{font-variant-numeric:tabular-nums;font-weight:700;color:var(--primary);padding-top:10px;text-align:center}
+.cp-tl li>button,.cp-tl li>div{width:100%;text-align:start;display:flex;flex-direction:column;gap:2px;padding:9px 12px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid transparent;color:var(--text);min-width:0}
+.cp-tl li>button:hover{border-color:var(--border)}
+.cp-tl li>button b{font-weight:700;color:var(--text-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-tl small{color:var(--text-muted);font-size:.82rem}
+.cp-tl li.is-hearing>button{border-inline-start:3px solid var(--danger)}
+.cp-tl li.is-past{opacity:.55}
+.cp-tl li.is-past time{text-decoration:line-through}
+
+/* ---------- طابور «يحتاج انتباهك» ---------- */
+.cp-attn{margin-bottom:16px}
+.cp-attn-tools{display:flex;gap:6px;flex-wrap:wrap}
+.cp-counts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.cp-count{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--radius-pill);background:var(--surface2);border:1px solid var(--border-subtle,var(--border));color:var(--text);font-size:.85rem}
+.cp-count b{font-variant-numeric:tabular-nums;color:var(--text-strong)}
+.cp-count.is-on{border-color:var(--primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 20%,transparent)}
+.cp-count--critical b{color:var(--danger)}
+.cp-count--high b{color:var(--warn)}
+.cp-count--normal b{color:var(--info)}
+
+.cp-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.cp-list li[hidden]{display:none!important}
+.cp-row{border-radius:var(--radius-sm)}
+.cp-row-main{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;gap:12px;padding:10px 14px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid transparent;color:var(--text);text-align:start;transition:border-color .15s,transform .15s}
+.cp-row-main:hover{border-color:var(--border);transform:translateX(-2px)}
+.cp-row-text{display:flex;flex-direction:column;min-width:0}
+.cp-row-text b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-strong)}
+.cp-row-text small{color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-row-when{font-size:.84rem;color:var(--text-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cp-row-sev{font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:var(--radius-pill);background:var(--surface);color:var(--text-muted);white-space:nowrap}
+.cp-row--critical .cp-row-sev{color:var(--danger);background:var(--danger-soft)}
+.cp-row--high .cp-row-sev{color:var(--warn);background:var(--warn-soft)}
+.cp-row-go{font-size:.8rem;color:var(--primary);font-weight:700;white-space:nowrap;opacity:.0;transition:opacity .15s}
+.cp-row-main:hover .cp-row-go,.cp-row-main:focus-visible .cp-row-go{opacity:1}
+.cp-more{margin:10px 0 0}
+
+/* ---------- كوكبيت الملف ---------- */
+.cp-fc{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px;margin:0 0 14px;align-items:stretch}
+.cp-fc-next{display:flex;flex-direction:column;gap:6px;padding:16px 18px;border-radius:var(--radius-lg);background:var(--surface);border:1px solid var(--border);border-inline-start:4px solid var(--primary);box-shadow:var(--shadow-sm)}
+.cp-fc-next--danger{border-inline-start-color:var(--danger)}
+.cp-fc-next--warn{border-inline-start-color:var(--warn)}
+.cp-fc-next--info{border-inline-start-color:var(--info)}
+.cp-fc-next--calm{border-inline-start-color:var(--success)}
+.cp-fc-next--danger .cp-eyebrow{color:var(--danger)}
+.cp-fc-title{font-size:1.02rem;color:var(--text-strong);line-height:1.5}
+.cp-fc-next small{line-height:1.5}
+.cp-fc-next button{align-self:flex-start;margin-top:4px}
+.cp-fc-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+.cp-fc-stats>div{padding:12px 14px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);display:flex;flex-direction:column;justify-content:space-between;gap:4px}
+.cp-fc-stats dt{font-size:.76rem;color:var(--text-muted)}
+.cp-fc-stats dd{margin:0;font-size:1.35rem;font-weight:800;color:var(--text-strong);font-variant-numeric:tabular-nums}
+.cp-fc-stats>div.is-alert dd{color:var(--danger)}
+.cp-fc-stage{grid-column:1/-1}
+.cp-fc-stage dd{font-size:.95rem;font-weight:700}
+
+/* ---------- ما الذي حدث ---------- */
+.cp-activity{margin-bottom:16px}
+.cp-tl--log li{grid-template-columns:1fr}
+.cp-tl--log li>button,.cp-tl--log li>div{flex-direction:row;align-items:center;gap:12px;padding:8px 12px}
+.cp-tl--log time{padding:0;text-align:start;font-size:.8rem;color:var(--text-muted);white-space:nowrap;min-width:9.5em}
+.cp-log-txt{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;min-width:0}
+.cp-log-txt small{color:var(--text-muted);font-size:.78rem}
+
+/* ---------- الاستجابة ---------- */
+@media (max-width:980px){
+  .cp-stage{grid-template-columns:1fr}
+  .cp-fc{grid-template-columns:1fr}
+  .cp-row-main{grid-template-columns:auto minmax(0,1fr) auto}
+  .cp-row-sev,.cp-row-go{display:none}
+}
+@media (max-width:600px){
+  .cp-hero{padding:16px}
+  .cp-hero-actions{width:100%}
+  .cp-hero-actions button{flex:1 1 auto}
+  .cp-focus{padding:18px}
+  .cp-tl li{grid-template-columns:48px minmax(0,1fr)}
+  .cp-row-main{padding:10px;gap:8px}
+  .cp-row-when{font-size:.76rem}
+  .cp-then small{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .cp-row-main,.cp-primary span{transition:none}
+}
+
+/* ---------- Wave 5: تنفيذ وتسجيل من الطابور + مركز الموكل ---------- */
+.cp-row{display:flex;align-items:stretch;gap:6px}
+.cp-row>.cp-row-main{flex:1 1 auto;min-width:0}
+.cp-done{white-space:nowrap;align-self:center;padding:6px 10px;font-size:.8rem;color:var(--success);border-color:color-mix(in srgb,var(--success) 40%,var(--border))}
+.cp-done:hover{background:color-mix(in srgb,var(--success) 12%,var(--surface2))}
+.cp-done:disabled{opacity:.5}
+.cp-actions--tight{margin-top:8px}
+.cp-client-ws{display:grid;gap:16px;margin-bottom:16px}
+.cp-client-ws .cp-stage{margin-bottom:0}
+.cp-done-list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
+.cp-done-list .cp-log-txt b{color:var(--success);font-weight:700}
+@media (max-width:600px){
+  .cp-done{padding:6px 8px}
+}
+/* مساحة لزر تخصيص القسم (الترس) حتى لا يتداخل مع العناوين */
+.cp-focus-head,.cp-day-head,.cp-attn-head{padding-inline-end:34px}
+/* قوائم السجل (ما الذي حدث / ما أُنجز) عمود واحد على كل الأحجام — لا تُضغط بعمود الوقت */
+.cp-tl--log li,.cp-done-list .cp-tl li{grid-template-columns:minmax(0,1fr)!important}

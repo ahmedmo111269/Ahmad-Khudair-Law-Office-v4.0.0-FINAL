@@ -231,11 +231,13 @@ class App{
     if(!isDesktop()&&closeMobile())return; // إغلاق لوحة تنقل الهاتف المفتوحة إن وُجدت
     if(paletteOpen()){closePalette();return}closeModal();return}
    if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
+   // G في الرئيسية: افتح «الخطوة التالية» مباشرة (من بطاقة «الآن») — مسار لوحة مفاتيح بلا فأرة.
+   if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&e.key.toLowerCase()==='g'&&this.route==='dashboard'){const nextBtn=document.querySelector('[data-section-id="focus"] [data-route]');if(nextBtn){e.preventDefault();nextBtn.click()}}
    if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
   });
  }
  showShortcutsHelp(){
-  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['R','مركز العمل: تحديث البيانات'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],
+  const rows=[['Ctrl + K','لوحة الأوامر: بحث وإجراءات وتنقل فوري'],['Ctrl + \\','طي أو فتح شريط التنقل العلوي'],['/','بحث داخل الجدول المعروض'],['Alt + 1…9','الرئيسية، مركز العمل، الملفات، الموكلون، القضايا، الجلسات، الأعمال، البحث، التقارير'],['N','مهمة جديدة (داخل مركز العمل وخارج الحقول)'],['T / W / M','مركز العمل: اليوم / هذا الأسبوع / هذا الشهر'],['R','مركز العمل: تحديث البيانات'],['G','الرئيسية: افتح الخطوة التالية (بطاقة «الآن»)'],['?','هذه المساعدة'],['Esc','إغلاق النافذة أو اللوحة'],['Ctrl + Enter','حفظ النموذج المفتوح'],
 ['Ctrl + Shift + T','بطاقة تنفيذ: فتح ورقة التسجيل (+ تسجيل)'],['نقرة عنوان العمود','تصفية العمود'],['نقرة سهم الفرز','فرز تصاعدي ثم تنازلي ثم إلغاء'],['Shift + سهم الفرز','فرز متعدد المستويات'],['سحب ▢ في رأس العمود','تغيير عرض العمود']];
   modal(`<h2 class="modal-title">اختصارات لوحة المفاتيح</h2><div class="kbd-help">${rows.map(([k,d])=>`<div class="kbd-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div><p class="muted small">كل الجداول تدعم التنقل بالأسهم و Enter لفتح الصف، والطباعة والتصدير من أدوات الجدول.</p>`);
  }
