@@ -151,3 +151,22 @@
 @media (prefers-reduced-motion:reduce){
   .cp-row-main,.cp-primary span{transition:none}
 }
+
+/* ---------- Wave 5: تنفيذ وتسجيل من الطابور + مركز الموكل ---------- */
+.cp-row{display:flex;align-items:stretch;gap:6px}
+.cp-row>.cp-row-main{flex:1 1 auto;min-width:0}
+.cp-done{white-space:nowrap;align-self:center;padding:6px 10px;font-size:.8rem;color:var(--success);border-color:color-mix(in srgb,var(--success) 40%,var(--border))}
+.cp-done:hover{background:color-mix(in srgb,var(--success) 12%,var(--surface2))}
+.cp-done:disabled{opacity:.5}
+.cp-actions--tight{margin-top:8px}
+.cp-client-ws{display:grid;gap:16px;margin-bottom:16px}
+.cp-client-ws .cp-stage{margin-bottom:0}
+.cp-done-list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
+.cp-done-list .cp-log-txt b{color:var(--success);font-weight:700}
+@media (max-width:600px){
+  .cp-done{padding:6px 8px}
+}
+/* مساحة لزر تخصيص القسم (الترس) حتى لا يتداخل مع العناوين */
+.cp-focus-head,.cp-day-head,.cp-attn-head{padding-inline-end:34px}
+/* قوائم السجل (ما الذي حدث / ما أُنجز) عمود واحد على كل الأحجام — لا تُضغط بعمود الوقت */
+.cp-tl--log li,.cp-done-list .cp-tl li{grid-template-columns:minmax(0,1fr)!important}

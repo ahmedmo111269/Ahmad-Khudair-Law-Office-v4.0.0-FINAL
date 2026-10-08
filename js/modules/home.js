@@ -115,7 +115,7 @@ ${card({icon:'report',title:'تقارير العمل السريع',size:'full',c
 
 export function bindHome(app){
  // شريط الأعداد والطابور: فلترة بالأهمية بلا إعادة رسم.
- bindCockpit(document.querySelector('#main-content'));
+ bindCockpit(document.querySelector('#main-content'),app);
  // شارة «مركز العمل» في الشريط الجانبي: عدّاد حي من محرك مركز العمل نفسه (المتأخر + اليوم)، بلا استعلام مكرر.
  import('../ui/work-badge.js').then(m=>m.scheduleWorkBadge(app,{force:true})).catch(()=>{});
  // حذف البيانات التجريبية دفعة واحدة: زر واحد في اللافتة أعلى الصفحة الرئيسية.

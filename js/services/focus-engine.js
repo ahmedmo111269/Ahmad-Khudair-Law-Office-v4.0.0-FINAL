@@ -31,7 +31,7 @@ const sortKey=(date,time)=>`${dayOf(date)||'9999-99-99'}T${time||'99:99'}`;
 function item(o){
  return {
   id:o.id,kind:o.kind,severity:o.severity,
-  title:o.title||'',meta:o.meta||'',
+  title:o.title||'',meta:[o.meta,o.ctx].filter(Boolean).join(' · '),
   date:dayOf(o.date),time:o.time||'',
   when:o.when||'',
   route:o.route,actionLabel:o.actionLabel||'فتح',
@@ -54,7 +54,7 @@ export function buildFocusModel(brief,{today,now=''}={}){
   const t=timeOf(h.hearingTime);
   add({id:`h:${h.id}`,kind:'hearing',severity:'critical',date:today,time:t,
    title:h.reason||h.type||'جلسة',
-   meta:h.caseNumber?`قضية ${h.caseNumber}`:'',
+   meta:h.caseNumber?`قضية ${h.caseNumber}`:'',ctx:h.__fileLabel,
    when:t?`اليوم ${t}`:'اليوم — بدون وقت',
    route:`rec:hearings:${h.id}`,actionLabel:'فتح الجلسة',daysLeft:0});
  }
@@ -64,7 +64,7 @@ export function buildFocusModel(brief,{today,now=''}={}){
   const isTomorrow=d===addDays(today,1);
   add({id:`h:${h.id}`,kind:'hearing',severity:isTomorrow?'high':'normal',date:d,time:timeOf(h.hearingTime),
    title:h.reason||h.type||'جلسة',
-   meta:h.caseNumber?`قضية ${h.caseNumber}`:'',
+   meta:h.caseNumber?`قضية ${h.caseNumber}`:'',ctx:h.__fileLabel,
    when:isTomorrow?`غدًا${timeOf(h.hearingTime)?' '+timeOf(h.hearingTime):''}`:formatDayShort(d),
    route:`rec:hearings:${h.id}`,actionLabel:'فتح الجلسة',daysLeft:diffDays(today,d)});
  }
@@ -74,14 +74,14 @@ export function buildFocusModel(brief,{today,now=''}={}){
   const urgent=['urgent','critical','عاجل'].includes(String(p.priority||'').toLowerCase());
   add({id:`p:${p.id}`,kind:'procedure',severity:urgent?'critical':'high',date:p.internalDueDate,
    title:p.description||p.type||'عمل إداري',
-   meta:'متأخر عن موعده الداخلي',
+   meta:'متأخر عن موعده الداخلي',ctx:p.__fileLabel,
    when:`كان موعده ${dayOf(p.internalDueDate)}`,
    route:`rec:procedures:${p.id}`,actionLabel:'تنفيذ',daysLeft:diffDays(today,p.internalDueDate)});
  }
  for(const p of b.upcomingProcedures||[]){
   add({id:`p:${p.id}`,kind:'procedure',severity:'normal',date:p.internalDueDate,
    title:p.description||p.type||'عمل إداري',
-   meta:p.type&&p.description?p.type:'',
+   meta:p.type&&p.description?p.type:'',ctx:p.__fileLabel,
    when:formatDayShort(p.internalDueDate),
    route:`rec:procedures:${p.id}`,actionLabel:'تنفيذ',daysLeft:diffDays(today,p.internalDueDate)});
  }
@@ -109,7 +109,7 @@ export function buildFocusModel(brief,{today,now=''}={}){
   const isToday=d===today;
   add({id:`ap:${a.id}`,kind:'appointment',severity:isToday?'high':'normal',date:d,time:timeOf(a.time),
    title:a.title||'موعد',
-   meta:a.location||a.withWhom||'',
+   meta:a.location||a.withWhom||'',ctx:a.__fileLabel,
    when:isToday?`اليوم${timeOf(a.time)?' '+timeOf(a.time):''}`:formatDayShort(d),
    route:`rec:appointments:${a.id}`,actionLabel:'فتح الموعد',daysLeft:diffDays(today,d)});
  }
@@ -118,7 +118,7 @@ export function buildFocusModel(brief,{today,now=''}={}){
   const isToday=d===today;
   add({id:`c:${c.id}`,kind:'followup',severity:isToday?'high':'normal',date:d,
    title:c.subject||'متابعة اتصال',
-   meta:c.contactName||'',
+   meta:c.contactName||'',ctx:c.__fileLabel,
    when:isToday?'متابعة اليوم':formatDayShort(d),
    route:`rec:communications:${c.id}`,actionLabel:'فتح المتابعة',daysLeft:diffDays(today,d)});
  }
@@ -127,7 +127,7 @@ export function buildFocusModel(brief,{today,now=''}={}){
  for(const f of b.staleFiles||[]){
   add({id:`f:${f.id}`,kind:'file',severity:'info',date:dayOf(f.lastActivityAt),
    title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||'بدون عنوان'}`.trim(),
-   meta:'لا نشاط منذ أكثر من ٣٠ يومًا',
+   meta:'لا نشاط منذ أكثر من ٣٠ يومًا',ctx:'',
    when:'راكد',
    route:`file:${f.id}`,actionLabel:'مراجعة الملف',daysLeft:null});
  }

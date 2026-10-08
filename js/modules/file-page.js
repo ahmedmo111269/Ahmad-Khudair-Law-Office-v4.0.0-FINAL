@@ -28,7 +28,7 @@ import {renderFileServiceTab,bindFileServiceTab} from './service-records.js';
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {buildFileTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
-import {fileCockpitHtml} from '../ui/cockpit.js';
+import {fileCockpitHtml,bindCockpit} from '../ui/cockpit.js';
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,hiddenSectionIds,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
@@ -77,6 +77,7 @@ export async function bindFilePage(app,id){
   if(hiddenSectionIds('file-details').has(app.__fileTab.tab)){app.__fileTab.tab='summary';renderTab(app).catch(e=>app.fail(e))}
  }}));
  root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
+ bindCockpit(root,app);
  root.querySelector('[data-cp-task]')?.addEventListener('click',()=>root.querySelector('[data-file-task]')?.click());
  root.querySelector('[data-file-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh()}})});
  root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{

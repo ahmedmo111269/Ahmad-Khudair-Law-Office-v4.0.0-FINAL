@@ -6,7 +6,10 @@ import {modal,closeModal,confirmBox} from '../ui/modal.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {legalFileColumns} from '../ui/grid-columns.js';
 import {createGridRelations} from '../services/grid-relations.js';
-import {formatDate,formatDateTime} from '../core/format.js';
+import {formatDate,formatDateTime,longDateAr} from '../core/format.js';
+import {clientWorkspaceHtml,bindCockpit} from '../ui/cockpit.js';
+import {buildFocusModel} from '../services/focus-engine.js';
+import {clientWorkspaceData} from '../services/client-workspace.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {userError} from '../core/errors.js';
 import {Clock} from '../core/clock.js';
@@ -61,10 +64,19 @@ export async function clientFilePage(app,clientId,query){
  </div></section>
  <div class="cf-search"><input type="search" id="cf-q" placeholder="ابحث داخل ملف الموكل: رقم الملف، الاسم، النوع، رقم القضية…" value="${esc(q)}" aria-label="بحث داخل ملف الموكل"></div>`;
  if(q)return head+`<section class="panel"><div class="panel-head"><h3>نتائج البحث داخل الملف</h3></div><div id="cf-files"></div></section></div>`;
+ // مركز عمل الموكل (الشاشة الرئيسية للموكل فقط): الخطوة التالية عبر كل ملفاته.
+ let ws='';
+ if(!cat&&!q){
+  try{
+   const d=await clientWorkspaceData(app.office,{clientId,clientName:fresh.fullName,summary:s});
+   const model=buildFocusModel(d.brief,{today:d.today,now:new Date().toTimeString().slice(0,5)});
+   ws=clientWorkspaceHtml({model,recentDone:d.recentDone,clientName:fresh.fullName,dayLabel:longDateAr()});
+  }catch(e){console.error('client workspace',e)}
+ }
  if(!cat){
   const used=tax.categories.filter(c=>s.byCategory.get(c.id));
   const empty=!s.total;
-  return head+`
+  return head+ws+`
   ${empty?`<div class="empty cf-empty"><h3>لا توجد ملفات قانونية بعد</h3><p>ابدأ بإضافة أول ملف لهذا الموكل — جنائي، مدني، أسرة، مجلس دولة، محليات، ضرائب… أو أي نوع تضيفه من الإعدادات.</p><button class="primary" data-new-lf>+ إضافة ملف قانوني</button></div>`:`
   <h3 class="cf-section-title">أقسام الأعمال</h3>
   <div class="cat-grid">${used.map(c=>catCard(c,s.byCategory.get(c.id),clientId)).join('')}
@@ -93,6 +105,7 @@ function fileCard(f,tax){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.cat
 
 export async function bindClientFilePage(app,clientId){
  const root=document.querySelector('#main-content .cfile-page');if(!root)return;const {s,catId,typeId,q,cf}=app.__cfile;const tax=s.tax;
+ bindCockpit(root,app);
  root.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b){e.preventDefault();app.go(b.dataset.go)}});
  root.querySelectorAll('[data-new-lf]').forEach(b=>b.onclick=()=>openLegalFileWizard(app,{clientId,categoryId:b.dataset.cat||catId||'',fileTypeId:b.dataset.type||typeId||''}));
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'client-file',root}));

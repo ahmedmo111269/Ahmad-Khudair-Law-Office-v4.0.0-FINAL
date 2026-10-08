@@ -863,3 +863,11 @@ Performance rule: UI list screens should migrate from `Office.list()` to `Office
 | `js/app.js` | اختصار `G` في الرئيسية يفتح بطاقة «الآن». |
 | `css/cockpit.css` | أنماط المكوّنات أعلاه (متغيرات الثيم، RTL، استجابة). مُدرج في `index.html` وفي تخزين PWA. |
 | `sw.js` | الكاش `ahmad-khudair-law-office-v6.0.0-wave4-cockpit` مع إضافة الملفات الجديدة. |
+
+## v6.1.0 — الموجة 5: مركز عمل الموكل
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/client-workspace.js` | لقطة الموكل عبر ملفاته (شكل dashboardBrief) — قراءة فقط عبر الفهارس. |
+| `js/ui/cockpit.js` | `clientWorkspaceHtml`, `doneListHtml`, زر «✓ تم» عبر `completeItem` ضمن `bindCockpit(root, app)`. |
+| `js/modules/client-file.js` | الشاشة الرئيسية للموكل تعرض مركز العمل. |

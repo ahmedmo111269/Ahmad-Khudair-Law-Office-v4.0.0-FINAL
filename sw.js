@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.0.0-wave4-cockpit';
+const CACHE='ahmad-khudair-law-office-v6.1.0-wave5-workspace';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -54,6 +54,7 @@ const ASSETS=[
   "./js/app.js",
   "./js/services/focus-engine.js",
   "./js/ui/cockpit.js",
+  "./js/services/client-workspace.js",
   "./js/core/clock.js",
   "./js/core/constants.js",
   "./js/core/feature-flags.js",
