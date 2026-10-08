@@ -28,6 +28,7 @@ import {renderFileServiceTab,bindFileServiceTab} from './service-records.js';
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {buildFileTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
+import {fileCockpitHtml} from '../ui/cockpit.js';
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,hiddenSectionIds,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
@@ -50,7 +51,8 @@ export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
  if(!f||f.isDeleted)return notFound('الملف');
  trackRecent('file:'+id,`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||'بدون عنوان'}`.trim(),{icon:'folder',sub:f.title?'':'ملف قانوني',scope:app.ctx?.profile?.id||''});
- const [parties,stages,serviceCount]=await Promise.all([fileParties(app.office,id),fileStages(app.office,id),app.office.r.serviceRecords.countIndex('fileId_recordState',[id,'active'])]);
+ // مركز الملف: الجلسات والأعمال تُقرأ مع بيانات الرأس في استعلام واحد متوازٍ (بحدود مضبوطة).
+ const [parties,stages,serviceCount,hearingsRes,proceduresRes]=await Promise.all([fileParties(app.office,id),fileStages(app.office,id),app.office.r.serviceRecords.countIndex('fileId_recordState',[id,'active']),fileChildren(app.office,id,'hearings'),fileChildren(app.office,id,'procedures')]);
  const tax=await taxonomy(app.office);const cat=tax.byId.get(f.categoryId),ftype=tax.byId.get(f.fileTypeId);
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
  app.__file={id,f,parties,stages,tax,serviceCount};
@@ -63,6 +65,7 @@ export async function filePage(app,id){
   <p class="badges">${cat?`<span class="badge type cat-badge">${esc(cat.icon||'')} ${esc(cat.name)}${ftype?' · '+esc(ftype.name):''}</span>`:f.fileType?`<span class="badge type">${esc(f.fileType)}</span>`:''}${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
   <p class="muted small">${clients.length?`الموكل: ${clients.map(p=>`${esc(p.name)} (${esc(p.role||'موكل')})`).join('، ')}`:'لا يوجد موكل مرتبط بعد'}${opps.length?` — الخصم: ${opps.map(p=>esc(p.name)).join('، ')}`:''}${cur?` — المرحلة الحالية: ${esc(refLabel('cases',cur))}`:' — لا توجد أرقام قضائية (ملف بلا قضية)'}</p></div>
   <div class="head-actions"><button class="ghost" data-file-task>+ مهمة</button><button class="ghost" data-file-pin aria-pressed="${isFavorite('file:'+id,app.ctx?.profile?.id||'')}">${isFavorite('file:'+id,app.ctx?.profile?.id||'')?'★ إلغاء التثبيت':'☆ تثبيت'}</button><button class="ghost" data-file-edit>تعديل البيانات</button><button class="ghost" data-reclass>تغيير القسم / النوع</button>${f.isArchived||isClosedFile(f)?'<button class="ghost" data-file-reopen>إعادة فتح</button>':'<button class="ghost" data-file-close>إنهاء الملف</button><button class="ghost" data-file-archive>أرشفة</button>'}</div></div>
+ ${fileCockpitHtml({hearings:hearingsRes.rows,procedures:proceduresRes.rows,stages,parties,today:localDate(),currentStage:cur?refLabel('cases',cur):''})}
  ${stagePathHtml(stages,f.currentStageId||cur?.id,id)}
  <nav class="tabs file-tabs" role="tablist" aria-label="أقسام الملف القانوني">${orderedFileTabs().map(([k,l,icon])=>{const count=k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:null;return `<button type="button" role="tab" data-tab="${k}" data-section-id="${k}" title="${esc(l)}" aria-label="${esc(l)}${count!==null?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="${app.__fileTab.tab===k?'active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count!==null?` <small>${count}</small>`:''}</button>`}).join('')}</nav><div class="file-tab-controls"><button type="button" class="link" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button></div>
  <div id="file-tab" role="tabpanel"></div>`;
@@ -74,6 +77,7 @@ export async function bindFilePage(app,id){
   if(hiddenSectionIds('file-details').has(app.__fileTab.tab)){app.__fileTab.tab='summary';renderTab(app).catch(e=>app.fail(e))}
  }}));
  root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
+ root.querySelector('[data-cp-task]')?.addEventListener('click',()=>root.querySelector('[data-file-task]')?.click());
  root.querySelector('[data-file-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh()}})});
  root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{
   const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()},app.ctx?.profile?.id||'');

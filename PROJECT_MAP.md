@@ -851,3 +851,15 @@ Performance rule: UI list screens should migrate from `Office.list()` to `Office
 - `js/core/format.js`: التنسيق الموحّد (تاريخ DD/MM/YYYY، وأرقام، وعملة).
 - `js/ui/date-input.js`: إدخال التاريخ يوم/شهر/سنة فوق input[type=date].
 - `js/ui/icons.js`: أيقونات خطية بأسلوب Lucide.
+
+## v6.0.0 — الموجة 4: مكتب اليوم وكوكبيت الملف
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/focus-engine.js` | دالة نقيّة: تحوّل `dashboardBrief()` إلى `{next, attention, timeline, counts}`. لا قراءة ولا كتابة. |
+| `js/ui/cockpit.js` | مكوّنات HTML مشتركة: `focusHtml`, `attentionHtml`, `timelineHtml`, `activityHtml`, `fileCockpitHtml`, و`bindCockpit` لفلاتر الطابور. |
+| `js/modules/home.js` | الرئيسية = مكتب اليوم. مصدر البيانات: `dashboardBrief` + `activityLog.reportRange` (timestamp، 6 صفوف). |
+| `js/modules/file-page.js` | يقرأ الجلسات والأعمال عبر `fileChildren` ويعرض `fileCockpitHtml` فوق مسار المراحل. |
+| `js/app.js` | اختصار `G` في الرئيسية يفتح بطاقة «الآن». |
+| `css/cockpit.css` | أنماط المكوّنات أعلاه (متغيرات الثيم، RTL، استجابة). مُدرج في `index.html` وفي تخزين PWA. |
+| `sw.js` | الكاش `ahmad-khudair-law-office-v6.0.0-wave4-cockpit` مع إضافة الملفات الجديدة. |
