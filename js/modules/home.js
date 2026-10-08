@@ -22,7 +22,7 @@ import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
 registerPageLayout({pageId:'dashboard',title:'الصفحة الرئيسية',sections:[
  {id:'favs',title:'مثبّتات',icon:'★'},
  {id:'kpis',title:'ملخص العمل',icon:'◈'},
- {id:'work',title:'جلسات اليوم والأعمال الإدارية',icon:'◷'},
+ {id:'work',title:'جلسات اليوم والأعمال الإدارية والتوكيلات',icon:'◷'},
  {id:'shortcuts',title:'تقارير العمل السريع',icon:'▤'},
  {id:'agenda',title:'الأجندة',icon:'📅'},
  {id:'recents',title:'آخر ما فُتح',icon:'🕘'}]});
@@ -56,7 +56,8 @@ export async function homePage(app){
   KPI('p',r.upcomingProcedures.length,'أعمال هذا الأسبوع','procedures?preset=week'),
   KPI('a',r.appointmentsNext3.length,'مواعيد خلال 3 أيام','appointments?preset=upcoming'),
   KPI('f',r.followupsThisWeek.length,'متابعات اتصال','communications?preset=week'),
-  KPI('s',r.staleFiles.length,'ملفات بلا نشاط','actionCenter',r.staleFiles.length?'warn':'')
+  KPI('s',r.staleFiles.length,'ملفات بلا نشاط','actionCenter',r.staleFiles.length?'warn':''),
+  KPI('x',(r.expiringPoa?.length||0)+(r.expiredPoa?.length||0),'توكيلات منتهية أو تنتهي خلال ٣٠ يومًا','powersOfAttorney',(r.expiredPoa?.length||r.expiringPoa?.length)?'warn':'')
  ];
  return `${demoBanner}${installHint}<div class="hero hero-home"><div><h2>${g}، مكتب الأستاذ أحمد محمد خضير</h2><p class="hero-date">${longDateAr()}</p></div>
   <div class="hero-quick"><button class="primary" data-quick-add>+ إضافة</button><button class="ghost" data-goto="actionCenter">مركز العمل</button><button class="ghost" data-goto="reports?type=hearings&preset=today">تقرير اليوم</button>${last?.route&&last.route!=='dashboard'?`<button class="ghost resume-chip" data-goto="${esc(last.route)}">متابعة: ${esc(last.title||'آخر صفحة')}</button>`:''}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button></div></div>
@@ -69,6 +70,8 @@ export async function homePage(app){
    body:r.overdueProcedures.length?r.overdueProcedures.slice(0,12).map(x=>workRow('procedures:'+x.id,d(x.internalDueDate)||'بدون تاريخ',x.description||x.type||'إجراء',label(x.priority||'normal'),{text:'عمل مطلوب'})).join(''):cardEmpty('لا توجد أعمال إدارية متأخرة.',{icon:'check'})})}
   ${card({icon:'calendar',title:'الجلسات القادمة',badge:statusBadge(String(r.upcomingHearings.length),''),actions:`<button class="link" data-dashboard-report="hearings|week">هذا الأسبوع</button>`,collapsible:true,persistKey:'home:upcomingHearings',pageId:'dashboard',
    body:r.upcomingHearings.length?r.upcomingHearings.slice(0,12).map(x=>{const sig=dateSignal(x.hearingDate);return workRow('hearings:'+x.id,d(x.hearingDate),`${x.hearingTime||''} — ${x.reason||x.type||'جلسة'}`,x.caseNumber?`قضية ${x.caseNumber}`:'',sig?{text:sig.text==='اليوم'?'جلسة اليوم':sig.text==='غدًا'?'جلسة غدًا':'جلسة '+sig.text}:null)}).join(''):cardEmpty('لا توجد جلسات قادمة ضمن الفترة المعروضة.',{icon:'calendar'})})}
+  ${card({icon:'stamp',title:'توكيلات تحتاج إجراءً',tone:(r.expiredPoa?.length||r.expiringPoa?.length)?'warn':'',badge:statusBadge(String((r.expiredPoa?.length||0)+(r.expiringPoa?.length||0)),r.expiredPoa?.length?'danger':'info'),actions:`<button class="link" data-goto="powersOfAttorney">كل التوكيلات</button>`,collapsible:true,persistKey:'home:poaExpiry',pageId:'dashboard',
+   body:(r.expiredPoa?.length||r.expiringPoa?.length)?[...(r.expiredPoa||[]).map(x=>({...x,__poa:'منتهٍ منذ '+d(x.expiryDate)})),...(r.expiringPoa||[]).map(x=>({...x,__poa:'ينتهي '+d(x.expiryDate)}))].slice(0,10).map(x=>workRow(`powersOfAttorney:${x.id}`,`توكيل ${x.poaNumber||'—'}`,x.clientName||'',x.__poa,{text:x.__poa.startsWith('منتهٍ')?'توكيل منتهٍ':'تجديد مطلوب'})).join(''):cardEmpty('لا توكيل منتهٍ ولا ما ينتهي خلال ثلاثين يومًا.',{icon:'check'})})}
   ${card({icon:'clipboard',title:'أعمال إدارية قادمة',badge:statusBadge(String(r.upcomingProcedures.length),''),actions:`<button class="link" data-dashboard-report="procedures|week">هذا الأسبوع</button>`,collapsible:true,persistKey:'home:upcomingProcedures',pageId:'dashboard',
    body:r.upcomingProcedures.length?r.upcomingProcedures.slice(0,12).map(x=>{const sig=dateSignal(x.internalDueDate);return workRow('procedures:'+x.id,d(x.internalDueDate),x.description||x.type||'إجراء',label(x.status||'pending'),sig?{text:'عمل '+sig.text}:null)}).join(''):cardEmpty('لا توجد أعمال إدارية قادمة ضمن الفترة المعروضة.',{icon:'clipboard'})})}
  </div>

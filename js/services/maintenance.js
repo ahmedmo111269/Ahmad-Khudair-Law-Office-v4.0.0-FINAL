@@ -6,7 +6,7 @@ import {Clock} from '../core/clock.js';
 import {transaction,request} from '../db/unit-of-work.js';
 import {seedLookups} from './lookups.js';
 import {seedTaxonomy,migrateToClientFiles} from './client-files.js';
-import {refreshFileSearchText} from './legal-files.js';
+import {refreshFileSearchText,indexFileSearchTextBatch} from './legal-files.js';
 import {phonesOf} from '../domain/entities.js';
 import {PARTY_ROLE_GROUP_MAP} from '../domain/taxonomy-defaults.js';
 import {migrateExecutionData} from './execution-migration.js';
@@ -15,16 +15,68 @@ const META_ID='maintenance';
 const SCHEMA13_META='schema13-data-backfill-v2';
 export const MAINTENANCE_VERSION=2;
 
-export async function runMaintenance(office){
+export async function runMaintenance(office,{searchIndex=true}={}){
  const meta=(await office.r.meta.get(META_ID))||{id:META_ID,key:META_ID};
  const report={lookups:0,parties:0,indexed:0};
  report.lookups=await seedLookups(office);
  try{report.taxonomy=await seedTaxonomy(office);report.clientFiles=await migrateToClientFiles(office)}catch(e){console.error('clientFiles migration',e);report.clientFilesError=String(e?.message||e)}
  if(!meta.partiesMigrated)report.parties=await migrateLegacyParties(office);
  report.schema13=await migrateSchema13Data(office);
- report.indexed=await indexMissingSearchText(office);
+ // بناء نص البحث كان يُمسح فيه مخزن الملفات كاملًا عند كل فتح (O(N) ≈ 270ms على
+ // 20K ملف) وهو ينتظر أول شاشة. صار اختياريًا: الإقلاع يمرّره إلى ما بعد أول
+ // رسم، مع علامة أمان تُبطل تكلفته كلها عندما لا شيء جديدًا (أدناه).
+ report.indexed=searchIndex?await indexMissingSearchText(office):'deferred';
  await office.r.meta.put({...meta,partiesMigrated:true,maintenanceVersion:MAINTENANCE_VERSION,lastRunAt:Clock.now()});
  return report;
+}
+
+/** أعلى قيمة مفهرسة في مخزن (قراءة مؤشر واحدة تنازلية) — لبصمة «هل تغيّر شيء؟». */
+async function maxIndexKey(office,store,index){
+ try{
+  office.ctx.assert();
+  const tx=office.ctx.db.transaction(store,'readonly'),os=tx.objectStore(store);
+  if(!os.indexNames.contains(index))return '';
+  return await new Promise((resolve,reject)=>{
+   const c=os.index(index).openCursor(null,'prev');
+   c.onerror=()=>reject(c.error);
+   c.onsuccess=()=>resolve(c.result?String(c.result.key):'');
+  });
+ }catch{return ''}
+}
+
+export const SEARCH_INDEX_META='searchTextIndex-v1';
+/**
+ * يبني searchText للملفات التي لا تملكه — مُعاد التنفيذ بأمان، ومقيَّد بعلامة:
+ * إذا بقي عدد الملفات وأحدث lastActivityAt كما عند آخر مسح كامل فلا نقرأ شيئًا.
+ * التعديلات التي تمر بـ refreshFileSearchText ترفع searchIndexedAt بنفسها، فلا
+ * تحتاج هذا المسح؛ أما مسارات الكتابة المباشرة (استعادة/مزامنة/إصلاح) فتغيّر
+ * العدد أو الطابع الزمني فتُعيد المسح تلقائيًا. بلا حذف ولا إعادة ترقيم.
+ */
+export async function indexMissingSearchText(office,{max=2000,force=false}={}){
+ // استيراد ديناميكي متعمَّد: وحدة الكاش لا تدخل رسم الإقلاع لهذا السبب.
+ const {withSuspendedSearchCache}=await import('./search-cache.js');
+ return withSuspendedSearchCache('search-index-rebuild',()=>indexMissingSearchTextInner(office,{max,force}));
+}
+async function indexMissingSearchTextInner(office,{max=2000,force=false}){
+ const marker=(await office.r.meta.get(SEARCH_INDEX_META))||{id:SEARCH_INDEX_META,key:SEARCH_INDEX_META};
+ const signature=async()=>{
+  const [count,newest]=await Promise.all([office.r.files.count(),maxIndexKey(office,STORE.files,'lastActivityAt')]);
+  return `${count}|${newest}`;
+ };
+ const current=await signature();
+ if(!force&&marker.complete&&marker.signature===current)return 0;
+ let cursor=null,done=0,complete=false;
+ while(true){
+  const page=await office.r.files.page({limit:100,cursor,filter:f=>!f.searchIndexedAt});
+  const batch=page.items.slice(0,Math.max(0,max-done));
+  if(batch.length)done+=await indexFileSearchTextBatch(office,batch);
+  if(page.items.length>batch.length)break; // توقّف عند السقف: لا نكتب علامة الاكتمال
+  cursor=page.nextCursor;
+  if(!cursor){complete=true;break}
+ }
+ // العلامة تُكتب عند اكتمال المسح فقط، وتحمل بصمة ما فُحص (العدد + أحدث نشاط).
+ if(complete)await office.r.meta.put({...marker,complete:true,signature:await signature(),filesIndexed:done,lastRunAt:Clock.now()});
+ return done;
 }
 
 /** Incremental, idempotent backfill for additive schema v13 fields; never deletes or renumbers historical records. */
@@ -77,12 +129,4 @@ export async function migrateLegacyParties(office){
  return moved;
 }
 
-async function indexMissingSearchText(office,max=2000){
- let cursor=null,done=0;
- do{
-  const page=await office.r.files.page({limit:100,cursor,filter:f=>!f.searchIndexedAt});
-  for(const f of page.items){await refreshFileSearchText(office,f.id);if(++done>=max)return done}
-  cursor=page.nextCursor;
- }while(cursor);
- return done;
-}
+

@@ -2,6 +2,8 @@ import {uid} from '../core/id.js';
 import {getDeviceId} from '../core/device-id.js';
 import {AppError,ERR} from '../core/errors.js';
 import {SYNCABLE_STORES,STORE} from './schema.js';
+import {bumpWriteEpoch} from './write-epoch.js';
+import {notifyWritesAcrossTabs} from './write-broadcast.js';
 
 const CAPTURE_STORES = new Set(SYNCABLE_STORES);
 const SYSTEM_STORES = [STORE.syncChanges, STORE.syncState];
@@ -220,6 +222,16 @@ function instrumentDatabase(db, context) {
           if (mode === 'readonly' && options === undefined) rawTx = target.transaction(txNames);
           else if (nativeOptions === undefined) rawTx = target.transaction(txNames, mode);
           else rawTx = target.transaction(txNames, mode, nativeOptions);
+          // أي معاملة كتابة معتمدة ترفع عدّادات مخازنها: هذا هو المصدر الموثوق
+          // لإبطال كل كاشات القراءة (بحث، مرشّحات، تسميات) مهما كان مسار الكتابة —
+          // Repository أو معاملة خام أو استعادة نسخة أو تطبيق مزامنة أو صيانة.
+          // الإبطال عند oncomplete فقط: المعاملة الملغاة لم تغيّر شيئًا فلا تُبطِل شيئًا.
+          if (mode === 'readwrite' && names.length) {
+            listen(rawTx, 'complete', () => {
+              bumpWriteEpoch(context, names);
+              notifyWritesAcrossTabs(context);
+            });
+          }
           return wrapTransaction(rawTx, context, captureEnabled);
         };
       }

@@ -180,7 +180,11 @@ function metaFor(fields,year,r){
 }
 
 // =====================================================================
-export async function seedDemoData(office,{onProgress}={}){
+export async function seedDemoData(office,opts={}){
+ const {withSuspendedSearchCache}=await import('./search-cache.js');
+ return withSuspendedSearchCache('demo-seed',()=>seedDemoDataInner(office,opts));
+}
+async function seedDemoDataInner(office,{onProgress}={}){
  const t0=Date.now();
  const report={clients:0,opponents:0,files:0,stages:0,hearings:0,procedures:0,appointments:0,communications:0,notes:0,judgments:0,execution:0,experts:0,poas:0,fees:0,payments:0,documents:0,serviceRecords:0,bailiffs:0,relations:0,assets:0,ms:0};
  const tax=await taxonomy(office);

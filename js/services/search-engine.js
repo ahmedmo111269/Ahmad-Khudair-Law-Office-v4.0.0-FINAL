@@ -14,6 +14,8 @@
 //   القديم فورًا (tx.abort) بدل أن يكمل المسح في الخلفية ويستهلك الوقت والذاكرة.
 // ============================================================
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
+import {normalizeCodeToken, NUMBERISH_FIELDS, numberishFieldsFor} from './search-shape.js';
+import {getSearchKeys, matchKeys, isWarm as indexIsWarm, searchCacheStats} from './search-cache.js';
 import {ENTITIES} from '../domain/entities.js';
 import {rowText} from './entity-query.js';
 import {prefs} from '../core/preferences.js';
@@ -28,7 +30,9 @@ export function isAbortError(e){return Boolean(e&&e.name==='AbortError')}
 export function tokenizeQuery(q){
  return String(q||'').trim().split(/[\s،,;؛+]+/).map(t=>normalizeArabic(normalizeDigits(t))).filter(Boolean).slice(0,8);
 }
-export function normalizeCodeToken(t){return normalizeDigits(String(t)).toUpperCase().replace(/[\s-]+/g,'')}
+// normalizeCodeToken و numberishFields انتقلا إلى search-shape.js (طبقة مشتركة مع
+// كاش البحث). يعاد تصديرهما هنا كما هما حتى لا يلمس أي مستورد أو اختبار سطرًا.
+export {normalizeCodeToken};
 /** هل اللفظ يشبه كودًا داخليًا CL-… أو LF-… ؟ */
 export function looksLikeCode(t){const c=normalizeCodeToken(t);return /^(CL|LF)\d/.test(c)}
 /** هل اللفظ رقمي خالص بطول يصلح للبحث بالفهارس (٣+ أرقام)؟ */
@@ -99,7 +103,7 @@ const FAST_INDEXES={
  executionReceipts:[['receiptNumber','digits']],
  executionPOAs:[['poaNumber','digits']]
 };
-const numberishFields={clients:['nationalId','phone','clientCode'],files:['fileNumber'],cases:['caseNumber','caseYear'],opponents:['nationalId'],serviceRecords:['internalNumber','noticeNumber'],powersOfAttorney:['poaNumber'],judgments:['judgmentNumber','lawsuitNumber','appealNumber'],execution:['executionNumber','officialNumber','internalNumber'],feePayments:['receiptNumber'],documentReferences:['referenceNumber'],executionReceipts:['receiptNumber'],executionPOAs:['poaNumber'],executionActions:['referenceNumber','judicialNumber','petitionNumber'],differenceRecords:['periodKey'],executionObligations:['obligationType','description'],executionPeriods:['periodKey','obligationTypeSnapshot','fromDate','toDate']};
+const numberishFields=NUMBERISH_FIELDS;
 
 function rowMatches(src,r,tokens,code,numDigits){
  if(src.extra&&!src.extra(r))return false;
@@ -158,6 +162,34 @@ function boundedScan(office,store,{tokens,code,numDigits,limit,predicate=null,si
 }
 
 /**
+ * مسار الكاش (موجة 3): يُرجع نتائج مطابقة قراءةً من الذاكرة، أو null عندما
+ * لا يوجد كاش آمن — فيكمل المستدعي بمؤشر IndexedDB القديم دون أي فرق وظيفي.
+ * كل مرشَّح يُتحقَّق عليه فوق الصف الحقيقي بنفس دالة المطابقة، فلا نتيجة تظهر
+ * إلا وهي صحيحة على بيانات اللحظة نفسها.
+ */
+async function scanWithCache(office,store,{tokens,code,numDigits,limit,predicate=null,signal=null}){
+ if(predicate)return null; // صيغة الملاحظات السريعة تُقيَّم على الصف أثناء المسح نفسه
+ const src=SRC[store];
+ let record=null;
+ try{record=await getSearchKeys(office.ctx,store,{fields:numberishFieldsFor(store),signal})}
+ catch(error){if(isAbortError(error))throw error;return null}
+ if(!record?.entries)return null;
+ const matched=matchKeys(record.entries,{tokens,code,numDigits,limit});
+ if(!matched)return null;
+ if(!matched.ids.length)return {hits:[],stopped:false};
+ const rows=await office.r[store].getManyRaw(matched.ids);
+ const byId=new Map(rows.map(r=>[String(r.id),r]));
+ const hits=[];
+ for(const id of matched.ids){
+  const row=byId.get(id);
+  if(!row)continue; // سجل تغيّر بين البناء والجلب: يُستبعد ولا يُعرض نصف مطابق
+  if(rowMatches(src,row,tokens,code,numDigits))hits.push(row);
+ }
+ const dropped=matched.ids.length-hits.length;
+ return {hits,stopped:Boolean(matched.stopped||(dropped&&hits.length>=limit))};
+}
+
+/**
  * بحث قسم واحد: مسار سريع بالفهارس + مسح احتوائي محدود، دمج وإزالة تكرار.
  * يرجع {items, more}
  */
@@ -172,7 +204,8 @@ export async function searchStore(office,store,raw,{limit=8,signal=null}={}){
  const ent=ENTITIES[store]||{};
  let prefixMap=new Map(),scanHits=[],stopped=false,scanError=false;
  try{prefixMap=await prefixFast(office,store,tokens,code,numDigits,limit,signal);if(parsedNotes)prefixMap=new Map([...prefixMap].filter(([,row])=>matchesQuickNoteQuery(row,parsedNotes)))}catch(error){if(isAbortError(error))throw error}
- try{const r=await boundedScan(office,store,{tokens,code,numDigits,limit,signal,predicate:parsedNotes?row=>matchesQuickNoteQuery(row,parsedNotes):null});scanHits=r.hits;stopped=r.stopped}catch(error){if(isAbortError(error))throw error;scanError=true}
+ let viaCache=false;
+ try{const cached=await scanWithCache(office,store,{tokens,code,numDigits,limit,signal,predicate:parsedNotes?row=>matchesQuickNoteQuery(row,parsedNotes):null});viaCache=Boolean(cached);const r=cached||await boundedScan(office,store,{tokens,code,numDigits,limit,signal,predicate:parsedNotes?row=>matchesQuickNoteQuery(row,parsedNotes):null});scanHits=r.hits;stopped=r.stopped}catch(error){if(isAbortError(error))throw error;scanError=true}
  // دمج: نتائج الفهارس أولًا (أعلى ترتيبًا) ثم المسح، مع إزالة التكرار
  const merged=[...new Map([...prefixMap,...scanHits.map(r=>[r.id,r])]).values()].slice(0,limit);
  const items=merged.map(r=>{
@@ -180,7 +213,9 @@ export async function searchStore(office,store,raw,{limit=8,signal=null}={}){
   const title=src.title(r)||ent.title?.(r)||'';
   return {id:r.id,row:r,store,icon:src.icon,route:src.routeOf?src.routeOf(r):`${ent.route||'rec:'+store}:${r.id}`,title,sub:src.sub?src.sub(r):'',score:scoreHit({title,sub:src.sub?src.sub(r):'',viaCode,tokens})};
  }).sort((a,b)=>b.score-a.score);
- return {items,more:stopped||scanError?stopped:false,partial:scanError};
+ // cached/cacheBypassed: مصدر القراءة لهذا القسم تحديدًا. الأقسام ذات الصيغة الخاصة
+ // (الملاحظات السريعة) تُقيَّم على الصف أثناء المسح فلا تُعدّ باردة ولا تُحاسب عليها.
+ return {items,more:stopped||scanError?stopped:false,partial:scanError,cached:viaCache,cacheBypassed:Boolean(parsedNotes)};
 }
 
 /**
@@ -203,7 +238,28 @@ export async function searchAll(office,raw,{stores=allSearchStores(),perStore=8,
   .map(r=>{const src=SRC[r.store];return {store:r.store,label:SRC[r.store].label||ENTITIES[r.store]?.plural||r.store,icon:src.icon,note:src.note||'',items:r.items,more:r.more,partial:r.partial}})
   .sort((a,b)=>(SRC[b.store].weight-SRC[a.store].weight)||(b.items.length-a.items.length));
  const t1=(typeof performance!=='undefined'&&performance.now?performance.now():Date.now());
- return {groups,total:groups.reduce((n,g)=>n+g.items.length,0),tookMs:Math.round(t1-t0),partial:groups.some(g=>g.partial)};
+ // indexWarm: هل كانت هذا البحث يقرأ من كاش مفاتيح البحث؟ للعرض في شريط الحالة
+ // ولمساعد المشغّل على ضبط تأخير الكتابة — المعلومة فقط، لا تغيّر أي نتيجة.
+ const eligible=results.filter(r=>!r.cacheBypassed);
+ const indexWarm=eligible.length>0&&eligible.every(r=>r.cached);
+ return {groups,total:groups.reduce((n,g)=>n+g.items.length,0),tookMs:Math.round(t1-t0),partial:groups.some(g=>g.partial),indexWarm,cachedStores:results.filter(r=>r.cached).length,scannedStores:eligible.length-results.filter(r=>r.cached).length};
+}
+
+/**
+ * تأخير البحث المناسب الآن: عندما تكون مفاتيح البحث جاهزة في الذاكرة يمكن
+ * التحديث بعد كل停顿 قصيرة (60ms) فيشعر المستخدم أن النتائج «فورية»؛ وعندما
+ * يلزم مسح المخزن نترك مهلة أطول (220ms) حتى لا تُقرأ المخازن مع كل مفتاح.
+ */
+export function searchDebounceMs(office,stores=PRIMARY_STORES,{warm=60,cold=220}={}){
+ // أقسام بلا فهرس جلسة بصيغتها الخاصة (الملاحظات السريعة) لا تُجبر البحث كله على المهلة الطويلة،
+ // وإلا بقي التأخير باردًا للأبد لأن مفاتيحها لا تُبنى أصلًا (خطأ وقع فعلًا).
+ try{return stores.every(store=>CACHE_EXEMPT.has(store)||indexIsWarm(office?.ctx,store))?warm:cold}catch{return cold}
+}
+/** الأقسام المستثناة من فهرس الجلسة بصيغتها — يجب أن تطابق قاعدة `predicate` في searchStore. */
+export const CACHE_EXEMPT=new Set(['caseNotes']);
+/** حالة كاش البحث للمشغّل التشخيصي (كم صَفًّا في الذاكرة، وهل تجاوز السقف). */
+export function searchEngineStats(office){
+ try{return searchCacheStats(office?.ctx)}catch{return {caches:0,rows:0,bytes:0}}
 }
 
 // ===== 3) عمليات بحث محفوظة وسجل بحث (في تفضيلات المستخدم) =====

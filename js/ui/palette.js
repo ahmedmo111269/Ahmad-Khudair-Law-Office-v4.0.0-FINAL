@@ -126,6 +126,12 @@ function recentCommands(scope=''){
  return getRecent(scope).map(r=>({id:'rec:'+r.route,label:r.title,sub:r.sub||'',iconKey:r.icon||'file',group:'آخر ما فُتح',rec:true,run:()=>window.__LAW_OFFICE_APP__?.go(r.route)}));
 }
 
+// تأخير لوحة الأوامر يتكيّف مع حالة فهرس الجلسة: بعد أول بحث دافئ تُحدَّث
+// النتائج بعد 40ms بدل 150ms. الحالة تُقرأ من نتيجة البحث نفسها — اللوحة لا
+// تستورد محرك البحث عند الإقلاع (بقية التقسيم الذي بناه الإصدار 5.16).
+let searchIndexWarm=false;
+const paletteDelay=()=>searchIndexWarm?40:150;
+
 // ===== الواجهة =====
 let paletteEl=null;
 try{document.addEventListener('modal:closed',()=>{paletteEl=null})}catch{}
@@ -175,6 +181,7 @@ export function openPalette(app){
     try{
      const {searchAll,PRIMARY_STORES}=await import('../services/search-engine.js');
      const r=await searchAll(app.office,q,{stores:PRIMARY_STORES,perStore:3,signal});
+     searchIndexWarm=Boolean(r.indexWarm);
      live=r.groups.flatMap(g=>g.items.map(it=>({
       id:`live:${g.store}:${it.id}`,group:'نتائج من قاعدة البيانات',iconKey:g.icon,icon:'',
       label:it.title,sub:it.sub,run:()=>app.go(it.route)
@@ -183,7 +190,8 @@ export function openPalette(app){
     if(my!==seq)return;
     items=filterCommands([...live,...statics,...recents],q,{limit:18});
     active=0;draw();
-   },150);
+   // الفهرس دافئ من أول كتابة داخل الصفحة نفسها: نتجاوب أسرع (40ms) بدل 150ms ثابتة.
+   },paletteDelay());
    items=filterCommands([...statics,...recents],q,{limit:18});active=0;draw();
   }else{
    clearTimeout(timer);seq++;abortCtl?.abort();abortCtl=null;
