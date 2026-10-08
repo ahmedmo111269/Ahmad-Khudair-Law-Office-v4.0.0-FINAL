@@ -6,7 +6,7 @@ import {confirmBox} from '../ui/modal.js';
 import {openEntityForm} from '../ui/form.js';
 import {ENTITIES,displayValue,label,fmtDate,phonesOf} from '../domain/entities.js';
 import {resolveRefs,clientRelated,opponentRelated,refLabel} from '../services/entity-query.js';
-import {deleteEntity} from '../services/entity-save.js';
+import {deleteEntity,restoreEntity} from '../services/entity-save.js';
 import {sectionGrid,routeFor} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {hearingCycle} from '../services/operations.js';
@@ -56,9 +56,15 @@ export function bindRefLinks(app,root){root.querySelectorAll('[data-open-ref]').
 
 async function confirmDelete(app,store,id){
  if(!await confirmBox(`حذف منطقي لهذا السجل (${esc(ENTITIES[store].label)})؟ يبقى محفوظًا في قاعدة البيانات ويمكن مراجعته من مركز الإصلاح، ولا يُحذف نهائيًا.`,{okText:'حذف منطقي'}))return;
- try{await deleteEntity(app.office,store,id);toast('تم الحذف المنطقي');app.back()}catch(e){toast(userError(e),'error')}
+ try{await deleteEntity(app.office,store,id)}catch(e){toast(userError(e),'error');return}
+ // «تراجع» خلال ١٢ ثانية: الحذف المنطقي علَمٌ فقط، وإعادة العلم آمنة تمامًا.
+ // الإشعار يُعرض قبل الرجوع ولا يُنتظَر به: فشل التنقل أو بطؤه لا يبتلع فرصة التراجع.
+ toast('تم الحذف المنطقي — يمكنك التراجع الآن','warn',{duration:12000,actionLabel:'تراجع',action:async()=>{
+  try{await restoreEntity(app.office,store,id);toast('تم التراجع: السجل عاد كما كان');await app.refresh()}
+  catch(error){toast(userError(error),'error')}
+ }});
+ try{app.back()}catch(e){app.fail(e)}
 }
-
 // ===== صفحة الموكل =====
 export async function clientPage(app,id){
  const c=await app.office.r.clients.get(id);
@@ -81,12 +87,14 @@ export async function clientPage(app,id){
  <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-wc-client-task>+ مهمة</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${clientWorkPanel}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
 }
 export async function bindClientPage(app,id){
- const root=document.querySelector('#main-content');const r=app.__rec.related;
+ const root=document.querySelector('#main-content');
+ if(app.__rec?.store!=='clients'||app.__rec?.id!==id)return;
+ const r=app.__rec.related;
  bindLinkedTasksPanel(app,root,{relatedType:'clients',relatedId:id});
  root.querySelector('[data-wc-client-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'clients',id,{onSaved:async()=>{toast('تمت إضافة المهمة');await app.refresh()}})});
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'client-details',root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,'clients',{id}));
- root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,'clients',id);
+ root.querySelector('[data-rec-delete]')?.addEventListener('click',()=>confirmDelete(app,'clients',id));
  root.querySelectorAll('[data-add]').forEach(b=>b.onclick=async()=>{const s=b.dataset.add;if(s==='files'){const {openLegalFileWizard}=await import('./client-file.js');return openLegalFileWizard(app,{clientId:id})}openEntityForm(app,s,{preset:{clientId:id}})});
  const roleCol={key:'clientRole',label:'صفة الموكل',get:x=>x.clientRole,text:x=>x.clientRole||''};
  await Promise.all([
@@ -115,10 +123,12 @@ export async function opponentPage(app,id){
  ${section('hearings','الجلسات',relatedCount(r,'hearings',r.hearings),'<div data-grid="hearings"></div>')}`;
 }
 export async function bindOpponentPage(app,id){
- const root=document.querySelector('#main-content');const r=app.__rec.related;
+ const root=document.querySelector('#main-content');
+ if(app.__rec?.store!=='opponents'||app.__rec?.id!==id)return;
+ const r=app.__rec.related;
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'opponent-details',root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,'opponents',{id}));
- root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,'opponents',id);
+ root.querySelector('[data-rec-delete]')?.addEventListener('click',()=>confirmDelete(app,'opponents',id));
  const roleCol={key:'opponentRole',label:'صفة الخصم',get:x=>x.opponentRole,text:x=>x.opponentRole||''};
  await Promise.all([
   sectionGrid(app,root.querySelector('[data-grid="files"]'),'files',r.files,{storageKey:'opp:files',extra:[roleCol]}),
@@ -185,7 +195,10 @@ export async function recordPage(app,store,id){
  ${section('activity','سجل النشاط',activity.length,'<div data-grid="activityLog"></div>',{open:false})}`;
 }
 export async function bindRecordPage(app,store,id){
- const root=document.querySelector('#main-content');const {row,children,activity,quickNotes,noteEntityType}=app.__rec;
+ const root=document.querySelector('#main-content');
+ // __rec قد يبقى من الصفحة السابقة إذا عُرض «غير موجود» (رابط قديم أو سجل حُذف): لا تربط القديم.
+ if(app.__rec?.store!==store||app.__rec?.id!==id)return;
+ const {row,children,activity,quickNotes,noteEntityType}=app.__rec;
  bindRecordQuickNotes(root,quickNotes,app,store,id,noteEntityType);
  if(TASK_LINK_STORES.includes(store)){
   const opts={relatedType:store,relatedId:id,title:store==='hearings'?'متابعة الجلسة':''};
@@ -194,7 +207,9 @@ export async function bindRecordPage(app,store,id){
  }
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:`rec:${store}`,root}));
  root.querySelectorAll('[data-rec-edit]').forEach(b=>b.onclick=()=>openEntityForm(app,store,{id}));
- root.querySelector('[data-rec-delete]').onclick=()=>confirmDelete(app,store,id);
+ // محمي بـ ?. لأن الصفحة تُرسم أحيانًا بحالة «غير موجود» (رابط قديم أو سجل حُذف للتو)،
+ // وكان السطر يرفع TypeError يقطع بقية الربط (الملاحظات، الدورات، الأزرار الأخرى).
+ root.querySelector('[data-rec-delete]')?.addEventListener('click',()=>confirmDelete(app,store,id));
  bindRefLinks(app,root);
  root.querySelector('[data-show-hearing-cycle]')?.addEventListener('click',()=>root.querySelector('[data-sec="hearing-cycle"]')?.scrollIntoView({behavior:'smooth',block:'center'}));
  root.querySelector('[data-show-service-cycle]')?.addEventListener('click',()=>root.querySelector('[data-sec="service-cycle"]')?.scrollIntoView({behavior:'smooth',block:'center'}));

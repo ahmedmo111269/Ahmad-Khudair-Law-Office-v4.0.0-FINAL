@@ -534,7 +534,12 @@ export async function createSyncBundle(ctx, {peerKnownVector = {}, maxChanges = 
 }
 
 /** Applies changes in small atomic batches. Change IDs and source sequences make a rerun safe after interruption. */
-export async function applySyncBundle(ctx, bundle, {batchSize = BATCH_SIZE, signal = null, onProgress = null} = {}) {
+export async function applySyncBundle(ctx, bundle, options = {}) {
+ // تطبيق حزمة كاملها كتابة جماعية: الكاش يُبطل صفًّا صفًّا لو تُرك يعمل أثناءها.
+ const {withSuspendedSearchCache} = await import('./search-cache.js');
+ return withSuspendedSearchCache('sync-apply', () => applySyncBundleInner(ctx, bundle, options));
+}
+async function applySyncBundleInner(ctx, bundle, {batchSize = BATCH_SIZE, signal = null, onProgress = null} = {}) {
   ctx.assert();
   validateSyncBundle(bundle, {deviceId: ctx.deviceId || getDeviceId()});
   if (activeContexts.has(ctx.token)) throw new Error('هناك عملية مزامنة أخرى جارية في قاعدة البيانات.');

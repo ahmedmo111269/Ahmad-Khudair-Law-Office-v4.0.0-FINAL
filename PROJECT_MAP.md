@@ -1,3 +1,32 @@
+# v5.17.0 — الموجة 3: فهرس بحث في الجلسة + صيانة مؤجَّلة · Schema 18 بلا تغيير
+
+**2026-10-08 — طبقة بحث/صيانة وميزتان ناقصتان. لا تغيير مخطط ولا على Backup/Restore.** الأرقام في [docs/PERFORMANCE-WAVE3.md](docs/PERFORMANCE-WAVE3.md).
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/services/search-shape.js` (جديد) | شكل واحد للمطابقة: `normalizeCodeToken` (تطبيع كود/أرقام) يُستعمل في المسح وفي الفهرس معًا — مصدر مشترك يمنع الانحراف. |
+| `js/services/search-cache.js` (جديد) | فهرس الجلسة: `getSearchKeys`/`matchKeys`/`isWarm`/`searchCacheStats`/`clearSearchCache`؛ ميزانية 24MB LRU و60k صف لكل مخزن؛ `suspendSearchCache`/`withSuspendedSearchCache` للحِمل الجماعي. **لا يكتب في قاعدة البيانات إطلاقًا.** |
+| `js/db/write-epoch.js` (جديد) | عدّادات كتابة لكل مخزن (WeakMap على السياق). بلا إبطال أعمق من الحاجة: لا `@all`. |
+| `js/db/write-broadcast.js` (جديد) | بثّ `db:write` بين التبويبات عبر `js/core/events.js`، مُجمَّع 200ms، يتجاهل مصدره. |
+| `js/db/database-context.js` | `bumpWriteEpoch(ctx,names)` عند `complete` لأي معاملة قراءة/كتابة، ونفس الأمر من `Repository.afterWrite` — غطاء مزدوج لأن الكتابة الخام تمرّ من السياق. |
+| `js/services/search-engine.js` | `scanWithCache` (فهرس ← مسح)، `indexWarm` من مصدر حقيقي (`cached`/`cacheBypassed` لكل قسم) مع `CACHE_EXEMPT`، `searchDebounceMs`، `searchEngineStats`؛ `predicate` يتجاوز الفهرس دائمًا؛ الإلغاء (`AbortSignal`) كما هو. |
+| `js/core/feature-flags.js` | `FLAGS.searchKeyCache` (مفتاح النجاة: `false` = المسار الحرفي القديم). |
+| `js/services/maintenance.js` | فهرسة نص الملفات **مؤجَّلة** عن الإقلاع، دفعية (معاملة/100 صف)، وعلامة اكتمال في `meta` عند استنفاد المسح فقط. |
+| `js/services/legal-files.js` | `buildFileSearchText` (نقي، مصدر واحد) + `fileNeedsSearchIndex` + `indexFileSearchTextBatch`؛ مسار ختم فقط عند تطابق النص. |
+| `js/services/entity-query.js` | `relatedIds` مُخبَّأ بمفاتيح المخازن المعنية + `relatedIdsStats` (للتشخيص). |
+| `js/app.js` | `scheduleSearchIndexMaintenance()` بعد أول رسم، و`refreshSearchDependentViews()`، و`runMaintenance({searchIndex:false})` في الإقلاع. |
+| `js/modules/search.js` · `js/ui/palette.js` | تأخير متكيف من حالة الفهرس؛ سطر النتائج يشرح مصدر النتائج. `palette.js` لا يستورد المحرك (علامة محلية فقط). |
+| `js/services/dashboard.js` | `expiringPoa`/`expiredPoa` من فهرس `expiryDate` + أسماء الموكّلين المرفقة. |
+| `js/services/entity-save.js` | `restoreEntity` (تراجع عن حذف منطقي: نفس المعاملة + سجل نشاط + إصدار واحد). |
+| `js/modules/record-page.js` · `js/modules/home.js` | زر «تراجع» في إشعار بعد الحذف؛ KPI وبطاقة «توكيلات تحتاج إجراءً». |
+| `js/tests/{search-cache,maintenance-boot,attention}-tests.js` (جديد) + `tests.html` + `run-tests.mjs` | 40 اختبارًا جديدًا، وحارس تكافؤ Node↔tests.html، و`setupError` بدل التعليق. |
+| `tools/verify-cross-platform.mjs` · `tools/node-tests/wave3-bench.mjs` · `tools/node-tests/wave3-features-browser-tests.mjs` | بوابة التغليف (48 فحصًا)، مِقياس قبل/بعد، وتحقق متصفحي لميزات الموجة (11 فحصًا). |
+| `manifest.webmanifest` · `index.html` · `sw.js` | `shortcuts`/`handle_links`/`edge_side_panel`؛ `theme-color` للوضعين؛ Precache يغطي الوحدات الخمس الجديدة والكاش `v5.17.0-wave3-final`. |
+
+**التحقق:** Node 563/563 · `tests.html` 562/562 · مِقياس ميزات الموجة 11/11 · Android/PWA 28/28 · Work center 61/61 · Grid (متصفح) بلا انحدار · Quick notes PASS · بوابة التغليف 0 FAIL.
+
+---
+
 # v5.16.0 — الموجة 2: أداء الإقلاع والبحث · Schema 18 بلا تغيير
 
 **2026-10-08 — طبقة أداء فوق المعمارية الحالية. لا تغيير مخطط ولا على Backup/Restore.**

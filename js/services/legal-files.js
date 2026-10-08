@@ -16,11 +16,12 @@ const STAGE_TEXT_FIELDS=['caseNumber','caseYear','numberType','stageType','court
 
 export function partyDisplay(p){return `${p.role?p.role+': ':''}${p.name||''}`}
 
-// نص البحث المطبّع للملف: يُعاد بناؤه بعد حفظ الملف أو أطرافه أو مراحله. لا يُستخدم كمصدر للبيانات.
-export async function refreshFileSearchText(office,fileId){
- if(!fileId)return null;
- const f=await office.r.files.get(fileId);if(!f)return null;
- const [parties,stages]=await Promise.all([office.r.fileParties.byIndexAll('fileId',fileId),office.r.cases.byIndex('fileId',fileId,500)]);
+/**
+ * نص البحث المطبّع للملف — دالة صافية واحدة (لا IndexedDB ولا كتابة):
+ * يبنيها الحفظ الفردي للصف، ويبنيها مسح البناء الجماعي في الصيانة، فلا يوجد
+ * تنفيذان يمكن أن يفترقا. الطرف والمراحل تُمرَّر جاهزة.
+ */
+export function buildFileSearchText(f,parties=[],stages=[]){
  const bits=[];
  for(const k of FILE_TEXT_FIELDS)bits.push(f[k]);
  for(const fld of allFileTypeFields())if(typeof f[fld.k]==='string')bits.push(f[fld.k]);
@@ -28,17 +29,64 @@ export async function refreshFileSearchText(office,fileId){
  if(f.typeSnapshot)bits.push(f.typeSnapshot.category,f.typeSnapshot.type);
  for(const p of parties)bits.push(p.name,p.role,p.phone);
  for(const s of stages)for(const k of STAGE_TEXT_FIELDS)bits.push(s[k]);
- const text=normalizeArabic(bits.filter(v=>v!==undefined&&v!==null&&v!=='').join(' | '));
- const partyNames=parties.map(partyDisplay).join('، ');
- if(f.searchText===text&&f.partyNames===partyNames)return f;
+ return {searchText:normalizeArabic(bits.filter(v=>v!==undefined&&v!==null&&v!=='').join(' | ')),partyNames:parties.map(partyDisplay).join('، ')};
+}
+
+/** هل يحتاج الصف فهرسة؟ (ملف بلا بصمة، أو نص بحث أقدم من آخر تعديل) */
+export function fileNeedsSearchIndex(f){return Boolean(f)&&(!f.searchIndexedAt||String(f.updatedAt||'')>String(f.searchIndexedAt||''))}
+
+// نص البحث المطبّع للملف: يُعاد بناؤه بعد حفظ الملف أو أطرافه أو مراحله. لا يُستخدم كمصدر للبيانات.
+export async function refreshFileSearchText(office,fileId){
+ if(!fileId)return null;
+ const f=await office.r.files.get(fileId);if(!f)return null;
+ const [parties,stages]=await Promise.all([office.r.fileParties.byIndexAll('fileId',fileId),office.r.cases.byIndex('fileId',fileId,500)]);
+ const {searchText,partyNames}=buildFileSearchText(f,parties,stages);
+ if(f.searchText===searchText&&f.partyNames===partyNames){
+  // النص مطابق لكن البصمة غير مسجَّلة (بيانات مُستعادة أو مُهاجَرة): تُختم مرة
+  // واحدة حتى لا يُعاد فحص الملف في كل صيانة إلى الأبد.
+  if(!f.searchIndexedAt){f.searchIndexedAt=Clock.now();await office.r.files.put(f)}
+  return f;
+ }
  // حقل مشتق: لا نرفع رقم الإصدار حتى لا يتعارض مع نموذج تعديل مفتوح.
- f.searchText=text;f.partyNames=partyNames;f.searchIndexedAt=Clock.now();
+ f.searchText=searchText;f.partyNames=partyNames;f.searchIndexedAt=Clock.now();
  await office.r.files.put(f);
  return f;
 }
+
+/**
+ * فهرسة مجموعة ملفات في معاملة واحدة (الصيانة وإعادة البناء الشاملة).
+ * الفرق عن refreshFileSearchText: قراءة الأطراف والمراحل والكتابة كلها في نفس
+ * المعاملة بدل ثلاث معاملات لكل ملف — على قاعدة فيها 20K ملف هذا فارق دقائق،
+ * وليس ميلي ثوانٍ. الدلالة نفسها حرفيًا: نفس النص، نفس الحقل المشتق، وبلا رفع
+ * version ولا لمس أي بيان أصلي.
+ */
+export async function indexFileSearchTextBatch(office,rows){
+ if(!rows?.length)return 0;
+ let changed=0;
+ await transaction(office.ctx,[STORE.files,STORE.fileParties,STORE.cases],async tx=>{
+  const files=tx.objectStore(STORE.files),partiesOf=tx.objectStore(STORE.fileParties).index('fileId'),stagesOf=tx.objectStore(STORE.cases).index('fileId');
+  for(const row of rows){
+   const f=await request(files.get(row.id));if(!f)continue;
+   const parties=(await request(partiesOf.getAll(IDBKeyRange.only(f.id)))).filter(p=>!p.isDeleted);
+   const stages=(await request(stagesOf.getAll(IDBKeyRange.only(f.id),500))).filter(c=>!c.isDeleted);
+   const {searchText,partyNames}=buildFileSearchText(f,parties,stages);
+   const textSame=f.searchText===searchText&&f.partyNames===partyNames;
+   // لا يُترك ملف بغير بصمة: وإلا عاد مسح الصيانة إليه في كل فتح للأبد.
+   if(textSame&&f.searchIndexedAt)continue;
+   f.searchText=searchText;f.partyNames=partyNames;f.searchIndexedAt=Clock.now();
+   await request(files.put(f));
+   changed++;
+  }
+ });
+ return changed;
+}
 export async function rebuildAllFileSearchText(office,onProgress=null){
+ const {withSuspendedSearchCache}=await import('./search-cache.js');
+ return withSuspendedSearchCache('search-text-rebuild',()=>rebuildAllFileSearchTextInner(office,onProgress));
+}
+async function rebuildAllFileSearchTextInner(office,onProgress){
  let cursor=null,done=0;
- do{const page=await office.r.files.page({limit:100,cursor});for(const f of page.items){await refreshFileSearchText(office,f.id);done++}onProgress?.(done);cursor=page.nextCursor}while(cursor);
+ do{const page=await office.r.files.page({limit:100,cursor});done+=await indexFileSearchTextBatch(office,page.items);onProgress?.(done);cursor=page.nextCursor}while(cursor);
  return done;
 }
 

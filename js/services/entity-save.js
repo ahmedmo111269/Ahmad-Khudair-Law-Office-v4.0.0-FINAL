@@ -1,5 +1,6 @@
 // نقطة حفظ موحّدة للنماذج: توجّه كل كيان إلى خدمته الأصلية (Services → Repositories) ولا تكتب مباشرة.
 import {AppError,ERR} from '../core/errors.js';
+import {uid} from '../core/id.js';
 import {saveOperational} from './operations.js';
 import {saveJudicial} from './judicial.js';
 import {saveFee,addFeePayment} from './finance.js';
@@ -69,6 +70,33 @@ async function refreshPersonFiles(office,key,personId){
 }
 
 // حذف منطقي عبر خدمة Office (يحترم قاعدة منع حذف ملف له قضايا).
+/**
+ * تراجع عن حذف منطقي: يعيد السجل كما كان (يبقي createdAt والإصدار التاريخي)،
+ * في معاملة واحدة مع سجل النشاط. لا يُصلح ما لم يكن محذوفًا منطقيًا فعلًا، ولا
+ * يمس الأرشيف ولا العلاقات: الحذف كان علَمًا فقط، فيُرفع العلم فقط.
+ */
+export async function restoreEntity(office,store,id){
+ if(!office?.r?.[store])throw new AppError(ERR.VALIDATION,'كيان غير معروف.');
+ const row=await office.r[store].getManyRaw([id]);
+ const current=row[0];
+ if(!current)throw new AppError(ERR.NOT_FOUND,'السجل غير موجود في القاعدة.');
+ if(!current.isDeleted)return current; // لا شيء للتراجع عنه: لا كتابة عبثية
+ const now=new Date().toISOString();
+ delete current.isDeleted;delete current.deletedAt;delete current.deletedBy;
+ if(store==='serviceRecords')current.recordState='active';
+ current.updatedAt=now;current.version=(Number(current.version)||0)+1;
+ const {transaction,request}=await import('../db/unit-of-work.js');
+ const {STORE}=await import('../db/schema.js');
+ await transaction(office.ctx,[store,STORE.activityLog],async tx=>{
+  await request(tx.objectStore(store).put(current));
+  await request(tx.objectStore(STORE.activityLog).add({id:uid(),entityType:store,entityId:id,action:'restore',timestamp:now,summary:`restore:${store}`,metadata:{via:'undo'}}));
+ });
+ if(store==='cases'&&current.fileId)await refreshFileSearchText(office,current.fileId);
+ const {events}=await import('../core/events.js');
+ events.emit('entity:changed',{entityType:store,id});
+ return current;
+}
+
 export async function deleteEntity(office,store,id){
  if(['executionValuePeriods','executionObligations','executionPeriods','executionLedger','executionAllocations','executionReceipts','differenceRecords','executionSettlements','executionPOAs'].includes(store))throw new AppError(ERR.CONFLICT,'لا تُحذف السجلات المالية أو لقطات FEAS؛ استخدم إجراء إلغاء/عكس موثقًا من بطاقة التنفيذ.');
  if(store==='fileParties')return removeParty(office,id);

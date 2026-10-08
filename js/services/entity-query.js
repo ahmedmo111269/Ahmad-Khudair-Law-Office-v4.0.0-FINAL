@@ -5,6 +5,7 @@ import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {localDate,addDays,isActiveProcedure} from '../core/clock.js';
 import {formatFileNumber,formatOfficialNumber} from '../core/file-number.js';
 import {createIndexedDbDataProvider} from '../db/grid-data-provider.js';
+import {readEpoch} from '../db/write-epoch.js';
 
 export const DEFAULT_LIMIT=1000;
 export const MAX_LIMIT=5000;
@@ -55,13 +56,40 @@ export function scan(office,store,{index=null,lower,upper,direction='prev',limit
 function abortError(){return new DOMException('تم إلغاء بحث قائمة قديم.','AbortError')}
 
 // معرّفات الملفات/القضايا/الموكلين التي تطابق نص البحث، ليظهر في جدول الجلسات مثلًا كل جلسات قضية تم البحث برقمها.
+// ذاكرة مرتبطة بعدّاد الكتابة: هذه أغلى قراءة في بحث الجداول (مسح كامل لكل
+// مخزن من الثلاثة)، وكانت تُعاد مع كل ضغطة مفتاح **ومع كل صفحة** رغم أن الناتج
+// لا يتغيّر. أي كتابة في أي من هذه المخازن تُبطل الذاكرة تلقائيًا عبر write-epoch.
+const RELATED_LIMIT=32;
+const RELATED_CACHE=new WeakMap();
+function relatedCache(ctx){
+ if(!ctx||(typeof ctx!=='object'&&typeof ctx!=='function'))return null;
+ let map=RELATED_CACHE.get(ctx);
+ if(!map){map=new Map();try{RELATED_CACHE.set(ctx,map)}catch{return null}}
+ return map;
+}
+function storesEpoch(ctx,stores){let sum=0;for(const store of stores)sum+=readEpoch(ctx,store);return sum}
 async function relatedIds(office,q,stores,signal=null){
+ const ctx=office?.ctx;
+ const key=`${q}|${[...stores].sort().join(',')}`;
+ const cache=relatedCache(ctx);
+ const epoch=cache?storesEpoch(ctx,stores):0;
+ if(cache){const hit=cache.get(key);if(hit&&hit.epoch===epoch)return hit.out}
  const out={files:new Set(),cases:new Set(),clients:new Set()};
  const jobs=[];
  if(stores.includes('files'))jobs.push(scan(office,'files',{limit:300,signal,filter:f=>(f.searchText||rowText(f)).includes(q)}).then(r=>r.rows.forEach(x=>out.files.add(x.id))));
  if(stores.includes('cases'))jobs.push(scan(office,'cases',{limit:300,signal,filter:c=>rowText(c).includes(q)}).then(r=>r.rows.forEach(x=>out.cases.add(x.id))));
  if(stores.includes('clients'))jobs.push(scan(office,'clients',{limit:300,signal,filter:c=>rowText(c).includes(q)}).then(r=>r.rows.forEach(x=>out.clients.add(x.id))));
- await Promise.all(jobs);return out;
+ await Promise.all(jobs);
+ if(cache&&!signal?.aborted){
+  cache.set(key,{epoch,out});
+  while(cache.size>RELATED_LIMIT)cache.delete(cache.keys().next().value);
+ }
+ return out;
+}
+/** للاختبارات والتشخيص: حالة ذاكرة المعرّفات المرتبطة لهذه القاعدة. */
+export function relatedIdsStats(ctx){
+ const cache=ctx&&RELATED_CACHE.get(ctx);
+ return cache?{entries:cache.size,keys:[...cache.keys()]}:{entries:0,keys:[]};
 }
 
 /**

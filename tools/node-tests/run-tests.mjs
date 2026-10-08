@@ -36,6 +36,9 @@ const {runQuickNotesTests}=await import(`${R}/tests/quick-notes-tests.js`);
 const {runProceduresExtrasTests}=await import(`${R}/tests/procedures-extras-tests.js`);
 const {runPwaTests}=await import(`${R}/tests/pwa-tests.js`);
 const {runSearchCancelTests}=await import(`${R}/tests/search-cancel-tests.js`);
+const {runSearchCacheTests}=await import(`${R}/tests/search-cache-tests.js`);
+const {runMaintenanceBootTests}=await import(`${R}/tests/maintenance-boot-tests.js`);
+const {runAttentionTests}=await import(`${R}/tests/attention-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -52,6 +55,16 @@ test('cursor stack paging',()=>{const s=pagingState();applyPageResult(s,{nextCur
 test('local date helpers',()=>{expect(localDate(new Date(2026,0,31))).toBe('2026-01-31');expect(addDays('2026-02-28',1)).toBe('2026-03-01')});
 test('open procedures are active',()=>{expect(isActiveProcedure({status:'open'})).toBe(true);expect(isActiveProcedure({status:'pending'})).toBe(true);expect(isActiveProcedure({status:'done'})).toBe(false)});
 
+// حارس تكافؤ: كل مجموعة مُناداة هنا يجب أن تُنادى في tests.html أيضًا، وإلا
+// فهي تُشغَّل في Node وحده ويهدأ المتصفح عنها بلا إنذار (انفلات صامت).
+{
+ const fs=await import('node:fs');
+ const src=fs.readFileSync(new URL(import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../../tests.html',import.meta.url),'utf8');
+ const called=new Set([...src.matchAll(/await (run\w+)\(test,expect\)/g)].map(m=>m[1]));
+ const orphans=[...called].filter(name=>!html.includes(name+'(test,expect)'));
+ if(orphans.length){console.error('مجموعات غير مسجلة في tests.html: '+orphans.join(', '));process.exit(1)}
+}
 await runTransactionTests(test,expect);
 await runClientFileTests(test,expect);
 await runClientDuplicateTests(test,expect);
@@ -82,6 +95,9 @@ await runSyncTests(test,expect);
 await runQuickNotesTests(test,expect);
 await runProceduresExtrasTests(test,expect);
 await runSearchCancelTests(test,expect);
+await runSearchCacheTests(test,expect);
+await runMaintenanceBootTests(test,expect);
+await runAttentionTests(test,expect);
 await runPwaTests(test,expect);
 
 // ===== حراسة الإقلاع: قائمة Precache في Service Worker تغطي كل وحدات الإقلاع =====

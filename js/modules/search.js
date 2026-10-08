@@ -10,7 +10,7 @@ import {highlightMatch} from '../ui/palette.js';
 import {getRecent} from '../services/recents.js';
 import {icon} from '../ui/icons.js';
 import {ENTITIES,label as statusLabel} from '../domain/entities.js';
-import {SEARCH_SOURCES,PRIMARY_STORES,allSearchStores,searchAll,searchStore,
+import {SEARCH_SOURCES,PRIMARY_STORES,allSearchStores,searchAll,searchStore,searchDebounceMs,
  getHistory,pushHistory,clearHistory,getSavedSearches,saveSearch,removeSavedSearch} from '../services/search-engine.js';
 import {localDate} from '../core/clock.js';
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
@@ -154,7 +154,10 @@ export function bindSearch(app){
    if(my!==seq)return;
   }
   const total=groups.reduce((n,g)=>n+g.items.length,0);
-  status.textContent=total?`عُرضت ${total} نتيجة${r.tookMs!=null?` خلال ${r.tookMs<850?r.tookMs+'ms':(r.tookMs/1000).toFixed(1)+'s'}`:''} — Enter لحفظ البحث في السجل، ↑↓ للتنقل.`:'لم يتم العثور على نتائج مطابقة — جرّب كلمات أقل أو جزءًا من الاسم.';
+  // مصدر القراءة يظهر للمستخدم بصدق: من فهرس الجلسة في الذاكرة أم بمسح المخزن.
+  // معلومة عرض فقط — لا تغيّر عدد النتائج ولا ترتيبها.
+  const via=r.indexWarm?' عبر فهرس الجلسة':' بمسح المخزن';
+  status.textContent=total?`عُرضت ${total} نتيجة${r.tookMs!=null?` خلال ${r.tookMs<850?r.tookMs+'ms':(r.tookMs/1000).toFixed(1)+'s'}`:''}${via} — Enter لحفظ البحث في السجل، ↑↓ للتنقل.`:`لم يتم العثور على نتائج مطابقة${r.indexWarm?' عبر الفهرس':''} — جرّب كلمات أقل أو جزءًا من الاسم.`;
  };
 
  const commit=()=>{pushHistory(input.value.trim());const p=new URLSearchParams();p.set('q',input.value.trim());if(st.scope!=='all')p.set('scope',st.scope);app.go('search?'+p.toString(),{replace:true}).then(()=>{const n=document.querySelector('#advanced-q');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length)}})};
@@ -194,7 +197,9 @@ export function bindSearch(app){
  root.querySelector('#search-to').onchange=e=>{st.to=e.target.value;syncFilterSummary();run().catch(err=>app.fail(err))};
 
  // لوحة المفاتيح: ↑↓ للتنقل، Enter للفتح أو لحفظ البحث في السجل والمسار، Esc للمسح
- input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>run().catch(err=>app.fail(err)),250)});
+ // التأخير يتكيّف مع حالة الفهرس: مع فهرس دافئ تُحدَّث النتائج بعد وقفة قصيرة
+ // جدًا (60ms)، ومع مسح مخزن نمنح المستخدم فرصة إنهاء الكلمة (220ms).
+ input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>run().catch(err=>app.fail(err)),searchDebounceMs(app.office,PRIMARY_STORES))});
  input.addEventListener('keydown',e=>{
   const items=[...out.querySelectorAll('.search-result,.dg tbody tr[data-i]')];
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){

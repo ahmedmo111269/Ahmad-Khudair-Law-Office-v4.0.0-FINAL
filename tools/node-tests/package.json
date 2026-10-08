@@ -20,7 +20,10 @@
     "test:legal-context-browser": "node legal-context-browser-tests.mjs",
     "test:html-browser": "node tests-html-browser-tests.mjs",
     "icons:pwa": "node make-pwa-icons.mjs",
-    "screenshots:pwa": "node make-pwa-screenshots.mjs"
+    "screenshots:pwa": "node make-pwa-screenshots.mjs",
+    "test:wave3-bench": "node wave3-bench.mjs",
+    "verify:cross-platform": "node ../verify-cross-platform.mjs",
+    "test:wave3-features-browser": "node wave3-features-browser-tests.mjs"
   },
   "keywords": [],
   "author": "",

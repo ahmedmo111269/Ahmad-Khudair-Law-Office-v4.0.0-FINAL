@@ -77,7 +77,12 @@ export async function inspectBackup(payload){
   return {valid:true,integrity,applicationVersion:payload.applicationVersion,schemaVersion:payload.schemaVersion,exportedAt:payload.exportedAt,database:payload.database||{},recordCounts:counts(payload.stores)};
 }
 
-export async function importDatabase(ctx,payload,{mode='replace'}={}){
+export async function importDatabase(ctx,payload,opts={}){
+ // الاستعادة تكتب القاعدة كاملة: لا معنى لبناء كاش بحث أثناءها ثم إبطاله.
+ const {withSuspendedSearchCache}=await import('./search-cache.js');
+ return withSuspendedSearchCache('backup-restore',()=>importDatabaseInner(ctx,payload,opts));
+}
+async function importDatabaseInner(ctx,payload,{mode='replace'}={}){
   ctx.assert();
   await inspectBackup(payload);
   if(mode!=='replace')throw new AppError(ERR.VALIDATION,'وضع الاستعادة المدعوم حاليًا هو الاستبدال الكامل فقط.');

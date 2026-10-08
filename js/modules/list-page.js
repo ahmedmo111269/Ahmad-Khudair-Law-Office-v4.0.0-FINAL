@@ -48,6 +48,9 @@ export function openRow(app,store,row){const r=routeFor(store,row);if(r)app.go(r
 
 // شبكة داخل قسم (صفحات السجل): صفوف معروفة مسبقًا
 export async function sectionGrid(app,el,store,rows,{storageKey,title,extra=[],collapseKey,printContext}={}){
+ // بلا وعاء لا شبكة: الصف قد يكون مخفيًا بتخصيص الصفحة، أو أن الصفحة عرضت «غير موجود».
+ // كان mountGrid ينفجر بـ TypeError ويقطع بقية ربط الصفحة (والأزرار فيها).
+ if(!el)return null;
  const relations=createGridRelations(app.office,store);
  const [refs]=await Promise.all([resolveRefs(app.office,rows,ENTITIES[store].fields),relations.hydrate(rows)]);
  const pageKey=String(app.route||'page').split('?')[0];

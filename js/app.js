@@ -85,7 +85,7 @@ function recordRoute(route){
 
 class App{
  constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null;this.routeHistory=null;this.storageWatch=null;this.pwaInstall=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';const {renderRecovery,bindRecovery}=await import('./modules/databases.js');$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true})}catch(e){this.booting=false;this.fail(e)}}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';const {renderRecovery,bindRecovery}=await import('./modules/databases.js');$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true});this.scheduleSearchIndexMaintenance()}catch(e){this.booting=false;this.fail(e)}}
  /** تاريخ المتصفح: كل انتقال يُسجَّل، وزر الرجوع في Android يغلق الطبقات ثم يرجع بين الشاشات. */
  startHistoryNav(){
   bindOverlayStack(this.routeHistory=new RouteHistory({
@@ -105,6 +105,36 @@ class App{
   try{this.storageWatch=watchStorage({onLevel:health=>{const level=health.level;if(level==='critical'||level==='high')warn(`مساحة التخزين المحلية قاربت حدها (${health.usageMb} من ${health.quotaMb} ميجابايت). أنشئ نسخة احتياطية من صفحة «النسخ الاحتياطي».`)}})}catch{}
   window.addEventListener('unhandledrejection',event=>{const hint=storageErrorHint(event.reason);if(hint)toast(hint,'error',{duration:9000})});
   window.addEventListener('error',event=>{const hint=storageErrorHint(event.error);if(hint)toast(hint,'error',{duration:9000})});
+ }
+ /**
+  * فهرسة نص البحث الثقيلة تُنفَّذ بعد أول شاشة لا قبلها. تعمل عند أول وقت فراغ
+  * (أو بعد 1.2s في المتصفحات بلا requestIdleCallback)، ومقيَّدة بعلامة اكتمال
+  * في الصيانة، فلا تُكلّف شيئًا في الإقلاعات التي لا جديد فيها. تُعاد جدولتها
+  * بعد كل تبديل قاعدة لأن setContext يصفّر المهمة.
+  */
+ scheduleSearchIndexMaintenance(){
+  if(this.searchIndexTask)return this.searchIndexTask;
+  const run=async()=>{
+   try{
+    await this.maintenance;
+    if(!this.office?.r?.files)return 0;
+    const {indexMissingSearchText}=await import('./services/maintenance.js');
+    const done=await indexMissingSearchText(this.office);
+    if(done>0)this.refreshSearchDependentViews();
+    return done;
+   }catch(error){console.info('search-index maintenance deferred',error);return 0}
+  };
+  const idle=callback=>globalThis.requestIdleCallback?requestIdleCallback(callback,{timeout:4000}):setTimeout(callback,1200);
+  this.searchIndexTask=new Promise(resolve=>idle(()=>{resolve(run())}));
+  return this.searchIndexTask;
+ }
+ /** بعد فهرسة لاحق: الجداول المفتوحة تُحدَّث محليًا — بلا إعادة تحميل صفحة. */
+ refreshSearchDependentViews(){
+  try{
+   const grid=document.querySelector('#list-grid');
+   if(grid?.__grid?.refresh)grid.__grid.refresh();
+   events.emit('search:indexed',{},false);
+  }catch{/* عرض فقط: لا يُفشل أي عملية */}
  }
  /** ترقية قواعد المكتب v2 مع حفظ نسخة v1 وسجل الفاعل/التاريخ وإبطال cache. */
  async runExecutionSettingsMigration(){
@@ -264,7 +294,12 @@ class App{
   this.ctx=ctx;this.office=new Office(ctx);this.office.app=this;this.resetViewState();$('#db-badge').textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   const sbDb=document.querySelector('#sb-db-name');if(sbDb)sbDb.textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   // صيانة غير مدمرة بعد فتح القاعدة (زرع القوائم، ترحيل روابط الموكلين، فهرس البحث)
-  const office=this.office;this.maintenance=runMaintenance(office).catch(e=>console.error('maintenance',e));
+  const office=this.office;
+  // الإقلاع لا ينتظر مسح نص البحث: كان O(N) على كل ملف عند كل فتح ويستغرق
+  // ≈270ms على 20K ملف قبل أول شاشة. الصيانة الحرجة فقط هنا، والفهرس يُبنى
+  // بعد أول رسم في scheduleSearchIndexMaintenance().
+  this.searchIndexTask=null;
+  this.maintenance=runMaintenance(office,{searchIndex:false}).catch(e=>console.error('maintenance',e));
  }
  resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__report','__agendaDay','__wc'])delete this[k]}
  back(){
