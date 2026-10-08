@@ -19,16 +19,7 @@ import {filePage,bindFilePage} from './modules/file-page.js';
 import {openQuickAdd} from './modules/quick-add.js';
 import {quickNotesPage,bindQuickNotes,openQuickNoteCapture,bindQuickNoteGlobalEvents} from './modules/quick-notes.js';
 import {remindersPage,bindReminders,initReminders,scheduleRemindersBadge} from './modules/reminders.js';
-import {renderDatabases,bindDatabases,renderBackup,bindBackup,renderRecovery,bindRecovery} from './modules/databases.js';
-import {reportsPage,bindReports} from './modules/reports.js';
-import {renderSearch,bindSearch} from './modules/search.js';
-import {workCenterPage,bindWorkCenter,scheduleWorkBadge} from './modules/work-center.js';
-import {executionCenterPage,bindExecutionCenter,executionDetailPage,bindExecutionDetail} from './modules/execution-center.js';
-import {analyticsPage,bindAnalytics} from './modules/analytics.js';
-import {integrityPage,bindIntegrity} from './modules/integrity.js';
-import {repairPage,bindRepair} from './modules/repair.js';
-import {renderSettings,bindSettings} from './modules/settings.js';
-import {renderSyncPage,bindSyncPage} from './modules/sync.js';
+import {scheduleWorkBadge} from './ui/work-badge.js';
 import {syncStatus} from './services/sync-engine.js';
 import {networkStatus,ONLINE,OFFLINE} from './core/network-status.js';
 import {PWAUpdateService} from './services/pwa-updates.js';
@@ -55,19 +46,19 @@ import {PWAInstallService} from './services/pwa-install.js';
 const LIST_STORES=['clients','opponents','files','cases','powersOfAttorney','hearings','procedures','serviceRecords','appointments','communications','caseNotes','expertReports','judgments','execution','fees','feePayments','documentReferences','bailiffs'];
 const PAGES={
  dashboard:{title:'الرئيسية',render:app=>homePage(app),bind:app=>bindHome(app)},
- search:{title:'البحث',render:app=>renderSearch(app),bind:app=>bindSearch(app)},
- reports:{title:'التقارير',render:(app,q)=>reportsPage(app,q),bind:app=>bindReports(app)},
- actionCenter:{title:'مركز العمل',render:(app,q)=>workCenterPage(app,q),bind:(app,q)=>bindWorkCenter(app,q)},
+ search:{title:'البحث',render:async app=>(await import('./modules/search.js')).renderSearch(app),bind:async app=>(await import('./modules/search.js')).bindSearch(app)},
+ reports:{title:'التقارير',render:async(app,q)=>(await import('./modules/reports.js')).reportsPage(app,q),bind:async app=>(await import('./modules/reports.js')).bindReports(app)},
+ actionCenter:{title:'مركز العمل',render:async(app,q)=>(await import('./modules/work-center.js')).workCenterPage(app,q),bind:async(app,q)=>(await import('./modules/work-center.js')).bindWorkCenter(app,q)},
  quickNotes:{title:'الملاحظات السريعة',render:(app,q)=>quickNotesPage(app,q),bind:(app,q)=>bindQuickNotes(app,q),layoutId:'quickNotes',store:'caseNotes'},
  reminders:{title:'التذكيرات',render:(app,q)=>remindersPage(app,q),bind:(app,q)=>bindReminders(app,q),layoutId:'reminders',store:'reminders'},
- executionCenter:{title:'مركز التنفيذ',render:app=>executionCenterPage(app),bind:app=>bindExecutionCenter(app),layoutId:'executionCenter'},
- analytics:{title:'الإحصاءات',render:(app,q)=>analyticsPage(app,q),bind:app=>bindAnalytics(app)},
- integrity:{title:'سلامة البيانات والتدقيق',render:app=>integrityPage(app),bind:app=>bindIntegrity(app)},
- repair:{title:'مركز الإصلاح والاسترداد',render:app=>repairPage(app),bind:app=>bindRepair(app)},
- databases:{title:'قواعد البيانات',render:app=>renderDatabases(app),bind:app=>bindDatabases(app)},
- backup:{title:'النسخ الاحتياطي',render:app=>renderBackup(app),bind:app=>bindBackup(app)},
- sync:{title:'المزامنة',render:app=>renderSyncPage(app),bind:app=>bindSyncPage(app)},
- settings:{title:'الإعدادات',render:app=>renderSettings(app),bind:app=>bindSettings(app)}
+ executionCenter:{title:'مركز التنفيذ',render:async app=>(await import('./modules/execution-center.js')).executionCenterPage(app),bind:async app=>(await import('./modules/execution-center.js')).bindExecutionCenter(app),layoutId:'executionCenter'},
+ analytics:{title:'الإحصاءات',render:async(app,q)=>(await import('./modules/analytics.js')).analyticsPage(app,q),bind:async app=>(await import('./modules/analytics.js')).bindAnalytics(app)},
+ integrity:{title:'سلامة البيانات والتدقيق',render:async app=>(await import('./modules/integrity.js')).integrityPage(app),bind:async app=>(await import('./modules/integrity.js')).bindIntegrity(app)},
+ repair:{title:'مركز الإصلاح والاسترداد',render:async app=>(await import('./modules/repair.js')).repairPage(app),bind:async app=>(await import('./modules/repair.js')).bindRepair(app)},
+ databases:{title:'قواعد البيانات',render:async app=>(await import('./modules/databases.js')).renderDatabases(app),bind:async app=>(await import('./modules/databases.js')).bindDatabases(app)},
+ backup:{title:'النسخ الاحتياطي',render:async app=>(await import('./modules/databases.js')).renderBackup(app),bind:async app=>(await import('./modules/databases.js')).bindBackup(app)},
+ sync:{title:'المزامنة',render:async app=>(await import('./modules/sync.js')).renderSyncPage(app),bind:async app=>(await import('./modules/sync.js')).bindSyncPage(app)},
+ settings:{title:'الإعدادات',render:async app=>(await import('./modules/settings.js')).renderSettings(app),bind:async app=>(await import('./modules/settings.js')).bindSettings(app)}
 };
 for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>listPage(app,s,q),bind:app=>bindListPage(app,s)};
 // المسار القديم caseNotes يبقى رابط توافق إلى شاشة الملاحظات السريعة، لا شاشة Notes ثانية.
@@ -79,12 +70,12 @@ function recordRoute(route){
  if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];const layouts={client:'client-details',opponent:'opponent-details',file:'file-details',case:'rec:cases'};return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0],layoutId:layouts[m[1]]}}
  // بطاقة التنفيذ: مسار ثابت يُستخدم من الجدول والبحث والخط الزمني
  m=/^exc:(.+)$/.exec(route);
- if(m)return {title:'بطاقة التنفيذ',render:app=>executionDetailPage(app,m[1]),bind:app=>bindExecutionDetail(app,m[1]),store:'executionCenter',layoutId:'execution:card'};
+ if(m)return {title:'بطاقة التنفيذ',render:async app=>(await import('./modules/execution-center.js')).executionDetailPage(app,m[1]),bind:async app=>(await import('./modules/execution-center.js')).bindExecutionDetail(app,m[1]),store:'executionCenter',layoutId:'execution:card'};
  m=/^cfile:(.+)$/.exec(route);
  if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients',layoutId:'client-file'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
  // المهمة المستقلة لا صفحة سجل عامة لها: تُفتح في مجلّد مركز العمل (رابط ثابت rec:workItems:ID).
- if(m&&m[1]==='workItems')return {title:'مركز العمل',render:app=>workCenterPage(app,new URLSearchParams({item:m[2]})),bind:app=>bindWorkCenter(app,new URLSearchParams({item:m[2]})),store:'actionCenter',layoutId:'actionCenter'};
+ if(m&&m[1]==='workItems')return {title:'مركز العمل',render:async app=>(await import('./modules/work-center.js')).workCenterPage(app,new URLSearchParams({item:m[2]})),bind:async app=>(await import('./modules/work-center.js')).bindWorkCenter(app,new URLSearchParams({item:m[2]})),store:'actionCenter',layoutId:'actionCenter'};
  // Old caseNotes record URLs open the single Quick Notes surface and its editor;
  // they never expose the retired generic Notes screen as a second system.
  if(m&&m[1]==='caseNotes')return {title:'الملاحظات السريعة',render:app=>quickNotesPage(app,new URLSearchParams({status:'ALL',note:m[2]})),bind:(app,q)=>bindQuickNotes(app,new URLSearchParams({status:'ALL',note:m[2]})),store:'caseNotes',layoutId:'quickNotes'};
@@ -94,7 +85,7 @@ function recordRoute(route){
 
 class App{
  constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null;this.routeHistory=null;this.storageWatch=null;this.pwaInstall=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true})}catch(e){this.booting=false;this.fail(e)}}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';const {renderRecovery,bindRecovery}=await import('./modules/databases.js');$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true})}catch(e){this.booting=false;this.fail(e)}}
  /** تاريخ المتصفح: كل انتقال يُسجَّل، وزر الرجوع في Android يغلق الطبقات ثم يرجع بين الشاشات. */
  startHistoryNav(){
   bindOverlayStack(this.routeHistory=new RouteHistory({

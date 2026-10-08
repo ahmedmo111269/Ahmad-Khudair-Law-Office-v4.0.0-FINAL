@@ -35,6 +35,7 @@ const {runSyncTests}=await import(`${R}/tests/sync-tests.js`);
 const {runQuickNotesTests}=await import(`${R}/tests/quick-notes-tests.js`);
 const {runProceduresExtrasTests}=await import(`${R}/tests/procedures-extras-tests.js`);
 const {runPwaTests}=await import(`${R}/tests/pwa-tests.js`);
+const {runSearchCancelTests}=await import(`${R}/tests/search-cancel-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -80,7 +81,21 @@ await runExecutionUiTests(test,expect);
 await runSyncTests(test,expect);
 await runQuickNotesTests(test,expect);
 await runProceduresExtrasTests(test,expect);
+await runSearchCancelTests(test,expect);
 await runPwaTests(test,expect);
+
+// ===== حراسة الإقلاع: قائمة Precache في Service Worker تغطي كل وحدات الإقلاع =====
+{
+ const fsMod=await import('node:fs');const {bootModuleGraph}=await import('../module-graph.mjs');
+ const ROOT_DIR=new URL('../../',import.meta.url).pathname;
+ const boot=bootModuleGraph(ROOT_DIR).filter(f=>f!=='js/app.js');
+ test('كل وحدات الإقلاع الساكنة مُخزَّنة مسبقًا في Service Worker (Offline-first)',()=>{
+  const sw=fsMod.readFileSync(ROOT_DIR+'sw.js','utf8');
+  const assets=new Set([...sw.matchAll(/"\.\/([^"]+)"/g)].map(m=>m[1]));
+  const missing=boot.filter(f=>!assets.has(f));
+  expect(missing.length).toBe(0);
+ });
+}
 
 const r=await run();
 for(const [status,name,msg] of r.results){

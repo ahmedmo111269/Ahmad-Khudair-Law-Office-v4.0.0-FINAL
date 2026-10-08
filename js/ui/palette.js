@@ -143,7 +143,7 @@ export function openPalette(app){
  overlay.classList.add('palette-card');
  paletteEl=overlay;
  const input=overlay.querySelector('.pal-q'),list=overlay.querySelector('.pal-list');
- let items=[],active=0,seq=0,timer=0;
+ let items=[],active=0,seq=0,timer=0,abortCtl=null;
  const closePalette=()=>{paletteEl=null;closeModal()};
  overlay.addEventListener('click',e=>{if(e.target===overlay.closest('.modal-backdrop'))closePalette()});
  const draw=()=>{
@@ -168,11 +168,13 @@ export function openPalette(app){
   if(q.length>=2){
    const my=++seq;list.innerHTML=`<div class="pal-empty muted">جارٍ البحث…</div>`;
    clearTimeout(timer);
+   abortCtl?.abort();
    timer=setTimeout(async()=>{
     let live=[];
+    abortCtl=new AbortController();const signal=abortCtl.signal;
     try{
      const {searchAll,PRIMARY_STORES}=await import('../services/search-engine.js');
-     const r=await searchAll(app.office,q,{stores:PRIMARY_STORES,perStore:3});
+     const r=await searchAll(app.office,q,{stores:PRIMARY_STORES,perStore:3,signal});
      live=r.groups.flatMap(g=>g.items.map(it=>({
       id:`live:${g.store}:${it.id}`,group:'نتائج من قاعدة البيانات',iconKey:g.icon,icon:'',
       label:it.title,sub:it.sub,run:()=>app.go(it.route)
@@ -184,7 +186,7 @@ export function openPalette(app){
    },150);
    items=filterCommands([...statics,...recents],q,{limit:18});active=0;draw();
   }else{
-   clearTimeout(timer);seq++;
+   clearTimeout(timer);seq++;abortCtl?.abort();abortCtl=null;
    items=filterCommands([...recents,...statics],'' ,{limit:16});active=0;draw();
   }
  };

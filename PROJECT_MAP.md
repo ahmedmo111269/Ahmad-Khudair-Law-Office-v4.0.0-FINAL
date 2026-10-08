@@ -1,3 +1,23 @@
+# v5.16.0 — الموجة 2: أداء الإقلاع والبحث · Schema 18 بلا تغيير
+
+**2026-10-08 — طبقة أداء فوق المعمارية الحالية. لا تغيير مخطط ولا على Backup/Restore.**
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/app.js` | جدول الصفحات يحمّل الشاشات الثقيلة عبر `import()` عند أول فتح؛ الإقلاع يبقى لـ: الرئيسية، القوائم، السجلات، النماذج، التذكيرات والملاحظات (ارتباطات عامة). |
+| `js/ui/work-badge.js` (جديد) | شارة عدّاد مركز العمل؛ يعتمد `services/work-query.js` فقط. `js/modules/work-center.js` يعيد التصدير. |
+| `js/services/search-engine.js` | `AbortSignal` في `searchAll`/`searchStore`/`boundedScan`؛ `isAbortError`/`abortError`. |
+| `js/modules/search.js` · `js/ui/palette.js` | كل بحث جديد يُلغي السابق عبر `AbortController`. |
+| `sw.js` | Precache يشمل `js/ui/work-badge.js`؛ الكاش `v5.16.0-wave2-perf`. |
+| `js/core/constants.js` | `APP_VERSION=5.16.0`. |
+| `js/tests/search-cancel-tests.js` · `js/tests/topnav-tests.js` · `tests.html` · `tools/node-tests/run-tests.mjs` | اختبارات الإلغاء، حراسة Precache، وإصلاح انتظار متذبذب في اختبار التنقل العلوي. |
+| `tools/module-graph.mjs` · `tools/node-tests/startup-bench.mjs` · `tools/node-tests/scale-bench.mjs` | رسم الاستيرادات الساكنة وأدوات القياس (نتائجها في `.cache/bench`). |
+| `docs/PERFORMANCE-WAVE2.md` | الأرقام قبل/بعد، شروط القياس، والمشكلات المفتوحة. |
+
+**التحقق:** Node 527/527 · `tests.html` 499/499 · حزمة الشبكة 37 فحصًا ناجحًا بلا أخطاء · Android/PWA 28/28 · Legal context 7/7 · Work center 61/61.
+
+---
+
 # v5.15.0 — تطوير الملاحظات السريعة والأعمال الإدارية + قسم التذكيرات
 
 **2026-10-07 — طبقة واجهة/خدمات فوق المعمارية الحالية. لا تغيير مخطط: `SCHEMA_VERSION=18` ومخازن IndexedDB كما هي؛ لا تغيير على Backup/Restore.**

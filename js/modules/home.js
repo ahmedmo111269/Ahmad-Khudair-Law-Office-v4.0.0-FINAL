@@ -83,7 +83,7 @@ export async function homePage(app){
 
 export function bindHome(app){
  // شارة «مركز العمل» في الشريط الجانبي: عدّاد حي من محرك مركز العمل نفسه (المتأخر + اليوم)، بلا استعلام مكرر.
- import('./work-center.js').then(m=>m.scheduleWorkBadge(app,{force:true})).catch(()=>{});
+ import('../ui/work-badge.js').then(m=>m.scheduleWorkBadge(app,{force:true})).catch(()=>{});
  // حذف البيانات التجريبية دفعة واحدة: زر واحد في اللافتة أعلى الصفحة الرئيسية.
  if(document.querySelector('[data-demo-cleanup]'))import('../ui/demo-cleanup.js').then(m=>{
   m.refreshDemoCount(app);

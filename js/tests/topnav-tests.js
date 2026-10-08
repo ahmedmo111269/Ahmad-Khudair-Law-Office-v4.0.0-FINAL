@@ -209,7 +209,9 @@ export async function runTopNavTests(test, expect) {
     for (const id of hiddenTabs) if (!list.includes(id)) throw Error('قسم غير متاح من «المزيد»: ' + id);
     const first = bar.querySelector(`#tn-more-list .tn-item[data-tab-open="${hiddenTabs[0]}"]`);
     first.click();
-    await new Promise(r => setTimeout(r, 0));
+    // فتح اللوحة قد يتأخر إطارًا أو اثنين تحت الحمل: ننتظر بحد زمني بدل مهلة صفرية هشة.
+    const panelDeadline = Date.now() + 1000;
+    while (Date.now() < panelDeadline && bar.querySelector(`#tn-panel-${hiddenTabs[0]}`).hidden) await new Promise(r => setTimeout(r, 20));
     expect(bar.querySelector(`#tn-panel-${hiddenTabs[0]}`).hidden).toBe(false);
     closePanel();
   });
