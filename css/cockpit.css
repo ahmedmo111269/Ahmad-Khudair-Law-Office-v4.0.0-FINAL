@@ -204,3 +204,30 @@
 @media (prefers-reduced-motion:reduce){
   .cp-exec-main{transition:none}
 }
+
+/* ---------- مكتب اليوم v2: السبب، طبقات الطابور، المُسجَّل، التعارض، منذ آخر زيارة ---------- */
+/* «لماذا الآن؟» — سطر نصي هادئ، لا شارة. */
+.cp-why{margin:8px 0 0;color:var(--text);line-height:1.6;font-size:.95rem}
+.cp-why-label{color:var(--text-muted);font-weight:700;margin-inline-end:6px}
+
+/* طبقات الطابور: عنوان نصي وفاصل، لا بطاقات متداخلة. */
+.cp-grp{margin-block-start:12px;padding-block-start:10px;border-block-start:1px solid var(--border)}
+.cp-grp:first-of-type{margin-block-start:0;padding-block-start:0;border-block-start:0}
+.cp-grp-title{margin:0 0 8px;font-size:.95rem;font-weight:700;color:var(--text-strong);display:flex;align-items:center;gap:8px}
+.cp-grp-more{margin:8px 0 0}
+.cp-grp-n{font-variant-numeric:tabular-nums;color:var(--text-muted);font-weight:600;font-size:.85rem}
+
+/* جدول اليوم: المُسجَّل يبقى مرئيًا لكن بهدوء، والتعارض بلون التحذير على الوقت. */
+.cp-day-chips{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
+.cp-tl li.is-done>button{opacity:.7}
+.cp-tl li.is-done time{text-decoration:line-through}
+.cp-done-mark{color:var(--success);font-weight:700}
+.cp-tl li.is-conflict time{color:var(--warn)}
+.cp-conflict-mark{color:var(--warn);font-weight:700}
+
+/* منذ آخر زيارة: قسم ثانوي، بلا بطاقة ثقيلة. */
+.cp-since{margin-block-start:14px}
+.cp-since .cp-tl--log li>button,.cp-since .cp-tl--log li>div{background:transparent}
+
+/* حركة قصيرة واحترام تفضيل تقليل الحركة. */
+@media (prefers-reduced-motion:reduce){.cp-tl li>button{transition:none}}
