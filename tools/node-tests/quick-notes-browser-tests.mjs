@@ -133,6 +133,31 @@ try {
     await page.waitForFunction(async id => (await window.__LAW_OFFICE_APP__.office.r.caseNotes.getManyRaw([id]))[0]?.isDeleted === false, uiId, {timeout: 10000});
   });
 
+  await check('Trash exposes confirmed per-note permanent deletion and the empty-trash action', async () => {
+    const purgeTitle = `QN_BROWSER_PURGE_${Date.now()}`;
+    const purgeId = await page.evaluate(async title => {
+      const {saveQuickNote, deleteQuickNote} = await import('/js/services/quick-notes.js');
+      const office = window.__LAW_OFFICE_APP__.office;
+      const note = await saveQuickNote(office, {title, content: 'ملاحظة اختبار للحذف النهائي'});
+      await deleteQuickNote(office, note.id);
+      return note.id;
+    }, purgeTitle);
+    await go('quickNotes');
+    await page.locator('[data-quick-query]').fill(purgeTitle);
+    await page.selectOption('[data-quick-status]', 'TRASH');
+    await waitQuick();
+    const noteCard = card(purgeId);
+    assert(await noteCard.count() === 1, 'الملاحظة المحذوفة لا تظهر في السلة');
+    assert(await noteCard.locator('[data-note-action="purge"]').textContent() === 'حذف نهائي', 'زر الحذف النهائي غير موجود في بطاقة السلة');
+    assert(await page.locator('[data-quick-empty-trash]').isVisible(), 'زر إفراغ السلة النهائي غير ظاهر');
+    await noteCard.locator('[data-note-action="purge"]').click();
+    await page.waitForSelector('.modal-card [data-ok]');
+    assert((await page.locator('.modal-card').textContent()).includes('لا يمكن استعادتها'), 'تأكيد الحذف النهائي لا يوضح أنه غير قابل للاستعادة');
+    await page.locator('.modal-card [data-ok]').click();
+    await page.waitForFunction(async id => !(await window.__LAW_OFFICE_APP__.office.r.caseNotes.getManyRaw([id])).length, purgeId, {timeout: 10000});
+    assert(await card(purgeId).count() === 0, 'الملاحظة المحذوفة نهائيًا ما زالت ظاهرة');
+  });
+
   await check('Command Center opens Quick Capture', async () => {
     await go('dashboard');
     await page.click('#command-btn');

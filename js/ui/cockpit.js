@@ -1,5 +1,5 @@
 // =====================================================================
-// واجهة التشغيل المشتركة — «الآن» و«يحتاج انتباهك» و«جدول اليوم» و«ما الذي حدث؟»
+// واجهة التشغيل المشتركة — «الآن» و«يحتاج انتباهك» و«جدول اليوم» و«المهام»
 // ومركز عمل الموكل وكوكبيت الملف. مكوّنات HTML + ربط سلوك، بلا قراءة/كتابة مباشرة
 // للبيانات إلا عبر الخدمات المعتمدة (completeItem لإنجاز عمل إداري).
 // ---------------------------------------------------------------------
@@ -11,15 +11,15 @@
 // =====================================================================
 import {esc} from './dom.js';
 import {SEVERITY,QUEUE_GROUPS} from '../services/focus-engine.js';
-import {reasonText,HOME_LIMITS} from '../services/work-config.js';
-import {formatDateTime} from '../core/format.js';
+import {reasonText,HOME_LIMITS,getWorkConfig} from '../services/work-config.js';
+import {formatDate,formatDateTime} from '../core/format.js';
+import {classifyDue,priorityInfo,overlayId} from '../domain/work-items.js';
 import {ENTITIES} from '../domain/entities.js';
 import {toast} from './toast.js';
 import {userError} from '../core/errors.js';
 import {executionContextSummary} from '../services/execution-work.js';
 import {completeItem,reopenItem} from '../services/work-items.js';
 
-import {overlayId} from '../domain/work-items.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {money} from './execution-work-view.js';
 
@@ -145,15 +145,35 @@ export function timelineHtml(model,{dayLabel='',empty='لا جلسات ولا م
 
 const kindLabel=k=>({hearing:'جلسة',appointment:'موعد',followup:'متابعة اتصال',execution:'تنفيذ'})[k]||'';
 
-/** ما الذي حدث؟ — آخر تحركات السجل (قراءة فقط). */
-export function activityHtml(rows){
- return `<section class="cp-activity" data-section-id="activity" aria-labelledby="cp-act-title">
-  <header class="cp-day-head"><div><span class="cp-eyebrow">ما الذي حدث؟</span><h2 id="cp-act-title">آخر التحركات</h2></div><span class="muted small">آخر ${rows.length||0} تحرّك</span></header>
-  ${rows.length?`<ol class="cp-tl cp-tl--log">${rows.map(r=>{
-    const ent=ENTITIES[r.entityType]?.label||'';
-    const inner=`<time>${esc(formatDateTime(r.timestamp)||'')}</time><span class="cp-log-txt">${esc(r.summary||'نشاط')}${ent?`<small>${esc(ent)}</small>`:''}</span>`;
-    return `<li>${r.fileId?`<button type="button" data-route="file:${esc(r.fileId)}">${inner}</button>`:`<div>${inner}</div>`}</li>`;
-   }).join('')}</ol>`:`<div class="cp-empty cp-empty--soft"><span aria-hidden="true">◌</span><p>لا توجد تحركات مسجلة بعد.</p></div>`}
+/**
+ * مهام الرئيسية من مصدر Work Center نفسه: المهام المستقلة المفتوحة فقط.
+ * كل صف يفتح مجلّد المهمة داخل مركز العمل؛ لا تُنسخ البيانات ولا تُكتب من هنا.
+ */
+export function homeTasksHtml({items=[],hasMore=false,partial=false,error=null,today=''}={}){
+ const config=getWorkConfig();
+ const count=error?'غير متاح':`${items.length}${hasMore||partial?'+':''} مفتوحة`;
+ const rows=items.map(item=>{
+  const bucket=classifyDue(item.dueDate,today);
+  const when=bucket==='overdue'?`متأخرة · ${formatDate(item.dueDate)}`
+   :bucket==='today'?'اليوم'
+   :bucket==='tomorrow'?'غدًا'
+   :item.dueDate?formatDate(item.dueDate):'بلا موعد';
+  const dueTime=item.dueTime?` · ${item.dueTime}`:'';
+  const tone=bucket==='overdue'?'danger':['today','tomorrow'].includes(bucket)?'info':'muted';
+  const priority=priorityInfo(item.priority,config);
+  const status=item.statusLabel||'مفتوحة';
+  return `<li class="cp-task-row"><button type="button" class="cp-task-main" data-route="rec:workItems:${esc(item.id)}" aria-label="فتح المهمة: ${esc(item.title||'مهمة بلا عنوان')}">
+   <b class="cp-task-title">${esc(item.title||'مهمة بلا عنوان')}</b>
+   <span class="cp-task-meta"><span class="cp-task-pill cp-task-due cp-task-due--${tone}">${esc(when+dueTime)}</span><span class="cp-task-pill cp-task-priority cp-task-priority--${esc(priority.key)}">${esc(priority.icon)} ${esc(priority.label)}</span><span class="cp-task-pill cp-task-status">${esc(status)}</span></span>
+   <span class="cp-task-open" aria-hidden="true">فتح ←</span>
+  </button></li>`;
+ }).join('');
+ const body=error?`<div class="cp-empty cp-empty--soft" role="alert"><span aria-hidden="true">!</span><p>تعذر تحميل المهام من مركز العمل الآن.</p><button type="button" class="ghost small" data-route="actionCenter">فتح مركز العمل</button></div>`
+  :rows?`<ul class="cp-task-list">${rows}</ul>${hasMore||partial?'<p class="cp-task-more muted small">يعرض القسم جزءًا من المهام المفتوحة؛ افتح مركز العمل لعرض الباقي.</p>':''}`
+  :`<div class="cp-empty cp-empty--soft"><span aria-hidden="true">✓</span><p>لا توجد مهام مفتوحة في مركز العمل.</p><button type="button" class="ghost small" data-route="actionCenter">إضافة أو مراجعة المهام</button></div>`;
+ return `<section class="cp-tasks" data-section-id="tasks" aria-labelledby="cp-tasks-title">
+  <header class="cp-day-head cp-tasks-head"><div><span class="cp-eyebrow">من مركز العمل</span><h2 id="cp-tasks-title">المهام</h2></div><div class="cp-tasks-head-actions"><span class="cp-chip">${esc(count)}</span><button type="button" class="ghost small" data-route="actionCenter">كل المهام ←</button></div></header>
+  ${body}
  </section>`;
 }
 
@@ -171,7 +191,7 @@ export function sinceHtml(change){
  </section>`;
 }
 
-/** صف سجل نشاط واحد (مشترك بين «ما الذي حدث؟» و«منذ آخر زيارة»). */
+/** صف واحد من سجل النشاط في ملخص «منذ آخر زيارة». */
 function logRowHtml(r){
  const ent=ENTITIES[r.entityType]?.label||'';
  const inner=`<time>${esc(formatDateTime(r.timestamp)||'')}</time><span class="cp-log-txt">${esc(r.summary||'نشاط')}${ent?`<small>${esc(ent)}</small>`:''}</span>`;

@@ -61,9 +61,24 @@
 .cp-then button span:nth-child(2){flex:1;font-weight:600}
 .cp-then small{color:var(--text-muted);white-space:nowrap}
 
-/* جدول اليوم */
-.cp-day,.cp-attn,.cp-activity{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
+/* جدول اليوم والمهام */
+.cp-day,.cp-attn,.cp-tasks{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
 .cp-day{display:flex;flex-direction:column;min-width:0}
+.cp-tasks{margin-bottom:16px;min-width:0}
+.cp-tasks-head{align-items:center}
+.cp-tasks-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cp-task-list{list-style:none;display:grid;gap:7px;margin:0;padding:0}
+.cp-task-main{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5px 12px;width:100%;min-width:0;padding:10px 12px;border:1px solid transparent;border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);text-align:start}
+.cp-task-main:hover,.cp-task-main:focus-visible{border-color:var(--border);outline:none}
+.cp-task-title{grid-column:1;grid-row:1;min-width:0;color:var(--text-strong);overflow-wrap:anywhere}
+.cp-task-meta{grid-column:1;grid-row:2;display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+.cp-task-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 8px;border:1px solid var(--border-subtle,var(--border));border-radius:var(--radius-pill);background:var(--surface);color:var(--text-muted);font-size:.76rem;line-height:1.5;overflow-wrap:anywhere}
+.cp-task-due--danger{border-color:var(--danger-border);background:var(--danger-soft);color:var(--danger);font-weight:700}
+.cp-task-due--info{border-color:var(--primary-border);background:var(--primary-soft);color:var(--info)}
+.cp-task-priority--urgent,.cp-task-priority--high{font-weight:700;color:var(--warn)}
+.cp-task-priority--urgent{color:var(--danger)}
+.cp-task-open{grid-column:2;grid-row:1/3;color:var(--primary);font-size:.8rem;font-weight:700;white-space:nowrap}
+.cp-task-more{margin:8px 0 0}
 .cp-day-head,.cp-attn-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap}
 .cp-day-head h2,.cp-attn-head h2{margin:2px 0 0;font-size:1.08rem;color:var(--text-strong)}
 .cp-tl{list-style:none;margin:0;padding:0;position:relative;display:grid;gap:4px}
@@ -123,8 +138,7 @@
 .cp-fc-stage{grid-column:1/-1}
 .cp-fc-stage dd{font-size:.95rem;font-weight:700}
 
-/* ---------- ما الذي حدث ---------- */
-.cp-activity{margin-bottom:16px}
+/* ---------- قوائم سجل النشاط (منذ آخر زيارة / ما أُنجز) ---------- */
 .cp-tl--log li{grid-template-columns:1fr}
 .cp-tl--log li>button,.cp-tl--log li>div{flex-direction:row;align-items:center;gap:12px;padding:8px 12px}
 .cp-tl--log time{padding:0;text-align:start;font-size:.8rem;color:var(--text-muted);white-space:nowrap;min-width:9.5em}
@@ -144,6 +158,9 @@
   .cp-hero-actions button{flex:1 1 auto}
   .cp-focus{padding:18px}
   .cp-tl li{grid-template-columns:48px minmax(0,1fr)}
+  .cp-tasks{padding:14px}
+  .cp-task-main{grid-template-columns:minmax(0,1fr);gap:5px}
+  .cp-task-title,.cp-task-meta,.cp-task-open{grid-column:1;grid-row:auto}
   .cp-row-main{padding:10px;gap:8px}
   .cp-row-when{font-size:.76rem}
   .cp-then small{display:none}

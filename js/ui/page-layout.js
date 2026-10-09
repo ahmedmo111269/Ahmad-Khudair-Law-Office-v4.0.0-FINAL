@@ -44,6 +44,7 @@ export function registerPageLayout(def){
 }
 export const getPageLayout=pageId=>registry.get(String(pageId||''))||null;
 export const listRegisteredLayouts=()=>[...registry.values()];
+const legacySectionId=(pageId,id)=>pageId==='dashboard'&&id==='activity'?'tasks':id;
 
 /** الترتيب الفعّال: المحفوظ أولًا (المطابق للأقسام المسجلة) ثم الباقي بالترتيب الافتراضي. */
 export function resolveSectionOrder(pageId){
@@ -51,7 +52,8 @@ export function resolveSectionOrder(pageId){
  if(!layout)return [];
  const ids=layout.sections.map(s=>s.id);
  const saved=getSectionLayout(pageId);
- const order=(saved.order||[]).filter(id=>ids.includes(id));
+ // الصفحة الرئيسية استبدلت «آخر التحركات» بالمهام؛ حافظ على الموضع والحالة المحفوظين.
+ const order=[...new Set((saved.order||[]).map(id=>legacySectionId(pageId,id)).filter(id=>ids.includes(id)))];
  for(const id of ids)if(!order.includes(id))order.push(id);
  return order;
 }
@@ -65,7 +67,7 @@ export function hiddenSectionIds(pageId){
  const layout=getPageLayout(pageId);
  if(!layout)return new Set();
  const ids=new Set(layout.sections.map(s=>s.id));
- return new Set((getSectionLayout(pageId).hidden||[]).filter(id=>ids.has(id)));
+ return new Set((getSectionLayout(pageId).hidden||[]).map(id=>legacySectionId(pageId,id)).filter(id=>ids.has(id)));
 }
 export const isSectionHidden=(pageId,id)=>hiddenSectionIds(pageId).has(id);
 

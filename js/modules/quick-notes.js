@@ -14,7 +14,7 @@ import {
   getQuickNote, saveQuickNote, completeQuickNote, reopenQuickNote, archiveQuickNote, unarchiveQuickNote,
   deleteQuickNote, restoreQuickNote, snoozeQuickNote, toggleQuickNoteFlag, toggleQuickNoteChecklist, linkQuickNote,
   unlinkQuickNote, linksForNote, noteAgenda, smartCaptureProposals, saveQuickNoteDraft,
-  getQuickNoteDraft, deleteQuickNoteDraft, quickNotesStats, emptyQuickNoteTrash, addTagToQuickNotes,
+  getQuickNoteDraft, deleteQuickNoteDraft, quickNotesStats, emptyQuickNoteTrash, purgeQuickNote, addTagToQuickNotes,
   bulkUpdateQuickNotes, needsActionNotes, reorderQuickNotes, quickNoteTypes, normalizeSearch
 } from '../services/quick-notes.js';
 import {saveWorkItemFromQuickNote} from '../services/work-items.js';
@@ -78,7 +78,7 @@ export function quickNotesPage(app, query) {
         <button type="button" class="ghost" data-quick-fab-copy>التقاط الآن</button>
         <button type="button" class="ghost" data-quick-refresh>⟳ تحديث</button>
         <button type="button" class="ghost" data-quick-print>طباعة العرض</button>
-        <button type="button" class="ghost danger" data-quick-empty-trash hidden>🗑 إفراغ السلة</button>
+        <button type="button" class="ghost danger" data-quick-empty-trash title="حذف جميع ملاحظات السلة وروابطها نهائيًا" hidden>🗑 إفراغ السلة نهائيًا</button>
       </div>
     </section>
     <section class="quick-notes-stats" aria-label="ملخص الملاحظات">
@@ -302,6 +302,11 @@ export async function bindQuickNotes(app, query) {
       else if (action === 'unsnooze') await snoozeQuickNote(rt.office, id, null);
       else if (action === 'delete') { if (!await confirmBox('نقل الملاحظة إلى السلة؟ يمكن استعادتها لاحقًا.')) return; await deleteQuickNote(rt.office, id); }
       else if (action === 'restore') await restoreQuickNote(rt.office, id);
+      else if (action === 'purge') {
+        if (!await confirmBox('حذف هذه الملاحظة نهائيًا من السلة؟ لا يمكن استعادتها بعد ذلك، وستُحذف روابطها معها.', {okText: 'حذف نهائي'})) return;
+        await purgeQuickNote(rt.office, id);
+        toast('حُذفت الملاحظة وروابطها نهائيًا.', 'ok');
+      }
       else if (action === 'pin' || action === 'star') { const note = await getQuickNote(rt.office, id); await toggleQuickNoteFlag(rt.office, id, action === 'pin' ? 'isPinned' : 'isStarred', !(action === 'pin' ? note.isPinned : note.isStarred)); }
       else if (action === 'snooze') await snoozeQuickNote(rt.office, id, addDays(localDate(new Date()), 1) + 'T09:00:00.000Z');
       else if (action === 'copy') {
@@ -372,7 +377,7 @@ function makeNoteCard(note, rt) {
   card.append(chips);
   const actions = document.createElement('div'); actions.className = 'qn-actions';
   const state = note.effectiveState;
-  if (state === 'TRASH') actions.append(button('استعادة', 'استعادة من السلة', 'restore', 'ghost'));
+  if (state === 'TRASH') actions.append(button('استعادة', 'استعادة من السلة', 'restore', 'ghost'), button('حذف نهائي', 'حذف الملاحظة نهائيًا من السلة', 'purge', 'danger'));
   else {
     const lifecycleAction = state === 'SNOOZED' ? 'unsnooze' : state === 'DONE' ? 'reopen' : state === 'ARCHIVED' ? 'unarchive' : 'complete';
     const lifecycleLabel = state === 'SNOOZED' ? 'إلغاء الغفوة' : state === 'DONE' ? 'إعادة فتح' : state === 'ARCHIVED' ? 'إلغاء الأرشفة' : 'إنجاز';

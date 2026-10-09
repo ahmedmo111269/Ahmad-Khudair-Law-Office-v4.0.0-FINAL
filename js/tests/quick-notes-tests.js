@@ -264,6 +264,23 @@ export async function runQuickNotesTests(test, expect) {
     } finally { close(e); }
   });
 
+  test('ملاحظات سريعة/السلة: الحذف النهائي الفردي يحذف الروابط ولا يقبل ملاحظة خارج السلة', async () => {
+    const e = await env();
+    try {
+      const trashed = await QN.saveQuickNote(e.office, {content: 'ملاحظة ستُحذف نهائيًا'});
+      await QN.linkQuickNote(e.office, trashed.id, {entityType: 'LEGAL_FILE', entityId: e.file.id});
+      await QN.deleteQuickNote(e.office, trashed.id);
+      const retained = await QN.saveQuickNote(e.office, {content: 'ملاحظة يجب أن تبقى'});
+
+      expect(await QN.purgeQuickNote(e.office, trashed.id)).toBe(true);
+      expect(await QN.getQuickNote(e.office, trashed.id, {raw: true})).toBe(null);
+      expect((await QN.linksForNote(e.office, trashed.id)).length).toBe(0);
+      const conflict = await rejects(() => QN.purgeQuickNote(e.office, retained.id));
+      expect(conflict.code).toBe(ERR.CONFLICT);
+      expect(Boolean(await QN.getQuickNote(e.office, retained.id))).toBe(true);
+    } finally { close(e); }
+  });
+
   test('ملاحظات سريعة/مفتاح البحث مثبت: يطابق المثبّتة فقط دون تغيير النص', () => {
     const parsed = QN.parseQuickNoteQuery('مثبت ملف');
     expect(parsed.states.has('PINNED')).toBe(true);
