@@ -183,15 +183,14 @@
 @media (max-width:600px){
   .cp-done{padding:6px 8px}
 }
-/* مساحة لزر تخصيص القسم (الترس) حتى لا يتداخل مع العناوين */
-.cp-focus-head,.cp-day-head,.cp-attn-head{padding-inline-end:34px}
+/* زر تخصيص القسم (⚙) يجلس في تدفق الرأس نفسه — لا حاجة لمساحة محجوزة فوق العنوان */
 /* قوائم السجل (ما الذي حدث / ما أُنجز) عمود واحد على كل الأحجام — لا تُضغط بعمود الوقت */
 .cp-tl--log li,.cp-done-list .cp-tl li{grid-template-columns:minmax(0,1fr)!important}
 
 /* ---------- Wave 6.1: شريط التنفيذ السياقي (ملف · موكل) ---------- */
 /* ملخص فقط + رابط للمركز: لا نماذج ولا طابور — مركز التنفيذ يبقى المكان الوحيد للتنفيذ. */
 .cp-exec{display:grid;gap:10px;margin:0 0 14px;padding:16px 18px;border-radius:var(--radius-lg);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
-.cp-exec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-inline-end:34px}
+.cp-exec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .cp-exec-title{margin:2px 0 0;font-size:1.02rem;color:var(--text-strong)}
 .cp-exec-pulse{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0;font-size:.86rem;color:var(--text-muted)}
 .cp-exec-pulse b{color:var(--text-strong);font-variant-numeric:tabular-nums}

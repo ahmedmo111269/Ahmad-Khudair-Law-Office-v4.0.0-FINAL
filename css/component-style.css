@@ -227,8 +227,10 @@
 .uxc-gear:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .panel-head .uxc-gear,.sp-head .uxc-gear{margin-inline-start:6px}
 summary .uxc-gear{margin-inline-start:auto}
-.uxc-gear-host{position:relative}
-.uxc-gear-host>.uxc-gear{position:absolute;top:6px;inset-inline-start:6px;z-index:5;margin:0;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+/* ⚙ لا يُوضع أبدًا بـ position:absolute فوق النص: يجلس في تدفق رأس القسم (flex)
+   بمسافة فاصلة، أو في شريط صغير مستقل أعلى المحتوى إذا لم يوجد رأس واضح. */
+.uxc-gear-bar{display:flex;justify-content:flex-end;align-items:center;min-width:0;margin:0 0 6px}
+.uxc-gear-bar .uxc-gear{margin-inline-start:0}
 [data-uxc-type="stage"]>.uxc-gear{width:22px;height:22px;min-width:22px}
 
 /* ---------- نافذة «تخصيص العرض» العالمية ---------- */

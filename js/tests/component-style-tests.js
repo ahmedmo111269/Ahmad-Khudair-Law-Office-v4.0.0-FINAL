@@ -342,6 +342,33 @@ export function runComponentStyleTests(test,expect){
   host.remove();
  });
 
+ test('تخصيص: ⚙ لا يُوضع داخل التبويبات ولا فوق النص — يجلس في تدفق رأس القسم',()=>{
+  clean();
+  const main=document.createElement('section');main.id='main-content';document.body.append(main);
+  main.innerHTML=`<div class="cfile-page">
+   <nav class="tabs file-tabs" role="tablist"><button type="button" role="tab" data-tab="summary" data-section-id="summary"><span class="tab-label">ملخص</span></button><button type="button" role="tab" data-tab="timeline" data-section-id="timeline"><span class="tab-label">الخط الزمني</span></button></nav>
+   <section class="cp-exec" data-section-id="execution"><header class="cp-exec-head"><div><h3 class="cp-exec-title">التنفيذ المرتبط بهذا الملف</h3></div></header><p>محتوى</p></section>
+   <section class="plain-block" data-section-id="plain"><p>بلا رأس واضح</p><section data-section-id="inner"><div class="panel-head"><h3>قسم داخلي</h3></div></section></section>
+  </div>`;
+  bindCustomizableComponents(main);
+  // التبويبات: لا ⚙ داخل أي زر ولا هوية مكوّن
+  main.querySelectorAll('.file-tabs button').forEach(b=>{expect(Boolean(b.querySelector('.uxc-gear'))).toBe(false);expect(b.dataset.uxcId===undefined).toBe(true)});
+  expect(main.querySelectorAll('.uxc-gear-host').length).toBe(0);
+  // قسم التنفيذ: ⚙ آخر عنصر داخل الرأس نفسه (تدفق طبيعي لا absolute)
+  const head=main.querySelector('.cp-exec-head');
+  expect(head.lastElementChild.classList.contains('uxc-gear')).toBe(true);
+  // قسم بلا رأس: شريط مستقل أعلى المحتوى، ولا يسرق رأس القسم الداخلي
+  const plain=main.querySelector('[data-section-id="plain"]');
+  expect(plain.firstElementChild.classList.contains('uxc-gear-bar')).toBe(true);
+  expect(Boolean(plain.querySelector(':scope > .uxc-gear-bar > .uxc-gear'))).toBe(true);
+  // القسم الداخلي يحصل على ⚙ في رأسه هو
+  expect(Boolean(main.querySelector('[data-section-id="inner"] .panel-head > .uxc-gear'))).toBe(true);
+  // idempotent: لا ⚙ مكررة عند إعادة الربط (cp-exec + bar + inner = 3)
+  bindCustomizableComponents(main);
+  expect(main.querySelectorAll('.uxc-gear').length).toBe(3);
+  main.remove();
+ });
+
  test('تخصيص: حفظ إعدادات الصفحة يُطبق على جذر المحتوى (خلفية/نص)',()=>{
   clean();
   const main=document.createElement('section');document.body.append(main);
