@@ -22,7 +22,7 @@ const OTHER_ITEMS=Object.keys(STORE_ICONS).filter(store=>!CORE_STORES.has(store)
 const CONTEXT_ACTIONS={
  today:[['task','مهمة اليوم','target'],['appointment','موعد اليوم','clock']],
  client:[['file','ملف جديد للموكل','folder'],['hearing','جلسة للموكل','calendar'],['procedure','عمل إداري للموكل','clipboard'],['appointment','موعد للموكل','clock'],['note','ملاحظة مرتبطة بالموكل','note'],['task','مهمة مرتبطة بالموكل','target']],
- file:[['hearing','جلسة في الملف','calendar'],['procedure','عمل إداري في الملف','clipboard'],['party','طرف جديد','users'],['stage','مرحلة قضائية','gavel'],['note','ملاحظة مرتبطة بالملف','note'],['task','مهمة مرتبطة بالملف','target']],
+ file:[['hearing','جلسة في الملف','calendar'],['procedure','عمل إداري في الملف','clipboard'],['judgment','حكم في الملف','landmark'],['serviceRecord','إعلان/محضر في الملف','stamp'],['document','مستند مرتبط','file'],['fee','أتعاب الملف','wallet'],['party','طرف جديد','users'],['stage','مرحلة قضائية','gavel'],['note','ملاحظة مرتبطة بالملف','note'],['task','مهمة مرتبطة بالملف','target']],
  case:[['hearing','جلسة للمرحلة','calendar'],['judgment','حكم للمرحلة','landmark'],['procedure','عمل إداري للملف','clipboard'],['serviceRecord','إعلان مرتبط','stamp'],['note','ملاحظة مرتبطة بالقضية','note'],['task','مهمة مرتبطة بالقضية','target']],
  record:[['note','ملاحظة مرتبطة بالسجل','note'],['task','مهمة مرتبطة بالسجل','target']]
 };
@@ -256,10 +256,10 @@ export async function runQuickAction(app,kind,{context=null,preset:providedPrese
  if(kind==='stage')kind='case';
  const store=FORM_KIND[kind]||(ENTITIES[kind]?kind:null);
  if(!store){toast('الإجراء غير مدعوم.','warn');return}
- if(['hearing','judgment','serviceRecord','procedure','party','document'].includes(kind)){
+ if(['hearing','judgment','serviceRecord','procedure','party','document','fee'].includes(kind)){
   if(target.fileId){const file=target.record&&target.type==='file'?target.record:await app.office.r.files.get(target.fileId);if(file)return launchOnFile(app,kind,file,target)}
   if(target.clientId){return openClientFilePicker(app,target.clientId,kind)}
-  if(['hearing','judgment','serviceRecord','procedure','party','document'].includes(kind)&&!target.fileId&&target.type!=='global'){
+  if(['hearing','judgment','serviceRecord','procedure','party','document','fee'].includes(kind)&&!target.fileId&&target.type!=='global'){
    toast('اختر ملفًا قانونيًا أولًا لربط السجل به.','info');return
   }
  }

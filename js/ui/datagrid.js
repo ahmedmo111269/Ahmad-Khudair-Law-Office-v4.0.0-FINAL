@@ -477,6 +477,13 @@ export function mountGrid(root,opts){
   if(detail.target==='section'||detail.target==='all'){st.shellCollapsed=next;if(save)saveCollapseState(shellCollapseKey,next)}
   if(save)persist();applyChrome();
  });
+ root.addEventListener('collapse:reset',()=>{
+  clearCollapseState(shellCollapseKey);clearCollapseState(toolsCollapseKey);clearCollapseState(filterCollapseKey);
+  st.shellCollapsed=resolveCollapseState(shellCollapseKey,{fallback:false,primary:true});
+  st.toolsCollapsed=resolveCollapseState(toolsCollapseKey,{fallback:true});
+  st.filterCollapsed=resolveCollapseState(filterCollapseKey,{fallback:true});
+  applyChrome();
+ });
  $('.dg-font').addEventListener('change',e=>{st.fontSize=e.target.value;persist();renderBody()});
  $('.dg-fullscreen').addEventListener('click',async()=>{if(document.fullscreenElement===root){try{await document.exitFullscreen()}catch{}root.classList.remove('dg-fullscreen')}else if(root.requestFullscreen){try{await root.requestFullscreen()}catch{root.classList.toggle('dg-fullscreen')}}else root.classList.toggle('dg-fullscreen');renderBody()});
  root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});

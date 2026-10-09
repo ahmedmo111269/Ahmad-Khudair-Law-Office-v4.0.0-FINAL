@@ -6,6 +6,7 @@ import {greetingKey,longDateAr,GREETINGS} from '../core/format.js';
 import {timelineHtml,timelineSummary,bindTimeline} from '../modules/timeline-view.js';
 import {toast,clearToasts} from '../ui/toast.js';
 import {rowText} from '../services/entity-query.js';
+import {FILE_LIST_CHIPS,listNavFor,listNavHtml} from '../modules/list-page.js';
 
 export function runUxTests(test,expect){
  test('آخر ما فُتح: يضيف ويزيل التكرار ويحفظ الترتيب',()=>{
@@ -147,5 +148,42 @@ export function runUxTests(test,expect){
   expect(a).toBe(b);
   expect(a.includes('احمد ابراهيم')).toBe(true);
   expect(a.includes('12345')).toBe(true);
+ });
+ test('شرائح قائمة الملفات: كل criterion يستند إلى بيانات فعلية',()=>{
+  // كل شريحة لها ids: «الكل» و«مثبتة» و«جلسة قادمة» تعتمدان على سياق، others على بيانات السجل
+  const names=FILE_LIST_CHIPS.map(([k])=>k);
+  expect(names).toContain('all');expect(names).toContain('active');expect(names).toContain('action');
+  expect(names).toContain('hearing');expect(names).toContain('stale');expect(names).toContain('pinned');
+  const byId=new Map(FILE_LIST_CHIPS.map(([k,,fn])=>[k,fn]));
+  const open={id:'a',status:'open'},closed={id:'b',status:'closed'},archived={id:'c',status:'open',isArchived:true};
+  expect(byId.get('all')(open)).toBe(true);
+  expect(byId.get('active')(open)).toBe(true);
+  expect(byId.get('active')(closed)).toBe(false);
+  expect(byId.get('active')(archived)).toBe(false);
+  // «تحتاج إجراء»: خطوة تالية بلا موعد أو موعدها اليوم/ماضٍ
+  expect(byId.get('action')({...open,nextStep:'متابعة',nextStepDate:''})).toBe(true);
+  expect(byId.get('action')({...open,nextStep:'متابعة',nextStepDate:'2999-01-01'})).toBe(false);
+  expect(byId.get('action')({...open,nextStep:'',nextStepDate:''})).toBe(false);
+  // «راكدة»: لا نشاط منذ 45 يومًا
+  expect(byId.get('stale')({...open,lastActivityAt:'2020-01-01T00:00:00.000Z'})).toBe(true);
+  expect(byId.get('stale')({...open,lastActivityAt:new Date().toISOString()})).toBe(false);
+  expect(byId.get('stale')({...closed,lastActivityAt:'2020-01-01T00:00:00.000Z'})).toBe(false);
+ });
+ test('سابق/تالي القائمة: يحدد ids الدفعة الظاهرة',()=>{
+  const app={__listNav:{store:'files',ids:['a','b','c']}};
+  expect(listNavFor(app,'files','a')).toBeTruthy();
+  expect(listNavFor(app,'files','a').prevId).toBe(null);
+  expect(listNavFor(app,'files','a').nextId).toBe('b');
+  expect(listNavFor(app,'files','b').prevId).toBe('a');
+  expect(listNavFor(app,'files','b').nextId).toBe('c');
+  expect(listNavFor(app,'files','c').nextId).toBe(null);
+  expect(listNavFor(app,'files','zzz')).toBe(null);
+  expect(listNavFor(app,'clients','a')).toBe(null);
+  expect(listNavFor(null,'files','a')).toBe(null);
+  const html=listNavHtml(app,'files','b');
+  expect(html.includes('data-list-nav-id="a"')).toBe(true);
+  expect(html.includes('data-list-nav-id="c"')).toBe(true);
+  expect(html.includes('2 / 3')).toBe(true);
+  expect(listNavHtml({__listNav:null},'files','a')).toBe('');
  });
 }

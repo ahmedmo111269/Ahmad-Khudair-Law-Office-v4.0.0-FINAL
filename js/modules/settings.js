@@ -8,7 +8,7 @@ import {rebuildAllFileSearchText} from '../services/legal-files.js';
 import {migrateLegacyParties} from '../services/maintenance.js';
 import {userError} from '../core/errors.js';
 import {renderAppearance,bindAppearance} from './appearance.js';
-import {COLLAPSE_MODES,COLLAPSE_MODE_LABELS,getCollapsePreferences,setDefaultCollapseState,resetCollapseStates,countPinnedCollapseStates} from '../ui/collapse-state.js';
+import {COLLAPSE_MODES,COLLAPSE_MODE_LABELS,COLLAPSE_MOBILE_MODES,COLLAPSE_MOBILE_MODE_LABELS,getCollapsePreferences,setDefaultCollapseState,setDefaultCollapseStateMobile,resetCollapseStates,countPinnedCollapseStates} from '../ui/collapse-state.js';
 import {CARD_FONT_SIZES,CARD_FONT_LABELS,CARD_DENSITIES,CARD_DENSITY_LABELS,FIELD_LAYOUTS,FIELD_LAYOUT_LABELS,GRID_FONT_SIZES,GRID_FONT_LABELS,GRID_DENSITIES,GRID_DENSITY_LABELS,resolvePageDisplay,resolveGridDisplay,setGlobalDisplay,resetAllDisplay} from '../core/display-prefs.js';
 import {applyPageDisplay} from '../ui/page-layout.js';
 import {getStyleCounts,resetUniversalDefaults,resetAllComponentOverrides,applyAllComponentStyles} from '../core/component-style.js';
@@ -120,6 +120,9 @@ function renderCollapseSettings(){
   <label class="collapse-setting-select">الوضع الافتراضي
    <select id="collapse-default-state" aria-describedby="collapse-default-help">${COLLAPSE_MODES.map(mode=>`<option value="${mode}"${config.defaultState===mode?' selected':''}>${labels[mode]||COLLAPSE_MODE_LABELS[mode]}</option>`).join('')}</select>
   </label>
+  <label class="collapse-setting-select">الوضع الافتراضي على الهاتف
+   <select id="collapse-mobile-state" aria-describedby="collapse-default-help">${COLLAPSE_MOBILE_MODES.map(mode=>`<option value="${mode}"${config.defaultStateMobile===mode?' selected':''}>${COLLAPSE_MOBILE_MODE_LABELS[mode]||mode}</option>`).join('')}</select>
+  </label>
   <p id="collapse-default-help" class="muted small" data-collapse-mode-status>${COLLAPSE_DESCRIPTIONS[config.defaultState]||COLLAPSE_DESCRIPTIONS.collapsed}</p>
   <div class="collapse-setting-actions"><button type="button" class="ghost" data-collapse-reset>استعادة الوضع الافتراضي للأقسام</button></div>
   <p class="muted small">استعادة الوضع الافتراضي تمسح الحالات الحالية والمثبتة لكل العناصر، وتُبقي اختيارك للوضع الافتراضي. لا تؤثر على بيانات الملفات.</p>
@@ -166,6 +169,10 @@ export function bindSettings(app){
   const note=root.querySelector('[data-collapse-mode-status]');
   if(note)note.textContent=COLLAPSE_DESCRIPTIONS[mode]||COLLAPSE_DESCRIPTIONS.collapsed;
   toast('تم حفظ الوضع الافتراضي لطي الأقسام');
+ });
+ root.querySelector('#collapse-mobile-state')?.addEventListener('change',e=>{
+  setDefaultCollapseStateMobile(e.currentTarget.value);
+  toast('تم حفظ الوضع الافتراضي لطي الأقسام على الهاتف');
  });
  root.querySelector('[data-collapse-reset]')?.addEventListener('click',async()=>{
   if(!await confirmBox('إعادة جميع الأقسام والبطاقات والجداول إلى وضعها الافتراضي؟ سيُلغى تثبيت الحالات، دون المساس بأي بيانات.',{okText:'استعادة الوضع الافتراضي'}))return;

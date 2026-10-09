@@ -19,6 +19,8 @@
     "test:android-pwa": "node android-pwa-browser-tests.mjs",
     "test:legal-context-browser": "node legal-context-browser-tests.mjs",
     "test:html-browser": "node tests-html-browser-tests.mjs",
+    "test:files-cockpit-browser": "node files-cockpit-browser-tests.mjs",
+    "perf:files-cockpit": "node files-cockpit-perf.mjs",
     "icons:pwa": "node make-pwa-icons.mjs",
     "screenshots:pwa": "node make-pwa-screenshots.mjs",
     "test:wave3-bench": "node wave3-bench.mjs",

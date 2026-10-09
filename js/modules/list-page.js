@@ -7,12 +7,14 @@ import {createGridRelations,gridPageContext,hasLegalFileColumns} from '../servic
 import {mountCalendar} from '../ui/calendar.js';
 import {openEntityForm} from '../ui/form.js';
 import {toast} from '../ui/toast.js';
-import {ENTITIES,FILE_TYPE_GROUPS,displayValue,columnType,phonesOf} from '../domain/entities.js';
+import {ENTITIES,FILE_TYPE_GROUPS,displayValue,columnType,phonesOf,isClosedFile} from '../domain/entities.js';
 import {createEntityGridProvider,resolveRefs,presetRange,PRESETS,scan} from '../services/entity-query.js';
 import {fmtDate} from '../domain/entities.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {prefs} from '../core/preferences.js';
 import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
+import {getFavorites} from '../services/favorites.js';
+import {updateCollapseSummary} from '../ui/collapsible.js';
 import {PROCEDURES_EXTRAS} from './procedures-extras.js';
 
 // ===== سجل إضافات القائمة =====
@@ -26,14 +28,18 @@ export function registerListExtras(store, extras) {
 export function listExtrasFor(store) { return LIST_EXTRAS.get(store) || null; }
 registerListExtras('procedures', PROCEDURES_EXTRAS);
 
-export function columnsFor(store,refs,{extra=[],relations=null}={}){
+ export function columnsFor(store,refs,{extra=[],relations=null}={}){
  const ent=ENTITIES[store];
  let fields=[...ent.fields];
  if(store==='files')fields=[...fields,...Object.values(FILE_TYPE_GROUPS).flatMap(g=>g.fields.map(f=>({...f,grid:false})))];
- const cols=fields.map(f=>({key:f.k,label:f.l,type:f.ref?'text':columnType(f),hidden:!f.grid||(store==='files'&&['fileType','partyNames'].includes(f.k)),index:f.ref?false:undefined,
+ const cols=fields.map(f=>({key:f.k,label:f.l,type:f.ref?'text':columnType(f),hidden:!f.grid||(store==='files'&&['fileType','partyNames','nextStep','nextStepDate'].includes(f.k)),index:f.ref?false:undefined,
   get:r=>f.t==='phones'?phonesOf(r).join(' '):f.ref?refs.get(r[f.k])||'':r[f.k],
   text:r=>displayValue(f,r,refs)}));
- if(store==='files')cols.push({key:'isArchived',label:'مؤرشف',type:'bool',hidden:true,get:r=>Boolean(r.isArchived),text:r=>r.isArchived?'نعم':'لا'});
+ if(store==='files'){
+  // الخطوة التالية تدخل العرض الافتراضي للقائمة: معلومة قرار لا تفاصيل زائدة.
+  for(const c of cols)if(['nextStep','nextStepDate'].includes(c.key))c.hidden=false;
+  cols.push({key:'isArchived',label:'مؤرشف',type:'bool',hidden:true,get:r=>Boolean(r.isArchived),text:r=>r.isArchived?'نعم':'لا'});
+ }
  let shared=[];
  if(hasLegalFileColumns(store)){
   const keys=store==='files'?{fileKey:'fileNumber'}:store==='clients'?{fileKey:'legalFiles',clientKey:'fullName'}:store==='opponents'?{fileKey:'legalFiles',opponentKey:'name'}:store==='fileRelations'?{fileKey:'sourceFileId'}:{};
@@ -60,8 +66,53 @@ export async function sectionGrid(app,el,store,rows,{storageKey,title,extra=[],c
 
 const LIST_VIEW_KEY=store=>`ui:list-view:${store}`;
 const state=app=>(app.__lists=app.__lists||{});
-function listFilterCount(st){return (String(st.q||'').trim()?1:0)+(st.preset&&st.preset!=='all'?1:0)+(st.status&&st.status!=='all'?1:0)}
-function saveListView(store,st){prefs.set(LIST_VIEW_KEY(store),{q:st.q||'',preset:st.preset||'all',from:st.from||'',to:st.to||'',showCal:Boolean(st.showCal),status:st.status||'all'})}
+function listFilterCount(st){return (String(st.q||'').trim()?1:0)+(st.preset&&st.preset!=='all'?1:0)+(st.status&&st.status!=='all'?1:0)+(st.chip&&st.chip!=='all'?1:0)}
+function saveListView(store,st){prefs.set(LIST_VIEW_KEY(store),{q:st.q||'',preset:st.preset||'all',from:st.from||'',to:st.to||'',showCal:Boolean(st.showCal),status:st.status||'all',chip:st.chip||'all'})}
+
+// ===== شرائح حالات قائمة الملفات =====
+// معايير تشغيلية واضحة من بيانات الملف الفعلية فقط — كل شريحة قابلة للتفسير:
+// نشطة: غير منتهية وغير مؤرشفة · تحتاج إجراء: لها خطوة تالية موعدها حان/متأخر أو بلا موعد
+// جلسة قادمة: لها جلسة مسجلة تاريخها ≥ اليوم (استعلام محدود بـ5,000 جلسة) ·
+// راكدة: لا نشاط منذ أكثر من 45 يومًا (نفس معيار «يحتاج متابعة» في ملف الموكل) · مثبتة: في المفضلة.
+export const FILE_LIST_CHIPS=Object.freeze([
+ ['all','الكل',()=>true],
+ ['active','نشطة',f=>!isClosedFile(f)&&!f.isArchived],
+ ['action','تحتاج إجراء',f=>!isClosedFile(f)&&!f.isArchived&&Boolean(f.nextStep)&&(!f.nextStepDate||String(f.nextStepDate).slice(0,10)<=todayStr())],
+ ['hearing','جلسة قادمة',null],
+ ['stale','راكدة',f=>!isClosedFile(f)&&!f.isArchived&&(!f.lastActivityAt||String(f.lastActivityAt)<staleBeforeStr())],
+ ['pinned','مثبتة',null]
+]);
+const todayStr=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const staleBeforeStr=()=>new Date(Date.now()-45*864e5).toISOString().slice(0,10);
+function fileChipPredicate(app,chip){
+ if(!chip||chip==='all')return null;
+ if(chip==='hearing'){
+  const ids=app.__filesChipIndex?.ids;
+  return ids?row=>ids.has(row.id):null;
+ }
+ if(chip==='pinned'){
+  const scope=app.ctx?.profile?.id||'';
+  const pinned=new Set(getFavorites(scope).map(x=>x.route).filter(r=>String(r).startsWith('file:')).map(r=>String(r).slice(5)));
+  return row=>pinned.has(row.id);
+ }
+ const def=FILE_LIST_CHIPS.find(([k])=>k===chip);
+ return def?.[2]||null;
+}
+/** استعلام واحد محدود لبنيان فهرس الجلسات القادمة — دفعة واحدة لكل فتح قائمة، لا Full Scan عند كل تغيير. */
+async function buildFilesChipIndex(app){
+ if(app.__filesChipIndex?.at&&Date.now()-app.__filesChipIndex.at<60000)return app.__filesChipIndex;
+ const ids=new Set();
+ try{
+  const today=todayStr();
+  const res=await scan(app.office,'hearings',{index:'hearingDate',lower:today,upper:'\uffff',limit:5000,direction:'next'});
+  for(const h of res.rows||[])if(h.fileId&&!h.isDeleted)ids.add(h.fileId);
+ }catch(e){console.info('files chip index',e)}
+ app.__filesChipIndex={ids,at:Date.now()};
+ return app.__filesChipIndex;
+}
+function filesChipsHtml(st){
+ return `<div class="list-status-chips" role="group" aria-label="حالات الملفات السريعة">${FILE_LIST_CHIPS.map(([k,l])=>`<button type="button" class="chip${st.chip===k?' active':''}" data-file-chip="${k}" aria-pressed="${st.chip===k}">${l}</button>`).join('')}</div>`;
+}
 
 
 export function listPage(app,store,query){
@@ -73,14 +124,17 @@ export function listPage(app,store,query){
   {id:'filters',title:'عوامل التصفية والفترات'},
   {id:'grid',title:'جدول السجلات',canHide:false}]});
  const saved=prefs.get(LIST_VIEW_KEY(store),{})||{};
- const st=state(app)[store]=state(app)[store]||{q:saved.q||'',preset:saved.preset||'all',from:saved.from||'',to:saved.to||'',showCal:saved.showCal??Boolean(ent.calendar),status:saved.status||'all'};
+ const st=state(app)[store]=state(app)[store]||{q:saved.q||'',preset:saved.preset||'all',from:saved.from||'',to:saved.to||'',showCal:saved.showCal??Boolean(ent.calendar),status:saved.status||'all',chip:saved.chip||'all'};
  if(query?.get('preset')){st.preset=query.get('preset');st.from=query.get('from')||'';st.to=query.get('to')||''}
  if(query?.get('q')!==null&&query?.get('q')!==undefined)st.q=query.get('q');
+ if(query?.get('chip'))st.chip=query.get('chip');
+ if(!st.chip)st.chip='all';
  saveListView(store,st);
  const hasDate=Boolean(ent.dateField);
  const presetLabel=store==='procedures'?[...PRESETS.slice(0,1),['overdue','المتأخرة'],...PRESETS.slice(1)]:PRESETS;
  return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
   <div class="head-actions"><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-qa-custom title="إظهار أو إخفاء إجراءات الصف">إجراءات الصف</button><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
+ ${store==='files'?filesChipsHtml(st):''}
  ${extras?`<section class="panel list-extras-panel" data-section-id="extras" data-collapse-id="list-extras-${esc(store)}" data-collapse-default="open"><div class="panel-head"><h3>${esc(extras.heading||'◈ ملخص سريع')}</h3><span class="muted small">${esc(extras.hint||'')}</span></div><div id="list-extras" aria-live="polite"><p class="muted small">جارٍ تحميل الملخص…</p></div></section>`:''}
  <section class="panel list-filter-panel" data-section-id="filters" data-collapse-id="list-filters-${esc(store)}"><div class="panel-head"><h3>🔍 عوامل التصفية والفترات</h3><span class="badge" data-list-filter-count>${listFilterCount(st)?`${listFilterCount(st)} فلاتر نشطة`:'لا توجد فلاتر نشطة'}</span></div>
  <div class="list-controls">
@@ -88,7 +142,9 @@ export function listPage(app,store,query){
   ${hasDate?`<div class="preset-bar" role="group" aria-label="الفترة">${presetLabel.map(([k,l])=>`<button type="button" class="chip${st.preset===k?' active':''}" data-preset="${k}">${l}</button>`).join('')}</div>
   <div class="custom-range"${st.preset==='custom'?'':' hidden'}><label>من<input type="date" id="list-from" value="${esc(st.from)}"></label><label>إلى<input type="date" id="list-to" value="${esc(st.to)}"></label><button type="button" class="ghost" data-range-apply>عرض</button></div>
   ${ent.calendar?`<button type="button" class="ghost" data-cal-toggle aria-expanded="${st.showCal}">📅 التقويم</button>`:''}`:''}
- </div></section>
+ </div>
+ <div class="list-filter-summary" id="list-filter-summary" aria-live="polite"></div>
+ </section>
  ${ent.calendar?`<div class="list-cal"${st.showCal?'':' hidden'}><div id="list-calendar"></div></div>`:''}
  <div class="list-status muted small" aria-live="polite"></div>
  <div id="list-grid" data-section-id="grid"></div>`;
@@ -104,7 +160,37 @@ export function bindListPage(app,store){
  const relations=createGridRelations(app.office,store);
  const status=root.querySelector('.list-status');
  const filterBadge=root.querySelector('[data-list-filter-count]');
- const syncFilterSummary=()=>{const n=listFilterCount(st);if(filterBadge)filterBadge.textContent=n?`${n} فلاتر نشطة`:'لا توجد فلاتر نشطة'};
+ const summaryHost=root.querySelector('#list-filter-summary');
+ const clearChip=id=>{
+  if(id==='q'){st.q='';const q=root.querySelector('#list-q');if(q)q.value=''}
+  else if(id==='preset'){st.preset='all';st.from='';st.to='';root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));const cr=root.querySelector('.custom-range');if(cr)cr.hidden=true}
+  else if(id==='range'){st.from='';st.to='';st.preset='all';root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));const cr=root.querySelector('.custom-range');if(cr)cr.hidden=true}
+  else if(id==='status'){st.status='all'}
+  else if(id==='chip'){st.chip='all';root.querySelectorAll('[data-file-chip]').forEach(x=>{const on=x.dataset.fileChip==='all';x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on))})}
+  saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err));
+ };
+ const syncFilterSummary=()=>{
+  const n=listFilterCount(st);
+  if(filterBadge)filterBadge.textContent=n?`${n} فلاتر نشطة`:'لا توجد فلاتر نشطة';
+  if(!summaryHost)return;
+  const chips=[];
+  if(String(st.q||'').trim())chips.push(['q',`بحث: ${st.q.trim()}`]);
+  if(st.preset&&st.preset!=='all'){
+   const label=st.preset==='custom'?'فترة مخصصة':st.preset==='overdue'?'المتأخرة':(PRESETS.find(([k])=>k===st.preset)?.[1]||st.preset);
+   chips.push(['preset',`الفترة: ${label}`]);
+  }
+  if(st.chip&&st.chip!=='all')chips.push(['chip',`الشريحة: ${FILE_LIST_CHIPS.find(([k])=>k===st.chip)?.[1]||st.chip}`]);
+  if(st.status&&st.status!=='all')chips.push(['status',`الحالة: ${st.status}`]);
+  summaryHost.innerHTML=chips.map(([id,label])=>`<span class="fs-chip">${esc(label)}<button type="button" data-fs-clear="${id}" aria-label="إزالة الفلتر: ${esc(label)}">✕</button></span>`).join('')+(chips.length>1?`<span class="fs-chip fs-clear"><button type="button" data-fs-clear="all">مسح الكل</button></span>`:'');
+  // الملخص يبقى ظاهرًا في رأس القسم حتى بعد الطي — مع عدّ الفلاتر النشطة.
+  updateCollapseSummary(root.querySelector('.list-filter-panel'),chips.length?`${chips.length} فلاتر نشطة · ${chips.map(([,l])=>l).join(' · ')}`:'');
+ };
+ summaryHost?.addEventListener('click',e=>{
+  const b=e.target.closest('[data-fs-clear]');if(!b)return;
+  const id=b.dataset.fsClear;
+  if(id==='all'){st.q='';st.preset='all';st.from='';st.to='';st.chip='all';st.status='all';const q=root.querySelector('#list-q');if(q)q.value='';root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));root.querySelectorAll('[data-file-chip]').forEach(x=>{const on=x.dataset.fileChip==='all';x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on))});const cr=root.querySelector('.custom-range');if(cr)cr.hidden=true;saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err));return}
+  clearChip(id);
+ });
  // مرشّح الحالة (شرائح الملخص) يُركّب مع مرشّح الفترة دون إلغاء أحدهما للآخر.
  const statusFilter=()=>{
   if(!extras?.statusFilter||!st.status||st.status==='all')return null;
@@ -114,7 +200,9 @@ export function bindListPage(app,store){
   const [from,to]=st.preset==='overdue'?['0000-01-01',yesterday()]:presetRange(st.preset,st.from,st.to);
   const presetFilter=st.preset==='overdue'?(row=>!row.status||['open','pending'].includes(row.status)):null;
   const extraFilter=statusFilter();
-  const filter=presetFilter||extraFilter?(row=>(!presetFilter||presetFilter(row))&&(!extraFilter||extraFilter(row))):null;
+  const chipFilter=store==='files'?fileChipPredicate(app,st.chip):null;
+  const parts=[presetFilter,extraFilter,chipFilter].filter(Boolean);
+  const filter=parts.length?(row=>parts.every(p=>p(row))):null;
   return {from,to,filter};
  };
  const scopeSummary=()=>{
@@ -126,11 +214,16 @@ export function bindListPage(app,store){
  };
  async function load(){
   saveListView(store,st);syncFilterSummary();
+  if(store==='files'&&st.chip==='hearing')await buildFilesChipIndex(app);
   if(!grid){
    const provider=createEntityGridProvider(app.office,store,{
     getBaseQuery:()=>({q:st.q,...currentScope(),dateField:ent.dateField}),
     prepareQuery:(query,{columns})=>relations.loadFilterLabels(query,columns),
-    prepareRows:async(pageRows,{signal})=>{await Promise.all([resolveRefs(app.office,pageRows,ent.fields,gridRefs),relations.hydrate(pageRows,{signal})])}
+    prepareRows:async(pageRows,{signal})=>{
+     // سياق التنقل السابق/التالي: معرّفات الدفعة الظاهرة الحالية فقط — بلا قراءة إضافية.
+     app.__listNav={store,ids:pageRows.map(r=>r.id).filter(Boolean)};
+     await Promise.all([resolveRefs(app.office,pageRows,ent.fields,gridRefs),relations.hydrate(pageRows,{signal})]);
+    }
    });
    grid=mountGrid(root.querySelector('#list-grid'),{
     columns:columnsFor(store,gridRefs,{relations}),rows:[],dataProvider:provider,pageSize:25,
@@ -161,6 +254,11 @@ export function bindListPage(app,store){
   else if(e.key==='Escape'&&e.target===q&&q.value){q.value='';st.q='';saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err))}
  });
  root.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{st.preset=b.dataset.preset;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x===b));root.querySelector('.custom-range').hidden=st.preset!=='custom';saveListView(store,st);syncFilterSummary();if(st.preset!=='custom')load().catch(err=>app.fail(err))});
+ root.querySelectorAll('[data-file-chip]').forEach(b=>b.onclick=()=>{
+  st.chip=b.dataset.fileChip;
+  root.querySelectorAll('[data-file-chip]').forEach(x=>{const on=x===b;x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on))});
+  saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err));
+ });
  root.querySelector('[data-range-apply]')?.addEventListener('click',()=>{st.from=root.querySelector('#list-from').value;st.to=root.querySelector('#list-to').value;saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err))});
  root.querySelector('[data-cal-toggle]')?.addEventListener('click',e=>{st.showCal=!st.showCal;e.currentTarget.setAttribute('aria-expanded',st.showCal);root.querySelector('.list-cal').hidden=!st.showCal;saveListView(store,st)});
  if(ent.calendar){
@@ -272,4 +370,31 @@ export async function customizeRowActions(){
  const card=(await import('../ui/modal.js')).modal(`<h2 class="modal-title">تخصيص إجراءات الصف</h2><p class="muted small">أخفِ ما لا تحتاجه حتى لا يزدحم الصف. النقر بزر الفأرة الأيمن يبقى متاحًا للإجراءات الظاهرة.</p><div class="action-stack">${QA_ALL.map(([id,label])=>`<label><input type="checkbox" value="${id}" ${!current||current.has(id)?'checked':''}> ${label}</label>`).join('')}</div><div class="form-actions"><button type="button" class="primary" data-save-qa>حفظ</button><button type="button" class="ghost" data-reset-qa>إظهار الكل</button></div>`);
  card.querySelector('[data-save-qa]').onclick=async()=>{const ids=[...card.querySelectorAll('input:checked')].map(i=>i.value);await prefs.set(QA_KEY,ids);(await import('../ui/modal.js')).closeModal();toast('حُفظت إجراءات الصف')};
  card.querySelector('[data-reset-qa]').onclick=async()=>{await prefs.remove(QA_KEY);(await import('../ui/modal.js')).closeModal();toast('عادت الإجراءات إلى الوضع الكامل')};
+}
+
+// ===== السابق/التالي داخل نتائج القائمة الحالية =====
+// سياق الدفعة الظاهرة (app.__listNav) يُبنى عند تحميل الصفحة من المزوّد، ويُستخدم
+// هنا للتنقل بين السجلات بمعرّفاتها فقط — البحث والفلاتر والصفحة المحفوظة كما هي.
+export function listNavFor(app,store,id){
+ const nav=app?.__listNav;
+ if(!nav||nav.store!==store||!Array.isArray(nav.ids)||!id)return null;
+ const i=nav.ids.indexOf(id);
+ if(i<0)return null;
+ return {index:i,total:nav.ids.length,prevId:i>0?nav.ids[i-1]:null,nextId:i<nav.ids.length-1?nav.ids[i+1]:null};
+}
+const NAV_ROUTES={files:id=>`file:${id}`,clients:id=>`client:${id}`,opponents:id=>`opponent:${id}`,cases:id=>`case:${id}`};
+export function listNavHtml(app,store,id){
+ const nav=listNavFor(app,store,id);
+ if(!nav)return '';
+ return `<div class="list-nav" role="group" aria-label="التنقل بين نتائج القائمة">
+  ${nav.prevId?`<button type="button" class="ghost small" data-list-nav-id="${esc(nav.prevId)}" title="السجل السابق في نتائج القائمة">→ السابق</button>`:`<button type="button" class="ghost small" disabled>→ السابق</button>`}
+  <span class="muted small" data-list-nav-pos>${nav.index+1} / ${nav.total}</span>
+  ${nav.nextId?`<button type="button" class="ghost small" data-list-nav-id="${esc(nav.nextId)}" title="السجل التالي في نتائج القائمة">التالي ←</button>`:`<button type="button" class="ghost small" disabled>التالي ←</button>`}
+ </div>`;
+}
+export function bindListNav(root,app,store){
+ root?.querySelectorAll('[data-list-nav-id]').forEach(b=>b.addEventListener('click',()=>{
+  const route=NAV_ROUTES[store]?.(b.dataset.listNavId)||`${store}:${b.dataset.listNavId}`;
+  app.go(route);
+ }));
 }

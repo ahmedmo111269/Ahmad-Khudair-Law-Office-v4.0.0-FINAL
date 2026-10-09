@@ -1,3 +1,30 @@
+# File Cockpit — إعادة هندسة قسم الملفات والموكلين + قابلية طي كاملة (2026-10-09)
+
+**لا تغيير في Schema أو المخازن أو `APP_VERSION`.** تفضيلات جديدة: `ui:file-last-tab`, `ui:focus-mode`, `defaultStateMobile` (داخل `ui:collapse-state`), `chip` (داخل `ui:list-view:*`).
+
+| المسار | الدور |
+|---|---|
+| `js/ui/collapse-state.js` | `defaultStateMobile` + `effectiveDefaultMode()` + `isMobileView()` |
+| `js/ui/collapsible.js` | ملخص حي (`updateCollapseSummary`)، فتح مؤقت (`openCollapseTransient` + حارس focusin)، `collapse:reset`، أكورديون (`data-collapse-accordion`)، عناصر رأس دائمة (`[data-collapse-alert]`) |
+| `js/ui/card.js`, `js/ui/datagrid.js` | دعم `collapse:reset` |
+| `js/ui/cockpit.js` | `fileNextStep()` — الآلية المشتركة الوحيدة لحساب «التالي» في الملف (تستخدمها القمرة والشريط الثابت) |
+| `js/modules/file-page.js` | قمرة علوية (إجراء أساسي + ⋯)، «نواقص الملف» (`fileGaps`)، شريط ثابت عند التمرير، 5 مناطق تبويبات + شريط فرعي، كاش in-memory للتبويبات (lazy)، آخر تبويب محفوظ، نسخ ملخص، فحص قبل الإنهاء/الأرشفة، وضع تركيز، «تغيّر منذ زيارتي»، السابق/التالي |
+| `js/modules/client-file.js` | اتصال/واتساب، ترتيب «تحتاج متابعة» أولًا (Register + DOM)، شارات تنبيه، أكور |
+| `js/modules/list-page.js` | `FILE_LIST_CHIPS` (6 شرائح)، ملخص فلاتر قابل للإزالة، `listNavFor`/`listNavHtml`/`bindListNav`، عمودا «الخطوة التالية» |
+| `js/modules/record-page.js` | السابق/التالي في رأس السجل |
+| `js/modules/quick-add.js` | إجراءات ملف إضافية (حكم/إعلان/مستند/أتعاب) + تمرير `fileId` |
+| `js/modules/settings.js` | الوضع الافتراضي للطي على الهاتف |
+| `js/app.js` | `resetViewState` ينظّف كاش التبويبات/التنقل/فهرس الشرائح |
+| `css/cards.css`, `css/client-file.css`, `css/ui.css` | ملخصات مطوية، قمرة/مناطق، شرائط، ملخص فلاتر، شريط ثابت، وضع تركيز، طباعة، `.ux-menu[hidden]`, 44px |
+| `js/tests/collapse-state-tests.js`, `js/tests/ux-tests.js` | اختبارات جديدة: وضع الهاتف، الشرائح، السابق/التالي |
+| `tools/node-tests/files-cockpit-browser-tests.mjs` | فحص Phase G للصفحات (13 فحص) |
+| `tools/node-tests/files-cockpit-perf.mjs` | قياس الأداء (1000 ملف + 500 سجل فرعي) |
+| `docs/FILES-AUDIT.md`, `docs/FILES-OWNERSHIP.md`, `docs/FILES-COLLAPSE-MATRIX.md`, `docs/FILES-FINAL-REPORT.md` | التوثيق الإلزامي |
+
+**التحقق (بعد اكتمال التنفيذ فقط):** Node **615/615** · `tests.html` Chromium **614/614** · File Cockpit Chromium **13/13** · legal-context **7/7** · grid-browser **38/38** (Print Preview NOT TESTED — كما في الخطة) · wave6-context **54/54**. قياس: طي/توسيع 16.9ms (متوسط) / 22.2ms (أقصى) بلا IDB؛ صفحة ملف بـ500 سجل فرعي: 35ms render + 22ms paint.
+
+---
+
 # 2026-10-09 — المهام في مكتب اليوم والحذف الفردي النهائي للملاحظات
 
 **استبدال «آخر التحركات» بقائمة مهام مركز العمل، وإضافة حذف نهائي لملاحظة واحدة من السلة.** لا تغيير في المخطط أو المخازن؛ بقي «منذ آخر زيارة» يعتمد سجل النشاط، وبقي زر إفراغ السلة الجماعي.

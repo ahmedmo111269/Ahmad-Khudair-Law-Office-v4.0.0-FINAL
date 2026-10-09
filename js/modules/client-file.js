@@ -24,8 +24,8 @@ import {openCustomizerForElement} from '../ui/component-customizer.js';
 // لوحة ملف الموكل ضمن نظام ترتيب الأقسام المركزي — نفس النظام لكل الصفحات.
 registerPageLayout({pageId:'client-file',title:'ملف الموكل',sections:[
  {id:'stats',title:'ملخص ملف الموكل'},
- {id:'recent-files',title:'آخر الملفات التي تم التعامل معها'},
  {id:'followup',title:'ملفات تحتاج متابعة'},
+ {id:'recent-files',title:'آخر الملفات التي تم التعامل معها'},
  {id:'hearings',title:'آخر الجلسات'},
  {id:'procedures',title:'آخر الأعمال الإدارية'},
  {id:'stopped',title:'الملفات المتوقفة',defaultHidden:false}]});
@@ -49,12 +49,15 @@ export async function clientFilePage(app,clientId,query){
  if(cat)crumb.push(`<button class="link" data-go="cfile:${esc(clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`);
  if(type)crumb.push(`<span>${esc(type.name)}</span>`);
  const phone=phonesOf(fresh)[0];
+ // أزرار اتصال مباشرة عند وجود رقم صالح فقط — tel: للهاتف وwa.me للواتساب (روابط قياسية بلا خدمة خارجية).
+ const phoneHref=phone?String(phone).replace(/[^\d+]/g,''):'';
+ const waHref=phoneHref?`https://wa.me/${phoneHref.replace(/^\+/,'').replace(/^0/,'20')}`:'';
  const head=`<div class="cfile-page"><nav class="crumbs" aria-label="المسار">${crumb.join('<span class="sep">‹</span>')}</nav>
  <section class="cf-hero">
   <div class="cf-id"><div class="cf-avatar" aria-hidden="true">${esc((fresh.fullName||'؟').trim().charAt(0))}</div>
-   <div><h2>${esc(fresh.fullName)}</h2><p class="cf-code">${fileNumberChip({clientCode:cf.clientCode||fresh.clientCode})}<span class="badge ${cf.isArchived?'warn':'open'}">${esc(cf.status||'نشط')}</span>${fresh.clientType?`<span class="badge">${esc(fresh.clientType)}</span>`:''}</p>
-   <dl class="cf-meta">${phone?`<div><dt>الهاتف</dt><dd><a href="tel:${esc(phone)}" dir="ltr">${esc(phone)}</a></dd></div>`:''}<div><dt>المحامي المسؤول</dt><dd>${esc(cf.responsibleLawyer||'—')}</dd></div><div><dt>فتح الملف</dt><dd>${formatDate(cf.openedAt)}</dd></div><div><dt>آخر نشاط</dt><dd>${rel(s.files[0]?.lastActivityAt||cf.lastActivityAt)}</dd></div></dl></div></div>
-  <div class="cf-actions"><button class="primary" data-new-lf>+ إضافة ملف قانوني</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-cf-edit>تعديل ملف الموكل</button>${cf.isArchived?'<button class="ghost" data-cf-reopen>إعادة فتح</button>':'<button class="ghost" data-cf-archive>أرشفة</button>'}</div>
+   <div><h2>${esc(fresh.fullName)}</h2><p class="cf-code">${fileNumberChip({clientCode:cf.clientCode||fresh.clientCode})}<span class="badge ${cf.isArchived?'warn':'open'}">${esc(cf.status||'نشط')}</span>${fresh.clientType?`<span class="badge">${esc(fresh.clientType)}</span>`:''}${s.needsFollowUp.length?`<span class="badge warn" data-collapse-alert title="ملفات تحتاج متابعة — مرفوعة للأعلى في الصفحة">⚠ ${s.needsFollowUp.length} ملفات تحتاج متابعة</span>`:''}</p>
+   <dl class="cf-meta">${phone?`<div><dt>الهاتف</dt><dd><a href="tel:${esc(phoneHref)}" dir="ltr">${esc(phone)}</a></dd></div>`:''}<div><dt>المحامي المسؤول</dt><dd>${esc(cf.responsibleLawyer||'—')}</dd></div><div><dt>فتح الملف</dt><dd>${formatDate(cf.openedAt)}</dd></div><div><dt>آخر نشاط</dt><dd>${rel(s.files[0]?.lastActivityAt||cf.lastActivityAt)}</dd></div></dl></div></div>
+  <div class="cf-actions">${phoneHref?`<a class="ghost" href="tel:${esc(phoneHref)}" aria-label="اتصال بالموكل">📞 اتصال</a>`:''}${waHref?`<a class="ghost" href="${esc(waHref)}" target="_blank" rel="noopener" aria-label="مراسلة الموكل عبر واتساب">🟢 واتساب</a>`:''}<button class="primary" data-new-lf>+ ملف قانوني جديد</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-cf-edit>تعديل ملف الموكل</button>${cf.isArchived?'<button class="ghost" data-cf-reopen>إعادة فتح</button>':'<button class="ghost" data-cf-archive>أرشفة</button>'}</div>
  </section>
  <section class="panel cf-stats-panel" data-collapse-id="client-file-stats" data-section-id="stats"><div class="panel-head"><h3>ملخص ملف الموكل</h3><span class="badge">${s.total} ملف</span></div><div class="cf-stats">
   <div class="stat"><b>${s.total}</b><span>إجمالي الملفات</span></div>
@@ -81,9 +84,9 @@ export async function clientFilePage(app,clientId,query){
   <h3 class="cf-section-title">أقسام الأعمال</h3>
   <div class="cat-grid">${used.map(c=>catCard(c,s.byCategory.get(c.id),clientId)).join('')}
    <button class="cat-card cat-add" data-new-lf><span class="cat-icon">＋</span><b>ملف في قسم آخر</b><small>${tax.categories.length-used.length} قسمًا متاحًا</small></button></div>
-  <div class="grid2 cf-panels">
+  <div class="grid2 cf-panels" data-collapse-accordion>
+   ${panel('ملفات تحتاج متابعة',s.needsFollowUp.map(f=>fileLine(f,tax,'لا نشاط منذ '+rel(f.lastActivityAt))).join('')||'<p class="muted small">لا توجد ملفات متأخرة المتابعة 👌</p>','followup',s.needsFollowUp.length?`${s.needsFollowUp.length} ملفات`:'')}
    ${panel('آخر الملفات التي تم التعامل معها',s.files.slice(0,6).map(f=>fileLine(f,tax)).join(''),'recent-files')}
-   ${panel('ملفات تحتاج متابعة',s.needsFollowUp.map(f=>fileLine(f,tax,'لا نشاط منذ '+rel(f.lastActivityAt))).join('')||'<p class="muted small">لا توجد ملفات متأخرة المتابعة 👌</p>','followup')}
    <section class="panel" data-section-id="hearings"><div class="panel-head"><h3>آخر الجلسات</h3></div><div id="cf-hearings"><div class="loading small">…</div></div></section>
    <section class="panel" data-section-id="procedures"><div class="panel-head"><h3>آخر الأعمال الإدارية</h3></div><div id="cf-procs"><div class="loading small">…</div></div></section>
    ${s.stoppedFiles.length?panel('الملفات المتوقفة',s.stoppedFiles.map(f=>fileLine(f,tax)).join(''),'stopped'):''}
@@ -96,7 +99,7 @@ export async function clientFilePage(app,clientId,query){
  <div class="type-chips" role="tablist"><button class="chip ${!type?'active':''}" data-go="cfile:${esc(clientId)}?cat=${esc(cat.id)}">الكل <small>${s.byCategory.get(cat.id)||0}</small></button>${typeCounts.filter(([,n])=>n).map(([t,n])=>`<button class="chip ${type?.id===t.id?'active':''}" data-go="cfile:${esc(clientId)}?cat=${esc(cat.id)}&type=${esc(t.id)}">${esc(t.name)} <small>${n}</small></button>`).join('')}${untyped?`<span class="chip">بدون نوع <small>${untyped}</small></span>`:''}</div>
  <div id="cf-files"></div></div>`;
 }
-const panel=(title,body,sectionId='')=>`<section class="panel"${sectionId?` data-section-id="${sectionId}"`:''}><div class="panel-head"><h3>${title}</h3></div><div class="cf-lines">${body||'<p class="muted small">لا يوجد.</p>'}</div></section>`;
+const panel=(title,body,sectionId='',badge='')=>`<section class="panel"${sectionId?` data-section-id="${sectionId}"`:''}><div class="panel-head"><h3>${title}</h3>${badge?`<span class="badge warn" data-collapse-alert>${esc(badge)}</span>`:''}</div><div class="cf-lines">${body||'<p class="muted small">لا يوجد.</p>'}</div></section>`;
 function catCard(c,n,clientId){return `<button class="cat-card" data-go="cfile:${esc(clientId)}?cat=${esc(c.id)}" style="--cat:${esc(c.color||'var(--primary)')}"><span class="cat-icon">${esc(c.icon||'📁')}</span><b>${esc(c.name)}</b><small>${filesWord(n)}</small></button>`}
 function fileLine(f,tax,note=''){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId);return `<button class="cf-line" data-go="file:${esc(f.id)}"><span class="cf-line-icon">${esc(c?.icon||'📁')}</span><span class="cf-line-main"><b>${esc(f.title||'')}</b><small>${fileNumberChip(f,{withKind:false})} · ${esc(t?.name||f.fileType||'')}${f.__stage?` · ${esc(f.__stage.stageType||'')}`:''}${f.__shared?' · ملف مشترك':''}</small></span><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span>${note?`<small class="muted">${esc(note)}</small>`:''}</button>`}
 function fileCard(f,tax){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.categoryId),st=f.__stage;return `<article class="lf-card" style="--cat:${esc(c?.color||'var(--primary)')}"><header><span>${esc(c?.icon||'📁')}</span><div><b>${esc(f.title||'')}</b><small>${fileNumberChip(f,{withKind:false})}</small></div><span class="badge ${statusClass(f)}">${esc(label(f.status||''))}</span></header>

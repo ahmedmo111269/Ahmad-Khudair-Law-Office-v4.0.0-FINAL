@@ -11,16 +11,28 @@ export const COLLAPSE_MODE_LABELS=Object.freeze({
  last:'آخر حالة',
  pinned:'تثبيت حالتي'
 });
+// الوضع الافتراضي على الهاتف قد يختلف عن الكمبيوتر (مثل: طي الكل على الشاشات الصغيرة).
+export const COLLAPSE_MOBILE_MODES=Object.freeze(['same','collapsed','open']);
+export const COLLAPSE_MOBILE_MODE_LABELS=Object.freeze({
+ same:'نفس وضع الكمبيوتر',
+ collapsed:'مطوي على الهاتف',
+ open:'مفتوح على الهاتف'
+});
 
-const blank=()=>({version:1,defaultState:'collapsed',legacyDisabled:false,items:{}});
+const blank=()=>({version:1,defaultState:'collapsed',defaultStateMobile:'same',legacyDisabled:false,items:{}});
 const validMode=mode=>COLLAPSE_MODES.includes(mode)?mode:'collapsed';
+const validMobileMode=mode=>COLLAPSE_MOBILE_MODES.includes(mode)?mode:'same';
 const isBool=value=>typeof value==='boolean';
+/** شاشة الهاتف الحالية — نافذة المتصفح أو نمط العرض، بلا اعتماد على جهاز محدد. */
+export function isMobileView(){
+ try{return Boolean(globalThis.matchMedia?.('(max-width:700px)').matches)}catch{return false}
+}
 
 function read(){
  const raw=prefs.get(COLLAPSE_PREF_KEY,null);
  if(!raw||typeof raw!=='object'||Array.isArray(raw))return blank();
  const items=raw.items&&typeof raw.items==='object'&&!Array.isArray(raw.items)?raw.items:{};
- return {version:1,defaultState:validMode(raw.defaultState),legacyDisabled:Boolean(raw.legacyDisabled),items};
+ return {version:1,defaultState:validMode(raw.defaultState),defaultStateMobile:validMobileMode(raw.defaultStateMobile),legacyDisabled:Boolean(raw.legacyDisabled),items};
 }
 function write(next){
  // prefs.set mirrors synchronously to localStorage and then persists to IndexedDB.
@@ -31,11 +43,18 @@ function write(next){
 /** A copy of the global collapse configuration, safe for UI rendering. */
 export function getCollapsePreferences(){
  const state=read();
- return {version:state.version,defaultState:state.defaultState,legacyDisabled:state.legacyDisabled,items:{...state.items}};
+ return {version:state.version,defaultState:state.defaultState,defaultStateMobile:state.defaultStateMobile,legacyDisabled:state.legacyDisabled,items:{...state.items}};
 }
 export const getDefaultCollapseState=()=>read().defaultState;
+export const getDefaultCollapseStateMobile=()=>read().defaultStateMobile;
+/** الوضع الفعّال الآن: وضع الهاتف إن كان مختلفًا، وإلا وضع الكمبيوتر. */
+export function effectiveDefaultMode(){
+ const state=read();
+ if(isMobileView()&&state.defaultStateMobile!=='same'&&['open','collapsed'].includes(state.defaultStateMobile))return state.defaultStateMobile;
+ return state.defaultState;
+}
 export function isDefaultCollapsed({fallback=true,primary=false,configured=false}={}){
- const mode=read().defaultState;
+ const mode=effectiveDefaultMode();
  if(primary||configured)return Boolean(fallback);
  if(mode==='open')return false;
  if(mode==='collapsed')return true;
@@ -60,7 +79,7 @@ export function resolveCollapseState(key,{fallback=true,legacy,primary=false,con
  // Main data sections and explicitly configured elements retain their local
  // starting point; global defaults apply to all other new, unconfigured items.
  if(primary||configured)return Boolean(fallback);
- switch(state.defaultState){
+ switch(effectiveDefaultMode()){
   case'open':return false;
   case'collapsed':return true;
   case'last':
@@ -98,6 +117,9 @@ export function toggleCollapsePin(key,currentCollapsed){
 
 export function setDefaultCollapseState(mode){
  const state=read();state.defaultState=validMode(mode);write(state);return state.defaultState;
+}
+export function setDefaultCollapseStateMobile(mode){
+ const state=read();state.defaultStateMobile=validMobileMode(mode);write(state);return state.defaultStateMobile;
 }
 
 export function clearCollapseState(key){

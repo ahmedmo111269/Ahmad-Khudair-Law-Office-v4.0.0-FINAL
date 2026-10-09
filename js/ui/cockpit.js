@@ -228,6 +228,29 @@ export function clientWorkspaceHtml({model,recentDone=[],clientName='',dayLabel=
 }
 
 /**
+ * الخطوة التالية في الملف — الآلية المشتركة الوحيدة لهذا الحساب (تستخدمها بطاقة
+ * «التالي في هذا الملف» والشريط المضغوط معًا). الأولوية: أقرب جلسة قادمة بلا نتيجة
+ * ← عمل متأخر ← عمل قادم. لا يستنتج أي أثر قانوني؛ بيانات مسجلة فقط.
+ * @returns {{tone:string,eyebrow:string,title:string,meta:string,route:string,label:string,done:string}|null}
+ */
+export function fileNextStep({hearings=[],procedures=[],today=''}={}){
+ const dayOf=v=>String(v||'').slice(0,10);
+ const upcomingHearings=hearings.filter(h=>dayOf(h.hearingDate)>=today&&!h.result).sort((a,b)=>(dayOf(a.hearingDate)+(a.hearingTime||'99')).localeCompare(dayOf(b.hearingDate)+(b.hearingTime||'99')));
+ const active=procedures.filter(p=>!p.status||p.status==='open'||p.status==='pending');
+ const overdue=active.filter(p=>dayOf(p.internalDueDate)&&dayOf(p.internalDueDate)<today).sort((a,b)=>dayOf(a.internalDueDate).localeCompare(dayOf(b.internalDueDate)));
+ const dueSoon=active.filter(p=>dayOf(p.internalDueDate)>=today).sort((a,b)=>dayOf(a.internalDueDate).localeCompare(dayOf(b.internalDueDate)));
+ if(upcomingHearings[0]){const h=upcomingHearings[0];const d=dayOf(h.hearingDate);
+  return {tone:d===today?'danger':'info',eyebrow:d===today?'جلسة اليوم':'الجلسة القادمة',title:`${h.type||h.reason||'جلسة'} — ${fmt(d)}${h.hearingTime?' · '+String(h.hearingTime).slice(0,5):''}`,meta:h.court?`${h.court}${h.chamber?' · '+h.chamber:''}`:'',route:`rec:hearings:${h.id}`,label:'فتح الجلسة',done:''};
+ }
+ if(overdue[0]){const p=overdue[0];
+  return {tone:'danger',eyebrow:'عمل متأخر',title:p.description||p.type||'عمل إداري',meta:`كان موعده ${fmt(dayOf(p.internalDueDate))}`,route:`rec:procedures:${p.id}`,label:'تنفيذ الآن',done:p.id};
+ }
+ if(dueSoon[0]){const p=dueSoon[0];
+  return {tone:'warn',eyebrow:'العمل التالي',title:p.description||p.type||'عمل إداري',meta:`الموعد ${fmt(dayOf(p.internalDueDate))}`,route:`rec:procedures:${p.id}`,label:'تنفيذ',done:p.id};
+ }
+ return null;
+}
+/**
  * كوكبيت الملف: الخطوة التالية + مؤشرات الحالة، فوق التبويبات مباشرة.
  * يُعرض قبل الخوض في التفاصيل: أين وصل الملف، وماذا يجب فعله.
  */
@@ -236,16 +259,8 @@ export function fileCockpitHtml({hearings=[],procedures=[],stages=[],parties=[],
  const upcomingHearings=hearings.filter(h=>dayOf(h.hearingDate)>=today&&!h.result).sort((a,b)=>(dayOf(a.hearingDate)+(a.hearingTime||'99')).localeCompare(dayOf(b.hearingDate)+(b.hearingTime||'99')));
  const active=procedures.filter(p=>!p.status||p.status==='open'||p.status==='pending');
  const overdue=active.filter(p=>dayOf(p.internalDueDate)&&dayOf(p.internalDueDate)<today).sort((a,b)=>dayOf(a.internalDueDate).localeCompare(dayOf(b.internalDueDate)));
- const dueSoon=active.filter(p=>dayOf(p.internalDueDate)>=today).sort((a,b)=>dayOf(a.internalDueDate).localeCompare(dayOf(b.internalDueDate)));
 
- let next;
- if(upcomingHearings[0]){const h=upcomingHearings[0];const d=dayOf(h.hearingDate);
-  next={tone:d===today?'danger':'info',eyebrow:d===today?'جلسة اليوم':'الجلسة القادمة',title:`${h.type||h.reason||'جلسة'} — ${fmt(d)}${h.hearingTime?' · '+String(h.hearingTime).slice(0,5):''}`,meta:h.court?`${h.court}${h.chamber?' · '+h.chamber:''}`:'',route:`rec:hearings:${h.id}`,label:'فتح الجلسة',done:''};
- }else if(overdue[0]){const p=overdue[0];
-  next={tone:'danger',eyebrow:'عمل متأخر',title:p.description||p.type||'عمل إداري',meta:`كان موعده ${fmt(dayOf(p.internalDueDate))}`,route:`rec:procedures:${p.id}`,label:'تنفيذ الآن',done:p.id};
- }else if(dueSoon[0]){const p=dueSoon[0];
-  next={tone:'warn',eyebrow:'العمل التالي',title:p.description||p.type||'عمل إداري',meta:`الموعد ${fmt(dayOf(p.internalDueDate))}`,route:`rec:procedures:${p.id}`,label:'تنفيذ',done:p.id};
- }
+ const next=fileNextStep({hearings,procedures,today});
  const nextBlock=next?`<div class="cp-fc-next cp-fc-next--${next.tone}">
    <span class="cp-eyebrow">${esc(next.eyebrow)}</span>
    <b class="cp-fc-title">${esc(next.title)}</b>

@@ -258,3 +258,18 @@
 .px-empty{padding:6px;text-align:center;font-size:11px;margin:0}
 @media (max-width:800px){.px-stats{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}.px-stat b{font-size:17px}}
 @media print{.px-toolbar-row,.px-board,.px-bars{display:none!important}}
+
+/* ===================== شرائح حالات قائمة الملفات + ملخص الفلاتر ===================== */
+.list-status-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.list-status-chips .chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;min-height:44px}
+.list-status-chips .chip small{opacity:.7;font-variant-numeric:tabular-nums}
+.list-status-chips .chip.has-alert{box-shadow:0 0 0 1px var(--warn-border,color-mix(in srgb,var(--warn,#B45309) 50%,transparent))}
+.list-filter-summary{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.list-filter-summary:empty{display:none}
+.fs-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:999px;padding:4px 6px 4px 10px;font-size:12px}
+.fs-chip button{border:0;background:transparent;color:var(--text-muted);cursor:pointer;border-radius:50%;width:22px;height:22px;line-height:1}
+.fs-chip button:hover{background:var(--surface);color:var(--danger)}
+.fs-chip.fs-clear button{width:auto;border-radius:999px;padding:3px 10px;color:var(--danger)}
+@media(max-width:700px){.list-status-chips{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px}.list-status-chips .chip{flex:none}}
+.list-nav{display:inline-flex;align-items:center;gap:8px;margin-inline-end:10px}
+.list-nav button{min-height:36px}
