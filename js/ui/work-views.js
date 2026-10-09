@@ -13,8 +13,10 @@ import {
   dayPartOf, DAY_PARTS, DAY_LAYOUTS, mergeStatuses, mergePriorities, classifyDue, agingBucket, AGING_BUCKETS, QUADRANTS, classifyQuadrant, dayDiff, RETIRED_STATUS_COLOR
 } from '../domain/work-items.js';
 import {workCardHtml, groupHeaderHtml, chip} from './work-card.js';
-import {nowAndNext, queryWorkItems} from '../services/work-query.js';
+import {nowAndNext, queryWorkItems, getWorkItemsByIds} from '../services/work-query.js';
 import {HOME_LIMITS} from '../services/work-config.js';
+import {getPicks} from '../services/my-day.js';
+import {filterVisibleItems, tempHiddenMap} from '../services/work-hides.js';
 import {prefs} from '../core/preferences.js';
 
 const PAGE_ID = 'actionCenter';
@@ -107,6 +109,47 @@ async function renderToday(rt) {
   // الأقسام داخل .wc-sections: عمود واحد على الجوال، وعمودان على سطح المكتب (الجلسات بجانب الأعمال الإدارية…).
   host.innerHTML = `${summary}${switcher}${nowBox}${pinned.html}<div class="wc-sections">${body}</div>`;
   host.querySelectorAll('[data-wc-layout]').forEach(b => b.onclick = () => rt.setState({dayLayout: b.dataset.wcLayout}));
+}
+
+// ---------- «يومي المدمج» (My Day): المثبّتة، العاجلة، المتأخرة، اليوم، اختيارات المستخدم ----------
+async function renderMyDay(rt) {
+  const {host} = rt;
+  const pickIds = getPicks();
+  const [pinned, urgent, overdue, todayPage, pickedRows] = await Promise.all([
+    rt.fetch(rt.spec({drive: 'pinned', range: 'all'}), {limit: 100}),
+    rt.fetch(rt.spec({range: 'all', priorities: ['urgent']}), {limit: 100}),
+    rt.fetch(rt.spec({range: 'overdue'}), {limit: 200}),
+    rt.fetch(rt.spec({range: 'today'}), {limit: 200}),
+    getWorkItemsByIds(rt.office, pickIds, {config: rt.config()})
+  ]);
+  const picked = filterVisibleItems(pickedRows.filter(item => item.isOpen), tempHiddenMap());
+  if (picked.length) {
+    await rt.relations.hydrate(picked, {signal: rt.signal});
+    for (const item of picked) rt.register(item);
+  }
+  const groups = [
+    ['pinned', 'المثبّتة', pinned.items],
+    ['urgent', 'عاجلة', urgent.items],
+    ['overdue', 'متأخرة', overdue.items],
+    ['day', 'اليوم', todayPage.items],
+    ['picks', 'اختياراتي لليوم', picked]
+  ];
+  // كل عنصر يظهر في أول قسم ينتمي إليه فقط، لتجنب تكرار البطاقة بين الأقسام.
+  const seen = new Set();
+  const sections = [];
+  let total = 0;
+  for (const [key, label, items] of groups) {
+    const list = items.filter(item => !seen.has(item.id));
+    list.forEach(item => seen.add(item.id));
+    if (!list.length) continue;
+    total += list.length;
+    sections.push(section(rt, `myday:${key}`, label, list));
+  }
+  if (!sections.length) {
+    host.innerHTML = cardEmpty('يومك خالٍ. ثبّت عناصر أو أضفها إلى يومك من قائمة «⋯» في أي بطاقة.', {icon: 'check', action: '<button type="button" class="primary" data-wc-new>+ مهمة جديدة</button>'});
+    return;
+  }
+  host.innerHTML = `<div class="wc-day-summary" role="status"><b>${total}</b> عنصرًا في يومك</div><div class="wc-sections">${sections.join('')}</div>`;
 }
 
 // ---------- البطاقات ----------
@@ -297,4 +340,4 @@ async function renderCalendar(rt) {
   await draw();
 }
 
-export const VIEW_RENDERERS = {cards: renderCards, kanban: renderKanban, matrix: renderMatrix, priorities: renderPriorities, overdue: renderOverdue, upcoming: renderUpcoming, completed: renderCompleted, calendar: renderCalendar};
+export const VIEW_RENDERERS = {cards: renderCards, kanban: renderKanban, matrix: renderMatrix, priorities: renderPriorities, overdue: renderOverdue, upcoming: renderUpcoming, completed: renderCompleted, calendar: renderCalendar, myDay: renderMyDay};

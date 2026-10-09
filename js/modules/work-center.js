@@ -373,15 +373,16 @@ export async function bindWorkCenter(app, q) {
   // «طريقة العرض ▾» في شريط الأدوات: قائمة عرض مقسمة (تشغيل / تخطيط / مراجعة) —
   // كل مدخل يعيّن مجموعة نطاق + عرض (WORK_VIEWS دون تغيير).
   function openViewMenu() {
-    const cur = {daily: rt.st.range === 'today', today: rt.st.range === 'today' && rt.st.view === 'cards', attention: rt.st.view === 'attention', cards: rt.st.view === 'cards' && rt.st.range !== 'today'};
+    const cur = {daily: rt.st.range === 'today', today: rt.st.range === 'today' && rt.st.view === 'cards', attention: rt.st.view === 'attention', cards: rt.st.view === 'cards' && rt.st.range !== 'today', myDay: rt.st.view === 'myDay'};
     const groups = [
-      ['تشغيل', [['daily', 'يومي'], ['today', 'اليوم'], ['attention', 'يحتاج انتباهي'], ['cards', 'بطاقات']]],
+      ['تشغيل', [['daily', 'يومي'], ['today', 'اليوم'], ['attention', 'يحتاج انتباهي'], ['cards', 'بطاقات'], ['myDay', 'يومي المدمج']]],
       ['تخطيط', [['calendar', 'تقويم'], ['kanban', 'كانبان'], ['priorities', 'الأولويات'], ['matrix', 'أيزنهاور']]],
       ['مراجعة', [['overdue', 'المتأخر'], ['upcoming', 'القادم'], ['completed', 'المنجز'], ['productivity', 'الإنتاجية']]]
     ];
     const run = async key => {
       if (key === 'daily') await rt.setState({range: 'today', from: '', to: ''});
       else if (key === 'today') await rt.setState({range: 'today', view: 'cards', from: '', to: ''});
+      else if (key === 'myDay') await rt.setState({range: 'all', view: 'myDay', from: '', to: ''});
       else await rt.setState({view: key});
     };
     const box = modal(`<h2 class="modal-title">طريقة العرض</h2><div class="wc-sheet wc-view-menu" role="menu">${groups.map(([title, items]) => `<div class="wc-menu-group" role="group" aria-label="${esc(title)}"><h3>${esc(title)}</h3>${items.map(([k, l]) => `<button type="button" role="menuitem" class="wc-sheet-btn${cur[k] || rt.st.view === k ? ' is-current' : ''}" data-vm="${k}">${esc(l)}</button>`).join('')}</div>`).join('')}</div>`);

@@ -15,6 +15,7 @@ import {getWorkConfig} from '../services/work-config.js';
 import {getLookup, saveLookupValue} from '../services/lookups.js';
 import * as C from '../services/work-items.js';
 import {hideTemporarily} from '../services/work-hides.js';
+import {isPicked, pickForToday, unpickForToday} from '../services/my-day.js';
 
 const fail = error => toast(userError(normalizeError(error)), 'error');
 
@@ -34,6 +35,8 @@ export function actionsFor(item) {
   }
   if (caps.priority) add('priority', 'تغيير الأولوية…', '▲');
   if (caps.pin) add('pin', item.isPinned ? 'إلغاء التثبيت' : 'تثبيت', '⚑');
+  // «يومي»: اختيار المستخدم لليوم (تفضيلات فقط، ينتهي تلقائيًا آخر اليوم)
+  if (item.isOpen) add('myDay', isPicked(item.id) ? 'أزل من يومي' : 'أضف إلى يومي', '📌');
   if (caps.tags) add('tags', 'الوسوم…', '#');
   if (item.sourceType === 'hearings' && item.sourceAvailable) add('result', 'تسجيل النتيجة / التأجيل في سجل الجلسة', '✎');
   if (caps.edit) add('edit', 'تعديل المهمة…', '✎');
@@ -208,6 +211,11 @@ export async function runAction(wc, item, action, extra = {}) {
         await C.setItemStatus(office, item, key); toast('تم تغيير الحالة'); return changed();
       }
       case 'pin': await C.setPinned(office, item, !item.isPinned); toast(item.isPinned ? 'أُلغي التثبيت' : 'تم التثبيت'); return changed();
+      case 'myDay': {
+        if (isPicked(item.id)) { await unpickForToday(item.id); toast('أُزيل من يومك'); }
+        else { await pickForToday(item.id); toast('أُضيف إلى يومك'); }
+        return changed({picked: true});
+      }
       case 'tags': {
         const tags = await tagsDialog(wc, item);
         if (!tags) return null;

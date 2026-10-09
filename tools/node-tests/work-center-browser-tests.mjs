@@ -72,7 +72,7 @@ async function goWC(page, route = 'actionCenter') {
 const clearToasts = page => page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const addDays = (day, n) => { const d = new Date(`${day}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const rtState = page => page.evaluate(() => { const rt = window.__LAW_OFFICE_APP__.__wc.rt; return {range: rt.st.range, view: rt.st.view, from: rt.st.from, to: rt.st.to, q: rt.st.q, filters: rt.st.filters, items: [...rt.items.values()].map(i => ({id: i.id, dueDate: i.dueDate, status: i.status, statusKind: i.statusKind, title: i.title, sourceType: i.sourceType, priority: i.priority, sourceAvailable: i.sourceAvailable}))}; });
+const rtState = page => page.evaluate(() => { const rt = window.__LAW_OFFICE_APP__.__wc.rt; return {range: rt.st.range, view: rt.st.view, from: rt.st.from, to: rt.st.to, q: rt.st.q, filters: rt.st.filters, items: [...rt.items.values()].map(i => ({id: i.id, dueDate: i.dueDate, status: i.status, statusKind: i.statusKind, title: i.title, sourceType: i.sourceType, priority: i.priority, isPinned: i.isPinned, sourceAvailable: i.sourceAvailable}))}; });
 const dbGet = (page, store, id) => page.evaluate(([s, i]) => window.__LAW_OFFICE_APP__.office.r[s].getManyRaw([i]).then(r => r[0] || null), [store, id]);
 async function selectView(page, view) { await page.selectOption('#wc-view-select', view); await ready(page); }
 async function openSheet(page, cardTitle) {
@@ -123,7 +123,7 @@ async function functional() {
     const bar = (await page.locator('.wc-quick-bar button').allTextContents()).join('|');
     for (const label of ['+ مهمة', '+ عمل إداري', '+ موعد', '+ متابعة', 'بحث', 'فلاتر', 'ترتيب', 'إعادة ضبط']) assert.ok(bar.includes(label), `زر ناقص: ${label}`);
     const views = await page.locator('#wc-view-select option').allTextContents();
-    for (const v of ['بطاقات', 'قائمة', 'كانبان', 'مصفوفة أيزنهاور', 'الأولويات', 'تقويم', 'المتأخر', 'القادم', 'المنجز', 'يحتاج انتباهي', 'الإنتاجية']) assert.ok(views.includes(v), `عرض ناقص: ${v}`);
+    for (const v of ['بطاقات', 'قائمة', 'كانبان', 'مصفوفة أيزنهاور', 'الأولويات', 'تقويم', 'المتأخر', 'القادم', 'المنجز', 'يحتاج انتباهي', 'الإنتاجية', 'يومي المدمج']) assert.ok(views.includes(v), `عرض ناقص: ${v}`);
     assert.ok((await page.locator('.wc-card').count()) > 0);
   });
 
@@ -139,7 +139,7 @@ async function functional() {
     await page.waitForSelector('.wc-view-menu');
     assert.deepEqual(await page.locator('.wc-view-menu .wc-menu-group h3').allTextContents(), ['تشغيل', 'تخطيط', 'مراجعة'], 'مجموعات قائمة العرض');
     const items = await page.locator('.wc-view-menu .wc-sheet-btn').allTextContents();
-    for (const it of ['يومي', 'اليوم', 'يحتاج انتباهي', 'بطاقات', 'تقويم', 'كانبان', 'الأولويات', 'أيزنهاور', 'المتأخر', 'القادم', 'المنجز', 'الإنتاجية']) assert.ok(items.includes(it), `عنصر ناقص في قائمة العرض: ${it}`);
+    for (const it of ['يومي', 'اليوم', 'يحتاج انتباهي', 'بطاقات', 'تقويم', 'كانبان', 'الأولويات', 'أيزنهاور', 'المتأخر', 'القادم', 'المنجز', 'الإنتاجية', 'يومي المدمج']) assert.ok(items.includes(it), `عنصر ناقص في قائمة العرض: ${it}`);
 
     await page.click('.wc-view-menu [data-vm="today"]'); await ready(page);
     assert.equal(await page.locator('#wc-view-select').inputValue(), 'cards', 'اليوم → عرض البطاقات');
@@ -309,6 +309,54 @@ async function functional() {
     assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.b}"]`).count(), 1, 'العنصر المجدول يظهر في «غدًا»');
   });
 
+  await verify('My Day: عرض مدمج للمثبّت والعاجل والمتأخر واليوم واختيار المستخدم، بلا تكرار وانتهاء الاختيار غدًا', async () => {
+    const seeded = await page.evaluate(async today => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {saveWorkItem, setPinned} = await import('/js/services/work-items.js');
+      const {pickForToday, PICKS_KEY} = await import('/js/services/my-day.js');
+      const clock = await import('/js/core/clock.js');
+      const pinned = await saveWorkItem(office, {title: 'WCTEST MyDay pinned', dueDate: clock.addDays(today, 3), status: 'notStarted', priority: 'medium'});
+      await setPinned(office, pinned.id, true);
+      const urgent = await saveWorkItem(office, {title: 'WCTEST MyDay urgent', dueDate: clock.addDays(today, 2), status: 'notStarted', priority: 'urgent'});
+      const overdue = await saveWorkItem(office, {title: 'WCTEST MyDay overdue', dueDate: clock.addDays(today, -1), status: 'notStarted', priority: 'medium'});
+      const todayItem = await saveWorkItem(office, {title: 'WCTEST MyDay today', dueDate: today, status: 'notStarted', priority: 'medium'});
+      const picked = await saveWorkItem(office, {title: 'WCTEST MyDay picked', dueDate: clock.addDays(today, 9), status: 'notStarted', priority: 'low'});
+      return {pinned: pinned.id, urgent: urgent.id, overdue: overdue.id, today: todayItem.id, picked: picked.id, picksKey: PICKS_KEY};
+    }, today());
+    await useTask(page, 'WCTEST MyDay picked');
+    await sheetAct(page, 'WCTEST MyDay picked', 'myDay'); await ready(page);
+    const pickState = await page.evaluate(async key => {
+      const {getPicks, todayKey} = await import('/js/services/my-day.js');
+      return {ids: getPicks(), date: todayKey(), raw: window.localStorage.getItem('akl:prefs:' + key)};
+    }, seeded.picksKey);
+    assert.ok(pickState.ids.includes(seeded.picked), 'اختيار المستخدم محفوظ في prefs');
+    assert.equal(pickState.date, today(), 'الاختيار مؤرخ بيومه المحلي');
+    await setSearch(page, '');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]'); await page.waitForSelector('.wc-view-menu');
+    await page.click('.wc-view-menu [data-vm="myDay"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'myDay', 'اختيار «يومي المدمج»');
+    const text = await page.locator('#wc-view').textContent();
+    for (const title of ['WCTEST MyDay pinned', 'WCTEST MyDay urgent', 'WCTEST MyDay overdue', 'WCTEST MyDay today', 'WCTEST MyDay picked']) assert.ok(text.includes(title), `عنصر غير ظاهر: ${title}`);
+    for (const id of [seeded.pinned, seeded.urgent, seeded.overdue, seeded.today, seeded.picked]) assert.equal(await page.locator(`.wc-card[data-wc-id="${id}"]`).count(), 1, `كل عنصر يظهر مرة واحدة: ${id}`);
+    const headings = await page.locator('#wc-view .wc-sections > section .ux-card-head h3').allTextContents();
+    assert.deepEqual(headings, ['المثبّتة', 'عاجلة', 'متأخرة', 'اليوم', 'اختياراتي لليوم']);
+    const expired = await page.evaluate(async date => {
+      const {picksForDate} = await import('/js/services/my-day.js');
+      return picksForDate({date: '2000-01-01', ids: ['old']}, date);
+    }, today());
+    assert.deepEqual(expired, [], 'اختيارات اليوم السابق منتهية تلقائيًا');
+    // Remove only this test's rows and preference pick so later range tests stay isolated.
+    await page.evaluate(async ids => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {deleteItem} = await import('/js/services/work-items.js');
+      const {unpickForToday} = await import('/js/services/my-day.js');
+      for (const id of ids) await deleteItem(office, id).catch(() => {});
+      await unpickForToday(ids.at(-1));
+    }, [seeded.pinned, seeded.urgent, seeded.overdue, seeded.today, seeded.picked]);
+    await page.selectOption('#wc-view-select', 'cards'); await ready(page);
+  });
+
   await verify('الفترات: كل تبويب يعيد نطاقه الصحيح فقط (اليوم/غدًا/الأسبوع/القادم/الشهر/الشهر القادم/السنة/متأخر/الكل)', async () => {
     for (const range of ['today', 'tomorrow', 'week', 'nextWeek', 'month', 'nextMonth', 'year', 'overdue', 'all']) {
       await page.click(`[data-wc-range="${range}"]`); await ready(page);
@@ -316,9 +364,9 @@ async function functional() {
       assert.equal(st.range, range);
       assert.equal(await page.locator('.wc-tab[aria-selected="true"]').getAttribute('data-wc-range'), range);
       const bounds = await page.evaluate(async r => { const m = await import('/js/services/work-query.js'); const x = m.resolveRange(r); return {from: x.from, to: x.to}; }, range);
-      for (const item of st.items.filter(i => i.dueDate)) {
-        if (bounds.from) assert.ok(item.dueDate >= bounds.from, `${range}: ${item.dueDate} قبل ${bounds.from}`);
-        if (bounds.to) assert.ok(item.dueDate <= bounds.to, `${range}: ${item.dueDate} بعد ${bounds.to}`);
+      for (const item of st.items.filter(i => i.dueDate && !i.isPinned)) {
+        if (bounds.from) assert.ok(item.dueDate >= bounds.from, `${range}: ${item.title} [${item.id}] due=${item.dueDate} pinned=${item.isPinned}`);
+        if (bounds.to) assert.ok(item.dueDate <= bounds.to, `${range}: ${item.title} [${item.id}] due=${item.dueDate} pinned=${item.isPinned}`);
       }
       assert.equal(await page.locator('#wc-view .error-box,#wc-view .ux-state-error').count(), 0);
     }

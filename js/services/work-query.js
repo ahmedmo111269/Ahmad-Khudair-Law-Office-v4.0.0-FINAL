@@ -512,6 +512,56 @@ async function driveQuery(office, spec, {cursor, limit, signal, predicate, relat
 
 
 /** عنصر واحد بمعرّفه (مهمة/إسقاط/تكرار افتراضي/يتيم) — للمجلّد وللروابط المباشرة. null إن لم يوجد. */
+/**
+ * عناصر متعددة بمعرّفاتها (للقوائم المحدودة المحفوظة في التفضيلات):
+ * صف workItems واحد مجمّع + صفوف المصادر مجمّعة لكل مخزن (لا N+1).
+ */
+export async function getWorkItemsByIds(office, ids = [], {config: given = null} = {}) {
+  office.ctx.assert();
+  await ensureWorkStatuses(office);
+  const config = given || getWorkConfig();
+  const unique = [...new Set((ids || []).filter(id => typeof id === 'string' && id))];
+  if (!unique.length) return [];
+  const regular = unique.filter(id => !id.startsWith('rec::'));
+  const rawRows = regular.length ? await office.r.workItems.getManyRaw(regular) : [];
+  const rawById = new Map(rawRows.map(row => [row.id, row]));
+  const sourceGroups = new Map();
+  for (const id of regular) {
+    const pos = id.indexOf('::');
+    if (pos < 1) continue;
+    const source = workSource(id.slice(0, pos));
+    if (!source) continue;
+    const idsForStore = sourceGroups.get(source.store) || new Set();
+    idsForStore.add(id.slice(pos + 2));
+    sourceGroups.set(source.store, idsForStore);
+  }
+  const sourceRows = new Map();
+  await Promise.all([...sourceGroups].map(async ([store, sourceIds]) => {
+    const rows = await office.r[store].getManyRaw([...sourceIds]);
+    sourceRows.set(store, new Map(rows.map(row => [row.id, row])));
+  }));
+  const out = [];
+  for (const id of unique) {
+    if (id.startsWith('rec::')) {
+      const item = await getWorkItem(office, id, {config});
+      if (item) out.push(item);
+      continue;
+    }
+    const raw = rawById.get(id) || null;
+    const pos = id.indexOf('::');
+    if (pos < 1) {
+      if (raw?.kind === WORK_KIND.native && !raw.isDeleted) out.push(buildNativeItem(raw, {config}));
+      continue;
+    }
+    const source = workSource(id.slice(0, pos));
+    const row = sourceRows.get(source?.store)?.get(id.slice(pos + 2)) || null;
+    if (row && isLiveSourceRow(row) && source.include(row)) out.push(buildProjectedItem(source, row, raw, {config}));
+    else if (raw) out.push(buildOrphanItem(raw, {config}));
+  }
+  const byId = new Map(out.map(item => [item.id, item]));
+  return unique.map(id => byId.get(id)).filter(Boolean);
+}
+
 export async function getWorkItem(office, id, {config: given = null} = {}) {
   office.ctx.assert();
   await ensureWorkStatuses(office);
