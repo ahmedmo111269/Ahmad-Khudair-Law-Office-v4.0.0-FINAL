@@ -183,6 +183,17 @@ export function runDisplayPrefsTests(test,expect){
   expect(orderedSections('pg').map(s=>s.id).join(',')).toBe('c,a,b');
  });
 
+ test('أقسام: استبدال تحركات الرئيسية بالمهام يحافظ على موضع المستخدم',()=>{
+  clean();
+  const original=getPageLayout('dashboard');
+  registerPageLayout({pageId:'dashboard',title:'الرئيسية',sections:[{id:'before',title:'قبل'},{id:'tasks',title:'المهام'},{id:'after',title:'بعد'}]});
+  saveSectionLayout('dashboard',{order:['before','activity','after'],hidden:['activity']});
+  expect(resolveSectionOrder('dashboard').join(',')).toBe('before,tasks,after');
+  expect(hiddenSectionIds('dashboard').has('tasks')).toBe(true);
+  if(original)registerPageLayout(original);
+  saveSectionLayout('dashboard',{order:[],hidden:[]});
+ });
+
  test('أقسام: الإخفاء يُحفظ ويُقرأ',()=>{
   clean();
   registerPageLayout({pageId:'pg2',title:'p',sections:[{id:'x',title:'X'},{id:'y',title:'Y'}]});

@@ -4,9 +4,9 @@
 //   1) الآن .......... ما الذي يجب فعله الآن؟ (الخطوة التالية بإجراء واحد)
 //   2) يحتاج انتباهك .. ما الذي يحتاج قرارًا؟ (طابور مرتب بالأهمية + فلاتر)
 //   3) جدول اليوم .... ما الذي يقع اليوم بالترتيب الزمني؟
-//   4) ما حدث؟ ....... آخر تحركات السجل
+//   4) المهام ......... المهام المستقلة المفتوحة من مركز العمل
 //   5) ملخص وتفاصيل .. المؤشرات، الأجندة، التقارير، والمثبّتات — كما كانت
-// كل بيانات الصفحة تأتي من dashboardBrief() الموجودة؛ محرّك التركيز دالة نقيّة فوقها.
+// موجز المكتب من dashboardBrief()، والمهام من Query مركز العمل؛ محرّك التركيز دالة نقيّة فوق الموجز.
 // كل عنصر يعرض معلومة يفتح سجلها بنقرة (قاعدة المنتج).
 import {esc} from '../ui/dom.js';
 import {mountCalendar} from '../ui/calendar.js';
@@ -26,7 +26,8 @@ import {registerPageLayout,openPageCustomizer,applyPageDisplay,applyPageLayout} 
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {applyUniversalStyles} from '../ui/component-customizer.js';
 import {buildFocusModel} from '../services/focus-engine.js';
-import {focusHtml,attentionHtml,timelineHtml,activityHtml,sinceHtml,bindCockpit} from '../ui/cockpit.js';
+import {focusHtml,attentionHtml,timelineHtml,homeTasksHtml,sinceHtml,bindCockpit} from '../ui/cockpit.js';
+import {queryWorkItems} from '../services/work-query.js';
 import {HOME_LIMITS,getWorkConfig} from '../services/work-config.js';
 import {tomorrowPrepCandidate} from '../services/tomorrow-prep.js';
 import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.js';
@@ -38,7 +39,7 @@ registerPageLayout({pageId:'dashboard',title:'مكتب اليوم',sections:[
  {id:'attention',title:'يحتاج انتباهك',icon:'⚑'},
  {id:'since',title:'منذ آخر زيارة',icon:'⟲'},
  {id:'kpis',title:'ملخص العمل',icon:'◈'},
- {id:'activity',title:'ما الذي حدث؟',icon:'≋'},
+ {id:'tasks',title:'المهام',icon:'✓'},
  {id:'favs',title:'مثبّتات',icon:'★'},
  {id:'agenda',title:'الأجندة',icon:'📅'},
  {id:'shortcuts',title:'تقارير العمل السريع',icon:'▤'},
@@ -70,8 +71,13 @@ function bindHomeLeave(app){
 }
 const KPI=(k,n,txt,route,accent='')=>`<button class="kpi${accent?` kpi-${accent}`:''}" data-kpi="${esc(route)}"><b>${formatNumber(n)}${n>=100?'+':''}</b><span>${esc(txt)}</span></button>`;
 
+/** المهام المستقلة المفتوحة نفسها المعروضة في مركز العمل، مرتبة بمحركه ومحدودة للقسم. */
+export async function loadHomeTasks(office){
+ return queryWorkItems(office,{range:'all',kinds:['open'],sources:['task']},{limit:HOME_LIMITS.homeTasks});
+}
+
 /**
- * تحميل بيانات مكتب اليوم مرة واحدة (brief + «منذ آخر زيارة» + «ما الذي حدث؟»).
+ * تحميل بيانات مكتب اليوم مرة واحدة (brief + «منذ آخر زيارة» + مهام مركز العمل).
  * البيانات نفسها في أول عرض للصفحة وفي التحديث بعد أي إجراء.
  */
 async function loadHomeData(app){
@@ -84,14 +90,12 @@ async function loadHomeData(app){
  // «منذ آخر زيارة»: أول تشغيل بلا خط أساس ⇒ لا قسم. لا كتابة هنا؛ الكتابة عند المغادرة فقط.
  const scope=homeScope(app);
  const sinceBase=homeBaseline(scope);
- const sinceRaw=sinceBase?await app.office.r.activityLog.reportRange({index:'timestamp',lower:sinceBase,upper:'\uffff',direction:'prev',limit:HOME_LIMITS.sinceLastVisit+1}).catch(()=>[]):[];
+ const [sinceRaw,tasks]=await Promise.all([
+  sinceBase?app.office.r.activityLog.reportRange({index:'timestamp',lower:sinceBase,upper:'\uffff',direction:'prev',limit:HOME_LIMITS.sinceLastVisit+1}).catch(()=>[]):Promise.resolve([]),
+  loadHomeTasks(app.office).catch(error=>({items:[],hasMore:false,partial:false,error}))
+ ]);
  const since=sinceChanges(sinceRaw,sinceBase);
- // «ما الذي حدث؟» — آخر 6 حركات (قراءة محدودة بالفهرس الزمني، بلا مسح كامل).
- // إذا وُجدت 6 حركات على الأقل بعد خط الأساس، فآخر 6 حركات "الكل" هي نفسها — استعلام واحد يكفي.
- let activity;
- if(sinceRaw.length>=6)activity=sinceRaw.slice(0,6);
- else activity=await app.office.r.activityLog.reportRange({index:'timestamp',lower:'0000-01-01',upper:'\uffff',direction:'prev',limit:6}).catch(()=>[]);
- return {r,focus,since,activity,today,nowHM,scope};
+ return {r,focus,since,tasks,today,nowHM,scope};
 }
 
 /** شرائط مؤشرات «ملخص العمل» — نفس القائمة في أول render وفي التحديث الموضعي. */
@@ -136,7 +140,7 @@ function tomorrowPrepHtml(brief){
 }
 
 export async function homePage(app){
- const {r,focus,since,activity,today,scope}=await loadHomeData(app);
+ const {r,focus,since,tasks,today,scope}=await loadHomeData(app);
  const g=GREETINGS[greetingKey()];
  const recents=getRecent(scope).slice(0,8);
  const favs=getFavorites(scope).slice(0,8);
@@ -175,7 +179,7 @@ export async function homePage(app){
  ${attentionHtml(focus)}
  ${sinceHtml(since)}
  ${kpisSectionHtml(r)}
- ${activityHtml(activity)}
+ ${homeTasksHtml({...tasks,today})}
 ${card({icon:'report',title:'تقارير العمل السريع',size:'full',cls:'daily-shortcuts',collapsible:true,persistKey:'home:shortcuts',sectionId:'shortcuts',pageId:'dashboard',
   body:`<div class="shortcut-grid"><button data-dashboard-report="hearings|tomorrow">جلسات غدًا</button><button data-dashboard-report="hearings|nextWeek">جلسات الأسبوع التالي</button><button data-dashboard-report="hearings|month">جلسات هذا الشهر</button><button data-dashboard-report="procedures|tomorrow">أعمال غدًا</button><button data-dashboard-report="procedures|nextWeek">أعمال الأسبوع التالي</button><button data-dashboard-report="procedures|month">أعمال هذا الشهر</button><button data-route-report="clients">الموكلون</button><button data-route-report="cases">القضايا</button></div>`})}
  ${card({icon:'calendar',title:'الأجندة',size:'lg',cls:'agenda',collapsible:true,persistKey:'home:agenda',sectionId:'agenda',pageId:'dashboard',
@@ -207,7 +211,7 @@ function bindHomeFocusMode(root,app){
 }
 
 // الأقسام التي يُحدَّث كل منها موضعًا بعد أي إجراء (بلا إعادة بناء الصفحة).
-const DYNAMIC_SECTIONS=['focus','today','attention','since','kpis','activity'];
+const DYNAMIC_SECTIONS=['focus','today','attention','since','kpis','tasks'];
 
 /**
  * تحديث موضعي بعد «✓ تم» (أو «تراجع»): يُعاد تحميل البيانات ويُستبدل كل قسم
@@ -220,9 +224,9 @@ async function positionalHomeRefresh(app){
  const scrollY=window.scrollY;
  const activeFilter=main.querySelector('.cp-count.is-on')?.dataset.attnFilter||'all';
  const activeEl=document.activeElement;
- const activeInDynamic=Boolean(activeEl&&activeEl.closest?.('.cp-hero,.cp-stage,[data-section-id="focus"],[data-section-id="today"],[data-section-id="attention"],[data-section-id="since"],[data-section-id="kpis"],[data-section-id="activity"]'));
+ const activeInDynamic=Boolean(activeEl&&activeEl.closest?.('.cp-hero,.cp-stage,[data-section-id="focus"],[data-section-id="today"],[data-section-id="attention"],[data-section-id="since"],[data-section-id="kpis"],[data-section-id="tasks"]'));
  try{
-  const {r,focus,since,activity,today}=await loadHomeData(app);
+  const {r,focus,since,tasks,today}=await loadHomeData(app);
   const dayLabel=longDateAr();
   const html={
    focus:focusHtml(focus,{dayLabel,focusMode:Boolean(app.__homeFocusMode)}),
@@ -230,7 +234,7 @@ async function positionalHomeRefresh(app){
    attention:attentionHtml(focus),
    since:sinceHtml(since),
    kpis:kpisSectionHtml(r),
-   activity:activityHtml(activity)
+   tasks:homeTasksHtml({...tasks,today})
   };
   for(const id of DYNAMIC_SECTIONS){
    const next=html[id];

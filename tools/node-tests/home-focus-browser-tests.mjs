@@ -45,6 +45,23 @@ try {
   // 1) أول تشغيل بلا قيمة سابقة: لا قسم «منذ آخر زيارة»
   check('أول تشغيل: لا يظهر قسم «منذ آخر زيارة»', (await page.locator('.cp-since').count()) === 0);
 
+  // 1b) «المهام» تعرض مهمة مركز العمل نفسها، وتفتح صفها الأصلي دون تكرار سجل النشاط.
+  const homeTaskId = await app(async () => {
+    const office = window.__LAW_OFFICE_APP__.office;
+    const {saveWorkItem} = await import('/js/services/work-items.js');
+    const {localDate} = await import('/js/core/clock.js');
+    const item = await saveWorkItem(office, {title: '〔تجريبي〕 مهمة رئيسية طويلة لاختبار التفاف العنوان داخل قائمة المهام دون تمرير أفقي على الهاتف', dueDate: localDate()});
+    return item.id;
+  });
+  await go('dashboard', 700);
+  const homeTaskRow = page.locator(`.cp-task-main[data-route="rec:workItems:${homeTaskId}"]`);
+  check('الرئيسية تستبدل «آخر التحركات» بقسم المهام', (await page.locator('[data-section-id="tasks"]').count()) === 1 && (await page.locator('[data-section-id="activity"]').count()) === 0 && (await page.locator('.cp-activity').count()) === 0);
+  check('المهمة المفتوحة من مركز العمل تظهر بموعدها في الرئيسية', (await homeTaskRow.count()) === 1 && /اليوم/.test(await homeTaskRow.textContent()));
+  await homeTaskRow.click();
+  await page.waitForFunction(id => window.__LAW_OFFICE_APP__?.route === `rec:workItems:${id}`, homeTaskId, {timeout: 15000});
+  check('نقرة المهمة تفتح سجلها في مركز العمل', await app(() => window.__LAW_OFFICE_APP__.route) === `rec:workItems:${homeTaskId}`);
+  await go('dashboard', 700);
+
   // 2) مغادرة الرئيسية تكتب وقت الزيارة (تفضيلات فقط) — وبلا أي كتابة في سجل النشاط
   await go('clients');
   const stamp1 = await app(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.includes('ui:home:last-seen'))) || 'null'));
