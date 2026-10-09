@@ -21,6 +21,7 @@ export const MAX_SAVED_VIEWS = 30;
 export const DEFAULT_WORK_CONFIG = Object.freeze({
   version: 1, statuses: {}, customStatuses: [], retiredStatuses: [], priorities: {}, sources: {}, lookback: {},
   staleFileDays: 30, summaryWindowDays: 45, upcomingDays: 14, urgentWithinDays: 2,
+  tomorrowPrepAfter: '17:00',
   attention: {rules: {}}, notifications: {enabled: true, maxVisible: 2}
 });
 
@@ -58,6 +59,8 @@ export function sanitizeWorkConfig(raw) {
   out.summaryWindowDays = num(src.summaryWindowDays, 7, 120, DEFAULT_WORK_CONFIG.summaryWindowDays);
   out.upcomingDays = num(src.upcomingDays, 3, 60, DEFAULT_WORK_CONFIG.upcomingDays);
   out.urgentWithinDays = num(src.urgentWithinDays, 0, 14, DEFAULT_WORK_CONFIG.urgentWithinDays);
+  const prepTime = String(src.tomorrowPrepAfter || '').trim();
+  out.tomorrowPrepAfter = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(prepTime) ? prepTime : DEFAULT_WORK_CONFIG.tomorrowPrepAfter;
   if (isObject(src.attention?.rules)) for (const [key, value] of Object.entries(src.attention.rules)) if (/^[a-zA-Z]{2,30}$/.test(key)) out.attention.rules[key] = Boolean(value);
   if (isObject(src.notifications)) {
     out.notifications.enabled = src.notifications.enabled !== false;
@@ -208,5 +211,6 @@ export function actionKeyFor(kind, state = {}) {
 export const HOME_LIMITS = Object.freeze({
   queuePerGroup: 5,          // أعلى عدد في كل طبقة من الطابور قبل «عرض الكل»
   sinceLastVisit: 15,        // أقصى عدد تغييرات في «منذ آخر زيارة»
-  postponeReviewAt: 3        // عدد التأجيلات الذي ينقل العمل إلى «يحتاج مراجعة» (إشارة تشغيلية فقط)
+  postponeReviewAt: 3,       // عدد التأجيلات الذي ينقل العمل إلى «يحتاج مراجعة» (إشارة تشغيلية فقط)
+  nowWindow: {before: 30, after: 90}  // نافذة «الآن» بالدقائق: من −30 إلى +90 دقيقة من الآن
 });

@@ -1,13 +1,16 @@
-import {contextualQuickActions,openQuickAdd} from '../modules/quick-add.js';
+import {contextualQuickActions,openQuickAdd,parseNaturalQuickAdd} from '../modules/quick-add.js';
 import {openRecordPreview} from '../ui/record-preview.js';
 import {closeModal} from '../ui/modal.js';
+import {addDays,localDate} from '../core/clock.js';
 
 export async function runQuickActionTests(test,expect){
  test('إجراءات الإضافة السياقية تتبدل مع المسار الحالي',()=>{
   const actions=contextualQuickActions({route:'file:file-1'});
   expect(actions.some(action=>action.kind==='hearing'&&action.context.id==='file-1')).toBe(true);
   expect(actions.some(action=>action.kind==='party')).toBe(true);
-  expect(contextualQuickActions({route:'dashboard'}).length).toBe(0);
+  const todayActions=contextualQuickActions({route:'dashboard'});
+  expect(todayActions.some(action=>action.kind==='task'&&action.context.type==='today'&&Boolean(action.context.date))).toBe(true);
+  expect(todayActions.some(action=>action.kind==='appointment'&&action.context.type==='today')).toBe(true);
  });
  test('قائمة الإضافة قابلة للبحث والفتح بالكيبورد وتعرض الأنواع القديمة',()=>{
   document.body.innerHTML='<div id="modal-root"></div>';
@@ -22,6 +25,78 @@ export async function runQuickActionTests(test,expect){
   expect(card.querySelector('.quick-more').hidden).toBe(false);
   expect(card.querySelector('[data-qa-kind="fees"]').hidden).toBe(false);
   expect(toggle.hidden).toBe(true);
+  closeModal();
+ });
+ test('المحلّل الطبيعي يعرّف مهمة «غدًا الساعة ٠٩:٣٠» محليًا',()=>{
+  const parsed=parseNaturalQuickAdd('مهمة مراجعة العقد غدًا الساعة ٠٩:٣٠',{today:'2026-10-09',homeContext:false});
+  expect(parsed.recognized).toBe(true);
+  expect(parsed.ok).toBe(true);
+  expect(parsed.kind).toBe('task');
+  expect(parsed.title).toBe('مراجعة العقد');
+  expect(parsed.date).toBe('2026-10-10');
+  expect(parsed.time).toBe('09:30');
+  expect(parsed.preset.title).toBe('مراجعة العقد');
+  expect(parsed.preset.dueDate).toBe('2026-10-10');
+  expect(parsed.preset.dueTime).toBe('09:30');
+  expect(Object.keys(parsed.preset).length).toBe(3);
+ });
+ test('المحلّل الطبيعي يعتمد اليوم للمواعيد ويقبل تاريخًا صريحًا',()=>{
+  const appointment=parseNaturalQuickAdd('موعد مراجعة العقد',{today:'2026-10-09',homeContext:false});
+  expect(appointment.ok).toBe(true);
+  expect(appointment.kind).toBe('appointment');
+  expect(appointment.date).toBe('2026-10-09');
+  expect(appointment.preset.date).toBe('2026-10-09');
+  const explicit=parseNaturalQuickAdd('مهمة مراجعة 2026-02-29',{today:'2026-10-09',homeContext:true});
+  expect(explicit.recognized).toBe(true);
+  expect(explicit.ok).toBe(false);
+  expect(explicit.error.includes('غير صالح')).toBe(true);
+ });
+ test('المحلّل الطبيعي يرفض الالتباس بدل التخمين',()=>{
+  const numericDate=parseNaturalQuickAdd('مهمة مراجعة 09/10/2026',{today:'2026-10-09'});
+  expect(numericDate.ok).toBe(false);
+  expect(numericDate.error.includes('ملتبسة')).toBe(true);
+  const badTime=parseNaturalQuickAdd('مهمة مراجعة 25:00',{today:'2026-10-09'});
+  expect(badTime.ok).toBe(false);
+  expect(badTime.error.includes('خارج النطاق')).toBe(true);
+  const twoDates=parseNaturalQuickAdd('مهمة مراجعة اليوم غدًا',{today:'2026-10-09'});
+  expect(twoDates.ok).toBe(false);
+  expect(twoDates.error.includes('أكثر من تاريخ')).toBe(true);
+  const weekday=parseNaturalQuickAdd('مهمة مراجعة الخميس',{today:'2026-10-09'});
+  expect(weekday.ok).toBe(false);
+  expect(weekday.error.includes('يوم الأسبوع')).toBe(true);
+  const taskTimeWithoutDate=parseNaturalQuickAdd('مهمة مراجعة 08:15',{today:'2026-10-09',homeContext:false});
+  expect(taskTimeWithoutDate.ok).toBe(false);
+  expect(taskTimeWithoutDate.error.includes('أضف تاريخًا')).toBe(true);
+  const homeTaskTime=parseNaturalQuickAdd('مهمة مراجعة 08:15',{today:'2026-10-09',homeContext:true});
+  expect(homeTaskTime.ok).toBe(true);
+  expect(homeTaskTime.date).toBe('2026-10-09');
+  const unrecognized=parseNaturalQuickAdd('تذكير بمراجعة العقد',{today:'2026-10-09'});
+  expect(unrecognized.recognized).toBe(false);
+ });
+ test('Quick Add يعرض معاينة الجملة الطبيعية قبل أي كتابة',()=>{
+  document.body.innerHTML='<div id="modal-root"></div>';
+  const card=openQuickAdd({route:'dashboard'});
+  const natural=card.querySelector('.qa-natural-input'),message=card.querySelector('[data-qa-natural-message]'),preview=card.querySelector('[data-qa-preview]'),open=card.querySelector('[data-qa-natural-open]');
+  expect(natural!==null).toBe(true);
+  natural.value='مهمة مراجعة 09/10/2026';natural.dispatchEvent(new Event('input',{bubbles:true}));
+  expect(message.hidden).toBe(false);
+  expect(message.textContent.includes('ملتبسة')).toBe(true);
+  expect(preview.hidden).toBe(true);
+  expect(open.disabled).toBe(true);
+  expect(natural.getAttribute('aria-invalid')).toBe('true');
+  const expected=addDays(localDate(),2);
+  natural.value='موعد مراجعة العقد بعد غد 14:05';natural.dispatchEvent(new Event('input',{bubbles:true}));
+  expect(message.hidden).toBe(true);
+  expect(preview.hidden).toBe(false);
+  expect(open.disabled).toBe(false);
+  expect(preview.querySelector('[data-preview-kind]').textContent).toBe('موعد');
+  expect(preview.querySelector('[data-preview-title]').textContent).toBe('مراجعة العقد');
+  expect(preview.querySelector('[data-preview-date]').textContent.includes(expected)).toBe(true);
+  expect(preview.querySelector('[data-preview-time]').textContent).toBe('14:05');
+  const helpToggle=card.querySelector('[data-qa-natural-help-toggle]'),help=card.querySelector('#qa-natural-help');
+  helpToggle.click();expect(help.hidden).toBe(false);expect(helpToggle.getAttribute('aria-expanded')).toBe('true');
+  card.querySelector('[data-qa-natural-clear]').click();
+  expect(natural.value).toBe('');expect(preview.hidden).toBe(true);expect(open.disabled).toBe(true);
   closeModal();
  });
  test('المعاينة السريعة تستبعد الحقول الحساسة وتبقي النص غير موثوق كنص',async()=>{

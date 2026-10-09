@@ -6,6 +6,7 @@ import {icon} from '../ui/icons.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {toast} from '../ui/toast.js';
+import {addDays,localDate} from '../core/clock.js';
 
 const STORE_ICONS={files:'folder',clients:'users',opponents:'userX',cases:'gavel',hearings:'calendar',procedures:'clipboard',powersOfAttorney:'stamp',appointments:'clock',communications:'phone',caseNotes:'note',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',serviceRecords:'stamp',bailiffs:'scale',executionParties:'users',executionValuePeriods:'chart',executionReceipts:'wallet',executionPOAs:'stamp',executionActions:'hammer'};
 const CORE_ITEMS=[
@@ -19,6 +20,7 @@ const CORE_ITEMS=[
 const CORE_STORES=new Set(['files','clients','hearings','procedures','caseNotes','executionObligations','executionPeriods']);
 const OTHER_ITEMS=Object.keys(STORE_ICONS).filter(store=>!CORE_STORES.has(store)&&ENTITIES[store]).map(store=>({kind:store,label:ENTITIES[store].label,icon:STORE_ICONS[store],keywords:`${ENTITIES[store].plural||''} ${ENTITIES[store].label}`}));
 const CONTEXT_ACTIONS={
+ today:[['task','مهمة اليوم','target'],['appointment','موعد اليوم','clock']],
  client:[['file','ملف جديد للموكل','folder'],['hearing','جلسة للموكل','calendar'],['procedure','عمل إداري للموكل','clipboard'],['appointment','موعد للموكل','clock'],['note','ملاحظة مرتبطة بالموكل','note'],['task','مهمة مرتبطة بالموكل','target']],
  file:[['hearing','جلسة في الملف','calendar'],['procedure','عمل إداري في الملف','clipboard'],['party','طرف جديد','users'],['stage','مرحلة قضائية','gavel'],['note','ملاحظة مرتبطة بالملف','note'],['task','مهمة مرتبطة بالملف','target']],
  case:[['hearing','جلسة للمرحلة','calendar'],['judgment','حكم للمرحلة','landmark'],['procedure','عمل إداري للملف','clipboard'],['serviceRecord','إعلان مرتبط','stamp'],['note','ملاحظة مرتبطة بالقضية','note'],['task','مهمة مرتبطة بالقضية','target']],
@@ -30,12 +32,83 @@ const CTX_LINK={client:'CLIENT',file:'LEGAL_FILE',case:'CASE',execution:'EXECUTI
 
 function routeContext(route){
  const clean=String(route||'').split('?')[0];
+ if(clean==='dashboard')return {type:'today',date:localDate()};
  let m=/^(client|file|case|cfile):(.+)$/.exec(clean);
  if(m)return {type:m[1]==='cfile'?'client':m[1],id:m[2],clientId:['client','cfile'].includes(m[1])?m[2]:''};
  m=/^exc:(.+)$/.exec(clean);if(m)return {type:'execution',id:m[1],store:'execution'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(clean);
  if(m)return {type:'record',store:m[1],id:m[2]};
  return null;
+}
+
+const RELATIVE_DATES=new Map([['اليوم',0],['غدا',1],['بكره',1],['بكرة',1]]);
+const UNSUPPORTED_DATE_WORDS=new Set(['احد','الاحد','الاثنين','الثلاثاء','الاربعاء','الخميس','الجمعة','السبت','اسبوع','الاسبوع','الشهر']);
+const UNSUPPORTED_TIME_WORDS=new Set(['صباحا','صباح','مساء','مساءا','ص','م']);
+const cleanNaturalToken=value=>String(value||'').replace(/^[،,؛]+|[،,؛]+$/gu,'');
+function naturalError(message){return {recognized:true,ok:false,error:message}}
+function validISODate(value){
+ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(value);if(!m)return false;
+ const year=Number(m[1]),month=Number(m[2]),day=Number(m[3]);
+ const date=new Date(Date.UTC(year,month-1,day));
+ return year>=1&&date.getUTCFullYear()===year&&date.getUTCMonth()+1===month&&date.getUTCDate()===day;
+}
+function parse24HourTime(value){
+ const m=/^(\d{1,2}):(\d{2})$/.exec(value);if(!m)return null;
+ const hour=Number(m[1]),minute=Number(m[2]);
+ if(hour>23||minute>59)return false;
+ return `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
+}
+
+/**
+ * A deliberately small, deterministic grammar for Quick Add. It parses only
+ * explicit task/appointment prefixes, local relative dates or ISO dates, and
+ * 24-hour HH:MM. It never saves; callers must show a preview and open a form.
+ */
+export function parseNaturalQuickAdd(value,{today=localDate(),homeContext=false}={}){
+ const text=normalizeArabic(value);
+ const prefix=/^(مهمة|مهمه|موعد)(?:\s+|$)/u.exec(text);
+ if(!prefix)return {recognized:false};
+ const body=text.slice(prefix[0].length).trim();
+ if(!body)return {recognized:false};
+ const kind=prefix[1]==='موعد'?'appointment':'task';
+ const tokens=body.split(/\s+/),consumed=new Set(),dates=[],times=[];
+ for(let i=0;i<tokens.length;i++){
+  if(consumed.has(i))continue;
+  const token=cleanNaturalToken(tokens[i]),next=cleanNaturalToken(tokens[i+1]);
+  if(token==='بعد'&&['غد','غدا','بكره','بكرة'].includes(next)){
+   dates.push({date:addDays(today,2)});consumed.add(i);consumed.add(i+1);i++;continue;
+  }
+  if(token==='بعد'&&/^\d+$/.test(next))return naturalError('الفترات العددية غير مدعومة بعد؛ استخدم اليوم أو غدًا أو بعد غد أو تاريخًا بصيغة YYYY-MM-DD.');
+  if(RELATIVE_DATES.has(token)){
+   dates.push({date:addDays(today,RELATIVE_DATES.get(token))});consumed.add(i);continue;
+  }
+  if(/^\d{4}-\d{2}-\d{2}$/.test(token)){
+   if(!validISODate(token))return naturalError(`التاريخ «${token}» غير صالح؛ استخدم تاريخًا صحيحًا بصيغة YYYY-MM-DD.`);
+   dates.push({date:token});consumed.add(i);continue;
+  }
+  if(/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(token))return naturalError('صيغة التاريخ الرقمية ملتبسة؛ استخدم YYYY-MM-DD أو اليوم أو غدًا.');
+  if(token==='الساعة'&&/^\d{1,2}$/.test(next))return naturalError('اكتب الوقت بصيغة 24 ساعة كاملة مثل 09:30 لتجنّب الالتباس بين الصباح والمساء.');
+  const maybeTime=parse24HourTime(token);
+  if(maybeTime===false)return naturalError(`الوقت «${token}» خارج النطاق؛ استخدم HH:MM بنظام 24 ساعة.`);
+  if(maybeTime){
+   times.push({time:maybeTime});consumed.add(i);
+   if(i>0&&cleanNaturalToken(tokens[i-1])==='الساعة')consumed.add(i-1);
+   continue;
+  }
+  if(/^\d{1,2}:\d{2}$/.test(token))return naturalError(`الوقت «${token}» غير صالح؛ استخدم HH:MM بنظام 24 ساعة.`);
+  if(UNSUPPORTED_DATE_WORDS.has(token))return naturalError('اسم يوم الأسبوع أو الفترة غير مدعوم تلقائيًا؛ حدّد اليوم أو غدًا أو بعد غد أو تاريخًا بصيغة YYYY-MM-DD.');
+  if(UNSUPPORTED_TIME_WORDS.has(token))return naturalError('اكتب الوقت بصيغة 24 ساعة مثل 09:30؛ لا يُخمَّن صباحًا أو مساءً.');
+ }
+ if(dates.length>1)return naturalError('وُجد أكثر من تاريخ؛ أبقِ تاريخًا واحدًا فقط في الجملة.');
+ if(times.length>1)return naturalError('وُجد أكثر من وقت؛ أبقِ وقتًا واحدًا فقط في الجملة.');
+ const title=tokens.filter((_,index)=>!consumed.has(index)).map(cleanNaturalToken).join(' ').replace(/^[،,؛]+|[،,؛]+$/gu,'').trim();
+ if(!title)return naturalError('أضف عنوانًا بعد نوع الإضافة والتاريخ/الوقت.');
+ let date=dates[0]?.date||'';
+ if(!date&&(kind==='appointment'||homeContext))date=today;
+ if(!date&&times.length)return naturalError('أضف تاريخًا صريحًا قبل استخدام وقت للمهمة، أو افتح Quick Add من «مكتب اليوم» ليكون اليوم الافتراضي.');
+ const time=times[0]?.time||'';
+ const preset={title,...(date?(kind==='task'?{dueDate:date}:{date}):{}),...(time?(kind==='task'?{dueTime:time}:{time}):{})};
+ return {recognized:true,ok:true,kind,title,date:date||'',time,preset};
 }
 
 /** Context actions shown in both «+ إضافة» and Ctrl+K. */
@@ -140,8 +213,14 @@ async function addStageFirst(app,file){
 
 async function launchOnFile(app,kind,file,context={}){
  const office=app.office;
- const stageId=context.caseId||file.currentStageId||'';
- const stage=stageId?await office.r.cases.get(stageId).catch(()=>null):null;
+ const preferredStageId=context.caseId||file.currentStageId||'';
+ let stage=preferredStageId?await office.r.cases.get(preferredStageId).catch(()=>null):null;
+ if(!stage||stage.isDeleted||stage.fileId!==file.id){
+  const stages=await office.r.cases.byIndex('fileId',file.id,500).catch(()=>[]);
+  const ordered=stages.filter(row=>!row.isDeleted).sort((a,b)=>(Number(a.stageOrder)||999)-(Number(b.stageOrder)||999)||String(a.filingDate||a.createdAt||'').localeCompare(String(b.filingDate||b.createdAt||'')));
+  stage=ordered.at(-1)||null;
+ }
+ const stageId=stage?.id||'';
  const base={fileId:file.id,...(context.clientId?{clientId:context.clientId}:{})};
  if(['hearing','judgment'].includes(kind)&&(!stage||stage.isDeleted))return addStageFirst(app,file);
  const preset={...base,...(stageId?{caseId:stageId}:{})};
@@ -156,8 +235,8 @@ async function launchOnFile(app,kind,file,context={}){
  return openEntityForm(app,store,{preset,onSaved:()=>app.refresh?.()});
 }
 
-export async function runQuickAction(app,kind,{context=null}={}){
- const target=await resolveContext(app,context);
+export async function runQuickAction(app,kind,{context=null,preset:providedPreset={}}={}){
+ const target=await resolveContext(app,context),overrides=providedPreset&&typeof providedPreset==='object'?{...providedPreset}:{};
  if(kind==='note'){
   const links=noteLink(target);
   const {openQuickNoteCapture}=await import('./quick-notes.js');
@@ -171,8 +250,8 @@ export async function runQuickAction(app,kind,{context=null}={}){
  if(kind==='task'){
   const related=target.store&&target.id?target.store:target.type==='client'?'clients':target.type==='file'?'files':target.type==='case'?'cases':'';
   const id=target.id||target.record?.id;
-  if(!related||!id){const {openEntityForm}=await import('../ui/form.js');return openEntityForm(app,'workItems')}
-  const {openLinkedTaskForm}=await import('../ui/work-actions.js');return openLinkedTaskForm(app,related,id,{onSaved:()=>app.refresh?.()});
+  if(!related||!id){const {openEntityForm}=await import('../ui/form.js');return openEntityForm(app,'workItems',{preset:{...(target.type==='today'?{dueDate:target.date||localDate()}:{}),...overrides},onSaved:()=>app.refresh?.()})}
+  const {openLinkedTaskForm}=await import('../ui/work-actions.js');return openLinkedTaskForm(app,related,id,{overrides,onSaved:()=>app.refresh?.()});
  }
  if(kind==='stage')kind='case';
  const store=FORM_KIND[kind]||(ENTITIES[kind]?kind:null);
@@ -184,7 +263,8 @@ export async function runQuickAction(app,kind,{context=null}={}){
    toast('اختر ملفًا قانونيًا أولًا لربط السجل به.','info');return
   }
  }
- const preset={};
+ const preset={...overrides};
+ if(target.type==='today'&&kind==='appointment')preset.date=preset.date||target.date||localDate();
  if(target.type==='case'&&target.caseId)preset.caseId=target.caseId;
  if(target.clientId&&['appointment','communication'].includes(kind))preset.clientId=target.clientId;
  if(target.fileId&&['appointment','communication'].includes(kind))preset.fileId=target.fileId;
@@ -200,6 +280,25 @@ function itemButton(item,index,contextIndex=-1){
 export function openQuickAdd(app){
  const contextItems=contextualQuickActions(app);
  const card=modal(`<h2 class="modal-title">إضافة جديد</h2>
+  <section class="qa-natural" role="group" aria-labelledby="qa-natural-label">
+   <div class="qa-natural-head"><label id="qa-natural-label" for="qa-natural-input">إضافة بجملة عربية</label><button type="button" class="link" data-qa-natural-help-toggle aria-expanded="false" aria-controls="qa-natural-help">المساعدة</button></div>
+   <div class="qa-natural-row">
+    <input type="text" id="qa-natural-input" class="qa-natural-input" placeholder="مثال: مهمة مراجعة العقد غدًا الساعة 09:30" autocomplete="off" aria-describedby="qa-natural-status">
+    <button type="button" class="ghost" data-qa-natural-parse>معاينة</button>
+   </div>
+   <p id="qa-natural-help" class="muted small qa-natural-help" hidden>اكتب جملة تبدأ بـ «مهمة» أو «موعد»، ثم العنوان، ثم — اختياريًا — «اليوم» أو «غدًا» أو «بعد غد» أو تاريخ بصيغة YYYY-MM-DD، ووقت بصيغة 24 ساعة مثل 09:30. ما عدا ذلك يُرفض برسالة واضحة، ولا تُكتب أي بيانات قبل فتح النموذج.</p>
+   <p id="qa-natural-status" class="qa-natural-message" data-qa-natural-message role="status" hidden></p>
+   <div class="qa-natural-preview" data-qa-preview hidden>
+    <dl class="qa-preview-list">
+     <div><dt>النوع</dt><dd data-preview-kind></dd></div>
+     <div><dt>العنوان</dt><dd data-preview-title></dd></div>
+     <div><dt>التاريخ</dt><dd data-preview-date></dd></div>
+     <div><dt>الوقت</dt><dd data-preview-time></dd></div>
+    </dl>
+    <p class="muted small">المعاينة لا تحفظ شيئًا؛ النموذج يُفتح أولًا قبل أي كتابة.</p>
+    <div class="qa-preview-actions"><button type="button" class="primary" data-qa-natural-open disabled>فتح النموذج بالمعاينة</button><button type="button" class="ghost" data-qa-natural-clear>مسح الجملة</button></div>
+   </div>
+  </section>
   <input type="search" class="qa-filter" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="qa-options" placeholder="ابحث في الإضافات… مثل: جلسة، موكل، ملاحظة" autocomplete="off" aria-label="فلترة قائمة الإضافة">
   <div id="qa-options" class="qa-options" role="listbox" aria-label="أنواع الإضافة">
    ${contextItems.length?`<section class="quick-context" role="group" aria-label="في السياق الحالي"><h3>في السياق الحالي</h3><div class="quick-grid">${contextItems.map((item,index)=>itemButton(item,index,index)).join('')}</div></section>`:''}
@@ -210,6 +309,62 @@ export function openQuickAdd(app){
   <p class="muted small qa-empty" hidden>لا توجد إضافة مطابقة — جرّب كلمة أقصر.</p>`);
  card.classList.add('quick-card');
  const input=card.querySelector('.qa-filter');
+ const naturalInput=card.querySelector('.qa-natural-input');
+ const naturalMessage=card.querySelector('[data-qa-natural-message]');
+ const naturalPreview=card.querySelector('[data-qa-preview]');
+ const naturalOpen=card.querySelector('[data-qa-natural-open]');
+ const naturalHelp=card.querySelector('#qa-natural-help');
+ const naturalHelpToggle=card.querySelector('[data-qa-natural-help-toggle]');
+ let naturalResult=null;
+ const naturalDateLabel=date=>{
+  if(!date)return '—';
+  const today=localDate();
+  if(date===today)return `${date} — اليوم`;
+  if(date===addDays(today,1))return `${date} — غدًا`;
+  if(date===addDays(today,2))return `${date} — بعد غد`;
+  return date;
+ };
+ const updateNatural=()=>{
+  const raw=naturalInput.value.trim();
+  if(!raw){
+   naturalResult=null;naturalPreview.hidden=true;naturalMessage.hidden=true;naturalOpen.disabled=true;
+   naturalInput.removeAttribute('aria-invalid');return;
+  }
+  const route=String(app?.route||'').split('?')[0];
+  const parsed=parseNaturalQuickAdd(raw,{today:localDate(),homeContext:route==='dashboard'});
+  naturalResult=parsed.recognized&&parsed.ok?parsed:null;
+  if(!parsed.recognized){
+   naturalMessage.textContent='اكتب جملة تبدأ بـ «مهمة» أو «موعد»، مثل: مهمة مراجعة العقد غدًا الساعة 09:30';
+   naturalMessage.classList.remove('is-error');naturalMessage.hidden=false;naturalPreview.hidden=true;naturalOpen.disabled=true;
+   naturalInput.setAttribute('aria-invalid','false');return;
+  }
+  if(!parsed.ok){
+   naturalMessage.textContent=parsed.error;naturalMessage.classList.add('is-error');naturalMessage.hidden=false;
+   naturalPreview.hidden=true;naturalOpen.disabled=true;naturalInput.setAttribute('aria-invalid','true');return;
+  }
+  naturalPreview.querySelector('[data-preview-kind]').textContent=parsed.kind==='task'?'مهمة':'موعد';
+  naturalPreview.querySelector('[data-preview-title]').textContent=parsed.title;
+  naturalPreview.querySelector('[data-preview-date]').textContent=naturalDateLabel(parsed.date|| (parsed.kind==='appointment'||route==='dashboard'?localDate():''));
+  naturalPreview.querySelector('[data-preview-time]').textContent=parsed.time||'—';
+  naturalMessage.hidden=true;naturalMessage.classList.remove('is-error');
+  naturalPreview.hidden=false;naturalOpen.disabled=false;naturalInput.removeAttribute('aria-invalid');
+ };
+ naturalInput.addEventListener('input',updateNatural);
+ naturalInput.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();updateNatural();if(naturalResult)naturalOpen.focus()}
+  else if(e.key==='Escape'){e.preventDefault();closeModal()}
+ });
+ card.querySelector('[data-qa-natural-parse]').addEventListener('click',()=>{updateNatural();if(naturalResult)naturalOpen.focus()});
+ card.querySelector('[data-qa-natural-clear]').addEventListener('click',()=>{naturalInput.value='';updateNatural();naturalInput.focus()});
+ naturalHelpToggle.addEventListener('click',()=>{
+  const open=naturalHelp.hidden;naturalHelp.hidden=!open;
+  naturalHelpToggle.setAttribute('aria-expanded',String(open));
+ });
+ naturalOpen.addEventListener('click',async()=>{
+  if(!naturalResult)return;
+  const result=naturalResult;closeModal();
+  try{await runQuickAction(app,result.kind,{preset:result.preset})}catch(error){console.error('natural quick add',error);app.fail?.(error)}
+ });
  const allButtons=[...card.querySelectorAll('[data-qa-kind]')];
  let active=-1,moreOpen=false;
  const visible=()=>allButtons.filter(button=>!button.hidden&&!button.closest('[hidden]'));

@@ -17,18 +17,20 @@ import {ENTITIES} from '../domain/entities.js';
 import {toast} from './toast.js';
 import {userError} from '../core/errors.js';
 import {executionContextSummary} from '../services/execution-work.js';
-import {completeItem} from '../services/work-items.js';
+import {completeItem,reopenItem} from '../services/work-items.js';
+
 import {overlayId} from '../domain/work-items.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {money} from './execution-work-view.js';
 
 /** البطاقة الكبيرة: «الآن» — الخطوة التالية المقترحة مع إجراء واحد واضح. */
-export function focusHtml(model,{dayLabel=''}={}){
+export function focusHtml(model,{dayLabel='',focusMode=false}={}){
  const next=model.next;
- const upcoming=model.attention.filter(x=>x!==next).slice(0,3);
+ const upcoming=focusMode?[]:model.attention.filter(x=>x!==next).slice(0,3);
+ const focusToggle=`<button type="button" class="ghost small cp-focus-mode" data-focus-mode aria-pressed="${focusMode}" title="عرض الخطوة التالية وحدها">${focusMode?'الخروج من التركيز':'تركيز'}</button>`;
  if(!next){
   return `<section class="cp-focus cp-focus--calm" data-section-id="focus" aria-labelledby="cp-focus-title">
-   <header class="cp-focus-head"><span class="cp-eyebrow">الآن</span><span class="cp-chip cp-chip--ok">لا عاجل</span></header>
+   <header class="cp-focus-head"><span class="cp-eyebrow">الآن</span><span class="cp-chip cp-chip--ok">لا عاجل</span>${focusToggle}</header>
    <h2 id="cp-focus-title">لا شيء يستعجل قرارك الآن</h2>
    <p class="cp-meta">${esc(dayLabel)} — كل الجلسات والأعمال المتأخرة مغطاة. وقت مناسب للمتابعة المنهجية أو إضافة عمل جديد.</p>
    <div class="cp-actions"><button class="primary" type="button" data-quick-add>+ إضافة</button><button class="ghost" type="button" data-route="actionCenter">مركز العمل</button><button class="ghost" type="button" data-route="files">الملفات</button></div>
@@ -36,9 +38,10 @@ export function focusHtml(model,{dayLabel=''}={}){
  }
  const sev=SEVERITY[next.severity]||SEVERITY.normal;
  return `<section class="cp-focus cp-focus--${esc(next.severity)}" data-section-id="focus" aria-labelledby="cp-focus-title">
-  <header class="cp-focus-head"><span class="cp-eyebrow">الآن · الخطوة التالية</span><span class="cp-chip cp-chip--${esc(sev.tone||'neutral')}">${esc(sev.label)}</span></header>
+  <header class="cp-focus-head"><span class="cp-eyebrow">الآن · الخطوة التالية</span><span class="cp-chip cp-chip--${esc(sev.tone||'neutral')}">${esc(sev.label)}</span>${focusToggle}</header>
   <h2 id="cp-focus-title">${esc(next.title)}</h2>
   <p class="cp-meta"><b>${esc(next.when)}</b>${next.meta?` <span aria-hidden="true">·</span> ${esc(next.meta)}`:''}</p>
+  ${postponeChipHtml(next)}
   ${whyLine(next)}
   <div class="cp-actions">
    <button class="primary cp-primary" type="button" data-route="${esc(next.route)}">${esc(next.actionLabel)} <span aria-hidden="true">←</span></button>
@@ -54,6 +57,12 @@ function whyLine(x){
  if(!x.reasonCode)return '';
  const r=reasonText(x.reasonCode,x.reasonParams);
  return r.why?`<p class="cp-why"><span class="cp-why-label">لماذا الآن؟</span> ${esc(r.why)}</p>`:'';
+}
+
+/** شارة التأجيل المتكرر «↷ أُجّل N مرات» — تقرأ من طبقة work-items (postponeCount) عبر dashboardBrief. */
+export function postponeChipHtml(x){
+ const n=Number(x?.postponeCount||0);
+ return n>0?`<span class="cp-chip cp-chip--warn" title="أُجّل ${n} مرات — قرّر إنجازه أو إنهاءه">↷ أُجّل ${n} مرات</span>`:'';
 }
 
 /** زر «✓ تم» للأعمال الإدارية فقط (الجلسات تُسجَّل نتيجتها داخل بطاقتها). */
@@ -111,7 +120,7 @@ function attnRow(x){
  return `<li class="cp-row cp-row--${esc(x.severity)}" data-sev="${esc(x.severity)}">
   <button type="button" class="cp-row-main" data-route="${esc(x.route)}">
    <span class="cp-dot cp-dot--${esc(x.severity)}" aria-hidden="true"></span>
-   <span class="cp-row-text"><b>${esc(x.title)}</b>${x.meta?`<small>${esc(x.meta)}</small>`:''}</span>
+   <span class="cp-row-text"><b>${esc(x.title)}</b>${x.meta?`<small>${esc(x.meta)}</small>`:''}${postponeChipHtml(x)}</span>
    <span class="cp-row-when">${esc(x.when)}</span>
    <span class="cp-row-sev">${esc(sev.label)}</span>
    <span class="cp-row-go" aria-hidden="true">${esc(x.actionLabel)} ←</span>
@@ -291,9 +300,20 @@ export function executionStripHtml({summary={},route='executionCenter',scope='fi
 }
 
 /**
+ * تحديث الشاشة بعد إجراء («✓ تم» أو «تراجع»):
+ * إذا كانت الصفحة تُحدَّث موضعًا (app.__refreshAfterAction — تضعها bindHome وbindFilePage
+ * وbindClientFilePage) يُحدَّث المتأثر فقط بلا إعادة بناء الصفحة؛ وإلا fallback لإعادة
+ * render كاملة (السلوك القديم).
+ */
+export function refreshAfterAction(app){
+ return app?.__refreshAfterAction?app.__refreshAfterAction():app?.refresh?.();
+}
+
+/**
  * سلوك مشترك لكل شاشة فيها كوكبيت/طابور:
  *  - فلترة بالأهمية دون إعادة رسم
- *  - «✓ تم» للأعمال الإدارية: completeItem ← تحديث الشاشة (refresh) بلا مغادرة
+ *  - «✓ تم» للأعمال الإدارية: completeItem ← تحديث موضعي (أو refresh كخيار احتياطي)
+ *    مع «تراجع» يعيد فتح العمل (reopenItem) — نفس النمط في مركز العمل.
  */
 export function bindCockpit(root,app){
  if(!root)return;
@@ -308,10 +328,11 @@ export function bindCockpit(root,app){
   e.preventDefault();e.stopPropagation();
   const id=btn.dataset.completeProc;
   btn.disabled=true;
+  const ref=overlayId('procedures',id);
   try{
-   await completeItem(app.office,overlayId('procedures',id));
-   toast('تم تسجيل إنجاز العمل ✓');
-   await app.refresh();
+   await completeItem(app.office,ref);
+   toast('تم تسجيل إنجاز العمل ✓','ok',{action:()=>{reopenItem(app.office,ref).then(()=>refreshAfterAction(app)).catch(err=>toast(userError(err),'error'))},actionLabel:'تراجع',duration:6000});
+   await refreshAfterAction(app);
   }catch(err){btn.disabled=false;toast(userError(err),'error')}
  }));
 }

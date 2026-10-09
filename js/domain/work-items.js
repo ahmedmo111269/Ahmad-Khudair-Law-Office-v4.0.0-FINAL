@@ -115,7 +115,8 @@ export const WORK_RANGES = Object.freeze([
 export const WORK_VIEWS = Object.freeze([
   ['cards', 'بطاقات'], ['list', 'قائمة'], ['kanban', 'كانبان'], ['matrix', 'مصفوفة أيزنهاور'], ['priorities', 'الأولويات'],
   ['calendar', 'تقويم'], ['overdue', 'المتأخر'], ['upcoming', 'القادم'], ['completed', 'المنجز'],
-  ['attention', 'يحتاج انتباهي'], ['productivity', 'الإنتاجية']
+  ['attention', 'يحتاج انتباهي'], ['productivity', 'الإنتاجية'],
+  ['myDay', 'يومي المدمج']
 ]);
 export const SNOOZE_OPTIONS = Object.freeze([
   ['tomorrow', 'غدًا'], ['twoDays', 'بعد يومين'], ['nextWeek', 'الأسبوع القادم'], ['nextMonth', 'الشهر القادم'], ['custom', 'تاريخ مخصص']

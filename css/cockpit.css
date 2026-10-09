@@ -231,3 +231,6 @@
 
 /* حركة قصيرة واحترام تفضيل تقليل الحركة. */
 @media (prefers-reduced-motion:reduce){.cp-tl li>button{transition:none}}
+.home-tomorrow-prep{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-block:10px}
+.home-tomorrow-prep>span{min-width:0}
+@media(max-width:600px){.home-tomorrow-prep{align-items:flex-start;flex-direction:column}.home-tomorrow-prep button{width:100%}}

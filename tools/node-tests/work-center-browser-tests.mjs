@@ -72,7 +72,7 @@ async function goWC(page, route = 'actionCenter') {
 const clearToasts = page => page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const addDays = (day, n) => { const d = new Date(`${day}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const rtState = page => page.evaluate(() => { const rt = window.__LAW_OFFICE_APP__.__wc.rt; return {range: rt.st.range, view: rt.st.view, from: rt.st.from, to: rt.st.to, q: rt.st.q, filters: rt.st.filters, items: [...rt.items.values()].map(i => ({id: i.id, dueDate: i.dueDate, status: i.status, statusKind: i.statusKind, title: i.title, sourceType: i.sourceType, priority: i.priority, sourceAvailable: i.sourceAvailable}))}; });
+const rtState = page => page.evaluate(() => { const rt = window.__LAW_OFFICE_APP__.__wc.rt; return {range: rt.st.range, view: rt.st.view, from: rt.st.from, to: rt.st.to, q: rt.st.q, filters: rt.st.filters, items: [...rt.items.values()].map(i => ({id: i.id, dueDate: i.dueDate, status: i.status, statusKind: i.statusKind, title: i.title, sourceType: i.sourceType, priority: i.priority, isPinned: i.isPinned, sourceAvailable: i.sourceAvailable}))}; });
 const dbGet = (page, store, id) => page.evaluate(([s, i]) => window.__LAW_OFFICE_APP__.office.r[s].getManyRaw([i]).then(r => r[0] || null), [store, id]);
 async function selectView(page, view) { await page.selectOption('#wc-view-select', view); await ready(page); }
 async function openSheet(page, cardTitle) {
@@ -123,8 +123,315 @@ async function functional() {
     const bar = (await page.locator('.wc-quick-bar button').allTextContents()).join('|');
     for (const label of ['+ مهمة', '+ عمل إداري', '+ موعد', '+ متابعة', 'بحث', 'فلاتر', 'ترتيب', 'إعادة ضبط']) assert.ok(bar.includes(label), `زر ناقص: ${label}`);
     const views = await page.locator('#wc-view-select option').allTextContents();
-    for (const v of ['بطاقات', 'قائمة', 'كانبان', 'مصفوفة أيزنهاور', 'الأولويات', 'تقويم', 'المتأخر', 'القادم', 'المنجز', 'يحتاج انتباهي', 'الإنتاجية']) assert.ok(views.includes(v), `عرض ناقص: ${v}`);
+    for (const v of ['بطاقات', 'قائمة', 'كانبان', 'مصفوفة أيزنهاور', 'الأولويات', 'تقويم', 'المتأخر', 'القادم', 'المنجز', 'يحتاج انتباهي', 'الإنتاجية', 'يومي المدمج']) assert.ok(views.includes(v), `عرض ناقص: ${v}`);
     assert.ok((await page.locator('.wc-card').count()) > 0);
+  });
+
+  await verify('Phase D: شريط الأدوات (إضافة/بحث/فلاتر/طريقة العرض/⋯) وقائمة العرض', async () => {
+    assert.equal(await page.locator('.wc-toolbar [data-wc-add-menu]').count(), 1, 'زر + إضافة');
+    assert.equal(await page.locator('.wc-toolbar #wc-q').count(), 1, 'حقل البحث');
+    assert.ok(await page.locator('.wc-toolbar [data-wc-toggle-filters]').count() >= 1, 'زر فلاتر');
+    assert.equal(await page.locator('.wc-toolbar #wc-view-select').count(), 1, 'قائمة طريقة العرض السريعة');
+    assert.equal(await page.locator('.wc-toolbar [data-wc-view-menu]').count(), 1, 'زر قائمة العرض');
+    assert.ok(await page.locator('.wc-toolbar [data-wc-more-menu]').count() >= 1, 'زر ⋯');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]');
+    await page.waitForSelector('.wc-view-menu');
+    assert.deepEqual(await page.locator('.wc-view-menu .wc-menu-group h3').allTextContents(), ['تشغيل', 'تخطيط', 'مراجعة'], 'مجموعات قائمة العرض');
+    const items = await page.locator('.wc-view-menu .wc-sheet-btn').allTextContents();
+    for (const it of ['يومي', 'اليوم', 'يحتاج انتباهي', 'بطاقات', 'تقويم', 'كانبان', 'الأولويات', 'أيزنهاور', 'المتأخر', 'القادم', 'المنجز', 'الإنتاجية', 'يومي المدمج']) assert.ok(items.includes(it), `عنصر ناقص في قائمة العرض: ${it}`);
+
+    await page.click('.wc-view-menu [data-vm="today"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'cards', 'اليوم → عرض البطاقات');
+    assert.equal(await page.locator('.wc-tab[aria-selected="true"]').getAttribute('data-wc-range'), 'today', 'اليوم → نطاق اليوم');
+    assert.ok((await page.locator('.wc-day-summary').count()) >= 1, 'اليوم → renderToday (wc-day-summary)');
+    assert.ok((await page.locator('#wc-view-name').textContent()).includes('اليوم'), 'اسم العرض الحالي = اليوم');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]'); await page.waitForSelector('.wc-view-menu');
+    await page.click('.wc-view-menu [data-vm="attention"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'attention', 'يحتاج انتباهي → عرض الانتباه');
+    assert.ok((await page.locator('.wc-attn').count()) >= 1 || (await page.locator('.ux-state-empty').count()) >= 1, 'عرض الانتباه يرسم');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]'); await page.waitForSelector('.wc-view-menu');
+    await page.click('.wc-view-menu [data-vm="cards"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'cards', 'بطاقات → عرض البطاقات');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]'); await page.waitForSelector('.wc-view-menu');
+    await page.click('.wc-view-menu [data-vm="daily"]'); await ready(page);
+    assert.equal(await page.locator('.wc-tab[aria-selected="true"]').getAttribute('data-wc-range'), 'today', 'يومي → نطاق اليوم');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]'); await page.waitForSelector('.wc-view-menu');
+    await page.click('.wc-view-menu [data-vm="matrix"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'matrix', 'أيزنهاور → عرض المصفوفة');
+    await page.selectOption('#wc-view-select', 'cards'); await ready(page);
+
+    await page.click('.wc-toolbar [data-wc-add-menu]'); await page.waitForSelector('.wc-sheet');
+    const adds = await page.locator('.wc-sheet .wc-sheet-btn').allTextContents();
+    for (const a of ['+ مهمة جديدة', '+ عمل إداري', '+ موعد', '+ متابعة اتصال']) assert.ok(adds.some(x => x.includes(a)), `إضافة ناقصة: ${a}`);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wc-sheet', {state: 'detached'});
+
+    await page.click('.wc-toolbar [data-wc-more-menu]'); await page.waitForSelector('.wc-sheet');
+    const more = await page.locator('.wc-sheet .wc-sheet-btn').allTextContents();
+    for (const m of ['العروض المحفوظة', 'ترتيب الأقسام وعرض الصفحة', '⚙ إعدادات مركز العمل', 'تصدير العرض الحالي (CSV)', 'نسخ خلاصة اليوم', 'تحديث البيانات']) assert.ok(more.some(x => x.includes(m)), `⋯ ناقص: ${m}`);
+    await page.click('.wc-sheet [data-i="12"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view .error-box,#wc-view .ux-state-error').count(), 0, 'لا خطأ بعد تحديث البيانات');
+  });
+
+  await verify('Phase E: «مساحة اليوم» — الترتيب الآن/التالي/اليوم/يحتاج موعدًا/أُنجز اليوم (مطوي)', async () => {
+    // زرع: عنصر بلا موعد + عنصر منجز اليوم + (الآن/التالي إن أمكن قبل منتصف الليل)
+    const seeded = await page.evaluate(async () => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {saveWorkItem} = await import('/js/services/work-items.js');
+      const clock = await import('/js/core/clock.js');
+      const today = clock.localDate();
+      const undated = await saveWorkItem(office, {title: 'WCTEST بلا موعد', dueDate: '', status: 'notStarted'}).catch(e => ({error: e.message}));
+      const done = await saveWorkItem(office, {title: 'WCTEST منجز اليوم', dueDate: today, status: 'done'}).catch(e => ({error: e.message}));
+      const now = new Date(), pad = n => String(n).padStart(2, '0');
+      const t1 = new Date(now.getTime() + 10 * 60000), t2 = new Date(now.getTime() + 120 * 60000);
+      const sameDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` === today;
+      let nowItem = null, nextItem = null;
+      if (sameDay(t1)) nowItem = await saveWorkItem(office, {title: 'WCTEST الآن', dueDate: today, dueTime: `${pad(t1.getHours())}:${pad(t1.getMinutes())}`, status: 'notStarted'}).catch(e => ({error: e.message}));
+      if (sameDay(t2)) nextItem = await saveWorkItem(office, {title: 'WCTEST التالي', dueDate: today, dueTime: `${pad(t2.getHours())}:${pad(t2.getMinutes())}`, status: 'notStarted'}).catch(e => ({error: e.message}));
+      return {undated: undated?.id || '', done: done?.id || '', now: nowItem?.id || '', next: nextItem?.id || ''};
+    });
+    assert.ok(seeded.undated && seeded.done, `الزرع: ${JSON.stringify(seeded)}`);
+    assert.ok(seeded.now && !seeded.now.error, `زرع «الآن»: ${JSON.stringify(seeded.now)}`);
+
+    await page.click('[data-wc-range="today"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'cards', 'عرض اليوم = البطاقات (renderToday)');
+    // Each item renders exactly once: now-item only in the now box, never duplicated in day sections
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.now}"]`).count(), 1, 'عنصر «الآن» يُعرض مرة واحدة بلا تكرار');
+    assert.ok((await page.locator('#wc-view .wc-day-summary').count()) >= 1, 'ملخص اليوم');
+
+    // الترتيب: الآن → التالي → اليوم → يحتاج موعدًا → أُنجز اليوم
+    const order = await page.evaluate(() => {
+      const marks = [];
+      const view = document.querySelector('#wc-view');
+      const nowBox = view.querySelector('.wc-now');
+      if (nowBox) {
+        marks.push('now');
+        for (const h of nowBox.querySelectorAll('h4')) marks.push('now:' + h.textContent.trim());
+      }
+      const secs = view.querySelector('.wc-sections');
+      if (secs) {
+        for (const el of secs.children) {
+          if (el.matches('h3.wc-group-h')) marks.push('h:' + el.textContent.trim());
+          else if (el.matches('section')) {
+            const t = (el.querySelector('.panel-head h3,h3')?.textContent || '').trim();
+            const list = el.querySelector('[data-wc-list]')?.dataset.wcList || '';
+            marks.push(`sec:${t}|${list}`);
+          }
+        }
+      }
+      return marks;
+    });
+    const ix = name => order.findIndex(m => m === name || m.startsWith(name));
+    if (ix('now') >= 0) assert.ok(ix('now:الآن') < ix('now:التالي') || ix('now:التالي') < 0, `ترتيب الآن/التالي: ${order.join(' | ')}`);
+    if (ix('h:اليوم') >= 0) assert.ok(ix('h:اليوم') < ix('sec:يحتاج موعدًا|part:undated'), '«اليوم» قبل «يحتاج موعدًا»');
+    assert.ok(ix('sec:يحتاج موعدًا|part:undated') >= 0 || ix('sec:يحتاج موعدًا|part:undated') >= 0, 'قسم «يحتاج موعدًا» موجود');
+    assert.ok(ix('sec:يحتاج موعدًا|part:undated') < ix('sec:أُنجز اليوم|done-today'), '«يحتاج موعدًا» قبل «أُنجز اليوم»');
+
+    // «يحتاج موعدًا» يعرض العنصر بلا موعد
+    const undatedText = await page.locator('[data-wc-list="part:undated"]').textContent();
+    assert.ok(undatedText.includes('WCTEST'), 'العنصر بلا موعد داخل قسم «يحتاج موعدًا»');
+    // «أُنجز اليوم» يعرض المنجز اليوم وهو مطوي افتراضيًا
+    const doneSec = page.locator('#wc-view section:has([data-wc-list="done-today"])');
+    assert.ok((await doneSec.count()) === 1, 'قسم «أُنجز اليوم» موجود');
+    const doneText = await doneSec.textContent();
+    assert.ok(doneText.includes('WCTEST منجز اليوم'), 'العنصر المنجز داخل «أُنجز اليوم»');
+    const collapsed = await doneSec.evaluate(el => el.dataset.collapseCollapsed === 'true' || el.querySelector('.panel-collapse-body')?.hidden === true);
+    assert.ok(collapsed, '«أُنجز اليوم» مطوي افتراضيًا');
+  });
+
+  await verify('Needs Scheduling: «يحتاج موعدًا» — تحديد موعد (تأكيد قبل الحفظ) / فتح / تأجيل / إبقاء بلا موعد', async () => {
+    const seeded = await page.evaluate(async () => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {saveWorkItem} = await import('/js/services/work-items.js');
+      const a = await saveWorkItem(office, {title: 'WCTEST بحاجة لموعد ١', dueDate: '', status: 'notStarted'}).catch(e => ({error: e.message}));
+      const b = await saveWorkItem(office, {title: 'WCTEST بحاجة لموعد ٢', dueDate: '', status: 'notStarted'}).catch(e => ({error: e.message}));
+      return {a: a?.id || '', b: b?.id || ''};
+    });
+    assert.ok(seeded.a && seeded.b, `الزرع: ${JSON.stringify(seeded)}`);
+    await page.click('[data-wc-range="today"]'); await ready(page);
+    const undatedList = page.locator('[data-wc-list="part:undated"]');
+    assert.ok((await undatedList.textContent()).includes('WCTEST بحاجة لموعد ١'), 'العنصر بلا موعد في قسم «يحتاج موعدًا»');
+    assert.ok((await undatedList.textContent()).includes('WCTEST بحاجة لموعد ٢'), 'العنصر الثاني بلا موعد في القسم');
+
+    // الأفعال الأربعة متاحة لعنصر بلا موعد
+    await openSheet(page, 'WCTEST بحاجة لموعد ١');
+    const acts = await page.locator('.wc-sheet [data-act]').allTextContents();
+    for (const want of ['تحديد موعد', 'فتح', 'تأجيل', 'إبقاء بلا موعد']) assert.ok(acts.some(a => a.includes(want)), `action ناقص: ${want}`);
+
+    // «إبقاء بلا موعد»: إخفاء مؤقت للعرض فقط — يختفي من القسم ومن «الكل»، والسجل بلا تغيير
+    await page.click('.wc-sheet [data-act="keepUndated"]'); await ready(page);
+    assert.ok(!(await undatedList.textContent()).includes('WCTEST بحاجة لموعد ١'), 'اختفى من «يحتاج موعدًا»');
+    const rowA1 = await dbGet(page, 'workItems', seeded.a);
+    assert.equal(rowA1.dueDate, '', 'السجل بلا تغيير (dueDate ما زال فارغًا)');
+    assert.ok((await undatedList.textContent()).includes('WCTEST بحاجة لموعد ٢'), 'العنصر الآخر ما زال في القسم');
+    // same hide applies to every view (single filter point in rt.fetch) - verify via search
+    await setSearch(page, 'WCTEST بحاجة لموعد');
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.a}"]`).count(), 0, 'اختفى من نتائج البحث أيضًا');
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.b}"]`).count(), 1, 'العنصر الآخر ما زال ظاهرًا في البحث');
+    await setSearch(page, '');
+
+    // «تحديد موعد»: dialog → تأكيد قبل الحفظ — لا حفظ مباشر
+    await page.click('[data-wc-range="today"]'); await ready(page);
+    await openSheet(page, 'WCTEST بحاجة لموعد ٢');
+    await page.click('.wc-sheet [data-act="schedule"]');
+    await page.waitForSelector('.modal-card [data-date]');
+    await page.fill('.modal-card [data-date]', addDays(today(), 1));
+    await page.click('.modal-card [data-ok]');   // «متابعة» — لا حفظ بعد
+    await page.waitForSelector('.modal-card .form-actions [data-ok]', {timeout: 5000}); // نافذة التأكيد
+    const confirmText = await page.locator('.modal-card').textContent();
+    assert.ok(confirmText.includes('تأكيد الجدولة'), 'نافذة تأكيد قبل الحفظ');
+    const rowB0 = await dbGet(page, 'workItems', seeded.b);
+    assert.equal(rowB0.dueDate, '', 'قبل التأكيد: السجل ما زال بلا موعد');
+    await page.click('.modal-card [data-cancel]');  // إلغاء التأكيد
+    await ready(page);
+    const rowB1 = await dbGet(page, 'workItems', seeded.b);
+    assert.equal(rowB1.dueDate, '', 'بعد إلغاء التأكيد: السجل ما زال بلا موعد');
+
+    // المحاولة الثانية: تأكيد → الحفظ (rescheduleItem — لا يُحتسب تأجيلًا)
+    await openSheet(page, 'WCTEST بحاجة لموعد ٢');
+    await page.click('.wc-sheet [data-act="schedule"]');
+    await page.waitForSelector('.modal-card [data-date]');
+    await page.fill('.modal-card [data-date]', addDays(today(), 1));
+    await page.click('.modal-card [data-ok]');
+    await page.waitForSelector('.modal-card .form-actions [data-ok]');
+    await page.click('.modal-card [data-ok]');   // «تأكيد الجدولة»
+    await ready(page);
+    const rowB2 = await dbGet(page, 'workItems', seeded.b);
+    assert.equal(rowB2.dueDate, addDays(today(), 1), 'تم تحديد الموعد بعد التأكيد');
+    assert.equal(rowB2.postponeCount, 0, 'تحديد الموعد لا يُحتسب تأجيلًا');
+    assert.equal(rowB2.status, 'notStarted', 'الحالة ما زالت «لم يبدأ»');
+    await page.click('[data-wc-range="tomorrow"]'); await ready(page);
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.b}"]`).count(), 1, 'العنصر المجدول يظهر في «غدًا»');
+  });
+
+  await verify('Not Now: إخفاء مؤقت لعنصر غير حرج فقط، السجل ثابت، والانتهاء/التراجع يعملان', async () => {
+    const made = await page.evaluate(async day => {
+      const {saveWorkItem} = await import('/js/services/work-items.js');
+      return saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: 'WCTEST ليس الآن', dueDate: day, status: 'notStarted', priority: 'medium'});
+    }, addDays(today(), 2));
+    await useTask(page, 'WCTEST ليس الآن');
+    await openSheet(page, 'WCTEST ليس الآن');
+    assert.ok((await page.locator('.wc-sheet [data-act="notNow"]').count()) === 1, 'Not Now متاح للعنصر غير الحرج');
+    await page.click('.wc-sheet [data-act="notNow"]'); await page.waitForSelector('.modal-card [data-ok]');
+    assert.ok((await page.locator('.modal-card').textContent()).includes('لم يتغير السجل الأصلي'), 'التأكيد يوضح أن السجل لا يتغير');
+    const before = await dbGet(page, 'workItems', made.id);
+    await page.click('.modal-card [data-ok]'); await ready(page);
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${made.id}"]`).count(), 0, 'العنصر مخفي من العرض الحالي');
+    const hidden = await page.evaluate(async id => {
+      const m = await import('/js/services/work-hides.js');
+      return {active: m.isTemporarilyHidden(id), stored: m.tempHiddenMap()[id]};
+    }, made.id);
+    assert.ok(hidden.active, 'الإخفاء محفوظ حتى نهاية اليوم');
+    assert.equal(hidden.stored.scope, 'notNow');
+    const after = await dbGet(page, 'workItems', made.id);
+    assert.equal(after.dueDate, before.dueDate, 'الموعد الأصلي لم يتغير');
+    assert.equal(after.status, before.status, 'الحالة الأصلية لم تتغير');
+    assert.ok((await page.locator('.toast-act').first().textContent()).includes('تراجع'), 'زر التراجع ظاهر');
+    await page.locator('.toast-act').first().click(); await ready(page);
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${made.id}"]`).count(), 1, 'التراجع يعيد البطاقة');
+    assert.equal(await page.evaluate(async id => (await import('/js/services/work-hides.js')).isTemporarilyHidden(id), made.id), false, 'التراجع يزيل الإخفاء');
+    await page.evaluate(async id => (await import('/js/services/work-items.js')).deleteItem(window.__LAW_OFFICE_APP__.office, id), made.id);
+    await page.fill('#wc-q', ''); await page.waitForTimeout(400); await ready(page);
+  });
+
+  await verify('Court Day: جدول جلسات اليوم، نتيجة محفوظة وعلامة «سُجّلت» ثم انتقال الصف للأسفل واتصال/WhatsApp', async () => {
+    const seeded = await page.evaluate(async today => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {createLegalFile} = await import('/js/services/legal-files.js');
+      const {saveOperational} = await import('/js/services/operations.js');
+      const client = await office.saveClient({fullName: 'WCTEST Court Client', phone: '+201011112222'});
+      const file = await createLegalFile(office, {clientId: client.id, title: 'WCTEST Court File', fileType: 'مدني'});
+      const kase = await office.createCase({fileId: file.id, stageType: 'دعوى', caseNumber: '9412', caseYear: '2026', courtId: 'محكمة الاختبار', chamber: 'الدائرة الأولى'});
+      const first = await saveOperational(office, 'hearings', {caseId: kase.id, fileId: file.id, hearingDate: today, hearingTime: '08:00', type: 'نظر', reason: 'WCTEST جلسة 1', court: 'محكمة الاختبار', chamber: 'الدائرة الأولى'});
+      const second = await saveOperational(office, 'hearings', {caseId: kase.id, fileId: file.id, hearingDate: today, hearingTime: '09:00', type: 'نظر', reason: 'WCTEST جلسة 2', court: 'محكمة الاختبار', chamber: 'الدائرة الأولى'});
+      return {clientId: client.id, fileId: file.id, caseId: kase.id, first: first.id, second: second.id};
+    }, today());
+    await page.selectOption('#wc-view-select', 'cards');
+    await page.click('[data-wc-range="today"]'); await ready(page);
+    const table = page.locator('.wc-court-day');
+    assert.equal(await table.count(), 1, 'جدول يوم المحكمة يظهر عند وجود جلسات');
+    assert.deepEqual(await table.locator('thead th').allTextContents(), ['الوقت', 'القضية', 'الموكل', 'المحكمة/الدائرة', 'الإجراء']);
+    const firstRow = table.locator(`tr[data-cd-id="hearings::${seeded.first}"]`);
+    const secondRow = table.locator(`tr[data-cd-id="hearings::${seeded.second}"]`);
+    assert.ok((await firstRow.textContent()).includes('9412/2026'), 'رقم القضية');
+    assert.ok((await firstRow.textContent()).includes('WCTEST Court Client'), 'اسم الموكل');
+    assert.ok((await firstRow.textContent()).includes('محكمة الاختبار'), 'المحكمة والدائرة');
+    assert.ok(await firstRow.locator('a[href^="tel:"]').count(), 'رابط اتصال');
+    assert.ok(await firstRow.locator('a[href*="wa.me/"]').count(), 'رابط WhatsApp');
+    assert.ok(await firstRow.locator('[data-wc-nav^="rec:hearings:"]').count(), 'فتح المصدر');
+    const rowOrder = async () => table.locator('tbody tr').evaluateAll(rows => rows.map(r => r.dataset.cdId));
+    const before = await rowOrder();
+    assert.ok(before.indexOf(`hearings::${seeded.first}`) < before.indexOf(`hearings::${seeded.second}`), 'الجلسات مرتبة بالوقت');
+
+    await firstRow.locator('[data-cd-result]').click(); await page.waitForSelector('.entity-form[data-store="hearings"]');
+    await page.fill('.entity-form [name=result]', 'WCTEST تم تسجيل نتيجة الجلسة');
+    await page.click('.entity-form [type=submit]'); await page.waitForSelector('.entity-form', {state: 'detached'}); await ready(page);
+    const after = await rowOrder();
+    assert.ok(after.indexOf(`hearings::${seeded.second}`) < after.indexOf(`hearings::${seeded.first}`), 'الجلسة المسجّلة تنتقل للأسفل');
+    assert.ok((await table.locator(`tr[data-cd-id="hearings::${seeded.first}"]`).textContent()).includes('✓ سُجّلت'), 'علامة سُجّلت');
+    const stored = await dbGet(page, 'hearings', seeded.first);
+    assert.equal(stored.result, 'WCTEST تم تسجيل نتيجة الجلسة', 'النتيجة في سجل الجلسة الأصلي');
+
+    // تنظيف صفوف الاختبار وعلاقاتها بعد التحقق.
+    await page.evaluate(async ids => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {deleteEntity} = await import('/js/services/entity-save.js');
+      for (const [store, id] of [['hearings', ids.first], ['hearings', ids.second], ['cases', ids.caseId], ['files', ids.fileId], ['clients', ids.clientId]]) await deleteEntity(office, store, id).catch(() => {});
+    }, seeded);
+    await page.selectOption('#wc-view-select', 'cards'); await ready(page);
+  });
+
+  await verify('My Day: عرض مدمج للمثبّت والعاجل والمتأخر واليوم واختيار المستخدم، بلا تكرار وانتهاء الاختيار غدًا', async () => {
+    const seeded = await page.evaluate(async today => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {saveWorkItem, setPinned} = await import('/js/services/work-items.js');
+      const {pickForToday, PICKS_KEY} = await import('/js/services/my-day.js');
+      const clock = await import('/js/core/clock.js');
+      const pinned = await saveWorkItem(office, {title: 'WCTEST MyDay pinned', dueDate: clock.addDays(today, 3), status: 'notStarted', priority: 'medium'});
+      await setPinned(office, pinned.id, true);
+      const urgent = await saveWorkItem(office, {title: 'WCTEST MyDay urgent', dueDate: clock.addDays(today, 2), status: 'notStarted', priority: 'urgent'});
+      const overdue = await saveWorkItem(office, {title: 'WCTEST MyDay overdue', dueDate: clock.addDays(today, -1), status: 'notStarted', priority: 'medium'});
+      const todayItem = await saveWorkItem(office, {title: 'WCTEST MyDay today', dueDate: today, status: 'notStarted', priority: 'medium'});
+      const picked = await saveWorkItem(office, {title: 'WCTEST MyDay picked', dueDate: clock.addDays(today, 9), status: 'notStarted', priority: 'low'});
+      return {pinned: pinned.id, urgent: urgent.id, overdue: overdue.id, today: todayItem.id, picked: picked.id, picksKey: PICKS_KEY};
+    }, today());
+    await useTask(page, 'WCTEST MyDay picked');
+    await sheetAct(page, 'WCTEST MyDay picked', 'myDay'); await ready(page);
+    const pickState = await page.evaluate(async key => {
+      const {getPicks, todayKey} = await import('/js/services/my-day.js');
+      return {ids: getPicks(), date: todayKey(), raw: window.localStorage.getItem('akl:prefs:' + key)};
+    }, seeded.picksKey);
+    assert.ok(pickState.ids.includes(seeded.picked), 'اختيار المستخدم محفوظ في prefs');
+    assert.equal(pickState.date, today(), 'الاختيار مؤرخ بيومه المحلي');
+    await setSearch(page, '');
+
+    await page.click('.wc-toolbar [data-wc-view-menu]'); await page.waitForSelector('.wc-view-menu');
+    await page.click('.wc-view-menu [data-vm="myDay"]'); await ready(page);
+    assert.equal(await page.locator('#wc-view-select').inputValue(), 'myDay', 'اختيار «يومي المدمج»');
+    const text = await page.locator('#wc-view').textContent();
+    for (const title of ['WCTEST MyDay pinned', 'WCTEST MyDay urgent', 'WCTEST MyDay overdue', 'WCTEST MyDay today', 'WCTEST MyDay picked']) assert.ok(text.includes(title), `عنصر غير ظاهر: ${title}`);
+    for (const id of [seeded.pinned, seeded.urgent, seeded.overdue, seeded.today, seeded.picked]) assert.equal(await page.locator(`.wc-card[data-wc-id="${id}"]`).count(), 1, `كل عنصر يظهر مرة واحدة: ${id}`);
+    const headings = await page.locator('#wc-view .wc-sections > section .ux-card-head h3').allTextContents();
+    assert.deepEqual(headings, ['المثبّتة', 'عاجلة', 'متأخرة', 'اليوم', 'اختياراتي لليوم']);
+    const expired = await page.evaluate(async date => {
+      const {picksForDate} = await import('/js/services/my-day.js');
+      return picksForDate({date: '2000-01-01', ids: ['old']}, date);
+    }, today());
+    assert.deepEqual(expired, [], 'اختيارات اليوم السابق منتهية تلقائيًا');
+    // Remove only this test's rows and preference pick so later range tests stay isolated.
+    await page.evaluate(async ids => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {deleteItem} = await import('/js/services/work-items.js');
+      const {unpickForToday} = await import('/js/services/my-day.js');
+      for (const id of ids) await deleteItem(office, id).catch(() => {});
+      await unpickForToday(ids.at(-1));
+    }, [seeded.pinned, seeded.urgent, seeded.overdue, seeded.today, seeded.picked]);
+    await page.selectOption('#wc-view-select', 'cards'); await ready(page);
   });
 
   await verify('الفترات: كل تبويب يعيد نطاقه الصحيح فقط (اليوم/غدًا/الأسبوع/القادم/الشهر/الشهر القادم/السنة/متأخر/الكل)', async () => {
@@ -134,9 +441,9 @@ async function functional() {
       assert.equal(st.range, range);
       assert.equal(await page.locator('.wc-tab[aria-selected="true"]').getAttribute('data-wc-range'), range);
       const bounds = await page.evaluate(async r => { const m = await import('/js/services/work-query.js'); const x = m.resolveRange(r); return {from: x.from, to: x.to}; }, range);
-      for (const item of st.items.filter(i => i.dueDate)) {
-        if (bounds.from) assert.ok(item.dueDate >= bounds.from, `${range}: ${item.dueDate} قبل ${bounds.from}`);
-        if (bounds.to) assert.ok(item.dueDate <= bounds.to, `${range}: ${item.dueDate} بعد ${bounds.to}`);
+      for (const item of st.items.filter(i => i.dueDate && !i.isPinned)) {
+        if (bounds.from) assert.ok(item.dueDate >= bounds.from, `${range}: ${item.title} [${item.id}] due=${item.dueDate} pinned=${item.isPinned}`);
+        if (bounds.to) assert.ok(item.dueDate <= bounds.to, `${range}: ${item.title} [${item.id}] due=${item.dueDate} pinned=${item.isPinned}`);
       }
       assert.equal(await page.locator('#wc-view .error-box,#wc-view .ux-state-error').count(), 0);
     }
@@ -231,16 +538,19 @@ async function functional() {
     await page.evaluate(i => { window.__WC_TASK = i; }, id);
   });
 
-  await verify('الإنجاز: مربع الإنجاز يكتب completedAt ثم «تراجع» يعيد فتحها (لا خلط مع التأجيل/الإلغاء/الأرشفة/الحذف)', async () => {
+  await verify('الإنجاز: مربع الإنجاز يكتب completedAt ثم «تراجع» يعيد فتحها (Phase E: المنجز يدخل «أُنجز اليوم»)', async () => {
     const id = await page.evaluate(() => window.__WC_TASK);
     await page.locator(`.wc-card[data-wc-id="${id}"] .wc-check`).check(); await ready(page);
-    assert.equal(await page.locator(`.wc-card[data-wc-id="${id}"]`).count(), 0);
+    // Phase E: البطاقة تخرج من أقسام اليوم وتظهر في قسم «أُنجز اليوم» (مطوي)
+    assert.equal(await page.locator(`[data-wc-list="done-today"] .wc-card[data-wc-id="${id}"]`).count(), 1, 'المنجز اليوم يظهر في «أُنجز اليوم»');
+    assert.equal(await page.locator(`#wc-view .wc-sections .wc-cards:not([data-wc-list="done-today"]) .wc-card[data-wc-id="${id}"]`).count(), 0, 'البطاقة لم تعُد في أقسام اليوم');
     let row = await dbGet(page, 'workItems', id);
     assert.equal(row.status, 'done'); assert.ok(row.completedAt); assert.equal(row.isArchived, false); assert.equal(row.isDeleted, false); assert.equal(row.postponeCount, 0);
     await page.locator('.toast-act').first().click(); await ready(page);
     row = await dbGet(page, 'workItems', id);
     assert.equal(row.status, 'notStarted'); assert.equal(row.completedAt, null);
-    assert.equal(await page.locator(`.wc-card[data-wc-id="${id}"]`).count(), 1);
+    assert.equal(await page.locator(`[data-wc-list="done-today"] .wc-card[data-wc-id="${id}"]`).count(), 0, 'بعد التراجع: out of «أُنجز اليوم»');
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${id}"]`).count(), 1, 'rollback restores card state');
   });
 
   await verify('التأجيل: خيار «غدًا» مع السبب ينقل العنصر للتبويب التالي ويحفظ الموعد الأصلي وعدّاد التأجيل والسبب', async () => {
@@ -492,6 +802,23 @@ async function functional() {
     assert.equal((await dbGet(page, 'workItems', `hearings::${fx.hearingId}`)), null, 'القراءة وحدها لا تكتب طبقة');
   });
 
+  await verify('Quick Add من الملف يحافظ على سياق الملف والقضية في الجلسة والمهمة', async () => {
+    await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`file:${id}`), fx.fileId);
+    await page.waitForSelector('[data-file-edit]');
+    await page.locator('#quick-add').click(); await page.waitForSelector('.quick-card .quick-context');
+    await page.locator('.quick-context [data-qa-kind="hearing"]').click();
+    await page.waitForSelector('.entity-form[data-store="hearings"]');
+    assert.equal(await page.inputValue('.entity-form [name=caseId]'), fx.caseId, 'جلسة Quick Add تحتفظ بالقضية الحالية للملف');
+    await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+
+    await page.locator('#quick-add').click(); await page.waitForSelector('.quick-card .quick-context');
+    await page.locator('.quick-context [data-qa-kind="task"]').click();
+    await page.waitForSelector('.entity-form[data-store="workItems"]');
+    assert.equal(await page.inputValue('.entity-form [name=fileId]'), fx.fileId, 'مهمة Quick Add تحتفظ بمعرّف الملف');
+    await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+    await goWC(page);
+  });
+
   await verify('السيناريو الكامل (2): فتح المجلّد ← روابط الملف/القضية/الموكل/الخصم صالحة وتفتح صفحاتها ثم الرجوع', async () => {
     await page.locator(`.wc-card[data-wc-id="hearings::${fx.hearingId}"] .wc-title`).click();
     await page.waitForSelector('.wc-drawer .wc-links');
@@ -617,6 +944,11 @@ async function functional() {
     const cmds = await page.evaluate(async () => { const m = await import('/js/ui/palette.js'); return m.staticCommands(window.__LAW_OFFICE_APP__).filter(c => c.group === 'مركز العمل' || c.id === 'qa:workItems').map(c => ({id: c.id, label: c.label})); });
     for (const id of ['wc:today', 'wc:overdue', 'wc:kanban', 'wc:attention', 'wc:review-day', 'wc:carry', 'wc:linked', 'qa:workItems']) assert.ok(cmds.some(c => c.id === id), `أمر ناقص ${id}`);
     assert.ok(cmds.find(c => c.id === 'wc:carry').label.includes('بتأكيد'));
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'k', code: 'KeyJ', ctrlKey: true, bubbles: true, cancelable: true})));
+    assert.equal(await page.locator('#modal-root .palette-card').count(), 0, 'حرف K على مفتاح آخر لا يفتح اللوحة');
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ж', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true})));
+    await page.waitForSelector('#modal-root .palette-card');
+    await page.keyboard.press('Escape'); await page.waitForSelector('#modal-root .palette-card', {state: 'detached'});
   });
 
   await verify('المراجعة اليومية والأسبوعية والإنتاجية والعروض التحليلية تفتح بلا أخطاء', async () => {
@@ -784,12 +1116,15 @@ async function functional() {
     const t = new Date(), pad = n => String(n).padStart(2, '0');
     const nowStr = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
     const later = t.getHours() <= 19 ? `${pad(t.getHours() + 3)}:${pad(t.getMinutes())}` : null;
-    await page.evaluate(async ([d, n, l]) => { const m = await import('/js/services/work-items.js'); const o = window.__LAW_OFFICE_APP__.office; await m.saveWorkItem(o, {title: 'WCTEST الآن', dueDate: d, dueTime: n}); if (l) await m.saveWorkItem(o, {title: 'WCTEST التالي', dueDate: d, dueTime: l}); }, [today(), nowStr, later]);
+    const seeded = await page.evaluate(async ([d, n, l]) => { const m = await import('/js/services/work-items.js'); const o = window.__LAW_OFFICE_APP__.office; const a = await m.saveWorkItem(o, {title: 'WCTEST الآن', dueDate: d, dueTime: n}); const b = l ? await m.saveWorkItem(o, {title: 'WCTEST التالي', dueDate: d, dueTime: l}) : null; return {a: a.id, b: b?.id || ''}; }, [today(), nowStr, later]);
     await page.click('[data-wc-range="all"]'); await page.click('[data-wc-range="today"]'); await ready(page);
     const box = page.locator('.wc-now');
     assert.equal(await box.count(), 1);
     assert.ok((await box.textContent()).includes('الآن') && (await box.textContent()).includes('WCTEST الآن'));
-    if (later) assert.ok((await box.textContent()).includes('التالي') && (await box.textContent()).includes('WCTEST التالي'));
+    // next group shows the earliest later item - another test item may win the slot, so: group exists + our item renders exactly once
+    if (later) assert.ok((await box.textContent()).includes('التالي'), 'مجموعة «التالي» موجودة');
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.a}"]`).count(), 1, 'عنصر «الآن» يظهر مرة واحدة');
+    if (later) assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.b}"]`).count(), 1, 'عنصر «التالي» يظهر مرة واحدة');
   });
 
   await verify('صفحة العمل الإداري (سجل) تعرض زر «+ مهمة مرتبطة» وقسم المهام المرتبطة، والإنشاء منها يربط بالمعرّفات فقط', async () => {

@@ -106,6 +106,24 @@ function fileCard(f,tax){const t=tax.byId.get(f.fileTypeId),c=tax.byId.get(f.cat
 export async function bindClientFilePage(app,clientId){
  const root=document.querySelector('#main-content .cfile-page');if(!root)return;const {s,catId,typeId,q,cf}=app.__cfile;const tax=s.tax;
  bindCockpit(root,app);
+ // بعد «✓ تم» في مركز عمل الموكل: تحديث موضعي لقسم «مركز عمل الموكل» فقط — بلا إعادة بناء الصفحة.
+ if(root.querySelector('.cp-client-ws')){
+  app.__refreshAfterAction=async()=>{
+   if(!app.route||!app.route.startsWith('cfile:'))return app.refresh();
+   const wsEl=root.querySelector('.cp-client-ws');if(!wsEl)return app.refresh();
+   const scrollY=window.scrollY;
+   try{
+    const d=await clientWorkspaceData(app.office,{clientId,clientName:app.__cfile.client.fullName,summary:app.__cfile.s});
+    const model=buildFocusModel(d.brief,{today:d.today,now:new Date().toTimeString().slice(0,5)});
+    const tpl=document.createElement('template');
+    tpl.innerHTML=clientWorkspaceHtml({model,recentDone:d.recentDone,clientName:app.__cfile.client.fullName,dayLabel:longDateAr(),clientId,executions:d.executions,fileLabelOf:id=>d.fileLabels?.get(id)||''}).trim();
+    wsEl.replaceWith(tpl.content.firstElementChild);
+    bindCockpit(root,app);
+    root.querySelectorAll('.cp-client-ws [data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
+    window.scrollTo(0,scrollY);
+   }catch(err){app.fail(err)}
+  };
+ }
  root.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b){e.preventDefault();app.go(b.dataset.go)}});
  root.querySelectorAll('[data-new-lf]').forEach(b=>b.onclick=()=>openLegalFileWizard(app,{clientId,categoryId:b.dataset.cat||catId||'',fileTypeId:b.dataset.type||typeId||''}));
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'client-file',root}));

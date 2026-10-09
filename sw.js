@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.2.1-wave6.1-context';
+const CACHE='ahmad-khudair-law-office-v6.2.1-wave7-p2-natural-quick-add';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -124,6 +124,9 @@ const ASSETS=[
   "./js/modules/settings.js",
   "./js/modules/taxonomy-editor.js",
   "./js/services/work-config.js",
+  "./js/services/work-hides.js",
+  "./js/services/my-day.js",
+  "./js/services/tomorrow-prep.js",
   "./js/services/work-insights.js",
   "./js/services/work-items.js",
   "./js/services/work-query.js",

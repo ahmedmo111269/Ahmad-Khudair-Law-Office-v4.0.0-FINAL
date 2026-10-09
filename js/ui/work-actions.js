@@ -14,6 +14,8 @@ import {SNOOZE_OPTIONS, snoozeTarget, isIsoDate, mergePriorities, mergeStatuses,
 import {getWorkConfig} from '../services/work-config.js';
 import {getLookup, saveLookupValue} from '../services/lookups.js';
 import * as C from '../services/work-items.js';
+import {hideTemporarily, unhideTemporarily, canHideNotNow} from '../services/work-hides.js';
+import {isPicked, pickForToday, unpickForToday} from '../services/my-day.js';
 
 const fail = error => toast(userError(normalizeError(error)), 'error');
 
@@ -27,13 +29,20 @@ export function actionsFor(item) {
     if (caps.postpone) add('snooze', item.sourceType === 'hearings' ? 'تأجيل رسمي للجلسة…' : 'تأجيل…', '↷');
     if (caps.reschedule) add('reschedule', 'إعادة جدولة…', '⇄');
     add('status', 'تغيير الحالة…', '◐');
+    // «يحتاج موعدًا»: عنصر بلا تاريخ — تحديد موعد (مع تأكيد قبل الحفظ) أو الإبقاء بلا موعد (إخفاء مؤقت للعرض فقط)
+    if (!item.dueDate && caps.reschedule) add('schedule', 'تحديد موعد…', '📅');
+    if (!item.dueDate) add('keepUndated', 'إبقاء بلا موعد (لليوم)', '🙈');
+    if (canHideNotNow(item)) add('notNow', 'ليس الآن (إخفاء حتى نهاية اليوم)', '◌');
   }
   if (caps.priority) add('priority', 'تغيير الأولوية…', '▲');
   if (caps.pin) add('pin', item.isPinned ? 'إلغاء التثبيت' : 'تثبيت', '⚑');
+  // «يومي»: اختيار المستخدم لليوم (تفضيلات فقط، ينتهي تلقائيًا آخر اليوم)
+  if (item.isOpen) add('myDay', isPicked(item.id) ? 'أزل من يومي' : 'أضف إلى يومي', '📌');
   if (caps.tags) add('tags', 'الوسوم…', '#');
   if (item.sourceType === 'hearings' && item.sourceAvailable) add('result', 'تسجيل النتيجة / التأجيل في سجل الجلسة', '✎');
   if (caps.edit) add('edit', 'تعديل المهمة…', '✎');
   if (item.route) add('source', 'فتح السجل الأصلي', '↗');
+  else if (!(item.isDone || item.isCancelled)) add('source', 'فتح', '↗');   // مهمة أصلية: نفتح درجتها
   add('linked', '+ مهمة مرتبطة', '+');
   if (caps.cancel && item.isOpen) add('cancel', 'إلغاء العنصر', '✕', {danger: true});
   if (item.archivedAt) add('restore', 'استعادة من الأرشيف', '↩');
@@ -101,6 +110,20 @@ export function rescheduleDialog(item) {
   }});
 }
 
+/** «تحديد موعد» لعنصر بلا تاريخ: dialog — يتطلب تأكيدًا قبل الحفظ (لا يُحفظ مباشرة). */
+export function scheduleDialog(item) {
+  const today = Clock.today();
+  return dialog('تحديد موعد', `<p class="muted small">العنصر بلا موعد حاليًا. اختر تاريخًا — لن يُحتسب تأجيلًا.</p>
+    <label>التاريخ<input type="date" data-date min="${today}"></label>
+    ${item.kind === 'native' ? '<label>الوقت (اختياري)<input type="time" data-time></label>' : ''}`,
+  {okText: 'متابعة', okDisabled: true, onMount: (card, done) => {
+    const ok = card.querySelector('[data-ok]'), date = card.querySelector('[data-date]');
+    const sync = () => { ok.disabled = !isIsoDate(date.value) || date.value < today; };
+    date.addEventListener('input', sync); sync();
+    ok.onclick = () => done({date: date.value, time: card.querySelector('[data-time]')?.value ?? null});
+  }});
+}
+
 function choiceDialog(title, rows, current) {
   return new Promise(resolve => {
     const card = modal(`<h2 class="modal-title">${esc(title)}</h2><div class="wc-sheet" role="listbox">${rows.map(r => `<button type="button" role="option" class="wc-sheet-btn${r.key === current ? ' is-current' : ''}" aria-selected="${r.key === current}" data-key="${esc(r.key)}"><span aria-hidden="true">${esc(r.icon)}</span> ${esc(r.label)}${r.key === current ? ' <small>(الحالي)</small>' : ''}</button>`).join('')}</div>`);
@@ -120,10 +143,10 @@ export async function tagsDialog(wc, item) {
 }
 
 /** نموذج «مهمة مرتبطة» (يعيد استخدام نموذج الكيانات العام). المعرّفات فقط تُنسخ؛ الأسماء تُقرأ حيًّا. */
-export async function openLinkedTaskForm(app, relatedType, relatedId, {title = '', dueDate = '', onSaved = null} = {}) {
+export async function openLinkedTaskForm(app, relatedType, relatedId, {title = '', dueDate = '', dueTime = '', overrides = {}, onSaved = null} = {}) {
   let preset;
   try { preset = await C.linkedTaskPreset(app.office, relatedType, relatedId); } catch (error) { return fail(error); }
-  return openEntityForm(app, 'workItems', {preset: {...preset, ...(title ? {title} : {}), ...(dueDate ? {dueDate} : {})}, title: 'مهمة مرتبطة', onSaved: onSaved || (async row => { toast('تمت إضافة المهمة المرتبطة', 'ok', {action: () => app.go(`actionCenter?item=${encodeURIComponent(row.id)}`), actionLabel: 'فتحها في مركز العمل', duration: 6000}); })});
+  return openEntityForm(app, 'workItems', {preset: {...preset, ...(overrides || {}), ...(title ? {title} : {}), ...(dueDate ? {dueDate} : {}), ...(dueTime ? {dueTime} : {})}, title: 'مهمة مرتبطة', onSaved: onSaved || (async row => { toast('تمت إضافة المهمة المرتبطة', 'ok', {action: () => app.go(`actionCenter?item=${encodeURIComponent(row.id)}`), actionLabel: 'فتحها في مركز العمل', duration: 6000}); })});
 }
 
 // ---------- منفّذ الأفعال ----------
@@ -163,6 +186,28 @@ export async function runAction(wc, item, action, extra = {}) {
         if (!picked) return null;
         await C.rescheduleItem(office, item, picked); toast('تم تعديل الموعد'); return changed({dueDate: picked.date});
       }
+      case 'schedule': {
+        // «تحديد موعد» لعنصر بلا موعد: dialog ثم تأكيد صريح قبل الحفظ — لا حفظ مباشر.
+        const picked = await scheduleDialog(item);
+        if (!picked) return null;
+        const ok = await confirmBox(`تأكيد الجدولة: <b>«${esc(item.title)}»</b> إلى <b>${esc(formatDate(picked.date))}</b>${picked.time ? ` — ${esc(picked.time)}` : ''}؟`, {okText: 'تأكيد الجدولة'});
+        if (!ok) return null;
+        await C.rescheduleItem(office, item, picked); toast('تم تحديد الموعد'); return changed({dueDate: picked.date});
+      }
+      case 'keepUndated': {
+        // «إبقاء بلا موعد»: إخفاء مؤقت للعرض فقط (تفضيلات + انتهاء نهاية اليوم) — لا تغيير للسجل.
+        await hideTemporarily(item.id, {scope: 'keepUndated', reason: 'user'});
+        toast('أُخفي من «يحتاج موعدًا» حتى نهاية اليوم');
+        return changed({hidden: true});
+      }
+      case 'notNow': {
+        if (!canHideNotNow(item)) { toast('هذا عنصر مهم لا يمكن إخفاؤه مؤقتًا.', 'error'); return null; }
+        const ok = await confirmBox(`إخفاء «${esc(item.title)}» من عروض مركز العمل حتى نهاية اليوم؟ لم يتغير السجل الأصلي.`, {okText: 'ليس الآن'});
+        if (!ok) return null;
+        await hideTemporarily(item.id, {scope: 'notNow', reason: 'user'});
+        toast('أُخفي حتى نهاية اليوم', 'ok', {action: () => unhideTemporarily(item.id).then(() => changed({restored: true})).catch(fail), actionLabel: 'تراجع', duration: 6000});
+        return changed({hidden: true});
+      }
       case 'priority': {
         const key = extra.key || await priorityDialog(item, config);
         if (!key) return null;
@@ -175,6 +220,11 @@ export async function runAction(wc, item, action, extra = {}) {
         await C.setItemStatus(office, item, key); toast('تم تغيير الحالة'); return changed();
       }
       case 'pin': await C.setPinned(office, item, !item.isPinned); toast(item.isPinned ? 'أُلغي التثبيت' : 'تم التثبيت'); return changed();
+      case 'myDay': {
+        if (isPicked(item.id)) { await unpickForToday(item.id); toast('أُزيل من يومك'); }
+        else { await pickForToday(item.id); toast('أُضيف إلى يومك'); }
+        return changed({picked: true});
+      }
       case 'tags': {
         const tags = await tagsDialog(wc, item);
         if (!tags) return null;
@@ -194,7 +244,7 @@ export async function runAction(wc, item, action, extra = {}) {
         if (item.isVirtual) id = (await C.materializeOccurrence(office, item.recurrenceId, item.occurrenceDate)).id;
         return openEntityForm(app, 'workItems', {id, title: 'تعديل المهمة', onSaved: async () => { await changed(); }});
       }
-      case 'source': if (item.route) return app.go(item.route); return null;
+      case 'source': if (item.route) return app.go(item.route); return wc.openItem?.(item.id) ?? null;
       case 'result': return openEntityForm(app, 'hearings', {id: item.sourceId, title: 'تسجيل نتيجة الجلسة / التأجيل', onSaved: async () => { await changed({sourceChanged: true}); }});
       case 'linked': {
         const type = item.kind === 'native' ? 'workItems' : item.sourceType;

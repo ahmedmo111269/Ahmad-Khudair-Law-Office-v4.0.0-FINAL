@@ -18,6 +18,7 @@ import {longDateAr} from '../core/format.js';
 import {WORK_RANGES, WORK_VIEWS, mergePriorities, mergeStatuses} from '../domain/work-items.js';
 import {allWorkSources} from '../domain/work-sources.js';
 import {getWorkConfig, getWorkState, saveWorkState, sanitizeWorkState, DEFAULT_WORK_STATE} from '../services/work-config.js';
+import {filterVisibleItems, tempHiddenMap} from '../services/work-hides.js';
 import {ensureWorkStatuses} from '../services/work-statuses.js';
 import {workSummary, queryWorkItems} from '../services/work-query.js';
 import {createGridRelations} from '../services/grid-relations.js';
@@ -82,9 +83,15 @@ export async function workCenterPage(app, q) {
     <div class="wc-qt-row" role="group" aria-label="مدى سريع من اليوم">${quick.map(([l, n]) => `<button type="button" class="ghost small" data-wc-quick="${n}">${esc(l)}</button>`).join('')}</div>
     <form class="wc-qt-custom" data-wc-custom><label>من<input type="date" name="from" value="${esc(st.from)}"></label><label>إلى<input type="date" name="to" value="${esc(st.to)}"></label><button type="submit" class="primary small">تطبيق</button></form>
    </section>
-   <div class="wc-toolbar" role="search">
+   <div class="wc-toolbar" role="toolbar" aria-label="أدوات العرض">
+    <button type="button" class="ghost" data-wc-add-menu aria-haspopup="menu">+ إضافة ▾</button>
     <label class="wc-search"><span class="sr-only">بحث في مركز العمل</span><input type="search" id="wc-q" placeholder="ابحث: عنوان، موكل، خصم، رقم ملف/قضية، وسم، تعليق…" value="${esc(st.q)}" autocomplete="off"></label>
-    <label class="wc-view-pick"><span>العرض</span><select id="wc-view-select" aria-label="طريقة العرض">${WORK_VIEWS.map(([k, l]) => `<option value="${k}"${st.view === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+    <button type="button" class="ghost" data-wc-toggle-filters aria-expanded="false" aria-controls="wc-filters">فلاتر</button>
+    <div class="wc-view-ctrl">
+     <label class="wc-view-pick"><span>طريقة العرض</span><select id="wc-view-select" aria-label="طريقة العرض">${WORK_VIEWS.map(([k, l]) => `<option value="${k}"${st.view === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+     <button type="button" class="ghost small" data-wc-view-menu aria-haspopup="menu" aria-expanded="false" title="قائمة العرض"><b id="wc-view-name">${esc(st.view === 'cards' && st.range === 'today' ? 'اليوم' : (WORK_VIEWS.find(([k]) => k === st.view)?.[1] || st.view))}</b> ▾</button>
+    </div>
+    <button type="button" class="ghost" data-wc-more-menu aria-haspopup="dialog">المزيد ⋯</button>
     <button type="button" class="ghost small" data-wc-global-search title="البحث الشامل في كل البرنامج">البحث الشامل ↗</button>
    </div>
    <div id="wc-scope" class="wc-scope"></div>
@@ -134,12 +141,14 @@ export async function bindWorkCenter(app, q) {
     const mySeq = rt.seq, epoch = rt.epoch;
     const page = await queryWorkItems(office, spec, {limit, cursor, signal: rt.signal, relations: rt.relations});
     if (mySeq !== rt.seq || rt.stale()) throw new DOMException('استعلام أحدث', 'AbortError');
+    // إخفاء مؤقت للعرض (إبقاء بلا موعد / ليس الآن): display-hiding فقط — يُصفى هنا مرة واحدة لكل العروض.
+    if (page.items?.length) page.items = filterVisibleItems(page.items, tempHiddenMap());
     await rt.relations.hydrate(page.items, {signal: rt.signal});
     for (const item of page.items) rt.register(item);
     if (epoch === rt.epoch) remember(key, page);
     return page;
   };
-  rt.wc = {app, office, relations: rt.relations, onChanged: change => rt.onChanged(change)};
+  rt.wc = {app, office, relations: rt.relations, onChanged: change => rt.onChanged(change), openItem: id => rt.openItem(id)};
 
   // ---------- تصيير العرض ----------
   const afterRender = () => {
@@ -255,10 +264,12 @@ export async function bindWorkCenter(app, q) {
   function syncChrome() {
     root.querySelectorAll('[data-wc-range]').forEach(b => { const on = b.dataset.wcRange === rt.st.range; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
     const sel = root.querySelector('#wc-view-select'); if (sel) sel.value = rt.st.view;
+    const vname = root.querySelector('#wc-view-name');
+    if (vname) vname.textContent = rt.st.view === 'cards' && rt.st.range === 'today' ? 'اليوم' : (WORK_VIEWS.find(([k]) => k === rt.st.view)?.[1] || rt.st.view);
     const from = root.querySelector('[data-wc-custom] [name=from]'), to = root.querySelector('[data-wc-custom] [name=to]');
     if (from) from.value = rt.st.from; if (to) to.value = rt.st.to;
     const active = Object.keys(rt.st.filters).length;
-    const btn = root.querySelector('[data-wc-toggle-filters]'); if (btn) btn.textContent = active ? `فلاتر (${active})` : 'فلاتر';
+    root.querySelectorAll('[data-wc-toggle-filters]').forEach(btn => { btn.textContent = active ? `فلاتر (${active})` : 'فلاتر'; });
     renderScope();
   }
 
@@ -279,6 +290,12 @@ export async function bindWorkCenter(app, q) {
     if (stat) return applyStat(stat.dataset.wcStat);
     const rangeBtn = t.closest('[data-wc-range]');
     if (rangeBtn) return rt.setState({range: rangeBtn.dataset.wcRange, ...(rangeBtn.dataset.wcRange === 'custom' ? {} : {from: '', to: ''})});
+    const courtResult = t.closest('[data-cd-result]');
+    if (courtResult) {
+      const item = rt.items.get(courtResult.dataset.cdResult);
+      if (!item || item.sourceType !== 'hearings') return;
+      return openEntityForm(app, 'hearings', {id: item.sourceId, title: 'تسجيل نتيجة الجلسة', onSaved: async () => { await rt.onChanged({id: item.id, sourceChanged: true}); }});
+    }
     if (t.closest('[data-wc-new]')) return newTask();
     if (t.closest('[data-wc-new-proc]')) return openEntityForm(app, 'procedures', {onSaved: async () => { await rt.onChanged({}); }});
     if (t.closest('[data-wc-new-appt]')) return openEntityForm(app, 'appointments', {onSaved: async () => { await rt.onChanged({}); }});
@@ -289,6 +306,8 @@ export async function bindWorkCenter(app, q) {
     if (t.closest('[data-wc-reset]')) return resetAll();
     if (t.closest('[data-wc-refresh]')) { await rt.onChanged({}); return toast('تم تحديث البيانات'); }
     if (t.closest('[data-wc-more-menu]')) return openMoreMenu();
+    if (t.closest('[data-wc-add-menu]')) return openAddMenu();
+    if (t.closest('[data-wc-view-menu]')) return openViewMenu();
     if (t.closest('[data-wc-global-search]')) return app.go(`search?q=${encodeURIComponent(rt.st.q || '')}`);
     if (t.closest('[data-wc-clear-filters]')) return rt.setState({filters: {}}).then(renderFilters);
     if (t.closest('[data-wc-retry]')) return rt.reload();
@@ -338,14 +357,47 @@ export async function bindWorkCenter(app, q) {
       ['مراجعة نهاية اليوم', () => openDailyReview(rt)], ['مراجعة الأسبوع', () => openWeeklyReview(rt)],
       ['العروض المحفوظة', () => openSavedViews(rt)], ['ترتيب الأقسام وعرض الصفحة', () => rt.openLayout()], ['⚙ إعدادات مركز العمل', () => openWorkSettings(rt)],
       // يُضاف الجديد في نهاية القائمة حتى لا تتحرك فهارس العناصر القديمة (تعتمد عليها الاختبارات).
-      ['تصدير العرض الحالي (CSV)', () => exportCurrentView(rt)], ['نسخ خلاصة اليوم', () => copyDaySummary(rt)]
+      ['تصدير العرض الحالي (CSV)', () => exportCurrentView(rt)], ['نسخ خلاصة اليوم', () => copyDaySummary(rt)],
+      ['تحديث البيانات', async () => { await rt.onChanged({}); toast('تم تحديث البيانات'); }]
     ];
     const box = modal(`<h2 class="modal-title">المزيد من إجراءات مركز العمل</h2><div class="wc-sheet" role="menu">${list.map(([l], i) => `<button type="button" role="menuitem" class="wc-sheet-btn" data-i="${i}">${esc(l)}</button>`).join('')}</div>`);
     box.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => { closeModal(); list[Number(b.dataset.i)][1](); }));
   }
+
+  // «+ إضافة ▾» في شريط الأدوات: قائمة موحدة للإنشاء (مهمة / عمل إداري / موعد / متابعة).
+  function openAddMenu() {
+    const list = [
+      ['+ مهمة جديدة', () => newTask()],
+      ['+ عمل إداري', () => openEntityForm(app, 'procedures', {onSaved: async () => { await rt.onChanged({}); }})],
+      ['+ موعد', () => openEntityForm(app, 'appointments', {onSaved: async () => { await rt.onChanged({}); }})],
+      ['+ متابعة اتصال', () => openEntityForm(app, 'communications', {preset: {followUpDate: addDays(rt.today(), 1)}, onSaved: async () => { await rt.onChanged({}); }})]
+    ];
+    const box = modal(`<h2 class="modal-title">إضافة</h2><div class="wc-sheet" role="menu">${list.map(([l], i) => `<button type="button" role="menuitem" class="wc-sheet-btn" data-i="${i}">${esc(l)}</button>`).join('')}</div>`);
+    box.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => { closeModal(); list[Number(b.dataset.i)][1](); }));
+  }
+
+  // «طريقة العرض ▾» في شريط الأدوات: قائمة عرض مقسمة (تشغيل / تخطيط / مراجعة) —
+  // كل مدخل يعيّن مجموعة نطاق + عرض (WORK_VIEWS دون تغيير).
+  function openViewMenu() {
+    const cur = {daily: rt.st.range === 'today', today: rt.st.range === 'today' && rt.st.view === 'cards', attention: rt.st.view === 'attention', cards: rt.st.view === 'cards' && rt.st.range !== 'today', myDay: rt.st.view === 'myDay'};
+    const groups = [
+      ['تشغيل', [['daily', 'يومي'], ['today', 'اليوم'], ['attention', 'يحتاج انتباهي'], ['cards', 'بطاقات'], ['myDay', 'يومي المدمج']]],
+      ['تخطيط', [['calendar', 'تقويم'], ['kanban', 'كانبان'], ['priorities', 'الأولويات'], ['matrix', 'أيزنهاور']]],
+      ['مراجعة', [['overdue', 'المتأخر'], ['upcoming', 'القادم'], ['completed', 'المنجز'], ['productivity', 'الإنتاجية']]]
+    ];
+    const run = async key => {
+      if (key === 'daily') await rt.setState({range: 'today', from: '', to: ''});
+      else if (key === 'today') await rt.setState({range: 'today', view: 'cards', from: '', to: ''});
+      else if (key === 'myDay') await rt.setState({range: 'all', view: 'myDay', from: '', to: ''});
+      else await rt.setState({view: key});
+    };
+    const box = modal(`<h2 class="modal-title">طريقة العرض</h2><div class="wc-sheet wc-view-menu" role="menu">${groups.map(([title, items]) => `<div class="wc-menu-group" role="group" aria-label="${esc(title)}"><h3>${esc(title)}</h3>${items.map(([k, l]) => `<button type="button" role="menuitem" class="wc-sheet-btn${cur[k] || rt.st.view === k ? ' is-current' : ''}" data-vm="${k}">${esc(l)}</button>`).join('')}</div>`).join('')}</div>`);
+    box.querySelectorAll('[data-vm]').forEach(b => b.addEventListener('click', () => { closeModal(); run(b.dataset.vm); }));
+  }
   function toggleFilters() {
-    const box = root.querySelector('#wc-filters'), btn = root.querySelector('[data-wc-toggle-filters]');
-    box.hidden = !box.hidden; btn.setAttribute('aria-expanded', String(!box.hidden));
+    const box = root.querySelector('#wc-filters');
+    box.hidden = !box.hidden;
+    root.querySelectorAll('[data-wc-toggle-filters]').forEach(btn => btn.setAttribute('aria-expanded', String(!box.hidden)));
     if (!box.hidden && !box.innerHTML.trim()) renderFilters();
   }
   async function applyStat(key) {
