@@ -306,7 +306,7 @@ class App{
   this.searchIndexTask=null;
   this.maintenance=runMaintenance(office,{searchIndex:false}).catch(e=>console.error('maintenance',e));
  }
- resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__report','__agendaDay','__wc'])delete this[k]}
+ resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__fileTabCache','__listNav','__filesChipIndex','__report','__agendaDay','__wc'])delete this[k]}
  back(){
   // زر «رجوع» داخل البرنامج: يستخدم تاريخ المتصفح نفسه فيُبقي مدخلات Android متوازنة.
   if(this.routeHistory?.canGoBack?.())return (this.routeHistory.back(),null);

@@ -1,8 +1,8 @@
 // اختبارات نظام الطي المركزي: الافتراضي والحالة الحالية والتثبيت والطي الجماعي.
 import {
  _resetCollapseStateForTests,getCollapseRecord,resolveCollapseState,saveCollapseState,
- toggleCollapsePin,isCollapsePinned,setDefaultCollapseState,clearCollapseState,
- resetCollapseStates,COLLAPSE_PREF_KEY
+ toggleCollapsePin,isCollapsePinned,setDefaultCollapseState,setDefaultCollapseStateMobile,clearCollapseState,
+ resetCollapseStates,getCollapsePreferences,COLLAPSE_PREF_KEY
 } from '../ui/collapse-state.js';
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {mountGrid} from '../ui/datagrid.js';
@@ -244,5 +244,23 @@ export function runCollapseStateTests(test,expect){
   expect(getCollapseRecord(filterKey).currentCollapsed).toBe(false);
   expect(getCollapseRecord(shellKey).currentCollapsed).toBe(false);
   root.remove();
+ });
+ test('طي الأقسام: الوضع الافتراضي للهاتف مستقل عن الكمبيوتر ولا يمس الحالات المحفوظة',()=>{
+  _resetCollapseStateForTests();
+  // افتراض «نفس الكمبيوتر»: يتبع الوضع العام
+  expect(resolveCollapseState('m:new')).toBe(true);
+  setDefaultCollapseStateMobile('open');
+  // matchMedia غير متاح في بيئة Node → effectiveDefaultMode digitales يعيد وضع الكمبيوتر (آمن)
+  expect(getCollapsePreferences().defaultStateMobile).toBe('open');
+  // الافتراضي العام لا يتغير
+  expect(getCollapsePreferences().defaultState).toBe('collapsed');
+  // القيمة غير المعروفة تُرفض وتعود إلى «نفس الكمبيوتر»
+  setDefaultCollapseStateMobile('weird');
+  expect(getCollapsePreferences().defaultStateMobile).toBe('same');
+  // الحالة المحفوظة تتغلب على وضع الهاتف
+  saveCollapseState('m:pinned-item',false);
+  expect(resolveCollapseState('m:pinned-item')).toBe(false);
+  setDefaultCollapseStateMobile('same');
+  resetCollapseStates();
  });
 }

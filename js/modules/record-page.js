@@ -7,7 +7,7 @@ import {openEntityForm} from '../ui/form.js';
 import {ENTITIES,displayValue,label,fmtDate,phonesOf} from '../domain/entities.js';
 import {resolveRefs,clientRelated,opponentRelated,refLabel} from '../services/entity-query.js';
 import {deleteEntity,restoreEntity} from '../services/entity-save.js';
-import {sectionGrid,routeFor} from './list-page.js';
+import {sectionGrid,routeFor,listNavHtml,bindListNav} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {hearingCycle} from '../services/operations.js';
 import {serviceCycle} from '../services/service-records.js';
@@ -183,7 +183,7 @@ export async function recordPage(app,store,id){
  ].join('');
  const workPanel=TASK_LINK_STORES.includes(store)?await linkedTasksPanelHtml(app.office,taskScope(store,id),{title:'المهام المرتبطة',collapseId:`rec-work:${store}`,centerRoute:`actionCenter?${store==='cases'?'caseId':'relatedId'}=${encodeURIComponent(id)}`}):'';
  return `<div class="record-head"><div><small class="muted">${esc(ent.label)}</small><h2>${esc(ent.title(row)||ent.label)}</h2><div class="parent-links">${parentBtns}</div></div>
- <div class="head-actions">${extraBtns}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
+ <div class="head-actions">${listNavHtml(app,store,id)}${extraBtns}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:true})}
  ${recordQuickNotesPanel(quickNotes,store,id)}
  ${workPanel}
@@ -199,6 +199,7 @@ export async function bindRecordPage(app,store,id){
  // __rec قد يبقى من الصفحة السابقة إذا عُرض «غير موجود» (رابط قديم أو سجل حُذف): لا تربط القديم.
  if(app.__rec?.store!==store||app.__rec?.id!==id)return;
  const {row,children,activity,quickNotes,noteEntityType}=app.__rec;
+ bindListNav(root,app,store);
  bindRecordQuickNotes(root,quickNotes,app,store,id,noteEntityType);
  if(TASK_LINK_STORES.includes(store)){
   const opts={relatedType:store,relatedId:id,title:store==='hearings'?'متابعة الجلسة':''};

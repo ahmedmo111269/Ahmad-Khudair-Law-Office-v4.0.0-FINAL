@@ -96,6 +96,7 @@ button.small{padding:6px 11px;font-size:12.5px;border-radius:8px}
 /* ---------- قائمة الإجراءات (⋯) — لتقليل الأزرار الظاهرة ---------- */
 .ux-menu-wrap{position:relative;display:inline-block}
 .ux-menu{position:absolute;top:calc(100% + 4px);inset-inline-end:0;z-index:50;min-width:170px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);padding:5px;display:flex;flex-direction:column;gap:2px}
+.ux-menu[hidden]{display:none}
 .ux-menu-item{border:0;background:transparent;text-align:start;padding:8px 10px;border-radius:7px;font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px;cursor:pointer}
 .ux-menu-item svg{width:15px;height:15px;color:var(--text-muted)}
 .ux-menu-item:hover{background:var(--surface2)}
@@ -131,3 +132,19 @@ button.small{padding:6px 11px;font-size:12.5px;border-radius:8px}
 
 @media print{.ux-card,.panel{box-shadow:none;break-inside:avoid}}
 @media(prefers-reduced-motion:reduce){.ux-state-loading .skel-line{animation:none}}
+
+/* ---------- الملخص الحي في رأس المنطقة المطوية (عقد قابلية الطي) ---------- */
+.collapse-summary{
+ font-size:12px;color:var(--text-muted);font-weight:500;
+ max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+ padding:2px 8px;border-radius:999px;background:var(--surface2);
+}
+.collapse-summary[hidden]{display:none}
+[data-collapse-alert]{flex:none}
+.panel-collapse-head .badge.warn,[data-collapse-alert]{box-shadow:0 0 0 1px color-mix(in srgb,var(--warn,#B45309) 45%,transparent)}
+@media(max-width:640px){.collapse-summary{max-width:20ch}}
+@media print{
+ .card-collapsed>*:not(.panel-head):not(.panel-collapse-head){display:revert!important}
+ .card-collapsed .panel-collapse-body{display:block!important}
+ .collapse-page-tools,.collapse-toggle,.collapse-pin,.card-collapse-toggle{display:none!important}
+}

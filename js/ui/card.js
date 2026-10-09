@@ -13,7 +13,7 @@
 import {esc} from './dom.js';
 import {icon} from './icons.js';
 import {prefs} from '../core/preferences.js';
-import {resolveCollapseState,saveCollapseState,isCollapsePinned} from './collapse-state.js';
+import {resolveCollapseState,saveCollapseState,isCollapsePinned,clearCollapseState} from './collapse-state.js';
 import {collapsePinMarkup,bindCollapsePin,syncCollapsePin} from './collapsible.js';
 import {resolveCardDisplay} from '../core/display-prefs.js';
 import {cardDisplayButtonMarkup,bindCardDisplay} from './card-display.js';
@@ -124,14 +124,22 @@ export function bindCards(root=document){
  });
  root.querySelectorAll('.ux-card[data-collapse-key]').forEach(cardEl=>{
   if(cardEl.dataset.bulkCollapseBound)return;cardEl.dataset.bulkCollapseBound='true';
-  cardEl.addEventListener('collapse:bulk',event=>{
-   const detail=event.detail||{};const next=Boolean(detail.collapsed);
+  const apply=(next,persist)=>{
    cardEl.classList.toggle('is-collapsed',next);cardEl.dataset.collapseCollapsed=String(next);
    const body=cardEl.querySelector('.ux-card-body'),foot=cardEl.querySelector('.ux-card-foot'),toggle=cardEl.querySelector('.ux-card-toggle');
    body?.setAttribute('aria-hidden',String(next));foot?.setAttribute('aria-hidden',String(next));
    toggle?.setAttribute('aria-expanded',String(!next));
    toggle?.setAttribute('aria-label',`${next?'توسيع':'طي'} البطاقة: ${cardEl.querySelector('h3')?.textContent?.trim()||''}`);
-   if(detail.persist!==false){saveCollapseState(cardEl.dataset.collapseKey,next);syncCollapsePin(cardEl.querySelector('.ux-card-pin'),cardEl.dataset.collapseKey)}
+   if(persist){saveCollapseState(cardEl.dataset.collapseKey,next);syncCollapsePin(cardEl.querySelector('.ux-card-pin'),cardEl.dataset.collapseKey)}
+  };
+  cardEl.addEventListener('collapse:bulk',event=>{
+   const detail=event.detail||{};
+   apply(Boolean(detail.collapsed),detail.persist!==false);
+  });
+  cardEl.addEventListener('collapse:reset',()=>{
+   clearCollapseState(cardEl.dataset.collapseKey);
+   apply(resolveCollapseState(cardEl.dataset.collapseKey,{fallback:true}),false);
+   syncCollapsePin(cardEl.querySelector('.ux-card-pin'),cardEl.dataset.collapseKey);
   });
  });
  root.querySelectorAll('.ux-card-pin').forEach(button=>{

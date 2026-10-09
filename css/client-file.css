@@ -111,3 +111,57 @@ select option{background:var(--surface);color:var(--text)}
  .dg-table tfoot{display:none}
 }
 .theme-menu{max-height:min(78vh,640px);overflow:auto;overscroll-behavior:contain}
+
+/* ===================== File Cockpit — القمرة العلوية ===================== */
+/* الشريط المضغوط الثابت عند التمرير: هوية الملف وحالته والخطوة التالية فقط */
+.file-sticky-bar{
+ position:sticky;top:0;z-index:60;display:none;align-items:center;gap:10px;flex-wrap:wrap;
+ padding:8px 12px;margin:0 0 10px;background:color-mix(in srgb,var(--surface) 92%,transparent);
+ backdrop-filter:blur(8px);border:1px solid var(--border);border-radius:var(--radius);
+ box-shadow:var(--shadow-md);
+}
+.file-sticky-bar.is-on{display:flex}
+.file-sticky-bar .fsb-title{font-weight:700;color:var(--text-strong);font-size:13.5px;
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:36ch}
+.file-sticky-bar .fsb-next{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:34ch}
+.file-sticky-bar .fsb-actions{margin-inline-start:auto;display:flex;gap:6px}
+@media(max-width:640px){.file-sticky-bar .fsb-next{display:none}.file-sticky-bar .fsb-title{max-width:18ch}}
+
+/* وضع التركيز: يختصر العناصر الثانوية دون إخفاء التنبيهات أو الإجراءات */
+#main-content.file-focus-mode .file-stats-panel,
+#main-content.file-focus-mode .file-extra-quiet,
+#main-content.file-focus-mode .ux-details,
+#main-content.file-focus-mode .stage-chain,
+#main-content.file-focus-mode .cp-fc-stats{display:none}
+#main-content.file-focus-mode .notice,
+#main-content.file-focus-mode .cp-fc-next,
+#main-content.file-focus-mode [data-collapse-alert]{display:revert}
+
+/* مناطق التبويبات: شريط رئيسي واحد + شريط فرعي خفيف */
+.file-areas-bar{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.file-areas-bar .area-btn{
+ border:1px solid var(--border);background:var(--surface);color:var(--text);
+ border-radius:999px;padding:8px 14px;min-height:44px;cursor:pointer;font:inherit;font-size:13px;
+ display:inline-flex;align-items:center;gap:6px;
+}
+.file-areas-bar .area-btn.active{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}
+.file-areas-bar .area-btn .area-count{font-size:11px;opacity:.75}
+.file-subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 10px;padding:0;list-style:none}
+.file-subtabs .subtab-btn{
+ border:0;background:transparent;color:var(--text-muted);padding:7px 12px;min-height:40px;
+ border-radius:8px;cursor:pointer;font:inherit;font-size:12.5px;min-height:44px;display:inline-flex;align-items:center;gap:5px;
+}
+.file-subtabs .subtab-btn.active{background:var(--surface2);color:var(--text-strong);font-weight:700}
+.file-subtabs .subtab-btn.has-data::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--primary)}
+
+/* رأس الملف: تكثيف بصري هادئ */
+.file-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between}
+.file-head .head-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.file-gaps{margin:0 0 12px}
+.file-gaps .gap-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border)}
+.file-gaps .gap-item:last-child{border-bottom:0}
+.file-parties-short{display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center}
+@media(max-width:700px){
+ .file-head{flex-direction:column}
+ .file-head .head-actions{width:100%}
+}
