@@ -251,6 +251,67 @@ try {
   check('Quick Add من الرئيسية يضع تاريخ اليوم للموعد', appointmentDate === localToday, appointmentDate);
   await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
 
+  // 9b) Quick Add الطبيعي: معاينة واضحة قبل النموذج، ورفض الالتباس، مع الحفاظ على السياق.
+  await go('dashboard', 700);
+  await page.locator('.cp-hero [data-quick-add]').click(); await page.waitForSelector('.qa-natural-input');
+  await page.fill('.qa-natural-input', 'مهمة مراجعة 09/10/2026');
+  const invalidNatural = await app(() => ({
+    message: document.querySelector('[data-qa-natural-message]')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    messageHidden: document.querySelector('[data-qa-natural-message]')?.hidden,
+    previewHidden: document.querySelector('[data-qa-preview]')?.hidden,
+    openDisabled: document.querySelector('[data-qa-natural-open]')?.disabled,
+    invalid: document.querySelector('.qa-natural-input')?.getAttribute('aria-invalid') || '',
+    formCount: document.querySelectorAll('.entity-form').length
+  }));
+  check('Quick Add الطبيعي يرفض التاريخ الرقمي الملتبس قبل أي نموذج', invalidNatural.message.includes('ملتبسة') && invalidNatural.messageHidden === false && invalidNatural.previewHidden === true && invalidNatural.openDisabled === true && invalidNatural.invalid === 'true' && invalidNatural.formCount === 0, JSON.stringify(invalidNatural));
+
+  await page.fill('.qa-natural-input', 'موعد مراجعة العقد اليوم 14:05');
+  const naturalPreview = await app(() => ({
+    messageHidden: document.querySelector('[data-qa-natural-message]')?.hidden,
+    previewHidden: document.querySelector('[data-qa-preview]')?.hidden,
+    openDisabled: document.querySelector('[data-qa-natural-open]')?.disabled,
+    kind: document.querySelector('[data-preview-kind]')?.textContent?.trim() || '',
+    title: document.querySelector('[data-preview-title]')?.textContent?.trim() || '',
+    date: document.querySelector('[data-preview-date]')?.textContent?.trim() || '',
+    time: document.querySelector('[data-preview-time]')?.textContent?.trim() || '',
+    formCount: document.querySelectorAll('.entity-form').length
+  }));
+  check('Quick Add الطبيعي يعرض معاينة واضحة بلا فتح نموذج', naturalPreview.messageHidden === true && naturalPreview.previewHidden === false && naturalPreview.openDisabled === false && naturalPreview.kind === 'موعد' && naturalPreview.title === 'مراجعة العقد' && naturalPreview.date.includes(localToday) && naturalPreview.time === '14:05' && naturalPreview.formCount === 0, JSON.stringify(naturalPreview));
+
+  await page.locator('[data-qa-natural-open]').click(); await page.waitForSelector('.entity-form[data-store="appointments"]');
+  const naturalAppointment = await app(() => ({
+    title: document.querySelector('.entity-form[data-store="appointments"] [name="title"]')?.value || '',
+    date: document.querySelector('.entity-form[data-store="appointments"] [name="date"]')?.value || '',
+    time: document.querySelector('.entity-form[data-store="appointments"] [name="time"]')?.value || ''
+  }));
+  check('Quick Add الطبيعي يفتح نموذج الموعد بالمعاينة', naturalAppointment.title === 'مراجعة العقد' && naturalAppointment.date === localToday && naturalAppointment.time === '14:05', JSON.stringify(naturalAppointment));
+  await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+
+  await page.locator('.cp-hero [data-quick-add]').click(); await page.waitForSelector('.qa-natural-input');
+  await page.fill('.qa-natural-input', 'مهمة مراجعة العقد اليوم 09:30');
+  await page.locator('[data-qa-natural-open]').click(); await page.waitForSelector('.entity-form[data-store="workItems"]');
+  const naturalTask = await app(() => ({
+    title: document.querySelector('.entity-form[data-store="workItems"] [name="title"]')?.value || '',
+    dueDate: document.querySelector('.entity-form[data-store="workItems"] [name="dueDate"]')?.value || '',
+    dueTime: document.querySelector('.entity-form[data-store="workItems"] [name="dueTime"]')?.value || ''
+  }));
+  check('Quick Add الطبيعي يفتح نموذج المهمة بالمعاينة', naturalTask.title === 'مراجعة العقد' && naturalTask.dueDate === localToday && naturalTask.dueTime === '09:30', JSON.stringify(naturalTask));
+  await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+
+  await go(`file:${seed.fileId}`, 900);
+  await page.locator('#quick-add').click(); await page.waitForSelector('.qa-natural-input');
+  await page.fill('.qa-natural-input', 'موعد مراجعة العقد اليوم 16:45');
+  await page.locator('[data-qa-natural-open]').click(); await page.waitForSelector('.entity-form[data-store="appointments"]');
+  const contextualAppointment = await app(() => ({
+    title: document.querySelector('.entity-form[data-store="appointments"] [name="title"]')?.value || '',
+    date: document.querySelector('.entity-form[data-store="appointments"] [name="date"]')?.value || '',
+    time: document.querySelector('.entity-form[data-store="appointments"] [name="time"]')?.value || '',
+    fileId: document.querySelector('.entity-form[data-store="appointments"] input[name="fileId"]')?.value || ''
+  }));
+  check('Quick Add الطبيعي يحافظ على سياق الملف', contextualAppointment.title === 'مراجعة العقد' && contextualAppointment.date === localToday && contextualAppointment.time === '16:45' && contextualAppointment.fileId === seed.fileId, JSON.stringify(contextualAppointment));
+  await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+  await go('dashboard', 700);
+
   // 10) قياس عرض الصفحة الحقيقي في كل نقاط القبول، للرئيسية ومركز العمل.
   const responsiveWidths = [360, 390, 768, 1024, 1280, 1440, 1600];
   for (const width of responsiveWidths) {

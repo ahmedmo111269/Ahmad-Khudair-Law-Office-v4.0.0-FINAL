@@ -143,10 +143,10 @@ export async function tagsDialog(wc, item) {
 }
 
 /** نموذج «مهمة مرتبطة» (يعيد استخدام نموذج الكيانات العام). المعرّفات فقط تُنسخ؛ الأسماء تُقرأ حيًّا. */
-export async function openLinkedTaskForm(app, relatedType, relatedId, {title = '', dueDate = '', onSaved = null} = {}) {
+export async function openLinkedTaskForm(app, relatedType, relatedId, {title = '', dueDate = '', dueTime = '', overrides = {}, onSaved = null} = {}) {
   let preset;
   try { preset = await C.linkedTaskPreset(app.office, relatedType, relatedId); } catch (error) { return fail(error); }
-  return openEntityForm(app, 'workItems', {preset: {...preset, ...(title ? {title} : {}), ...(dueDate ? {dueDate} : {})}, title: 'مهمة مرتبطة', onSaved: onSaved || (async row => { toast('تمت إضافة المهمة المرتبطة', 'ok', {action: () => app.go(`actionCenter?item=${encodeURIComponent(row.id)}`), actionLabel: 'فتحها في مركز العمل', duration: 6000}); })});
+  return openEntityForm(app, 'workItems', {preset: {...preset, ...(overrides || {}), ...(title ? {title} : {}), ...(dueDate ? {dueDate} : {}), ...(dueTime ? {dueTime} : {})}, title: 'مهمة مرتبطة', onSaved: onSaved || (async row => { toast('تمت إضافة المهمة المرتبطة', 'ok', {action: () => app.go(`actionCenter?item=${encodeURIComponent(row.id)}`), actionLabel: 'فتحها في مركز العمل', duration: 6000}); })});
 }
 
 // ---------- منفّذ الأفعال ----------
