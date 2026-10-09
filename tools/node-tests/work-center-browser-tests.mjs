@@ -309,6 +309,36 @@ async function functional() {
     assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.b}"]`).count(), 1, 'العنصر المجدول يظهر في «غدًا»');
   });
 
+  await verify('Not Now: إخفاء مؤقت لعنصر غير حرج فقط، السجل ثابت، والانتهاء/التراجع يعملان', async () => {
+    const made = await page.evaluate(async day => {
+      const {saveWorkItem} = await import('/js/services/work-items.js');
+      return saveWorkItem(window.__LAW_OFFICE_APP__.office, {title: 'WCTEST ليس الآن', dueDate: day, status: 'notStarted', priority: 'medium'});
+    }, addDays(today(), 2));
+    await useTask(page, 'WCTEST ليس الآن');
+    await openSheet(page, 'WCTEST ليس الآن');
+    assert.ok((await page.locator('.wc-sheet [data-act="notNow"]').count()) === 1, 'Not Now متاح للعنصر غير الحرج');
+    await page.click('.wc-sheet [data-act="notNow"]'); await page.waitForSelector('.modal-card [data-ok]');
+    assert.ok((await page.locator('.modal-card').textContent()).includes('لم يتغير السجل الأصلي'), 'التأكيد يوضح أن السجل لا يتغير');
+    const before = await dbGet(page, 'workItems', made.id);
+    await page.click('.modal-card [data-ok]'); await ready(page);
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${made.id}"]`).count(), 0, 'العنصر مخفي من العرض الحالي');
+    const hidden = await page.evaluate(async id => {
+      const m = await import('/js/services/work-hides.js');
+      return {active: m.isTemporarilyHidden(id), stored: m.tempHiddenMap()[id]};
+    }, made.id);
+    assert.ok(hidden.active, 'الإخفاء محفوظ حتى نهاية اليوم');
+    assert.equal(hidden.stored.scope, 'notNow');
+    const after = await dbGet(page, 'workItems', made.id);
+    assert.equal(after.dueDate, before.dueDate, 'الموعد الأصلي لم يتغير');
+    assert.equal(after.status, before.status, 'الحالة الأصلية لم تتغير');
+    assert.ok((await page.locator('.toast-act').first().textContent()).includes('تراجع'), 'زر التراجع ظاهر');
+    await page.locator('.toast-act').first().click(); await ready(page);
+    assert.equal(await page.locator(`.wc-card[data-wc-id="${made.id}"]`).count(), 1, 'التراجع يعيد البطاقة');
+    assert.equal(await page.evaluate(async id => (await import('/js/services/work-hides.js')).isTemporarilyHidden(id), made.id), false, 'التراجع يزيل الإخفاء');
+    await page.evaluate(async id => (await import('/js/services/work-items.js')).deleteItem(window.__LAW_OFFICE_APP__.office, id), made.id);
+    await page.fill('#wc-q', ''); await page.waitForTimeout(400); await ready(page);
+  });
+
   await verify('Court Day: جدول جلسات اليوم، نتيجة محفوظة وعلامة «سُجّلت» ثم انتقال الصف للأسفل واتصال/WhatsApp', async () => {
     const seeded = await page.evaluate(async today => {
       const app = window.__LAW_OFFICE_APP__, office = app.office;

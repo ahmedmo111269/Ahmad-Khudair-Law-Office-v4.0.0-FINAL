@@ -27,7 +27,8 @@ import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {applyUniversalStyles} from '../ui/component-customizer.js';
 import {buildFocusModel} from '../services/focus-engine.js';
 import {focusHtml,attentionHtml,timelineHtml,activityHtml,sinceHtml,bindCockpit} from '../ui/cockpit.js';
-import {HOME_LIMITS} from '../services/work-config.js';
+import {HOME_LIMITS,getWorkConfig} from '../services/work-config.js';
+import {tomorrowPrepCandidate} from '../services/tomorrow-prep.js';
 import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.js';
 
 // أقسام الصفحة في نظام ترتيب الأقسام المركزي (ترتيب/إظهار من «تخصيص الصفحة»).
@@ -123,6 +124,16 @@ function summaryHtml(r,focus){
  return summaryParts.join('<span aria-hidden="true"> · </span>');
 }
 
+/** إشارة صغيرة فقط قبل الغد: تظهر بعد الوقت المضبوط ومع فجوة تشغيلية واضحة. */
+function tomorrowPrepHtml(brief){
+ const prep=tomorrowPrepCandidate(brief,{now:new Date().toTimeString().slice(0,5),after:getWorkConfig().tomorrowPrepAfter});
+ if(!prep)return '';
+ const hearing=prep.item;
+ const gap=prep.kind==='missingFile'?'لا يوجد ملف مرتبط':'لا يوجد وقت محدد';
+ const title=hearing.reason||hearing.type||'جلسة';
+ return `<aside class="notice home-tomorrow-prep" data-home-tomorrow-prep role="status"><span><b>تحضير الغد</b> — جلسة غدًا «${esc(title)}» ${gap}; راجع بياناتها قبل الجلسة.</span><button type="button" class="ghost small" data-route="rec:hearings:${esc(hearing.id)}">فتح الجلسة</button></aside>`;
+}
+
 export async function homePage(app){
  const {r,focus,since,activity,today,scope}=await loadHomeData(app);
  const g=GREETINGS[greetingKey()];
@@ -138,7 +149,8 @@ export async function homePage(app){
   const probe=meta?.seeded?true:await import('../services/demo-data.js').then(m=>m.hasDemoData(app.office)).catch(()=>false);
   if(probe)demoBanner=`<div class="notice demo-banner" role="status"><b>بيانات تجريبية</b> السجلات المعلَّمة بـ〔تجريبي〕 للاختبار فقط. زر واحد يحذفها كلها مع كل ما يرتبط بها.</div><div class="notice demo-cleanup-panel"><span class="demo-cleanup-txt" data-demo-count>جارٍ فحص البيانات التجريبية…</span><button type="button" class="ghost danger" data-demo-cleanup title="حذف كل السجلات التجريبية وكل ما يرتبط بها دفعة واحدة">🗑 حذف كل البيانات التجريبية</button></div>`}catch{}
  const dayLabel=longDateAr();
- return `${demoBanner}${installHint}
+ const tomorrowPrep=tomorrowPrepHtml(r);
+ return `${demoBanner}${installHint}${tomorrowPrep}
  <header class="cp-hero">
   <div class="cp-hero-text">
    <span class="cp-eyebrow">مكتب اليوم</span>
@@ -206,6 +218,9 @@ async function positionalHomeRefresh(app){
    const node=tpl.content.firstElementChild;if(!node)continue;
    if(old)old.replaceWith(node);else main.append(node);
   }
+  const oldPrep=main.querySelector('[data-home-tomorrow-prep]'),prepHtml=tomorrowPrepHtml(r);
+  if(!prepHtml)oldPrep?.remove();
+  else{const tpl=document.createElement('template');tpl.innerHTML=prepHtml.trim();const node=tpl.content.firstElementChild;if(oldPrep)oldPrep.replaceWith(node);else main.insertBefore(node,main.querySelector('.cp-hero')||main.firstChild)}
   const sum=main.querySelector('.cp-hero .cp-summary');if(sum)sum.innerHTML=summaryHtml(r,focus);
   // إعادة الربط: bindCockpit للعُقد الجديدة، وonclick (idempotent) للباقي.
   bindCockpit(main,app);

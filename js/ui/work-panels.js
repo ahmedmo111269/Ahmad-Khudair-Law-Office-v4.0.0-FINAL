@@ -145,6 +145,7 @@ export function openWorkSettings(rt) {
       <label>ملف «بلا نشاط» بعد (يومًا)<input type="number" min="7" max="730" data-stale value="${config.staleFileDays}"></label>
       <label>خلال كم يومًا يُعدّ العنصر عاجلًا<input type="number" min="0" max="14" data-urgent value="${config.urgentWithinDays}"></label>
       <label>أيام «القادم»<input type="number" min="3" max="60" data-upcoming value="${config.upcomingDays}"></label>
+      <label>إظهار إشارة «تحضير الغد» بعد<input type="time" data-tomorrow-prep value="${esc(config.tomorrowPrepAfter)}"></label>
       <label class="wc-check-row"><input type="checkbox" data-notify ${config.notifications.enabled ? 'checked' : ''}> إظهار تنبيهات مركز العمل (قليلة وقابلة للإخفاء)</label>
       <label>أقصى عدد تنبيهات ظاهرة<input type="number" min="1" max="6" data-notify-max value="${config.notifications.maxVisible}"></label></details>
     <div class="form-actions"><button class="primary" type="submit">حفظ الإعدادات</button><button class="ghost" type="button" data-reset>استعادة الافتراضي</button><button class="ghost" type="button" data-layout>⚙ ترتيب الأقسام وعرض الصفحة</button></div>
@@ -199,6 +200,7 @@ export function openWorkSettings(rt) {
     catch (error) { redrawCustom(); return toast(userError(normalizeError(error)) || 'تعذر حفظ الحالات المخصصة', 'error'); }
     await saveWorkConfig({priorities, statuses: {...statuses, ...customColors}, sources, lookback, attention: {rules},
       staleFileDays: Number(box.querySelector('[data-stale]').value), urgentWithinDays: Number(box.querySelector('[data-urgent]').value), upcomingDays: Number(box.querySelector('[data-upcoming]').value),
+      tomorrowPrepAfter: box.querySelector('[data-tomorrow-prep]').value,
       notifications: {enabled: box.querySelector('[data-notify]').checked, maxVisible: Number(box.querySelector('[data-notify-max]').value)}});
     closeModal(); toast('تم حفظ إعدادات مركز العمل'); await rt.onSettingsChanged();
   });

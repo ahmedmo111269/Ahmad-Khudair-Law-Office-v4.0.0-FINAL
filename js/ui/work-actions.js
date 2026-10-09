@@ -14,7 +14,7 @@ import {SNOOZE_OPTIONS, snoozeTarget, isIsoDate, mergePriorities, mergeStatuses,
 import {getWorkConfig} from '../services/work-config.js';
 import {getLookup, saveLookupValue} from '../services/lookups.js';
 import * as C from '../services/work-items.js';
-import {hideTemporarily} from '../services/work-hides.js';
+import {hideTemporarily, unhideTemporarily, canHideNotNow} from '../services/work-hides.js';
 import {isPicked, pickForToday, unpickForToday} from '../services/my-day.js';
 
 const fail = error => toast(userError(normalizeError(error)), 'error');
@@ -32,6 +32,7 @@ export function actionsFor(item) {
     // «يحتاج موعدًا»: عنصر بلا تاريخ — تحديد موعد (مع تأكيد قبل الحفظ) أو الإبقاء بلا موعد (إخفاء مؤقت للعرض فقط)
     if (!item.dueDate && caps.reschedule) add('schedule', 'تحديد موعد…', '📅');
     if (!item.dueDate) add('keepUndated', 'إبقاء بلا موعد (لليوم)', '🙈');
+    if (canHideNotNow(item)) add('notNow', 'ليس الآن (إخفاء حتى نهاية اليوم)', '◌');
   }
   if (caps.priority) add('priority', 'تغيير الأولوية…', '▲');
   if (caps.pin) add('pin', item.isPinned ? 'إلغاء التثبيت' : 'تثبيت', '⚑');
@@ -194,9 +195,17 @@ export async function runAction(wc, item, action, extra = {}) {
         await C.rescheduleItem(office, item, picked); toast('تم تحديد الموعد'); return changed({dueDate: picked.date});
       }
       case 'keepUndated': {
-        // «إبقاء بلا موعد»: إخفاء مؤقت للعرض فقط (تفضيلات + expiry نهاية اليوم) — لا تغيير للسجل.
+        // «إبقاء بلا موعد»: إخفاء مؤقت للعرض فقط (تفضيلات + انتهاء نهاية اليوم) — لا تغيير للسجل.
         await hideTemporarily(item.id, {scope: 'keepUndated', reason: 'user'});
         toast('أُخفي من «يحتاج موعدًا» حتى نهاية اليوم');
+        return changed({hidden: true});
+      }
+      case 'notNow': {
+        if (!canHideNotNow(item)) { toast('هذا عنصر مهم لا يمكن إخفاؤه مؤقتًا.', 'error'); return null; }
+        const ok = await confirmBox(`إخفاء «${esc(item.title)}» من عروض مركز العمل حتى نهاية اليوم؟ لم يتغير السجل الأصلي.`, {okText: 'ليس الآن'});
+        if (!ok) return null;
+        await hideTemporarily(item.id, {scope: 'notNow', reason: 'user'});
+        toast('أُخفي حتى نهاية اليوم', 'ok', {action: () => unhideTemporarily(item.id).then(() => changed({restored: true})).catch(fail), actionLabel: 'تراجع', duration: 6000});
         return changed({hidden: true});
       }
       case 'priority': {

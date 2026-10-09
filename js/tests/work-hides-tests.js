@@ -4,7 +4,7 @@
 //   • filterVisibleItems: تصفية العناصر المخفية — دالة نقية.
 //   • endOfTodayISO: expiry = نهاية اليوم الحالي.
 // ============================================================
-import {isHideActive, filterVisibleItems, endOfTodayISO} from '../services/work-hides.js';
+import {isHideActive, filterVisibleItems, endOfTodayISO, canHideNotNow} from '../services/work-hides.js';
 
 export async function runWorkHidesTests(test, expect) {
   test('isHideActive: ساري حتى «until» ثم ينتهي تلقائيًا', () => {
@@ -31,6 +31,18 @@ export async function runWorkHidesTests(test, expect) {
     // خريطة فارغة أو null: لا تصفية
     expect(JSON.stringify(filterVisibleItems(items, null, now).map(i => i.id))).toBe(JSON.stringify(['a', 'b', 'c']));
     expect(JSON.stringify(filterVisibleItems(items, {}, now).map(i => i.id))).toBe(JSON.stringify(['a', 'b', 'c']));
+  });
+
+  test('Not Now allows only open noncritical dated work items', () => {
+    const today = '2026-10-08';
+    expect(canHideNotNow({isOpen: true, dueDate: '2026-10-10', sourceType: 'task'}, today)).toBe(true);
+    expect(canHideNotNow({isOpen: true, dueDate: '', sourceType: 'task'}, today)).toBe(false);
+    expect(canHideNotNow({isOpen: true, dueDate: today, sourceType: 'hearings'}, today)).toBe(false);
+    expect(canHideNotNow({isOpen: true, dueDate: '2026-10-07', sourceType: 'procedures'}, today)).toBe(false);
+    expect(canHideNotNow({isOpen: true, dueDate: '2026-10-10', sourceType: 'execution', priority: 'urgent'}, today)).toBe(false);
+    expect(canHideNotNow({isOpen: true, dueDate: '2026-10-10', sourceType: 'execution', severity: 'critical'}, today)).toBe(false);
+    expect(canHideNotNow({isOpen: true, dueDate: '2026-10-10', kind: 'poa', expiryDate: '2026-10-07'}, today)).toBe(false);
+    expect(canHideNotNow({isOpen: false, dueDate: '2026-10-10', sourceType: 'task'}, today)).toBe(false);
   });
 
   test('endOfTodayISO: نهاية اليوم الحالي (23:59:59.999 بالتوقيت المحلي)', () => {

@@ -69,7 +69,7 @@ export async function dashboardBrief(office){
  // attach case numbers so the dashboard can show which case a hearing belongs to
  const caseIds=[...todayHearings,...upcomingHearings].map(x=>x.caseId).filter(Boolean);
  const cases=caseIds.length?await office.r.cases.getMany(caseIds):[];const cm=new Map(cases.map(c=>[c.id,c]));
- for(const h of [...todayHearings,...upcomingHearings]){const c=cm.get(h.caseId);if(c)h.caseNumber=`${c.caseNumber||''}/${c.caseYear||''}`}
+ for(const h of [...todayHearings,...upcomingHearings]){const c=cm.get(h.caseId);if(c){h.caseNumber=`${c.caseNumber||''}/${c.caseYear||''}`;h.fileId=h.fileId||c.fileId||''}}
  // اسم الموكل يظهر في البطاقة مباشرة: قرار «أجدّد التوكيل لمن؟» لا يحتمل نقرتين.
  const poaClientIds=[...new Set([...expiringPoa,...expiredPoa].map(p=>p.clientId).filter(Boolean))];
  if(poaClientIds.length){

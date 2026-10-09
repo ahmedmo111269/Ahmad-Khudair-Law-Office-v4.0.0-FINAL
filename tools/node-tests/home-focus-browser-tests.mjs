@@ -179,7 +179,48 @@ try {
   check('«تراجع» يعيد العمل إلى الطابور بلا إعادة بناء', undone.sentinel && undone.attnHas && undone.attnCount === before.attnCount && undone.filter === filterBefore, JSON.stringify(undone));
   await app(() => { document.querySelector('#pos-sentinel')?.remove(); });
 
-  // 8) الهاتف: لا تمرير أفقي في الرئيسية مع الطبقات الجديدة
+  // 8) تحضير الغد: بعد الوقت المضبوط فقط، ومع عنصر غدٍ وفجوة تشغيلية قابلة للتصرف.
+  const prepSeed = await app(async () => {
+    const office = window.__LAW_OFFICE_APP__.office;
+    const clock = await import('/js/core/clock.js');
+    const {createLegalFile} = await import('/js/services/legal-files.js');
+    const {saveOperational} = await import('/js/services/operations.js');
+    const {saveWorkConfig, getWorkConfig} = await import('/js/services/work-config.js');
+    const client = await office.saveClient({fullName: '〔تجريبي〕 موكل تحضير الغد'});
+    const file = await createLegalFile(office, {clientId: client.id, title: '〔تجريبي〕 ملف تحضير الغد', fileType: 'مدني'});
+    const kase = await office.createCase({fileId: file.id, stageType: 'دعوى', caseNumber: '9876', caseYear: '2026'});
+    const tomorrow = clock.addDays(clock.localDate(), 1);
+    const hearing = await saveOperational(office, 'hearings', {caseId: kase.id, fileId: file.id, hearingDate: tomorrow, type: 'نظر', reason: '〔تجريبي〕 جلسة بلا وقت لتحضير الغد'});
+    const oldTime = getWorkConfig().tomorrowPrepAfter;
+    await saveWorkConfig({tomorrowPrepAfter: '23:59'});
+    return {clientId: client.id, fileId: file.id, caseId: kase.id, hearingId: hearing.id, oldTime, now: new Date().toTimeString().slice(0, 5)};
+  });
+  await go('dashboard', 800);
+  if (prepSeed.now < '23:59') check('قبل وقت الإعداد: لا يظهر تحضير الغد', (await page.locator('[data-home-tomorrow-prep]').count()) === 0);
+  await app(async () => {
+    const {saveWorkConfig} = await import('/js/services/work-config.js');
+    await saveWorkConfig({tomorrowPrepAfter: '00:00'});
+  });
+  await go('dashboard', 800);
+  const prepNotice = await app(() => ({
+    count: document.querySelectorAll('[data-home-tomorrow-prep]').length,
+    text: document.querySelector('[data-home-tomorrow-prep]')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    route: document.querySelector('[data-home-tomorrow-prep] [data-route]')?.dataset.route || ''
+  }));
+  check('بعد وقت الإعداد: جلسة الغد بلا وقت تُظهر إشارة واحدة وفتح المصدر', prepNotice.count === 1 && /تحضير الغد/.test(prepNotice.text) && /لا يوجد وقت محدد/.test(prepNotice.text) && prepNotice.route === `rec:hearings:${prepSeed.hearingId}`, JSON.stringify(prepNotice));
+  await app(async id => {
+    const office = window.__LAW_OFFICE_APP__.office;
+    const {saveOperational} = await import('/js/services/operations.js');
+    await saveOperational(office, 'hearings', {hearingTime: '11:00'}, id, {reason: 'تحديد وقت الجلسة'});
+  }, prepSeed.hearingId);
+  await go('dashboard', 800);
+  check('معالجة الفجوة: بعد تحديد وقت الجلسة لا تتحول الإشارة إلى لوحة ثانية', (await page.locator('[data-home-tomorrow-prep]').count()) === 0);
+  await app(async oldTime => {
+    const {saveWorkConfig} = await import('/js/services/work-config.js');
+    await saveWorkConfig({tomorrowPrepAfter: oldTime});
+  }, prepSeed.oldTime);
+
+  // 9) الهاتف: لا تمرير أفقي في الرئيسية مع الطبقات الجديدة
   await page.setViewportSize({width: 390, height: 844});
   await settle(400);
   const ov = await app(() => ({doc: document.documentElement.scrollWidth, win: window.innerWidth}));

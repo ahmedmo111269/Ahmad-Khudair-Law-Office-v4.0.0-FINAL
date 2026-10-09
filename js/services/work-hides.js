@@ -5,8 +5,20 @@
 //   • النواة (isHideActive/filterVisibleItems) دالة نقية — قابلة للاختبار بلا IndexedDB.
 // =====================================================================
 import {prefs} from '../core/preferences.js';
+import {localDate} from '../core/clock.js';
 
 export const TEMP_HIDDEN_KEY = 'ui:wc:temp-hidden';
+
+/** Critical items must never be hidden by «Not Now». */
+export function canHideNotNow(item, today = localDate()) {
+  if (!item || item.isDone || item.isCancelled || item.isOpen === false || !item.dueDate) return false;
+  if (item.sourceType === 'hearings' && String(item.dueDate || '').slice(0, 10) === today) return false;
+  if (item.dueDate && String(item.dueDate).slice(0, 10) < today && item.isOpen !== false) return false;
+  if (item.sourceType === 'execution' && (item.priority === 'urgent' || item.severity === 'critical' || item.isUrgent === true || item.raw?.isUrgent === true)) return false;
+  const poaExpiry = item.expiryDate || item.raw?.expiryDate || '';
+  if ((item.kind === 'poa' || item.sourceType === 'powersOfAttorney') && poaExpiry && poaExpiry < today && !(item.isArchived || item.raw?.isArchived)) return false;
+  return true;
+}
 
 /** نهاية اليوم الحالي (بالتوقيت المحلي) — expiry تلقائي للإخفاء المؤقت. */
 export function endOfTodayISO(now = new Date()) {
