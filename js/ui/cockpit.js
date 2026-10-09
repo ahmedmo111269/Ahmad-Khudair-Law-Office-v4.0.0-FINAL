@@ -24,12 +24,13 @@ import {formatFileNumber} from '../core/file-number.js';
 import {money} from './execution-work-view.js';
 
 /** البطاقة الكبيرة: «الآن» — الخطوة التالية المقترحة مع إجراء واحد واضح. */
-export function focusHtml(model,{dayLabel=''}={}){
+export function focusHtml(model,{dayLabel='',focusMode=false}={}){
  const next=model.next;
- const upcoming=model.attention.filter(x=>x!==next).slice(0,3);
+ const upcoming=focusMode?[]:model.attention.filter(x=>x!==next).slice(0,3);
+ const focusToggle=`<button type="button" class="ghost small cp-focus-mode" data-focus-mode aria-pressed="${focusMode}" title="عرض الخطوة التالية وحدها">${focusMode?'الخروج من التركيز':'تركيز'}</button>`;
  if(!next){
   return `<section class="cp-focus cp-focus--calm" data-section-id="focus" aria-labelledby="cp-focus-title">
-   <header class="cp-focus-head"><span class="cp-eyebrow">الآن</span><span class="cp-chip cp-chip--ok">لا عاجل</span></header>
+   <header class="cp-focus-head"><span class="cp-eyebrow">الآن</span><span class="cp-chip cp-chip--ok">لا عاجل</span>${focusToggle}</header>
    <h2 id="cp-focus-title">لا شيء يستعجل قرارك الآن</h2>
    <p class="cp-meta">${esc(dayLabel)} — كل الجلسات والأعمال المتأخرة مغطاة. وقت مناسب للمتابعة المنهجية أو إضافة عمل جديد.</p>
    <div class="cp-actions"><button class="primary" type="button" data-quick-add>+ إضافة</button><button class="ghost" type="button" data-route="actionCenter">مركز العمل</button><button class="ghost" type="button" data-route="files">الملفات</button></div>
@@ -37,7 +38,7 @@ export function focusHtml(model,{dayLabel=''}={}){
  }
  const sev=SEVERITY[next.severity]||SEVERITY.normal;
  return `<section class="cp-focus cp-focus--${esc(next.severity)}" data-section-id="focus" aria-labelledby="cp-focus-title">
-  <header class="cp-focus-head"><span class="cp-eyebrow">الآن · الخطوة التالية</span><span class="cp-chip cp-chip--${esc(sev.tone||'neutral')}">${esc(sev.label)}</span></header>
+  <header class="cp-focus-head"><span class="cp-eyebrow">الآن · الخطوة التالية</span><span class="cp-chip cp-chip--${esc(sev.tone||'neutral')}">${esc(sev.label)}</span>${focusToggle}</header>
   <h2 id="cp-focus-title">${esc(next.title)}</h2>
   <p class="cp-meta"><b>${esc(next.when)}</b>${next.meta?` <span aria-hidden="true">·</span> ${esc(next.meta)}`:''}</p>
   ${postponeChipHtml(next)}

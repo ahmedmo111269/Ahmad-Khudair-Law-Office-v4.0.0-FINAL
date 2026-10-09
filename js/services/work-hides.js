@@ -1,6 +1,6 @@
 // =====================================================================
 // الإخفاء المؤقت للعرض (work-hides): «إبقاء بلا موعد» و«ليس الآن».
-//   - no record is modified: display-hiding only.
+// Display-only hiding; do not modify the underlying record.
 //   • التخزين في التفضيلات (prefs) مع «until» — ينتهي تلقائيًا (نهاية اليوم).
 //   • النواة (isHideActive/filterVisibleItems) دالة نقية — قابلة للاختبار بلا IndexedDB.
 // =====================================================================

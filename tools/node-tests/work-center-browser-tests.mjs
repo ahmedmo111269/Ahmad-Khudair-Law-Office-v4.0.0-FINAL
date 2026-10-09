@@ -173,7 +173,7 @@ async function functional() {
 
     await page.click('.wc-toolbar [data-wc-more-menu]'); await page.waitForSelector('.wc-sheet');
     const more = await page.locator('.wc-sheet .wc-sheet-btn').allTextContents();
-    for (const m of ['العروض المحفوظة', 'ترتيب الأقسام وعرض الصفحة', '⚙ إعدادات مركز العمل', 'تصدير العرض الحالي (CSV)', 'تحديث البيانات']) assert.ok(more.some(x => x.includes(m)), `⋯ ناقص: ${m}`);
+    for (const m of ['العروض المحفوظة', 'ترتيب الأقسام وعرض الصفحة', '⚙ إعدادات مركز العمل', 'تصدير العرض الحالي (CSV)', 'نسخ خلاصة اليوم', 'تحديث البيانات']) assert.ok(more.some(x => x.includes(m)), `⋯ ناقص: ${m}`);
     await page.click('.wc-sheet [data-i="12"]'); await ready(page);
     assert.equal(await page.locator('#wc-view .error-box,#wc-view .ux-state-error').count(), 0, 'لا خطأ بعد تحديث البيانات');
   });
@@ -802,6 +802,23 @@ async function functional() {
     assert.equal((await dbGet(page, 'workItems', `hearings::${fx.hearingId}`)), null, 'القراءة وحدها لا تكتب طبقة');
   });
 
+  await verify('Quick Add من الملف يحافظ على سياق الملف والقضية في الجلسة والمهمة', async () => {
+    await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`file:${id}`), fx.fileId);
+    await page.waitForSelector('[data-file-edit]');
+    await page.locator('#quick-add').click(); await page.waitForSelector('.quick-card .quick-context');
+    await page.locator('.quick-context [data-qa-kind="hearing"]').click();
+    await page.waitForSelector('.entity-form[data-store="hearings"]');
+    assert.equal(await page.inputValue('.entity-form [name=caseId]'), fx.caseId, 'جلسة Quick Add تحتفظ بالقضية الحالية للملف');
+    await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+
+    await page.locator('#quick-add').click(); await page.waitForSelector('.quick-card .quick-context');
+    await page.locator('.quick-context [data-qa-kind="task"]').click();
+    await page.waitForSelector('.entity-form[data-store="workItems"]');
+    assert.equal(await page.inputValue('.entity-form [name=fileId]'), fx.fileId, 'مهمة Quick Add تحتفظ بمعرّف الملف');
+    await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+    await goWC(page);
+  });
+
   await verify('السيناريو الكامل (2): فتح المجلّد ← روابط الملف/القضية/الموكل/الخصم صالحة وتفتح صفحاتها ثم الرجوع', async () => {
     await page.locator(`.wc-card[data-wc-id="hearings::${fx.hearingId}"] .wc-title`).click();
     await page.waitForSelector('.wc-drawer .wc-links');
@@ -927,6 +944,11 @@ async function functional() {
     const cmds = await page.evaluate(async () => { const m = await import('/js/ui/palette.js'); return m.staticCommands(window.__LAW_OFFICE_APP__).filter(c => c.group === 'مركز العمل' || c.id === 'qa:workItems').map(c => ({id: c.id, label: c.label})); });
     for (const id of ['wc:today', 'wc:overdue', 'wc:kanban', 'wc:attention', 'wc:review-day', 'wc:carry', 'wc:linked', 'qa:workItems']) assert.ok(cmds.some(c => c.id === id), `أمر ناقص ${id}`);
     assert.ok(cmds.find(c => c.id === 'wc:carry').label.includes('بتأكيد'));
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'k', code: 'KeyJ', ctrlKey: true, bubbles: true, cancelable: true})));
+    assert.equal(await page.locator('#modal-root .palette-card').count(), 0, 'حرف K على مفتاح آخر لا يفتح اللوحة');
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'ж', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true})));
+    await page.waitForSelector('#modal-root .palette-card');
+    await page.keyboard.press('Escape'); await page.waitForSelector('#modal-root .palette-card', {state: 'detached'});
   });
 
   await verify('المراجعة اليومية والأسبوعية والإنتاجية والعروض التحليلية تفتح بلا أخطاء', async () => {

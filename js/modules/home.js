@@ -80,6 +80,7 @@ async function loadHomeData(app){
  const today=localDate();
  const nowHM=new Date().toTimeString().slice(0,5);
  const focus=buildFocusModel(r,{today,now:nowHM});
+ app.__homeFocusModel=focus;
  // «منذ آخر زيارة»: أول تشغيل بلا خط أساس ⇒ لا قسم. لا كتابة هنا؛ الكتابة عند المغادرة فقط.
  const scope=homeScope(app);
  const sinceBase=homeBaseline(scope);
@@ -168,7 +169,7 @@ export async function homePage(app){
  </header>
  ${favs.length?card({icon:'folder',title:'مثبّتات',size:'full',collapsible:true,persistKey:'home:favs',sectionId:'favs',pageId:'dashboard',badge:statusBadge(String(favs.length),'info'),body:`<div class="fav-row">${favs.map(x=>`<button class="recent-chip" data-goto="${esc(x.route)}">${esc(x.title)}</button>`).join('')}</div>`}):''}
  <div class="cp-stage">
-  ${focusHtml(focus,{dayLabel})}
+  ${focusHtml(focus,{dayLabel,focusMode:Boolean(app.__homeFocusMode)})}
   ${timelineHtml(focus,{dayLabel:`يوم ${fmtDate(today)}`})}
  </div>
  ${attentionHtml(focus)}
@@ -182,6 +183,27 @@ ${card({icon:'report',title:'تقارير العمل السريع',size:'full',c
   body:`<div class="agenda-layout" id="agenda-layout"><div id="home-calendar"></div><div class="agenda-day"><h4 id="agenda-title"></h4><div id="agenda-grid"></div></div></div>`})}
  ${recents.length?card({icon:'clock',title:'آخر ما فُتح',size:'full',cls:'recents-section',collapsible:true,collapsed:true,persistKey:'home:recents',sectionId:'recents',pageId:'dashboard',summary:'السجلات التي فتحتها مؤخرًا — تُفتح بنقرة، والقسم مطوي افتراضيًا لتبقى الصفحة نظيفة',badge:statusBadge(String(recents.length),'info'),
   body:`<div class="recents-bar"><div class="recents-chips">${recents.map(x=>`<button class="recent-chip" data-recent="${esc(x.route)}"><span class="rc-ic" aria-hidden="true">${esc(x.icon==='calendar'?'📅':x.icon==='users'?'👤':x.icon==='gavel'?'⚖':'📁')}</span><span class="rc-t">${esc(x.title)}</span></button>`).join('')}</div></div>`}):''}`;
+}
+
+/** Toggle «Focus» on the existing Next Step Card only — no timer and no new screen. */
+function bindHomeFocusMode(root,app){
+ root?.querySelectorAll?.('[data-focus-mode]').forEach(button=>{button.onclick=()=>{
+  app.__homeFocusMode=!app.__homeFocusMode;
+  const model=app.__homeFocusModel,old=root.matches?.('[data-section-id="focus"]')?root:root.querySelector('[data-section-id="focus"]');
+  if(!model||!old)return;
+  const scrollY=window.scrollY;
+  const tpl=document.createElement('template');
+  tpl.innerHTML=focusHtml(model,{dayLabel:longDateAr(),focusMode:Boolean(app.__homeFocusMode)}).trim();
+  const node=tpl.content.firstElementChild;if(!node)return;
+  old.replaceWith(node);
+  bindCockpit(node,app);
+  node.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
+  node.querySelectorAll('[data-quick-add]').forEach(b=>b.onclick=()=>import('./quick-add.js').then(m=>m.openQuickAdd(app)));
+  bindHomeFocusMode(node,app);
+  applyUniversalStyles(node,'dashboard');
+  node.querySelector('[data-focus-mode]')?.focus?.({preventScroll:true});
+  window.scrollTo(0,scrollY);
+ }});
 }
 
 // الأقسام التي يُحدَّث كل منها موضعًا بعد أي إجراء (بلا إعادة بناء الصفحة).
@@ -203,7 +225,7 @@ async function positionalHomeRefresh(app){
   const {r,focus,since,activity,today}=await loadHomeData(app);
   const dayLabel=longDateAr();
   const html={
-   focus:focusHtml(focus,{dayLabel}),
+   focus:focusHtml(focus,{dayLabel,focusMode:Boolean(app.__homeFocusMode)}),
    today:timelineHtml(focus,{dayLabel:`يوم ${fmtDate(today)}`}),
    attention:attentionHtml(focus),
    since:sinceHtml(since),
@@ -224,6 +246,7 @@ async function positionalHomeRefresh(app){
   const sum=main.querySelector('.cp-hero .cp-summary');if(sum)sum.innerHTML=summaryHtml(r,focus);
   // إعادة الربط: bindCockpit للعُقد الجديدة، وonclick (idempotent) للباقي.
   bindCockpit(main,app);
+  bindHomeFocusMode(main,app);
   main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
   main.querySelectorAll('[data-kpi]').forEach(b=>b.onclick=()=>app.go(b.dataset.kpi));
   main.querySelectorAll('[data-quick-add]').forEach(b=>b.onclick=()=>import('./quick-add.js').then(m=>m.openQuickAdd(app)));
@@ -250,6 +273,7 @@ async function positionalHomeRefresh(app){
 export function bindHome(app){
  // شريط الأعداد والطابور: فلترة بالأهمية بلا إعادة رسم.
  bindCockpit(document.querySelector('#main-content'),app);
+ bindHomeFocusMode(document.querySelector('#main-content'),app);
  bindHomeLeave(app);
  // بعد أي إجراء («✓ تم» / «تراجع»): تحديث موضعي بدل app.refresh() — بدون إعادة بناء الصفحة.
  app.__refreshAfterAction=()=>positionalHomeRefresh(app);

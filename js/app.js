@@ -225,7 +225,7 @@ class App{
    const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
    if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='t'){e.preventDefault();if(String(this.route||'').startsWith('exc:')){document.dispatchEvent(new CustomEvent('exec:record'));return}return}
    if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();openQuickNoteCapture(this);return}
-   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
+   if((e.ctrlKey||e.metaKey)&&e.code==='KeyK'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
    if((e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
    if(e.key==='Escape'&&!document.querySelector('.dg-pop')){
     if(!isDesktop()&&closeMobile())return; // إغلاق لوحة تنقل الهاتف المفتوحة إن وُجدت

@@ -7,7 +7,9 @@ export async function runQuickActionTests(test,expect){
   const actions=contextualQuickActions({route:'file:file-1'});
   expect(actions.some(action=>action.kind==='hearing'&&action.context.id==='file-1')).toBe(true);
   expect(actions.some(action=>action.kind==='party')).toBe(true);
-  expect(contextualQuickActions({route:'dashboard'}).length).toBe(0);
+  const todayActions=contextualQuickActions({route:'dashboard'});
+  expect(todayActions.some(action=>action.kind==='task'&&action.context.type==='today'&&Boolean(action.context.date))).toBe(true);
+  expect(todayActions.some(action=>action.kind==='appointment'&&action.context.type==='today')).toBe(true);
  });
  test('قائمة الإضافة قابلة للبحث والفتح بالكيبورد وتعرض الأنواع القديمة',()=>{
   document.body.innerHTML='<div id="modal-root"></div>';

@@ -123,12 +123,13 @@ try {
     const {saveEntity} = await import('/js/services/entity-save.js');
     const today = clock.localDate();
     const p = await saveEntity(office, 'procedures', {fileId, type: 'متابعة', description: '〔تجريبي〕 عمل متأخر «تم»', internalDueDate: clock.addDays(today, -1), status: 'open', priority: 'urgent'});
-    return {procId: p?.id || ''};
+    const next = await saveEntity(office, 'procedures', {fileId, type: 'متابعة', description: '〔تجريبي〕 الخطوة التالية', internalDueDate: clock.addDays(today, -1), status: 'open', priority: 'medium'});
+    return {procId: p?.id || '', nextId: next?.id || ''};
   }, seed.fileId);
   check('زرع عمل إداري متأخر عاجل', Boolean(posSeed.procId), JSON.stringify(posSeed).slice(0, 120));
 
   await go('dashboard', 900);
-  await app(() => { const el = document.createElement('div'); el.id = 'pos-sentinel'; el.hidden = true; document.querySelector('#main-content').append(el); window.scrollTo(0, 420); });
+  await app(() => { const el = document.createElement('div'); el.id = 'pos-sentinel'; el.style.cssText = 'height:1600px;visibility:hidden;pointer-events:none'; document.querySelector('#main-content').append(el); window.scrollTo(0, 420); });
   const before = await app(() => ({
     hook: typeof window.__LAW_OFFICE_APP__.__refreshAfterAction,
     route: window.__LAW_OFFICE_APP__.route,
@@ -139,8 +140,17 @@ try {
   }));
   check('hook التحديث الموضعي مفعَّل في الرئيسية', before.hook === 'function' && before.route === 'dashboard', JSON.stringify(before));
   check('العمل المتأخر العاجل هو «الخطوة التالية»', /عمل متأخر «تم»/.test(before.focusTitle) && before.attnHas, before.focusTitle.slice(0, 80));
+  const thenBefore = await page.locator('.cp-focus .cp-then li').count();
+  await page.locator('.cp-focus [data-focus-mode]').click();
+  const focusModeBefore = await app(() => ({pressed: document.querySelector('.cp-focus [data-focus-mode]')?.getAttribute('aria-pressed') || '', thenCount: document.querySelector('.cp-focus .cp-then')?.querySelectorAll('li').length || 0}));
+  check('Focus على نفس البطاقة يعرض عنصرًا واحدًا فقط', thenBefore > 0 && focusModeBefore.pressed === 'true' && focusModeBefore.thenCount === 0, JSON.stringify({thenBefore, ...focusModeBefore}));
+  await page.locator('.cp-focus [data-focus-mode]').click();
+  check('يمكن الخروج من Focus فورًا بلا تحديث صفحة', (await page.locator('.cp-focus [data-focus-mode]').getAttribute('aria-pressed')) === 'false' && (await page.locator('.cp-focus .cp-then li').count()) > 0);
+  await page.locator('.cp-focus [data-focus-mode]').click();
+  check('يمكن إعادة Focus فورًا على البطاقة نفسها', (await page.locator('.cp-focus [data-focus-mode]').getAttribute('aria-pressed')) === 'true' && (await page.locator('.cp-focus .cp-then li').count()) === 0);
   await app(() => { document.querySelector('[data-attn-filter="critical"]')?.click(); });
   const filterBefore = await app(() => document.querySelector('.cp-count.is-on')?.dataset.attnFilter || '');
+  const scrollBefore = await app(() => { window.scrollTo(0, 420); return window.scrollY; });
   const clickInfo = await app(() => {
     const btn = document.querySelector('.cp-focus [data-complete-proc]');
     if (!btn) return {clicked: false};
@@ -159,13 +169,15 @@ try {
     attnHas: /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''),
     filter: document.querySelector('.cp-count.is-on')?.dataset.attnFilter || '',
     scrollY: window.scrollY,
-    undoBtn: [...document.querySelectorAll('.toast .toast-act')].at(-1)?.textContent?.trim() || ''
+    undoBtn: [...document.querySelectorAll('.toast .toast-act')].at(-1)?.textContent?.trim() || '',
+    focusMode: document.querySelector('.cp-focus [data-focus-mode]')?.getAttribute('aria-pressed') || ''
   }));
   check('لا إعادة بناء كاملة: Sentinel و قسم واحد لكل قسم', after.sentinel && after.sections.focus === 1 && after.sections.attention === 1 && after.sections.kpis === 1, JSON.stringify(after.sections));
   check('«✓ تم» يزيل العمل من الطابور دون مغادرة الصفحة', after.route === 'dashboard' && !after.attnHas && after.attnCount === before.attnCount - 1, `${before.attnCount}→${after.attnCount}`);
-  check('«الخطوة التالية» تتغير إلى العمل التالي', after.focusTitle !== before.focusTitle && !/عمل متأخر «تم»/.test(after.focusTitle), `${before.focusTitle.slice(0, 40)} → ${after.focusTitle.slice(0, 40)}`);
+  check('«الخطوة التالية» تتغير إلى العمل التالي', /الخطوة التالية/.test(after.focusTitle) && !/عمل متأخر «تم»/.test(after.focusTitle), `${before.focusTitle.slice(0, 40)} → ${after.focusTitle.slice(0, 40)}`);
+  check('Focus يبقى مفعّلًا بعد «✓ تم»', after.focusMode === 'true');
   check('الفلتر النشط (الأهمية) يبقى بعد التحديث', after.filter === filterBefore && after.filter !== '', `${filterBefore}→${after.filter}`);
-  check('موضع التمرير محفوظ بعد التحديث الموضعي', after.scrollY === before.scrollY, `${before.scrollY}→${after.scrollY}`);
+  check('موضع التمرير محفوظ بعد التحديث الموضعي', after.scrollY === scrollBefore, `${scrollBefore}→${after.scrollY}`);
   check('إشعار «تراجع» (Undo) يظهر بعد «✓ تم»', /تراجع/.test(after.undoBtn), after.undoBtn);
   await app(() => { [...document.querySelectorAll('.toast .toast-act')].at(-1)?.click(); });
   await page.waitForFunction(() => /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''), null, {timeout: 15000}).catch(() => {});
@@ -174,9 +186,12 @@ try {
     sentinel: Boolean(document.querySelector('#pos-sentinel')),
     attnCount: document.querySelectorAll('[data-attn-list] .cp-row').length,
     attnHas: /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''),
-    filter: document.querySelector('.cp-count.is-on')?.dataset.attnFilter || ''
+    filter: document.querySelector('.cp-count.is-on')?.dataset.attnFilter || '',
+    focusMode: document.querySelector('.cp-focus [data-focus-mode]')?.getAttribute('aria-pressed') || ''
   }));
-  check('«تراجع» يعيد العمل إلى الطابور بلا إعادة بناء', undone.sentinel && undone.attnHas && undone.attnCount === before.attnCount && undone.filter === filterBefore, JSON.stringify(undone));
+  check('«تراجع» يعيد العمل إلى الطابور بلا إعادة بناء', undone.sentinel && undone.attnHas && undone.attnCount === before.attnCount && undone.filter === filterBefore && undone.focusMode === 'true', JSON.stringify(undone));
+  await page.locator('.cp-focus [data-focus-mode]').click();
+  check('الخروج من Focus يعيد قائمة «ثم» على البطاقة نفسها', (await page.locator('.cp-focus [data-focus-mode]').getAttribute('aria-pressed')) === 'false' && (await page.locator('.cp-focus .cp-then li').count()) > 0);
   await app(() => { document.querySelector('#pos-sentinel')?.remove(); });
 
   // 8) تحضير الغد: بعد الوقت المضبوط فقط، ومع عنصر غدٍ وفجوة تشغيلية قابلة للتصرف.
@@ -220,11 +235,35 @@ try {
     await saveWorkConfig({tomorrowPrepAfter: oldTime});
   }, prepSeed.oldTime);
 
-  // 9) الهاتف: لا تمرير أفقي في الرئيسية مع الطبقات الجديدة
-  await page.setViewportSize({width: 390, height: 844});
-  await settle(400);
-  const ov = await app(() => ({doc: document.documentElement.scrollWidth, win: window.innerWidth}));
-  check('الهاتف 390: لا تمرير أفقي في الرئيسية', ov.doc <= ov.win, JSON.stringify(ov));
+  // 9) Quick Add context: Home «مكتب اليوم» يضع تاريخ اليوم افتراضيًا للمهمة والموعد.
+  await go('dashboard', 700);
+  await page.locator('.cp-hero [data-quick-add]').click(); await page.waitForSelector('.quick-context');
+  await page.locator('.quick-context [data-qa-kind="task"]').click();
+  await page.waitForSelector('.entity-form[data-store="workItems"]');
+  const taskDate = await page.locator('.entity-form[data-store="workItems"] [name="dueDate"]').inputValue();
+  const localToday = await page.evaluate(async () => (await import('/js/core/clock.js')).localDate());
+  check('Quick Add من الرئيسية يضع تاريخ اليوم للمهمة', taskDate === localToday, taskDate);
+  await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+  await page.locator('.cp-hero [data-quick-add]').click(); await page.waitForSelector('.quick-context');
+  await page.locator('.quick-context [data-qa-kind="appointment"]').click();
+  await page.waitForSelector('.entity-form[data-store="appointments"]');
+  const appointmentDate = await page.locator('.entity-form[data-store="appointments"] [name="date"]').inputValue();
+  check('Quick Add من الرئيسية يضع تاريخ اليوم للموعد', appointmentDate === localToday, appointmentDate);
+  await page.keyboard.press('Escape'); await page.waitForSelector('.entity-form', {state: 'detached'});
+
+  // 10) قياس عرض الصفحة الحقيقي في كل نقاط القبول، للرئيسية ومركز العمل.
+  const responsiveWidths = [360, 390, 768, 1024, 1280, 1440, 1600];
+  for (const width of responsiveWidths) {
+    await page.setViewportSize({width, height: 900}); await settle(300);
+    const ov = await app(() => ({doc: document.documentElement.scrollWidth, body: document.body.scrollWidth, win: window.innerWidth}));
+    check(`لا تمرير أفقي في الرئيسية عند ${width}px`, ov.doc <= ov.win && ov.body <= ov.win, JSON.stringify(ov));
+  }
+  await go('actionCenter', 1000); await page.waitForSelector('#wc-root', {timeout: 20000});
+  for (const width of responsiveWidths) {
+    await page.setViewportSize({width, height: 900}); await settle(350);
+    const ov = await app(() => ({doc: document.documentElement.scrollWidth, body: document.body.scrollWidth, win: window.innerWidth}));
+    check(`لا تمرير أفقي في مركز العمل عند ${width}px`, ov.doc <= ov.win && ov.body <= ov.win, JSON.stringify(ov));
+  }
   await page.setViewportSize({width: 1280, height: 900});
 
   check('لا أخطاء JavaScript أثناء الفحص', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

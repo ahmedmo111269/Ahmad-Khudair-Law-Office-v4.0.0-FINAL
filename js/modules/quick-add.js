@@ -6,6 +6,7 @@ import {icon} from '../ui/icons.js';
 import {normalizeArabic} from '../core/search-normalizer.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {toast} from '../ui/toast.js';
+import {localDate} from '../core/clock.js';
 
 const STORE_ICONS={files:'folder',clients:'users',opponents:'userX',cases:'gavel',hearings:'calendar',procedures:'clipboard',powersOfAttorney:'stamp',appointments:'clock',communications:'phone',caseNotes:'note',judgments:'landmark',expertReports:'microscope',execution:'hammer',fees:'wallet',documentReferences:'file',serviceRecords:'stamp',bailiffs:'scale',executionParties:'users',executionValuePeriods:'chart',executionReceipts:'wallet',executionPOAs:'stamp',executionActions:'hammer'};
 const CORE_ITEMS=[
@@ -19,6 +20,7 @@ const CORE_ITEMS=[
 const CORE_STORES=new Set(['files','clients','hearings','procedures','caseNotes','executionObligations','executionPeriods']);
 const OTHER_ITEMS=Object.keys(STORE_ICONS).filter(store=>!CORE_STORES.has(store)&&ENTITIES[store]).map(store=>({kind:store,label:ENTITIES[store].label,icon:STORE_ICONS[store],keywords:`${ENTITIES[store].plural||''} ${ENTITIES[store].label}`}));
 const CONTEXT_ACTIONS={
+ today:[['task','مهمة اليوم','target'],['appointment','موعد اليوم','clock']],
  client:[['file','ملف جديد للموكل','folder'],['hearing','جلسة للموكل','calendar'],['procedure','عمل إداري للموكل','clipboard'],['appointment','موعد للموكل','clock'],['note','ملاحظة مرتبطة بالموكل','note'],['task','مهمة مرتبطة بالموكل','target']],
  file:[['hearing','جلسة في الملف','calendar'],['procedure','عمل إداري في الملف','clipboard'],['party','طرف جديد','users'],['stage','مرحلة قضائية','gavel'],['note','ملاحظة مرتبطة بالملف','note'],['task','مهمة مرتبطة بالملف','target']],
  case:[['hearing','جلسة للمرحلة','calendar'],['judgment','حكم للمرحلة','landmark'],['procedure','عمل إداري للملف','clipboard'],['serviceRecord','إعلان مرتبط','stamp'],['note','ملاحظة مرتبطة بالقضية','note'],['task','مهمة مرتبطة بالقضية','target']],
@@ -30,6 +32,7 @@ const CTX_LINK={client:'CLIENT',file:'LEGAL_FILE',case:'CASE',execution:'EXECUTI
 
 function routeContext(route){
  const clean=String(route||'').split('?')[0];
+ if(clean==='dashboard')return {type:'today',date:localDate()};
  let m=/^(client|file|case|cfile):(.+)$/.exec(clean);
  if(m)return {type:m[1]==='cfile'?'client':m[1],id:m[2],clientId:['client','cfile'].includes(m[1])?m[2]:''};
  m=/^exc:(.+)$/.exec(clean);if(m)return {type:'execution',id:m[1],store:'execution'};
@@ -140,8 +143,14 @@ async function addStageFirst(app,file){
 
 async function launchOnFile(app,kind,file,context={}){
  const office=app.office;
- const stageId=context.caseId||file.currentStageId||'';
- const stage=stageId?await office.r.cases.get(stageId).catch(()=>null):null;
+ const preferredStageId=context.caseId||file.currentStageId||'';
+ let stage=preferredStageId?await office.r.cases.get(preferredStageId).catch(()=>null):null;
+ if(!stage||stage.isDeleted||stage.fileId!==file.id){
+  const stages=await office.r.cases.byIndex('fileId',file.id,500).catch(()=>[]);
+  const ordered=stages.filter(row=>!row.isDeleted).sort((a,b)=>(Number(a.stageOrder)||999)-(Number(b.stageOrder)||999)||String(a.filingDate||a.createdAt||'').localeCompare(String(b.filingDate||b.createdAt||'')));
+  stage=ordered.at(-1)||null;
+ }
+ const stageId=stage?.id||'';
  const base={fileId:file.id,...(context.clientId?{clientId:context.clientId}:{})};
  if(['hearing','judgment'].includes(kind)&&(!stage||stage.isDeleted))return addStageFirst(app,file);
  const preset={...base,...(stageId?{caseId:stageId}:{})};
@@ -171,7 +180,7 @@ export async function runQuickAction(app,kind,{context=null}={}){
  if(kind==='task'){
   const related=target.store&&target.id?target.store:target.type==='client'?'clients':target.type==='file'?'files':target.type==='case'?'cases':'';
   const id=target.id||target.record?.id;
-  if(!related||!id){const {openEntityForm}=await import('../ui/form.js');return openEntityForm(app,'workItems')}
+  if(!related||!id){const {openEntityForm}=await import('../ui/form.js');return openEntityForm(app,'workItems',{preset:target.type==='today'?{dueDate:target.date||localDate()}: {},onSaved:()=>app.refresh?.()})}
   const {openLinkedTaskForm}=await import('../ui/work-actions.js');return openLinkedTaskForm(app,related,id,{onSaved:()=>app.refresh?.()});
  }
  if(kind==='stage')kind='case';
@@ -185,6 +194,7 @@ export async function runQuickAction(app,kind,{context=null}={}){
   }
  }
  const preset={};
+ if(target.type==='today'&&kind==='appointment')preset.date=target.date||localDate();
  if(target.type==='case'&&target.caseId)preset.caseId=target.caseId;
  if(target.clientId&&['appointment','communication'].includes(kind))preset.clientId=target.clientId;
  if(target.fileId&&['appointment','communication'].includes(kind))preset.fileId=target.fileId;
