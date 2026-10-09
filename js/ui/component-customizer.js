@@ -585,8 +585,22 @@ function drawTargets(){
 
 // ===== الربط التلقائي في أي جذر (اكتشاف + وسم + تطبيق + أزرار ⚙) =====
 const headTitle=el=>el.querySelector('.panel-head h3,.panel-head h2,.sp-head>b,summary span,h3,h2,b')?.textContent?.trim()||'';
+// رؤوس الأقسام التي يُوضع فيها ⚙ داخل التدفق الطبيعي (لا فوق النص).
+const GEAR_HEAD_SEL='.panel-head,.panel-collapse-head,.sp-head,.cp-focus-head,.cp-day-head,.cp-attn-head,.cp-exec-head,summary,header';
+// عناصر تفاعلية لا تحمل ⚙ أبدًا: زر داخل زر = HTML غير صالح وتداخل مع النص (مثل تبويبات الملف).
+const INTERACTIVE_SEL='button,a,input,select,textarea,label,summary,[role="tab"],[role="tablist"],[role="button"]';
+const isGearable=el=>Boolean(el)&&!el.matches?.(INTERACTIVE_SEL);
+/** الرأس الذي يستقبل ⚙ لعنصر: رأس مباشر أولًا، ثم رأس داخلي يخص العنصر نفسه (لا يخص عنصرًا موسومًا داخله). */
+function gearHeadOf(el){
+ const direct=[...el.children].find(c=>c.matches?.(GEAR_HEAD_SEL)&&isGearable(c));
+ if(direct)return direct;
+ // الحدّ: أقرب قسم/مكوّن (موسوم) يحيط بالرأس يجب أن يكون هذا العنصر نفسه — فلا يسرق رأس قسم داخلي
+ return [...el.querySelectorAll(GEAR_HEAD_SEL)].find(h=>isGearable(h)&&h.closest('[data-uxc-id],[data-section-id]')===el)||null;
+}
 function ensureGear(el,{id,title}){
- if(el.querySelector('.uxc-gear'))return;
+ if(!isGearable(el))return;
+ // idempotent: ⚙ يخص هذا العنصر فقط — لا نعتبر ⚙ عنصرٍ موسوم داخله كأنه ⚙ لنا
+ if([...el.querySelectorAll('.uxc-gear')].some(g=>g.closest('[data-uxc-id]')===el))return;
  const btn=document.createElement('button');
  btn.type='button';btn.className='uxc-gear';
  btn.dataset.uxcGear=id;
@@ -595,9 +609,12 @@ function ensureGear(el,{id,title}){
  btn.title='⚙ تخصيص العرض';
  btn.innerHTML=icon('settings');
  btn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();openCustomizerForElement(el,btn)});
- const head=el.querySelector('.panel-head,.panel-collapse-head,summary,.sp-head');
- if(head&&head.closest('[data-uxc-id]')===el)head.append(btn);
- else{el.classList.add('uxc-gear-host');el.append(btn)}
+ const head=gearHeadOf(el);
+ if(head)head.append(btn);
+ else{
+  // لا رأس واضح: شريط صغير في التدفق أعلى المحتوى، بلا أي تموضع مطلق
+  const bar=document.createElement('div');bar.className='uxc-gear-bar';bar.append(btn);el.prepend(bar);
+ }
 }
 /**
  * اكتشاف العناصر القابلة للتخصيص في جذر معين: البطاقات (من نظام البطاقات
@@ -622,6 +639,8 @@ export function bindCustomizableComponents(root=document){
  // 2) الأقسام غير البطاقة (لوحات/تفاصيل/حاويات) — لكل قسم هوية مستقرة
  root.querySelectorAll('[data-section-id]').forEach(el=>{
   if(seen.has(el)||el.classList.contains('ux-card'))return;
+  // أزرار التنقل (مثل تبويبات الملف) ليست أقسامًا قابلة للتخصيص — تُدار بترتيب الصفحة فقط
+  if(!isGearable(el)){seen.add(el);return}
   const sid=el.dataset.sectionId,id=`section:${pageId||'page'}:${sid}`;
   el.dataset.uxcId=id;el.dataset.uxcType='section';
   const title=el.dataset.uxcTitle||headTitle(el)||sid;
@@ -632,8 +651,9 @@ export function bindCustomizableComponents(root=document){
   seen.add(el);
  });
  // 3) المراحل وأي مكون موسوم (stage / stagepath / component / مسجل مسبقًا)
- const processTagged=el=>{
+  const processTagged=el=>{
   if(seen.has(el)||el.classList.contains('uxc-preview'))return;
+  if(!isGearable(el)){seen.add(el);return}
   const id=el.dataset.uxcId,type=el.dataset.uxcType||'component';
   const title=el.dataset.uxcTitle||(type==='stage'?el.querySelector('span')?.textContent?.trim()||'':headTitle(el))||'';
   if(title)el.dataset.uxcTitle=title;

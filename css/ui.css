@@ -171,6 +171,10 @@
 .tabs button{border:0;background:transparent;padding:10px 14px;white-space:nowrap;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--text-muted);font-weight:600}
 .tabs button.active{border-bottom-color:var(--primary);color:var(--text-strong)}
 .tabs small{background:var(--surface2);border-radius:99px;padding:1px 7px;font-size:11px}
+/* تبويبات الملف: الأيقونة والنص والعدد في سطر واحد بمسافة ثابتة (لا تداخل ولا التفاف) */
+.file-tabs button{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none}
+.file-tabs .tab-icon{flex:none;line-height:1}
+.file-tabs .tab-label{white-space:nowrap}
 .stage-chain{display:flex;flex-wrap:wrap;gap:0;list-style:none;padding:0;margin:6px 0 10px}
 .stage-chain li{display:flex;align-items:center}
 .stage-chain li+li::before{content:'←';color:var(--primary);margin:0 6px;font-weight:700}
