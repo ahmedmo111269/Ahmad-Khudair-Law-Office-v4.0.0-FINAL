@@ -255,3 +255,19 @@
 .wc-dayprogress-label{margin:0 0 4px;font-variant-numeric:tabular-nums}
 .wc-card{content-visibility:auto;contain-intrinsic-size:auto 110px}
 @media print{.wc-card{content-visibility:visible;contain-intrinsic-size:auto}.wc-dayprogress{display:none}}
+
+/* يوم المحكمة داخل «مساحة اليوم»: تمرير أفقي داخل الجدول فقط، لا على الصفحة. */
+.wc-court-day{margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.wc-court-day>header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.wc-court-day h3{margin:0;font-size:1rem}
+.wc-cd-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
+.wc-court-day table{width:100%;min-width:720px;border-collapse:collapse;font-size:.9rem}
+.wc-court-day th,.wc-court-day td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:start;vertical-align:middle}
+.wc-court-day th{color:var(--muted);font-size:.82rem;white-space:nowrap}
+.wc-court-day tbody tr:last-child td{border-bottom:0}
+.wc-court-day .wc-cd-row.is-recorded{background:color-mix(in srgb,var(--surface) 82%,var(--success) 18%)}
+.wc-cd-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:260px}
+.wc-cd-status{font-weight:700;color:var(--success);white-space:nowrap}
+.wc-cd-contact{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);text-decoration:none;white-space:nowrap}
+.wc-cd-contact:hover,.wc-cd-contact:focus-visible{border-color:var(--primary);background:var(--primary-soft)}
+@media(max-width:600px){.wc-court-day{padding:9px}.wc-court-day table{min-width:680px}.wc-cd-actions{min-width:240px}}

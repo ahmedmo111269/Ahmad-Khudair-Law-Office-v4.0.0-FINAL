@@ -309,6 +309,53 @@ async function functional() {
     assert.equal(await page.locator(`.wc-card[data-wc-id="${seeded.b}"]`).count(), 1, 'العنصر المجدول يظهر في «غدًا»');
   });
 
+  await verify('Court Day: جدول جلسات اليوم، نتيجة محفوظة وعلامة «سُجّلت» ثم انتقال الصف للأسفل واتصال/WhatsApp', async () => {
+    const seeded = await page.evaluate(async today => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {createLegalFile} = await import('/js/services/legal-files.js');
+      const {saveOperational} = await import('/js/services/operations.js');
+      const client = await office.saveClient({fullName: 'WCTEST Court Client', phone: '+201011112222'});
+      const file = await createLegalFile(office, {clientId: client.id, title: 'WCTEST Court File', fileType: 'مدني'});
+      const kase = await office.createCase({fileId: file.id, stageType: 'دعوى', caseNumber: '9412', caseYear: '2026', courtId: 'محكمة الاختبار', chamber: 'الدائرة الأولى'});
+      const first = await saveOperational(office, 'hearings', {caseId: kase.id, fileId: file.id, hearingDate: today, hearingTime: '08:00', type: 'نظر', reason: 'WCTEST جلسة 1', court: 'محكمة الاختبار', chamber: 'الدائرة الأولى'});
+      const second = await saveOperational(office, 'hearings', {caseId: kase.id, fileId: file.id, hearingDate: today, hearingTime: '09:00', type: 'نظر', reason: 'WCTEST جلسة 2', court: 'محكمة الاختبار', chamber: 'الدائرة الأولى'});
+      return {clientId: client.id, fileId: file.id, caseId: kase.id, first: first.id, second: second.id};
+    }, today());
+    await page.selectOption('#wc-view-select', 'cards');
+    await page.click('[data-wc-range="today"]'); await ready(page);
+    const table = page.locator('.wc-court-day');
+    assert.equal(await table.count(), 1, 'جدول يوم المحكمة يظهر عند وجود جلسات');
+    assert.deepEqual(await table.locator('thead th').allTextContents(), ['الوقت', 'القضية', 'الموكل', 'المحكمة/الدائرة', 'الإجراء']);
+    const firstRow = table.locator(`tr[data-cd-id="hearings::${seeded.first}"]`);
+    const secondRow = table.locator(`tr[data-cd-id="hearings::${seeded.second}"]`);
+    assert.ok((await firstRow.textContent()).includes('9412/2026'), 'رقم القضية');
+    assert.ok((await firstRow.textContent()).includes('WCTEST Court Client'), 'اسم الموكل');
+    assert.ok((await firstRow.textContent()).includes('محكمة الاختبار'), 'المحكمة والدائرة');
+    assert.ok(await firstRow.locator('a[href^="tel:"]').count(), 'رابط اتصال');
+    assert.ok(await firstRow.locator('a[href*="wa.me/"]').count(), 'رابط WhatsApp');
+    assert.ok(await firstRow.locator('[data-wc-nav^="rec:hearings:"]').count(), 'فتح المصدر');
+    const rowOrder = async () => table.locator('tbody tr').evaluateAll(rows => rows.map(r => r.dataset.cdId));
+    const before = await rowOrder();
+    assert.ok(before.indexOf(`hearings::${seeded.first}`) < before.indexOf(`hearings::${seeded.second}`), 'الجلسات مرتبة بالوقت');
+
+    await firstRow.locator('[data-cd-result]').click(); await page.waitForSelector('.entity-form[data-store="hearings"]');
+    await page.fill('.entity-form [name=result]', 'WCTEST تم تسجيل نتيجة الجلسة');
+    await page.click('.entity-form [type=submit]'); await page.waitForSelector('.entity-form', {state: 'detached'}); await ready(page);
+    const after = await rowOrder();
+    assert.ok(after.indexOf(`hearings::${seeded.second}`) < after.indexOf(`hearings::${seeded.first}`), 'الجلسة المسجّلة تنتقل للأسفل');
+    assert.ok((await table.locator(`tr[data-cd-id="hearings::${seeded.first}"]`).textContent()).includes('✓ سُجّلت'), 'علامة سُجّلت');
+    const stored = await dbGet(page, 'hearings', seeded.first);
+    assert.equal(stored.result, 'WCTEST تم تسجيل نتيجة الجلسة', 'النتيجة في سجل الجلسة الأصلي');
+
+    // تنظيف صفوف الاختبار وعلاقاتها بعد التحقق.
+    await page.evaluate(async ids => {
+      const app = window.__LAW_OFFICE_APP__, office = app.office;
+      const {deleteEntity} = await import('/js/services/entity-save.js');
+      for (const [store, id] of [['hearings', ids.first], ['hearings', ids.second], ['cases', ids.caseId], ['files', ids.fileId], ['clients', ids.clientId]]) await deleteEntity(office, store, id).catch(() => {});
+    }, seeded);
+    await page.selectOption('#wc-view-select', 'cards'); await ready(page);
+  });
+
   await verify('My Day: عرض مدمج للمثبّت والعاجل والمتأخر واليوم واختيار المستخدم، بلا تكرار وانتهاء الاختيار غدًا', async () => {
     const seeded = await page.evaluate(async today => {
       const app = window.__LAW_OFFICE_APP__, office = app.office;

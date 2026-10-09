@@ -290,6 +290,12 @@ export async function bindWorkCenter(app, q) {
     if (stat) return applyStat(stat.dataset.wcStat);
     const rangeBtn = t.closest('[data-wc-range]');
     if (rangeBtn) return rt.setState({range: rangeBtn.dataset.wcRange, ...(rangeBtn.dataset.wcRange === 'custom' ? {} : {from: '', to: ''})});
+    const courtResult = t.closest('[data-cd-result]');
+    if (courtResult) {
+      const item = rt.items.get(courtResult.dataset.cdResult);
+      if (!item || item.sourceType !== 'hearings') return;
+      return openEntityForm(app, 'hearings', {id: item.sourceId, title: 'تسجيل نتيجة الجلسة', onSaved: async () => { await rt.onChanged({id: item.id, sourceChanged: true}); }});
+    }
     if (t.closest('[data-wc-new]')) return newTask();
     if (t.closest('[data-wc-new-proc]')) return openEntityForm(app, 'procedures', {onSaved: async () => { await rt.onChanged({}); }});
     if (t.closest('[data-wc-new-appt]')) return openEntityForm(app, 'appointments', {onSaved: async () => { await rt.onChanged({}); }});
