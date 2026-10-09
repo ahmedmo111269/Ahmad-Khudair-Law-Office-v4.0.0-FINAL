@@ -208,5 +208,6 @@ export function actionKeyFor(kind, state = {}) {
 export const HOME_LIMITS = Object.freeze({
   queuePerGroup: 5,          // أعلى عدد في كل طبقة من الطابور قبل «عرض الكل»
   sinceLastVisit: 15,        // أقصى عدد تغييرات في «منذ آخر زيارة»
-  postponeReviewAt: 3        // عدد التأجيلات الذي ينقل العمل إلى «يحتاج مراجعة» (إشارة تشغيلية فقط)
+  postponeReviewAt: 3,       // عدد التأجيلات الذي ينقل العمل إلى «يحتاج مراجعة» (إشارة تشغيلية فقط)
+  nowWindow: {before: 30, after: 90}  // نافذة «الآن» بالدقائق: من −30 إلى +90 دقيقة من الآن
 });

@@ -80,6 +80,23 @@ export async function bindFilePage(app,id){
  }}));
  root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
  bindCockpit(root,app);
+ // بعد «✓ تم» في مركز الملف: تحديث موضعي لقسم «مركز الملف» فقط — بلا إعادة بناء الصفحة.
+ app.__refreshAfterAction=async()=>{
+  if(!app.route||!app.route.startsWith('file:'))return app.refresh();
+  const sec=root.querySelector('.cp-fc');if(!sec)return app.refresh();
+  const scrollY=window.scrollY;
+  try{
+   const [hearingsRes,proceduresRes]=await Promise.all([fileChildren(app.office,id,'hearings'),fileChildren(app.office,id,'procedures')]);
+   const cur=app.__file.stages.find(s=>s.id===app.__file.f.currentStageId)||app.__file.stages.at(-1);
+   const tpl=document.createElement('template');
+   tpl.innerHTML=fileCockpitHtml({hearings:hearingsRes.rows,procedures:proceduresRes.rows,stages:app.__file.stages,parties:app.__file.parties,today:localDate(),currentStage:cur?refLabel('cases',cur):''}).trim();
+   sec.replaceWith(tpl.content.firstElementChild);
+   bindCockpit(root,app);
+   root.querySelectorAll('.cp-fc [data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
+   root.querySelector('[data-cp-task]')?.addEventListener('click',()=>root.querySelector('[data-file-task]')?.click());
+   window.scrollTo(0,scrollY);
+  }catch(err){app.fail(err)}
+ };
  root.querySelector('[data-cp-task]')?.addEventListener('click',()=>root.querySelector('[data-file-task]')?.click());
  root.querySelector('[data-file-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await app.refresh()}})});
  root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{

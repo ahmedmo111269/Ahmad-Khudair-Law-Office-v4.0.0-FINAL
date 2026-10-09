@@ -109,7 +109,77 @@ try {
   });
   check('تبويب أقدم لا يستبدل قيمة lastSeen أحدث', guard.wrote === false && guard.kept, JSON.stringify(guard));
 
-  // 7) الهاتف: لا تمرير أفقي في الرئيسية مع الطبقات الجديدة
+  // 7) التحديث الموضعي بعد «✓ تم»: بلا إعادة بناء الصفحة، وبـ «تراجع» (Undo) يعمل
+  // عزل البيانات: نحذف البيانات التجريبية حتى تكون قائمة الانتباه
+  // مستندة على بيانات هذا الفحص فقط
+  await app(async () => {
+    const office = window.__LAW_OFFICE_APP__.office;
+    const {removeDemoData} = await import('/js/services/demo-data.js');
+    await removeDemoData(office, {reason: 'عزل بيانات فحص التحديث الموضعي'});
+  });
+  const posSeed = await app(async fileId => {
+    const office = window.__LAW_OFFICE_APP__.office;
+    const clock = await import('/js/core/clock.js');
+    const {saveEntity} = await import('/js/services/entity-save.js');
+    const today = clock.localDate();
+    const p = await saveEntity(office, 'procedures', {fileId, type: 'متابعة', description: '〔تجريبي〕 عمل متأخر «تم»', internalDueDate: clock.addDays(today, -1), status: 'open', priority: 'urgent'});
+    return {procId: p?.id || ''};
+  }, seed.fileId);
+  check('زرع عمل إداري متأخر عاجل', Boolean(posSeed.procId), JSON.stringify(posSeed).slice(0, 120));
+
+  await go('dashboard', 900);
+  await app(() => { const el = document.createElement('div'); el.id = 'pos-sentinel'; el.hidden = true; document.querySelector('#main-content').append(el); window.scrollTo(0, 420); });
+  const before = await app(() => ({
+    hook: typeof window.__LAW_OFFICE_APP__.__refreshAfterAction,
+    route: window.__LAW_OFFICE_APP__.route,
+    focusTitle: document.querySelector('#cp-focus-title')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    attnCount: document.querySelectorAll('[data-attn-list] .cp-row').length,
+    attnHas: /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''),
+    scrollY: window.scrollY
+  }));
+  check('hook التحديث الموضعي مفعَّل في الرئيسية', before.hook === 'function' && before.route === 'dashboard', JSON.stringify(before));
+  check('العمل المتأخر العاجل هو «الخطوة التالية»', /عمل متأخر «تم»/.test(before.focusTitle) && before.attnHas, before.focusTitle.slice(0, 80));
+  await app(() => { document.querySelector('[data-attn-filter="critical"]')?.click(); });
+  const filterBefore = await app(() => document.querySelector('.cp-count.is-on')?.dataset.attnFilter || '');
+  const clickInfo = await app(() => {
+    const btn = document.querySelector('.cp-focus [data-complete-proc]');
+    if (!btn) return {clicked: false};
+    btn.click();
+    return {clicked: true};
+  });
+  check('زر «✓ تم» موجود في بطاقة الخطوة التالية', clickInfo.clicked);
+  await page.waitForFunction(() => !/عمل متأخر «تم»/.test(document.querySelector('#cp-focus-title')?.textContent || ''), null, {timeout: 15000}).catch(() => {});
+  await settle(600);
+  const after = await app(() => ({
+    sentinel: Boolean(document.querySelector('#pos-sentinel')),
+    sections: {focus: document.querySelectorAll('[data-section-id="focus"]').length, attention: document.querySelectorAll('[data-section-id="attention"]').length, kpis: document.querySelectorAll('[data-section-id="kpis"]').length},
+    route: window.__LAW_OFFICE_APP__.route,
+    focusTitle: document.querySelector('#cp-focus-title')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    attnCount: document.querySelectorAll('[data-attn-list] .cp-row').length,
+    attnHas: /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''),
+    filter: document.querySelector('.cp-count.is-on')?.dataset.attnFilter || '',
+    scrollY: window.scrollY,
+    undoBtn: [...document.querySelectorAll('.toast .toast-act')].at(-1)?.textContent?.trim() || ''
+  }));
+  check('لا إعادة بناء كاملة: Sentinel و قسم واحد لكل قسم', after.sentinel && after.sections.focus === 1 && after.sections.attention === 1 && after.sections.kpis === 1, JSON.stringify(after.sections));
+  check('«✓ تم» يزيل العمل من الطابور دون مغادرة الصفحة', after.route === 'dashboard' && !after.attnHas && after.attnCount === before.attnCount - 1, `${before.attnCount}→${after.attnCount}`);
+  check('«الخطوة التالية» تتغير إلى العمل التالي', after.focusTitle !== before.focusTitle && !/عمل متأخر «تم»/.test(after.focusTitle), `${before.focusTitle.slice(0, 40)} → ${after.focusTitle.slice(0, 40)}`);
+  check('الفلتر النشط (الأهمية) يبقى بعد التحديث', after.filter === filterBefore && after.filter !== '', `${filterBefore}→${after.filter}`);
+  check('موضع التمرير محفوظ بعد التحديث الموضعي', after.scrollY === before.scrollY, `${before.scrollY}→${after.scrollY}`);
+  check('إشعار «تراجع» (Undo) يظهر بعد «✓ تم»', /تراجع/.test(after.undoBtn), after.undoBtn);
+  await app(() => { [...document.querySelectorAll('.toast .toast-act')].at(-1)?.click(); });
+  await page.waitForFunction(() => /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''), null, {timeout: 15000}).catch(() => {});
+  await settle(500);
+  const undone = await app(() => ({
+    sentinel: Boolean(document.querySelector('#pos-sentinel')),
+    attnCount: document.querySelectorAll('[data-attn-list] .cp-row').length,
+    attnHas: /عمل متأخر «تم»/.test(document.querySelector('[data-attn-list]')?.textContent || ''),
+    filter: document.querySelector('.cp-count.is-on')?.dataset.attnFilter || ''
+  }));
+  check('«تراجع» يعيد العمل إلى الطابور بلا إعادة بناء', undone.sentinel && undone.attnHas && undone.attnCount === before.attnCount && undone.filter === filterBefore, JSON.stringify(undone));
+  await app(() => { document.querySelector('#pos-sentinel')?.remove(); });
+
+  // 8) الهاتف: لا تمرير أفقي في الرئيسية مع الطبقات الجديدة
   await page.setViewportSize({width: 390, height: 844});
   await settle(400);
   const ov = await app(() => ({doc: document.documentElement.scrollWidth, win: window.innerWidth}));

@@ -56,6 +56,11 @@
 .wc-search input{width:100%;min-height:42px}
 .wc-view-pick{display:flex;align-items:center;gap:6px;font-size:.88rem}
 .wc-view-pick select{min-height:42px}
+.wc-view-ctrl{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.wc-view-ctrl #wc-view-name{font-weight:600}
+.wc-menu-group{display:grid;gap:6px;margin:0 0 12px}
+.wc-menu-group:last-child{margin-bottom:0}
+.wc-menu-group h3{margin:0;font-size:.78rem;color:var(--muted);padding:2px 4px}
 .wc-scope-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 10px;border:1px dashed var(--primary-border);border-radius:var(--radius-sm);background:var(--primary-soft);font-size:.88rem}
 .wc-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
 .wc-filters[hidden]{display:none}

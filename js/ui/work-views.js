@@ -14,6 +14,7 @@ import {
 } from '../domain/work-items.js';
 import {workCardHtml, groupHeaderHtml, chip} from './work-card.js';
 import {nowAndNext, queryWorkItems} from '../services/work-query.js';
+import {HOME_LIMITS} from '../services/work-config.js';
 import {prefs} from '../core/preferences.js';
 
 const PAGE_ID = 'actionCenter';
@@ -80,19 +81,29 @@ async function renderToday(rt) {
   const byPriority = mergePriorities(config).map(p => ({p, n: items.filter(i => i.priority === p.key).length}));
   const summary = `<div class="wc-day-summary" role="status"><b>${items.length}</b> عنصرًا لليوم${done.items.length ? ` · <b>${done.items.length}</b> منجز اليوم` : ''}${byPriority.filter(x => x.n).map(({p, n}) => ` <span class="wc-chip wc-pri wc-pri--${p.key}" style="--wc-c:${esc(p.color)}"><span aria-hidden="true">${esc(p.icon)}</span><b class="wc-mark" aria-hidden="true">${esc(p.mark)}</b>${esc(p.label)}: ${n}</span>`).join('')}</div>`;
   const switcher = `<div class="wc-layouts" role="group" aria-label="طريقة عرض اليوم">${DAY_LAYOUTS.map(([k, l]) => `<button type="button" class="ghost small" data-wc-layout="${k}" aria-pressed="${st.dayLayout === k}">${esc(l)}</button>`).join('')}</div>`;
-  const nn = nowAndNext(items, new Date().toTimeString().slice(0, 5));
-  const nowBox = nn.now.length || nn.next ? `<div class="wc-now" role="region" aria-label="الآن والتالي">${nn.now.length ? `<div><h4>الآن</h4>${cardsHtml(rt, nn.now, {compact: true})}</div>` : ''}${nn.next ? `<div><h4>التالي</h4>${cardsHtml(rt, [nn.next], {compact: true})}</div>` : ''}</div>` : '';
+  // نافذة «الآن» من الإعدادات (−30/+90 دقيقة)، افتراضيًا 60/30.
+  const nn = nowAndNext(items, new Date().toTimeString().slice(0, 5), {windowBefore: HOME_LIMITS.nowWindow.before, windowAfter: HOME_LIMITS.nowWindow.after});
+  // now/next cards render full (with client/case context) - the user acts on them right now
+  const nowBox = nn.now.length || nn.next ? `<div class="wc-now" role="region" aria-label="الآن والتالي">${nn.now.length ? `<div><h4>الآن</h4>${cardsHtml(rt, nn.now)}</div>` : ''}${nn.next ? `<div><h4>التالي</h4>${cardsHtml(rt, [nn.next])}</div>` : ''}</div>` : '';
+  // عناصر «الآن/التالي» تُعرض في مربع الآن/التالي وحدها — لا تُكرَّر داخل أقسام اليوم.
+  const nnIds = new Set([...nn.now.map(i => i.id), ...(nn.next ? [nn.next.id] : [])]);
+  const dayItems = items.filter(i => !nnIds.has(i.id));
+  // ترتيب أقسام «مساحة اليوم»: الآن → التالي → اليوم → يحتاج موعدًا → أُنجز اليوم (مطوي).
   let body = '';
   if (!items.length && !undated.items.length) body = emptyView(rt, 'يومك خالٍ من الالتزامات المسجّلة. استمتع بالهدوء أو خطّط للأيام القادمة.');
-  else if (st.dayLayout === 'priority') {
-    body = mergePriorities(config).map(p => { const list = items.filter(i => i.priority === p.key); return list.length ? section(rt, `prio:${p.key}`, `${p.icon} ${p.label}`, list, {tone: p.key === 'urgent' ? 'danger' : ''}) : ''; }).join('');
-  } else if (st.dayLayout === 'timeline') {
-    const timed = items.filter(i => i.dueTime), untimed = items.filter(i => !i.dueTime);
-    body = section(rt, 'timeline', 'الخط الزمني لليوم', timed, {body: `<ol class="wc-timeline">${timed.map(i => `<li><time>${esc(i.dueTime)}</time>${rt.html(i, {compact: true})}</li>`).join('')}</ol>${untimed.length ? `<h4 class="wc-group-h">بلا وقت محدد</h4>${cardsHtml(rt, untimed)}` : ''}`});
-  } else {
-    body = DAY_PARTS.filter(([k]) => k !== 'undated').map(([key, label]) => { const list = items.filter(i => dayPartOf(i) === key); return list.length ? section(rt, `part:${key}`, label, list, {tone: key === 'hearings' ? 'info' : ''}) : ''; }).join('');
+  else {
+    body = dayItems.length ? '<h3 class="wc-group-h">اليوم</h3>' : '';
+    if (st.dayLayout === 'priority') {
+      body += mergePriorities(config).map(p => { const list = dayItems.filter(i => i.priority === p.key); return list.length ? section(rt, `prio:${p.key}`, `${p.icon} ${p.label}`, list, {tone: p.key === 'urgent' ? 'danger' : ''}) : ''; }).join('');
+    } else if (st.dayLayout === 'timeline') {
+      const timed = dayItems.filter(i => i.dueTime), untimed = dayItems.filter(i => !i.dueTime);
+      body += section(rt, 'timeline', 'الخط الزمني لليوم', timed, {body: `<ol class="wc-timeline">${timed.map(i => `<li><time>${esc(i.dueTime)}</time>${rt.html(i, {compact: true})}</li>`).join('')}</ol>${untimed.length ? `<h4 class="wc-group-h">بلا وقت محدد</h4>${cardsHtml(rt, untimed)}` : ''}`});
+    } else {
+      body += DAY_PARTS.filter(([k]) => k !== 'undated').map(([key, label]) => { const list = dayItems.filter(i => dayPartOf(i) === key); return list.length ? section(rt, `part:${key}`, label, list, {tone: key === 'hearings' ? 'info' : ''}) : ''; }).join('');
+    }
   }
-  if (undated.items.length) body += section(rt, 'part:undated', 'بلا موعد', undated.items, {more: undated.hasMore});
+  if (undated.items.length) body += section(rt, 'part:undated', 'يحتاج موعدًا', undated.items, {more: undated.hasMore});
+  if (done.items.length) body += section(rt, 'done-today', 'أُنجز اليوم', done.items, {collapsed: true});
   // الأقسام داخل .wc-sections: عمود واحد على الجوال، وعمودان على سطح المكتب (الجلسات بجانب الأعمال الإدارية…).
   host.innerHTML = `${summary}${switcher}${nowBox}${pinned.html}<div class="wc-sections">${body}</div>`;
   host.querySelectorAll('[data-wc-layout]').forEach(b => b.onclick = () => rt.setState({dayLayout: b.dataset.wcLayout}));

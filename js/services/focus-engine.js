@@ -52,7 +52,8 @@ function item(o){
   reasonCode:o.reasonCode,reasonParams:o.reasonParams||{},
   done:Boolean(o.done),
   sort:sortKey(o.date,o.time),
-  daysLeft:o.daysLeft??null
+  daysLeft:o.daysLeft??null,
+  postponeCount:Number(o.postponeCount||0)
  };
 }
 
@@ -108,7 +109,7 @@ export function buildFocusModel(brief,{today,now=''}={}){
    meta:'متأخر عن موعده الداخلي',ctx:p.__fileLabel,
    when:`كان موعده ${dayOf(p.internalDueDate)}`,
    route:`rec:procedures:${p.id}`,actionLabel:ACTION_LABEL[actionKeyFor('procedure')],daysLeft:diffDays(today,p.internalDueDate),
-   reasonCode:'OVERDUE',reasonParams:{days:late,postponed}});
+   reasonCode:'OVERDUE',reasonParams:{days:late,postponed},postponeCount:postponed});
  }
  for(const p of b.upcomingProcedures||[]){
   const urgent=['urgent','critical','عاجل'].includes(String(p.priority||'').toLowerCase());
