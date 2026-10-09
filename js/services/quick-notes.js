@@ -64,6 +64,8 @@ const dateNow = () => new Date();
 
 export function effectiveNoteState(note, at = nowIso()) {
   if (!note) return 'TRASH';
+  // إزالة نهائية: الصف المتبقي كـ Tombstone للمزامنة فقط، فلا يُعرض في السلة ولا في العدّادات.
+  if (note.purgedAt) return 'PURGED';
   if (note.deletedAt || note.isDeleted) return 'TRASH';
   if (note.archivedAt || note.isArchived) return 'ARCHIVED';
   if (note.lifecycle === NOTE_LIFECYCLES.DONE) return 'DONE';
@@ -376,12 +378,25 @@ export async function deleteQuickNote(office, id) {
   return updateNoteState(office, id, {deletedAt: now, isDeleted: true}, 'deleted');
 }
 
+/**
+ * إزالة فعلية داخل معاملة قائمة: الحذف الفيزيائي في وضع المزامنة يتحول إلى Tombstone يحمل كل حقول الصف،
+ * لذلك نختم الصف أولًا بـ purgedAt (كـ Tombstone أيضًا) ثم نحذفه؛ فيبقى Tombstone المزامنة لكنه لا يعود للسلة.
+ */
+async function purgeNoteRowInTx(tx, id, now) {
+  const notes = tx.objectStore(NOTE_STORE);
+  const row = await request(notes.get(id));
+  if (!row) return false;
+  await request(notes.put({...row, isDeleted: true, deletedAt: row.deletedAt || now, purgedAt: now, updatedAt: now, version: Number(row.version || 0) + 1}));
+  await request(notes.delete(id));
+  return true;
+}
+
 export async function purgeQuickNote(office, id) {
   const row = await getQuickNote(office, id, {raw: true});
   if (!row) throw new AppError(ERR.NOT_FOUND, 'الملاحظة غير موجودة في السلة.');
   if (!row.deletedAt && !row.isDeleted) throw new AppError(ERR.CONFLICT, 'لا يمكن الإزالة النهائية قبل نقل الملاحظة إلى السلة.');
   await transaction(office.ctx, [NOTE_STORE, LINK_STORE, STORE.activityLog], async tx => {
-    await request(tx.objectStore(NOTE_STORE).delete(id));
+    await purgeNoteRowInTx(tx, id, nowIso());
     const links = await request(tx.objectStore(LINK_STORE).index('noteId').getAll(IDBKeyRange.only(id)));
     for (const link of links) await request(tx.objectStore(LINK_STORE).delete(link.id));
     await request(tx.objectStore(STORE.activityLog).add(activity(office, id, 'purged')));
@@ -535,8 +550,9 @@ export async function quickNotesStats(office, {pageLimit = 100, maxRows = 20000}
     const page = await office.r.caseNotes.page({index: 'updatedAt', cursor, limit: Math.min(Math.max(1, Number(pageLimit) || 100), MAX_PAGE), direction: 'prev', includeDeleted: true});
     for (const row of page.items) {
       scanned += 1;
-      counts.ALL += 1;
       const state = effectiveNoteState(row);
+      if (state === 'PURGED') { if (scanned >= maxRows) { counts.capped = true; break; } continue; }
+      counts.ALL += 1;
       if (state === 'TRASH') counts.TRASH += 1;
       else if (state === 'ACTIVE') { counts.ACTIVE += 1; if (isInboxRow(row)) counts.INBOX += 1; }
       else if (state === 'SNOOZED') { counts.ACTIVE += 1; counts.SNOOZED += 1; }
@@ -555,9 +571,10 @@ export async function emptyQuickNoteTrash(office, {limit = 200} = {}) {
   const ids = page.rows.map(row => row.id);
   if (!ids.length) return {purged: 0};
   await transaction(office.ctx, [NOTE_STORE, LINK_STORE, STORE.activityLog], async tx => {
-    const notes = tx.objectStore(NOTE_STORE), links = tx.objectStore(LINK_STORE);
+    const links = tx.objectStore(LINK_STORE);
+    const at = nowIso();
     for (const id of ids) {
-      await request(notes.delete(id));
+      await purgeNoteRowInTx(tx, id, at);
       const rows = await request(links.index('noteId').getAll(IDBKeyRange.only(id)));
       for (const link of rows) await request(links.delete(link.id));
     }

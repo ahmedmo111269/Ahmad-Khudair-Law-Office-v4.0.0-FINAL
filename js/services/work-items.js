@@ -634,3 +634,50 @@ export async function bulkApply(office, refs, action, params = {}) {
   }
   return {done, failed};
 }
+
+// ---------- المهام المنجزة: عدّ وحذف نهائي (مهام مستقلة فقط) ----------
+// «منجزة» = مهمة مستقلة (kind='native') حالتها done ولم تُحذف منطقيًا. لا تُلمس السجلات الأصلية
+// (جلسات/أعمال/مواعيد) ولا طبقاتها، لأنها ليست مهامًا مستقلة. الحذف نهائي من الشاشة وقاعدة البيانات:
+// يمر عبر معاملة DatabaseContext نفسها كبقية الحذف الفيزيائي (يُسجَّل كـ Tombstone للمزامنة).
+const isLiveCompletedNative = row => row?.kind === WORK_KIND.native && row.status === 'done' && !row.isDeleted && !row.deletedAt;
+
+/** عدد المهام المنجزة الحيّة (قراءة فقط عبر فهرس الحالة، بصفحات محدودة). */
+export async function countCompletedWorkItems(office) {
+  let count = 0, cursor = null;
+  do {
+    const page = await office.r.workItems.page({index: 'status', key: 'done', cursor, limit: 100, filter: isLiveCompletedNative});
+    count += page.items.length;
+    cursor = page.hasMore ? page.nextCursor : null;
+  } while (cursor);
+  return count;
+}
+
+/**
+ * حذف نهائي لدفعة من المهام المنجزة مع تعليقاتها، في معاملة واحدة لكل دفعة.
+ * يعيد عدد ما حُذف في هذه الدفعة؛ استدعِه حتى يعود 0 لتفريغ الكل.
+ */
+export async function purgeCompletedWorkItems(office, {limit = 200} = {}) {
+  const cap = Math.min(Math.max(1, Number(limit) || 1), 500);
+  const ids = [];
+  let cursor = null;
+  do {
+    const page = await office.r.workItems.page({index: 'status', key: 'done', cursor, limit: 100, filter: isLiveCompletedNative});
+    for (const row of page.items) {
+      ids.push(row.id);
+      if (ids.length >= cap) break;
+    }
+    cursor = ids.length >= cap ? null : (page.hasMore ? page.nextCursor : null);
+  } while (cursor);
+  if (!ids.length) return {purged: 0};
+  await transaction(office.ctx, [WI, WC, STORE.activityLog], async tx => {
+    const items = tx.objectStore(WI), comments = tx.objectStore(WC);
+    for (const id of ids) {
+      await request(items.delete(id));
+      const rows = await request(comments.index('workItemId').getAll(IDBKeyRange.only(id)));
+      for (const comment of rows) await request(comments.delete(comment.id));
+    }
+    await logTx(tx, activityRow('bulk', 'purged', `حذف نهائي لـ ${ids.length} مهمة منجزة`, {metadata: {count: ids.length}}));
+  });
+  events.emit('entity:changed', {entityType: WI, id: 'bulk'});
+  return {purged: ids.length};
+}

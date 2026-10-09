@@ -1,5 +1,5 @@
 // =====================================================================
-// واجهة التشغيل المشتركة — «الآن» و«يحتاج انتباهك» و«جدول اليوم» و«ما الذي حدث؟»
+// واجهة التشغيل المشتركة — «الآن» و«يحتاج انتباهك» و«جدول اليوم» و«منذ آخر زيارة»
 // ومركز عمل الموكل وكوكبيت الملف. مكوّنات HTML + ربط سلوك، بلا قراءة/كتابة مباشرة
 // للبيانات إلا عبر الخدمات المعتمدة (completeItem لإنجاز عمل إداري).
 // ---------------------------------------------------------------------
@@ -144,18 +144,6 @@ export function timelineHtml(model,{dayLabel='',empty='لا جلسات ولا م
 }
 
 const kindLabel=k=>({hearing:'جلسة',appointment:'موعد',followup:'متابعة اتصال',execution:'تنفيذ'})[k]||'';
-
-/** ما الذي حدث؟ — آخر تحركات السجل (قراءة فقط). */
-export function activityHtml(rows){
- return `<section class="cp-activity" data-section-id="activity" aria-labelledby="cp-act-title">
-  <header class="cp-day-head"><div><span class="cp-eyebrow">ما الذي حدث؟</span><h2 id="cp-act-title">آخر التحركات</h2></div><span class="muted small">آخر ${rows.length||0} تحرّك</span></header>
-  ${rows.length?`<ol class="cp-tl cp-tl--log">${rows.map(r=>{
-    const ent=ENTITIES[r.entityType]?.label||'';
-    const inner=`<time>${esc(formatDateTime(r.timestamp)||'')}</time><span class="cp-log-txt">${esc(r.summary||'نشاط')}${ent?`<small>${esc(ent)}</small>`:''}</span>`;
-    return `<li>${r.fileId?`<button type="button" data-route="file:${esc(r.fileId)}">${inner}</button>`:`<div>${inner}</div>`}</li>`;
-   }).join('')}</ol>`:`<div class="cp-empty cp-empty--soft"><span aria-hidden="true">◌</span><p>لا توجد تحركات مسجلة بعد.</p></div>`}
- </section>`;
-}
 
 /**
  * منذ آخر زيارة: تغييرات السجل منذ مغادرة المكتب آخر مرة (قراءة فقط).

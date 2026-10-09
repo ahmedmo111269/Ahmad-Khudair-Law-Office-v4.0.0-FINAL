@@ -62,7 +62,7 @@
 .cp-then small{color:var(--text-muted);white-space:nowrap}
 
 /* جدول اليوم */
-.cp-day,.cp-attn,.cp-activity{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
+.cp-day,.cp-attn{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
 .cp-day{display:flex;flex-direction:column;min-width:0}
 .cp-day-head,.cp-attn-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap}
 .cp-day-head h2,.cp-attn-head h2{margin:2px 0 0;font-size:1.08rem;color:var(--text-strong)}
@@ -123,8 +123,7 @@
 .cp-fc-stage{grid-column:1/-1}
 .cp-fc-stage dd{font-size:.95rem;font-weight:700}
 
-/* ---------- ما الذي حدث ---------- */
-.cp-activity{margin-bottom:16px}
+/* ---------- سجل الزيارة (منذ آخر زيارة) ---------- */
 .cp-tl--log li{grid-template-columns:1fr}
 .cp-tl--log li>button,.cp-tl--log li>div{flex-direction:row;align-items:center;gap:12px;padding:8px 12px}
 .cp-tl--log time{padding:0;text-align:start;font-size:.8rem;color:var(--text-muted);white-space:nowrap;min-width:9.5em}
@@ -234,3 +233,13 @@
 .home-tomorrow-prep{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-block:10px}
 .home-tomorrow-prep>span{min-width:0}
 @media(max-width:600px){.home-tomorrow-prep{align-items:flex-start;flex-direction:column}.home-tomorrow-prep button{width:100%}}
+
+/* ---------- تنظيف نهائي (الرئيسية): حذف ملاحظات السلة والمهام المنجزة ---------- */
+.home-purge .purge-list{display:grid;gap:10px}
+.home-purge .purge-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2,transparent)}
+.home-purge .purge-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+.home-purge .purge-info small{color:var(--text-muted)}
+.home-purge .purge-row button{flex:none;white-space:nowrap}
+.home-purge .purge-row button:disabled{opacity:.5;cursor:not-allowed}
+.home-purge .purge-note{margin:2px 0 0}
+@media (max-width:640px){.home-purge .purge-row{flex-direction:column;align-items:stretch}.home-purge .purge-row button{width:100%}}

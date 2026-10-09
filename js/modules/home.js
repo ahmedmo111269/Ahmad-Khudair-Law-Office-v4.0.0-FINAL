@@ -4,8 +4,10 @@
 //   1) الآن .......... ما الذي يجب فعله الآن؟ (الخطوة التالية بإجراء واحد)
 //   2) يحتاج انتباهك .. ما الذي يحتاج قرارًا؟ (طابور مرتب بالأهمية + فلاتر)
 //   3) جدول اليوم .... ما الذي يقع اليوم بالترتيب الزمني؟
-//   4) ما حدث؟ ....... آخر تحركات السجل
+//   4) منذ آخر زيارة .. تغييرات السجل منذ مغادرتك (يظهر عند وجودها فقط)
 //   5) ملخص وتفاصيل .. المؤشرات، الأجندة، التقارير، والمثبّتات — كما كانت
+//   6) تنظيف نهائي ... حذف ملاحظات السلة والمهام المنجزة نهائيًا (بتأكيد صريح)
+// (قسم «آخر التحركات / ما الذي حدث؟» أُزيل من هذه الشاشة بطلب المستخدم.)
 // كل بيانات الصفحة تأتي من dashboardBrief() الموجودة؛ محرّك التركيز دالة نقيّة فوقها.
 // كل عنصر يعرض معلومة يفتح سجلها بنقرة (قاعدة المنتج).
 import {esc} from '../ui/dom.js';
@@ -26,7 +28,9 @@ import {registerPageLayout,openPageCustomizer,applyPageDisplay,applyPageLayout} 
 import {enhanceCollapsiblePanels} from '../ui/collapsible.js';
 import {applyUniversalStyles} from '../ui/component-customizer.js';
 import {buildFocusModel} from '../services/focus-engine.js';
-import {focusHtml,attentionHtml,timelineHtml,activityHtml,sinceHtml,bindCockpit} from '../ui/cockpit.js';
+import {focusHtml,attentionHtml,timelineHtml,sinceHtml,bindCockpit} from '../ui/cockpit.js';
+import {confirmBox} from '../ui/modal.js';
+import {toast} from '../ui/toast.js';
 import {HOME_LIMITS,getWorkConfig} from '../services/work-config.js';
 import {tomorrowPrepCandidate} from '../services/tomorrow-prep.js';
 import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.js';
@@ -38,10 +42,10 @@ registerPageLayout({pageId:'dashboard',title:'مكتب اليوم',sections:[
  {id:'attention',title:'يحتاج انتباهك',icon:'⚑'},
  {id:'since',title:'منذ آخر زيارة',icon:'⟲'},
  {id:'kpis',title:'ملخص العمل',icon:'◈'},
- {id:'activity',title:'ما الذي حدث؟',icon:'≋'},
  {id:'favs',title:'مثبّتات',icon:'★'},
  {id:'agenda',title:'الأجندة',icon:'📅'},
  {id:'shortcuts',title:'تقارير العمل السريع',icon:'▤'},
+ {id:'purge',title:'تنظيف نهائي',icon:'✕'},
  {id:'recents',title:'آخر ما فُتح',icon:'🕘'}]});
 
 let __lastBrief=null;
@@ -86,12 +90,7 @@ async function loadHomeData(app){
  const sinceBase=homeBaseline(scope);
  const sinceRaw=sinceBase?await app.office.r.activityLog.reportRange({index:'timestamp',lower:sinceBase,upper:'\uffff',direction:'prev',limit:HOME_LIMITS.sinceLastVisit+1}).catch(()=>[]):[];
  const since=sinceChanges(sinceRaw,sinceBase);
- // «ما الذي حدث؟» — آخر 6 حركات (قراءة محدودة بالفهرس الزمني، بلا مسح كامل).
- // إذا وُجدت 6 حركات على الأقل بعد خط الأساس، فآخر 6 حركات "الكل" هي نفسها — استعلام واحد يكفي.
- let activity;
- if(sinceRaw.length>=6)activity=sinceRaw.slice(0,6);
- else activity=await app.office.r.activityLog.reportRange({index:'timestamp',lower:'0000-01-01',upper:'\uffff',direction:'prev',limit:6}).catch(()=>[]);
- return {r,focus,since,activity,today,nowHM,scope};
+ return {r,focus,since,today,nowHM,scope};
 }
 
 /** شرائط مؤشرات «ملخص العمل» — نفس القائمة في أول render وفي التحديث الموضعي. */
@@ -136,7 +135,7 @@ function tomorrowPrepHtml(brief){
 }
 
 export async function homePage(app){
- const {r,focus,since,activity,today,scope}=await loadHomeData(app);
+ const {r,focus,since,today,scope}=await loadHomeData(app);
  const g=GREETINGS[greetingKey()];
  const recents=getRecent(scope).slice(0,8);
  const favs=getFavorites(scope).slice(0,8);
@@ -175,14 +174,92 @@ export async function homePage(app){
  ${attentionHtml(focus)}
  ${sinceHtml(since)}
  ${kpisSectionHtml(r)}
- ${activityHtml(activity)}
 ${card({icon:'report',title:'تقارير العمل السريع',size:'full',cls:'daily-shortcuts',collapsible:true,persistKey:'home:shortcuts',sectionId:'shortcuts',pageId:'dashboard',
   body:`<div class="shortcut-grid"><button data-dashboard-report="hearings|tomorrow">جلسات غدًا</button><button data-dashboard-report="hearings|nextWeek">جلسات الأسبوع التالي</button><button data-dashboard-report="hearings|month">جلسات هذا الشهر</button><button data-dashboard-report="procedures|tomorrow">أعمال غدًا</button><button data-dashboard-report="procedures|nextWeek">أعمال الأسبوع التالي</button><button data-dashboard-report="procedures|month">أعمال هذا الشهر</button><button data-route-report="clients">الموكلون</button><button data-route-report="cases">القضايا</button></div>`})}
  ${card({icon:'calendar',title:'الأجندة',size:'lg',cls:'agenda',collapsible:true,persistKey:'home:agenda',sectionId:'agenda',pageId:'dashboard',
   actions:`<div class="agenda-modes" role="group" aria-label="طريقة عرض الأجندة"><button type="button" data-agenda-mode="day">يوم</button><button type="button" data-agenda-mode="week">أسبوع</button><button type="button" data-agenda-mode="month">شهر</button><button type="button" data-agenda-mode="list">قائمة</button></div>`,
   body:`<div class="agenda-layout" id="agenda-layout"><div id="home-calendar"></div><div class="agenda-day"><h4 id="agenda-title"></h4><div id="agenda-grid"></div></div></div>`})}
+ ${purgeCardHtml()}
  ${recents.length?card({icon:'clock',title:'آخر ما فُتح',size:'full',cls:'recents-section',collapsible:true,collapsed:true,persistKey:'home:recents',sectionId:'recents',pageId:'dashboard',summary:'السجلات التي فتحتها مؤخرًا — تُفتح بنقرة، والقسم مطوي افتراضيًا لتبقى الصفحة نظيفة',badge:statusBadge(String(recents.length),'info'),
   body:`<div class="recents-bar"><div class="recents-chips">${recents.map(x=>`<button class="recent-chip" data-recent="${esc(x.route)}"><span class="rc-ic" aria-hidden="true">${esc(x.icon==='calendar'?'📅':x.icon==='users'?'👤':x.icon==='gavel'?'⚖':'📁')}</span><span class="rc-t">${esc(x.title)}</span></button>`).join('')}</div></div>`}):''}`;
+}
+
+/**
+ * «تنظيف نهائي»: حذف ملاحظات السلة والمهام المنجزة نهائيًا — كل خطوة بتأكيد صريح.
+ * الأعداد تُملأ بعد الرسم (refreshPurgeCounts) حتى لا تُبطئ أول عرض للصفحة.
+ */
+function purgeCardHtml(){
+ return card({icon:'x',title:'تنظيف نهائي',size:'full',cls:'home-purge',collapsible:true,collapsed:false,persistKey:'home:purge',sectionId:'purge',pageId:'dashboard',
+  summary:'حذف نهائي لا يمكن التراجع عنه — كل خطوة تطلب تأكيدًا قبل التنفيذ',
+  body:`<div class="purge-list">
+   <div class="purge-row"><div class="purge-info"><b>ملاحظات في السلة</b><small data-purge-notes-count>جارٍ الحساب…</small></div><button type="button" class="ghost danger" data-purge-notes disabled title="حذف الملاحظات الموجودة في السلة نهائيًا">🗑 حذف الملاحظات من السلة نهائيًا</button></div>
+   <div class="purge-row"><div class="purge-info"><b>مهام منجزة</b><small data-purge-tasks-count>جارٍ الحساب…</small></div><button type="button" class="ghost danger" data-purge-tasks disabled title="حذف المهام المستقلة المنجزة نهائيًا مع تعليقاتها">🗑 حذف المهام المنجزة نهائيًا</button></div>
+   <p class="muted small purge-note">الملاحظات خارج السلة والمهام غير المنجزة لا تتأثر. الجلسات والأعمال الإدارية والمواعيد لا تُحذف من هنا أبدًا.</p>
+  </div>`});
+}
+
+/** يملأ أعداد «تنظيف نهائي» ويفعّل الأزرار فقط عند وجود ما يُحذف. */
+async function refreshPurgeCounts(app){
+ const notesEl=document.querySelector('[data-purge-notes-count]');
+ if(!notesEl)return;
+ const tasksEl=document.querySelector('[data-purge-tasks-count]');
+ const notesBtn=document.querySelector('[data-purge-notes]');
+ const tasksBtn=document.querySelector('[data-purge-tasks]');
+ try{
+  const [{countQuickNotes}, {countCompletedWorkItems}]=await Promise.all([import('../services/quick-notes.js'),import('../services/work-items.js')]);
+  const [notes,tasks]=await Promise.all([countQuickNotes(app.office,{status:'TRASH'}),countCompletedWorkItems(app.office)]);
+  notesEl.textContent=notes?`${formatNumber(notes)} ملاحظة في السلة`:'السلة فارغة';
+  tasksEl.textContent=tasks?`${formatNumber(tasks)} مهمة منجزة`:'لا توجد مهام منجزة';
+  if(notesBtn)notesBtn.disabled=!notes;
+  if(tasksBtn)tasksBtn.disabled=!tasks;
+ }catch{
+  notesEl.textContent='تعذر حساب الملاحظات في السلة';
+  tasksEl.textContent='تعذر حساب المهام المنجزة';
+ }
+}
+
+/** حذف نهائي لكل ملاحظات السلة بعد تأكيد. يعيد عدد ما حُذف (أو 0 عند الإلغاء). */
+async function purgeTrashNotes(app){
+ const {countQuickNotes,emptyQuickNoteTrash}=await import('../services/quick-notes.js');
+ const count=await countQuickNotes(app.office,{status:'TRASH'});
+ if(!count){toast('السلة فارغة بالفعل','info');return 0}
+ const ok=await confirmBox(`حذف <b>${formatNumber(count)}</b> ملاحظة من السلة <b>نهائيًا</b>؟<br><small class="muted">لا يمكن استعادتها بعد الحذف، وتُزال روابطها مع الملاحظات. الملاحظات خارج السلة لا تتأثر.</small>`,{okText:'حذف نهائي'});
+ if(!ok)return 0;
+ let total=0;
+ for(let i=0;i<200;i++){const {purged}=await emptyQuickNoteTrash(app.office,{limit:500});total+=purged;if(!purged)break}
+ toast(total?`حُذفت ${formatNumber(total)} ملاحظة من السلة نهائيًا`:'لم يُحذف شيء',total?'ok':'info');
+ return total;
+}
+
+/** حذف نهائي لكل المهام المنجزة (المستقلة فقط) بعد تأكيد. يعيد عدد ما حُذف (أو 0 عند الإلغاء). */
+async function purgeCompletedTasks(app){
+ const {countCompletedWorkItems,purgeCompletedWorkItems}=await import('../services/work-items.js');
+ const count=await countCompletedWorkItems(app.office);
+ if(!count){toast('لا توجد مهام منجزة لحذفها','info');return 0}
+ const ok=await confirmBox(`حذف <b>${formatNumber(count)}</b> مهمة منجزة <b>نهائيًا</b>؟<br><small class="muted">تُحذف المهمة وتعليقاتها ولا يمكن استعادتها. الجلسات والأعمال الإدارية والمواعيد الأصلية لا تُمس.</small>`,{okText:'حذف نهائي'});
+ if(!ok)return 0;
+ let total=0;
+ for(let i=0;i<200;i++){const {purged}=await purgeCompletedWorkItems(app.office,{limit:200});total+=purged;if(!purged)break}
+ toast(total?`حُذفت ${formatNumber(total)} مهمة منجزة نهائيًا`:'لم يُحذف شيء',total?'ok':'info');
+ return total;
+}
+
+/** يربط أزرار «تنظيف نهائي»: كل زر يمنع النقر المزدوج أثناء التنفيذ، ثم يحدّث الأعداد والصفحة. */
+function bindPurgeActions(app){
+ const wire=(selector,run)=>{
+  const button=document.querySelector(selector);if(!button)return;
+  button.onclick=async()=>{
+   if(button.disabled)return;
+   button.disabled=true;
+   try{
+    const removed=await run(app);
+    if(removed){await positionalHomeRefresh(app)}
+   }catch(err){app.fail(err)}
+   finally{button.disabled=false;await refreshPurgeCounts(app).catch(()=>{})}
+  };
+ };
+ wire('[data-purge-notes]',purgeTrashNotes);
+ wire('[data-purge-tasks]',purgeCompletedTasks);
 }
 
 /** Toggle «Focus» on the existing Next Step Card only — no timer and no new screen. */
@@ -207,7 +284,7 @@ function bindHomeFocusMode(root,app){
 }
 
 // الأقسام التي يُحدَّث كل منها موضعًا بعد أي إجراء (بلا إعادة بناء الصفحة).
-const DYNAMIC_SECTIONS=['focus','today','attention','since','kpis','activity'];
+const DYNAMIC_SECTIONS=['focus','today','attention','since','kpis'];
 
 /**
  * تحديث موضعي بعد «✓ تم» (أو «تراجع»): يُعاد تحميل البيانات ويُستبدل كل قسم
@@ -220,17 +297,16 @@ async function positionalHomeRefresh(app){
  const scrollY=window.scrollY;
  const activeFilter=main.querySelector('.cp-count.is-on')?.dataset.attnFilter||'all';
  const activeEl=document.activeElement;
- const activeInDynamic=Boolean(activeEl&&activeEl.closest?.('.cp-hero,.cp-stage,[data-section-id="focus"],[data-section-id="today"],[data-section-id="attention"],[data-section-id="since"],[data-section-id="kpis"],[data-section-id="activity"]'));
+ const activeInDynamic=Boolean(activeEl&&activeEl.closest?.('.cp-hero,.cp-stage,[data-section-id="focus"],[data-section-id="today"],[data-section-id="attention"],[data-section-id="since"],[data-section-id="kpis"]'));
  try{
-  const {r,focus,since,activity,today}=await loadHomeData(app);
+  const {r,focus,since,today}=await loadHomeData(app);
   const dayLabel=longDateAr();
   const html={
    focus:focusHtml(focus,{dayLabel,focusMode:Boolean(app.__homeFocusMode)}),
    today:timelineHtml(focus,{dayLabel:`يوم ${fmtDate(today)}`}),
    attention:attentionHtml(focus),
    since:sinceHtml(since),
-   kpis:kpisSectionHtml(r),
-   activity:activityHtml(activity)
+   kpis:kpisSectionHtml(r)
   };
   for(const id of DYNAMIC_SECTIONS){
    const next=html[id];
@@ -294,6 +370,8 @@ export function bindHome(app){
  document.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'dashboard'}));
  document.querySelectorAll('[data-open-rec]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.openRec));
  document.querySelectorAll('[data-recent]').forEach(b=>b.onclick=()=>app.go(b.dataset.recent));
+ bindPurgeActions(app);
+ refreshPurgeCounts(app).catch(()=>{});
  const refs=new Map();
  const relations=createGridRelations(app.office,'agenda');
  const cols=[
