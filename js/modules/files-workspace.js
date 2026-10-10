@@ -16,8 +16,8 @@ export function filesWorkspaceHtml({st,presets,chips,hasDate}){
   <div class="custom-range"${st.preset==='custom'?'':' hidden'}><label>من<input type="date" id="list-from" value="${esc(st.from||'')}"></label><label>إلى<input type="date" id="list-to" value="${esc(st.to||'')}"></label><button type="button" class="ghost" data-range-apply>عرض</button></div>`:'';
  return `<div class="fw" data-files-workspace>
  <header class="fw-pagebar" data-fw-pagebar>
+  <button type="button" class="primary fw-addfile" data-list-add title="إنشاء ملف قانوني جديد — نفس مسار الإنشاء المعتمد (تحقق وترقيم تلقائي وتنقّل)">${icon('plus')}<span class="fw-addfile-lbl">إضافة ملف جديد</span></button>
   <h2 class="fw-title">الملفات</h2>
-  <button type="button" class="primary fw-addfile" data-list-add title="إنشاء ملف قانوني جديد">إضافة ملف</button>
   <button type="button" class="ghost icon-btn fw-icon" data-fw-search aria-label="بحث شامل" title="لوحة الأوامر — البحث الشامل">${icon('search')}</button>
   <button type="button" class="primary fw-quickadd" data-fw-quick-add title="إضافة سريعة لأي سجل">+ إضافة</button>
   <button type="button" class="ghost fw-back" data-fw-back title="رجوع">↩ <span class="fw-lbl">رجوع</span></button>
@@ -37,6 +37,7 @@ export function filesWorkspaceHtml({st,presets,chips,hasDate}){
   <button type="button" class="ghost fw-tb-btn" data-fw-clear title="مسح بحث الصفحة وفلاتر الوقت وفلاتر الجدول — دون المساس بإعدادات العرض أو التحديد">مسح الفلاتر</button>
   <button type="button" class="ghost fw-tb-btn" data-fw-cards aria-pressed="false" title="تبديل جدول / بطاقات">بطاقات</button>
   <button type="button" class="ghost fw-tb-btn" data-fw-io aria-haspopup="true" aria-expanded="false">المزيد</button>
+  <button type="button" class="ghost fw-tb-btn fw-sel-clear" data-fw-sel-clear hidden title="مسح تحديد الصفوف المحددة فقط — لا يمس البحث ولا الفلاتر ولا إعدادات العرض">${icon('x')}<span>مسح التحديد</span><span class="fw-badge" data-fw-sel-count hidden></span></button>
  </div>
  <div class="fw-panel fw-time-panel" data-fw-panel="time" hidden role="dialog" aria-label="فلاتر الوقت">
   <section class="fw-group"><h3>حالة الملف</h3>${chipsHtml}</section>
@@ -61,6 +62,14 @@ export function paintFilesWorkspace(root,st,grid){
  const nGrid=Number(ui?.filterCount||0);
  const gridBadge=root.querySelector('[data-fw-grid-count]');
  if(gridBadge){gridBadge.textContent=nGrid?String(nGrid):'';gridBadge.hidden=!nGrid}
+ const nSel=Number(ui?.selected||0);
+ const selBtn=root.querySelector('[data-fw-sel-clear]');
+ if(selBtn){
+  selBtn.hidden=!nSel;
+  const cnt=selBtn.querySelector('[data-fw-sel-count]');
+  if(cnt){cnt.textContent=nSel?String(nSel):'';cnt.hidden=!nSel}
+  selBtn.setAttribute('aria-label',nSel?`مسح التحديد — ${nSel} صف محدد`:'مسح التحديد');
+ }
  const cardsBtn=root.querySelector('[data-fw-cards]');
  if(cardsBtn){
   const cards=Boolean(ui?.cards);
@@ -90,6 +99,8 @@ export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,save
 
  root.querySelector('[data-fw-page-more]')?.addEventListener('click',e=>{
   const btn=e.currentTarget;
+  // إغلاق قوائم الجدول العائمة حتى لا تتداخل طبقات القوائم فوق بعضها.
+  document.querySelectorAll('.dg-pop .dg-x').forEach(x=>x.click());
   openWorkspaceMenu(btn,{el:panel('page-more'),width:240,role:'menu',label:'المزيد'});
  });
  root.querySelector('[data-fw-themes]')?.addEventListener('click',e=>{
@@ -98,8 +109,15 @@ export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,save
   closeWorkspaceMenu();
   openThemeMenuAt(app,more);
  });
+ // عناصر قائمة «المزيد» التي تفتح نافذة منبثقة (إجراءات الصف/تخصيص الصفحة):
+ // أغلق القائمة أولًا وإلّا بقيت عائمة خلف النافذة وصار النقر التالي على زر «المزيد» إغلاقًا بدل فتح.
+ root.querySelector('[data-fw-panel="page-more"]')?.addEventListener('click',e=>{
+  if(e.target.closest('[data-qa-custom],[data-customize-page]'))closeWorkspaceMenu();
+ });
 
  root.querySelector('[data-fw-time]')?.addEventListener('click',e=>{
+  // لا تبقى قوائم الجدول (dg-pop) عائمة فوق لوحة الوقت أو حاجبة لزرها — تُغلق أولًا.
+  document.querySelectorAll('.dg-pop .dg-x').forEach(x=>x.click());
   openWorkspaceMenu(e.currentTarget,{el:panel('time'),width:Math.min(520,window.innerWidth-16),role:'dialog',label:'فلاتر الوقت'});
  });
  root.querySelector('[data-fw-display]')?.addEventListener('click',e=>{
@@ -119,6 +137,13 @@ export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,save
   const g=gridOf();
   if(!g)return;
   g.toggleCards();
+  paintFilesWorkspace(root,st,g);
+ });
+ root.querySelector('[data-fw-sel-clear]')?.addEventListener('click',()=>{
+  closeAll();
+  const g=gridOf();
+  if(!g)return;
+  g.clearSelection();// يمسح التحديد الفعلي وحده: يحدّث الصفوف والعدّاد فورًا ولا يمس بحثًا ولا فلترًا
   paintFilesWorkspace(root,st,g);
  });
  root.querySelector('[data-fw-clear]')?.addEventListener('click',()=>{

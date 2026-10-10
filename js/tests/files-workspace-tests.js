@@ -1,6 +1,6 @@
 // اختبارات مساحة عمل الملفات (Four-Zone Files Workspace)
 import {listPage} from '../modules/list-page.js';
-import {filesWorkspaceHtml,paintFilesWorkspace} from '../modules/files-workspace.js';
+import {filesWorkspaceHtml,paintFilesWorkspace,bindFilesChrome} from '../modules/files-workspace.js';
 import {FILE_LIST_CHIPS} from '../modules/list-page.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {openWorkspaceMenu,closeWorkspaceMenu,isWorkspaceMenuOpen} from '../ui/workspace-menu.js';
@@ -36,10 +36,12 @@ export function runFilesWorkspaceTests(test,expect){
    if(el.hasAttribute('data-fw-page-more'))return 'more';
    return el.className;
   });
-  expect(keys.join('|')).toBe('title|addfile|search|quick|back|home|more');
+  expect(keys.join('|')).toBe('addfile|title|search|quick|back|home|more');
+  expect(bar.querySelector('[data-list-add]').textContent).toContain('إضافة ملف جديد');
+  expect(bar.querySelectorAll('[data-list-add]').length).toBe(1);
  });
 
- test('صفحة الملفات: ترتيب شريط أدوات الجدول السبعة',()=>{
+ test('صفحة الملفات: ترتيب شريط أدوات الجدول — «مسح التحديد» أخيرًا (أقصى اليسار)',()=>{
   const root=parse(listPage(mockApp(),'files',null));
   const bar=root.querySelector('[data-fw-toolbar]');
   const keys=[...bar.children].map(el=>{
@@ -50,9 +52,11 @@ export function runFilesWorkspaceTests(test,expect){
    if(el.hasAttribute('data-fw-clear'))return 'clear';
    if(el.hasAttribute('data-fw-cards'))return 'cards';
    if(el.hasAttribute('data-fw-io'))return 'io';
+   if(el.hasAttribute('data-fw-sel-clear'))return 'selclear';
    return el.className;
   });
-  expect(keys.join('|')).toBe('display|filters|time|search|clear|cards|io');
+  expect(keys.join('|')).toBe('display|filters|time|search|clear|cards|io|selclear');
+  expect(bar.querySelectorAll('[data-fw-sel-clear]').length).toBe(1);
  });
 
  test('صفحة الملفات: المزيد يحتوي الثيمات وإجراءات الصف وتخصيص الصفحة',()=>{
@@ -190,6 +194,58 @@ export function runFilesWorkspaceTests(test,expect){
   expect(collected.rows.length).toBe(3);
   expect(collected.truncated).toBe(false);
   root.remove();
+ });
+
+ test('وضع مساحة العمل لا يرسم شريط الإجراءات الجماعية القديم إطلاقًا',()=>{
+  const root=document.createElement('div');
+  document.body.append(root);
+  mountGrid(root,{workspace:true,title:'الملفات',storageKey:'test:fw-noselbar:'+Date.now(),selectable:true,
+   rows:[{id:'1',name:'أ'}],columns:[{key:'name',label:'الاسم'}],
+   bulkActions:[{id:'archive',label:'أرشفة',danger:true}],onBulk:()=>{}});
+  const chk=root.querySelector('.dg-rowchk');
+  chk.checked=true;chk.dispatchEvent(new Event('change',{bubbles:true}));
+  expect(Boolean(root.querySelector('.dg-selbar'))).toBe(false);
+  expect(Boolean(root.querySelector('.dg-open-sel'))).toBe(false);
+  root.remove();
+ });
+
+ test('الجداول العادية خارج مساحة العمل تحتفظ بشريط التحديد وإجراءاته كاملة',()=>{
+  const root=document.createElement('div');
+  document.body.append(root);
+  mountGrid(root,{title:'الجلسات',storageKey:'test:nw-selbar:'+Date.now(),selectable:true,
+   rows:[{id:'1',name:'أ'}],columns:[{key:'name',label:'الاسم'}]});
+  const sb=root.querySelector('.dg-selbar');
+  expect(Boolean(sb)).toBe(true);
+  expect(Boolean(sb.querySelector('.dg-sel-clear'))).toBe(true);
+  expect(Boolean(sb.querySelector('.dg-sel-print'))).toBe(true);
+  expect(Boolean(sb.querySelector('.dg-sel-export'))).toBe(true);
+  expect(Boolean(sb.querySelector('.dg-open-sel'))).toBe(true);
+  root.remove();
+ });
+
+ test('«مسح التحديد» في شريط الأدوات: مخفي بلا تحديد، يظهر بعدّاد، ويمسح التحديد الفعلي',()=>{
+  const host=parse(listPage(mockApp(),'files',null));
+  document.body.append(host);
+  const st={q:'',preset:'all',from:'',to:'',chip:'all',status:'all'};
+  let grid;
+  grid=mountGrid(host.querySelector('#list-grid'),{workspace:true,title:'الملفات',storageKey:'test:fw-selclear:'+Date.now(),selectable:true,
+   rows:[{id:'1',name:'أ'},{id:'2',name:'ب'}],columns:[{key:'name',label:'الاسم'}],
+   onChrome:()=>paintFilesWorkspace(host,st,grid)});
+  bindFilesChrome(mockApp(),{root:host,st,getGrid:()=>grid});
+  const btn=host.querySelector('[data-fw-sel-clear]');
+  expect(btn.hidden).toBe(true);
+  const boxes=[...host.querySelectorAll('.dg-rowchk')];
+  boxes[0].checked=true;boxes[0].dispatchEvent(new Event('change',{bubbles:true}));
+  boxes[1].checked=true;boxes[1].dispatchEvent(new Event('change',{bubbles:true}));
+  expect(grid.getUi().selected).toBe(2);
+  expect(btn.hidden).toBe(false);
+  expect(host.querySelector('[data-fw-sel-count]').textContent).toBe('2');
+  btn.click();
+  expect(grid.getUi().selected).toBe(0);
+  expect(grid.getSelection().length).toBe(0);
+  expect(btn.hidden).toBe(true);
+  // لا يمس البحث: نص البحث في شريط الأدوات يبقى كما هو
+  host.remove();
  });
 
  test('شرائح الملفات ما زالت معرفة كما هي',()=>{
