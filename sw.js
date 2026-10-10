@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.2.1-wave7-p2-natural-quick-add';
+const CACHE='ahmad-khudair-law-office-v6.2.2-files-workspace';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -47,6 +47,7 @@ const ASSETS=[
   "./css/quick-notes.css",
   "./css/topnav.css",
   "./css/topbar.css",
+  "./css/files-workspace.css",
   "./css/cockpit.css",
   "./css/mobile-pwa.css",
   "./icons/app-icon.svg",
@@ -111,6 +112,8 @@ const ASSETS=[
   "./js/modules/home.js",
   "./js/modules/integrity.js",
   "./js/modules/list-page.js",
+  "./js/modules/files-workspace.js",
+  "./js/ui/workspace-menu.js",
   "./js/modules/quick-add.js",
   "./js/modules/quick-notes.js",
   "./js/modules/reminders.js",

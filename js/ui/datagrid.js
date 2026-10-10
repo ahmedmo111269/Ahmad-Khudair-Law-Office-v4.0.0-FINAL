@@ -115,6 +115,11 @@ export function mountGrid(root,opts){
  let hl=null;const collapsed=new Set();
  let view=[];
  root.classList.add('dg');
+ if(o.workspace){
+  root.classList.add('dg-workspace');
+  st.shellCollapsed=false;
+  st.toolsCollapsed=false;
+ }
  root.dataset.gridId=PK||`grid:anonymous:${instance}`;
  const bodyId=`dg-body-${instance}`,toolsId=`dg-tools-${instance}`;
  root.dataset.collapseReady='true';root.dataset.collapseType='grid';root.dataset.collapseKey=shellCollapseKey;root.dataset.collapseCollapsed=String(st.shellCollapsed);
@@ -239,6 +244,7 @@ export function mountGrid(root,opts){
   if(shellCount)shellCount.textContent=`— ${shownSummary}${n?` · ${fmtN(n)} فلاتر نشطة`:''}${st.activeView?` · ${st.activeView}`:''}`;
  }
  function applyChrome(){
+  if(o.workspace){st.shellCollapsed=false;st.toolsCollapsed=false}
   root.style.setProperty('--dg-w',(st.tableWidth||100)+'%');
   root.classList.toggle('dg-span-wide',st.span==='wide'||st.span==='full');
   root.classList.toggle('dg-span-full',st.span==='full');
@@ -264,6 +270,19 @@ export function mountGrid(root,opts){
   syncCollapsePin($('.dg-shell-pin'),shellCollapseKey);
   syncCollapsePin($('.dg-tools-pin'),toolsCollapseKey);
   syncCollapsePin($('.dg-filter-pin'),filterCollapseKey);
+  syncWorkspaceExit();
+ }
+ function syncWorkspaceExit(){
+  if(!o.workspace)return;
+  let btn=$('.dg-fs-exit');
+  const on=root.classList.contains('dg-fullscreen')||document.fullscreenElement===root;
+  if(!btn){
+   btn=document.createElement('button');
+   btn.type='button';btn.className='primary dg-fs-exit';btn.textContent='✕ خروج من ملء الشاشة';
+   btn.addEventListener('click',()=>$('.dg-fullscreen')?.click());
+   root.append(btn);
+  }
+  btn.hidden=!on;
  }
  function menuItems(row){try{const items=(typeof o.rowMenu==='function'?o.rowMenu(row):o.rowMenu)||[];return Array.isArray(items)?items:[];}catch{return []}}
  function compute(){
@@ -367,6 +386,8 @@ export function mountGrid(root,opts){
   ['small','medium','large'].forEach(d=>root.classList.toggle('dg-font-'+d,st.fontSize===d));$('.dg-font').value=st.fontSize;
   $('.dg-views-btn').classList.toggle('dg-chip-active',Boolean(st.activeView));
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
+  try{o.onChrome?.({cards:st.cards,density:st.density,fontSize:st.fontSize,filterCount:nFilt,selected:st.selected.size,viewCount:view.length,activeView:st.activeView,span:st.span,fullscreen:root.classList.contains('dg-fullscreen')||document.fullscreenElement===root})}catch{/* عرض فقط */}
+  syncWorkspaceExit();
   $('.dg-filter-toggle').setAttribute('aria-expanded',String(!st.filterCollapsed));
   $('.dg-fullscreen').setAttribute('aria-pressed',String(root.classList.contains('dg-fullscreen')));$('.dg-fullscreen').textContent=root.classList.contains('dg-fullscreen')?'⛶ خروج من الشاشة':'⛶ ملء الشاشة';
   const state=$('.dg-state');
@@ -475,6 +496,7 @@ export function mountGrid(root,opts){
   if(detail.target==='tools'||detail.target==='all'){st.toolsCollapsed=next;if(save)saveCollapseState(toolsCollapseKey,next)}
   if(detail.target==='filters'||detail.target==='all'){st.filterCollapsed=next;if(save)saveCollapseState(filterCollapseKey,next)}
   if(detail.target==='section'||detail.target==='all'){st.shellCollapsed=next;if(save)saveCollapseState(shellCollapseKey,next)}
+  if(o.workspace)st.shellCollapsed=false;
   if(save)persist();applyChrome();
  });
  root.addEventListener('collapse:reset',()=>{
@@ -489,7 +511,8 @@ export function mountGrid(root,opts){
  root.addEventListener('fullscreenchange',()=>{root.classList.toggle('dg-fullscreen',document.fullscreenElement===root);renderBody()});
  $('thead').addEventListener('pointerdown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle)return;e.preventDefault();const th=handle.closest('th'),key=th?.dataset.key;if(!key)return;const startX=e.clientX,startW=th.getBoundingClientRect().width,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl';let w=startW;const move=ev=>{w=Math.max(byKey.get(key).minWidth,Math.min(byKey.get(key).maxWidth,startW+(rtl?startX-ev.clientX:ev.clientX-startX)));th.style.width=w+'px';th.style.minWidth=w+'px';th.style.maxWidth=w+'px'};const end=()=>{document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',end,true);document.removeEventListener('pointercancel',end,true);st.widths[key]=Math.round(w);persist();renderBody()};document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',end,true);document.addEventListener('pointercancel',end,true)});
  $('thead').addEventListener('keydown',e=>{const handle=e.target.closest('.dg-resizer');if(!handle||!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const th=handle.closest('th'),key=th.dataset.key,rtl=(root.closest('[dir]')?.dir||document.documentElement.dir)==='rtl',delta=(e.key==='ArrowRight'?1:-1)*(rtl?-1:1)*12,w=Math.max(byKey.get(key).minWidth,Math.min(byKey.get(key).maxWidth,(Number(st.widths[key])||th.getBoundingClientRect().width)+delta));st.widths[key]=w;persist();renderHead();[...$('thead').querySelectorAll('th')].find(x=>x.dataset.key===key)?.querySelector('.dg-resizer')?.focus()});
- $('.dg-clear').addEventListener('click',()=>{st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.colSearch={};st.activeView='';$('.dg-quick').value='';renderAdv();changeQuery()});
+ function clearQueryFilters(){st.filters.clear();st.adv.rules=[];st.quick='';st.sort=[];st.colSearch={};st.activeView='';const qel=$('.dg-quick');if(qel)qel.value='';renderAdv();changeQuery()}
+ $('.dg-clear').addEventListener('click',()=>clearQueryFilters());
  $('.dg-chips').addEventListener('click',e=>{
   if(e.target.closest('.dg-chips-clear')){$('.dg-clear').click();return}
   const b=e.target.closest('[data-rm]');if(!b)return;const t=b.dataset.rm,k=b.dataset.k;
@@ -500,11 +523,12 @@ export function mountGrid(root,opts){
  const toggleGroup=tr=>{const k=tr.dataset.g;collapsed.has(k)?collapsed.delete(k):collapsed.add(k);renderBody()};
  $('tbody').addEventListener('click',e=>{const tr=e.target.closest('.dg-grouprow');if(tr){e.stopPropagation();toggleGroup(tr)}},true);
  $('tbody').addEventListener('keydown',e=>{const tr=e.target.closest?.('.dg-grouprow');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();toggleGroup(tr)}});
- root.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();$('.dg-quick').focus()}});
+ root.addEventListener('keydown',e=>{if(o.workspace)return;if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();$('.dg-quick').focus()}});
  $('.dg-cards-btn').addEventListener('click',()=>{st.cards=!st.cards;persist();renderBody()});
  $('.dg-density').addEventListener('change',e=>{st.density=e.target.value;rowH=0;persist();renderBody()});
  // ===== 🎨 تخصيص مظهر الجدول — popover داخل Universal DataGrid (البند: إعدادات الجدول تبقى ضمن الجدول) =====
- $('.dg-head-gear')?.addEventListener('click',e=>{
+ function openAppearPop(anchor){
+  if(!anchor)return;
   closePop();pop=document.createElement('div');pop.className='dg-pop dg-appear-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','تخصيص مظهر الجدول');
   const ctl=(key,label,inner)=>`<div class="uxc-ctl" data-ap="${key}"><span class="uxc-ctl-lbl">${label}</span><div class="uxc-ctl-in">${inner}<button type="button" class="link uxc-clear" data-apc="${key}" title="إعادة هذه القيمة للوضع الافتراضي" aria-label="إعادة ${label} للافتراضي" hidden>↺</button></div></div>`;
   const rng=(key,label,min,max,step,val)=>ctl(key,label,`<input type="range" data-apr="${key}" min="${min}" max="${max}" step="${step}" value="${val??min}" aria-label="${label}"><output data-apo>${val!=null?val+'px':'—'}</output>`);
@@ -521,7 +545,7 @@ export function mountGrid(root,opts){
    </div>
    <p class="muted small">تُحفظ القيم ضمن إعدادات هذا الجدول المحفوظة لديه — الجداول الأخرى لا تتغير، ولا تُعاد قراءة أي بيانات. الحجم/الكثافة/الأعمدة/الفرز/التصفية/طرق العرض تبقى في أدوات الجدول نفسها.</p>
    <div class="dg-pop-actions"><button type="button" class="ghost dg-appear-reset">↺ إعادة مظهر الجدول</button></div>`;
-  place(pop,e.currentTarget);
+  place(pop,anchor);
   const drawValues=()=>{
    pop.querySelectorAll('[data-ap]').forEach(row=>{
     const k=row.dataset.ap,v=st.appear[k];
@@ -557,7 +581,8 @@ export function mountGrid(root,opts){
    if(cb)setKey(cb.dataset.apc,null);
   });
   drawValues();
- });
+ }
+ $('.dg-head-gear')?.addEventListener('click',e=>openAppearPop(e.currentTarget));
  let raf=0;$('.dg-scroll').addEventListener('scroll',()=>{if(!virtualOn()||raf)return;raf=requestAnimationFrame(()=>{raf=0;renderWindow(false)})},{passive:true});
  $('.dg-print').addEventListener('click',()=>printGrid());
  $('.dg-export').addEventListener('change',e=>{const v=e.target.value;e.target.value='';if(v)Promise.resolve(exportGrid(v)).catch(error=>toast(`تعذر التصدير: ${error?.message||''}`,'error'))});
@@ -620,13 +645,14 @@ export function mountGrid(root,opts){
  let pop=null;
  const closePop=()=>{pop?.remove();pop=null;document.removeEventListener('mousedown',outside,true);disarmPopGuard()};
  const outside=e=>{if(pop&&!pop.contains(e.target))closePop()};
- function place(el,anchor){
+ function place(el,anchor,wMax=330){
   document.body.append(el);
-  const r=anchor.getBoundingClientRect(),w=Math.min(330,window.innerWidth-16);
+  const r=anchor.getBoundingClientRect(),w=Math.min(wMax,window.innerWidth-16);
   el.style.width=w+'px';
   let left=r.right-w;if(left<8)left=8;if(left+w>window.innerWidth-8)left=window.innerWidth-8-w;
   el.style.left=left+'px';
   const top=r.bottom+4,h=el.offsetHeight;el.style.top=Math.max(8,Math.min(top,window.innerHeight-h-8))+'px';
+  if(wMax>330)el.style.maxHeight=Math.min(window.innerHeight-16,Math.floor(window.innerHeight*0.74))+'px';
   setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
  }
  function openCellDetails(anchor,column,row){
@@ -699,11 +725,12 @@ export function mountGrid(root,opts){
   persist();renderHead();renderBody();
  }
  // ===== الأعمدة =====
- $('.dg-cols-btn').addEventListener('click',e=>{
+ function openColsPop(anchor){
+  if(!anchor)return;
   closePop();pop=document.createElement('div');pop.className='dg-pop';
   const listHtml=()=>order.map((k,i)=>{const c=byKey.get(k);const pinned=st.pinned.includes(k);return `<li draggable="true" data-k="${esc(k)}"><span class="dg-handle" title="اسحب لإعادة الترتيب">⋮⋮</span><label><input type="checkbox" value="${esc(k)}" ${st.hidden.has(k)?'':'checked'}> ${esc(c.label)}</label><button type="button" class="link dg-pinb${pinned?' dg-chip-active':''}" data-pin="${esc(k)}" title="${pinned?'إلغاء تثبيت':'تثبيت'} العمود (${MAX_PINS} كحد أقصى)">📌</button><button type="button" class="link dg-mv" data-mv="-1" ${i===0?'disabled':''} aria-label="تحريك لأعلى">▲</button><button type="button" class="link dg-mv" data-mv="1" ${i===order.length-1?'disabled':''} aria-label="تحريك لأسفل">▼</button></li>`}).join('');
   pop.innerHTML=`<div class="dg-pop-head"><b>الأعمدة — إظهار وترتيب وتثبيت</b><button type="button" class="link dg-x">✕</button></div><small class="muted">اسحب العمود لتغيير ترتيبه، و📌 لتثبيته أثناء التمرير الأفقي (حتى ${MAX_PINS} أعمدة). يُحفظ كل شيء لهذا الجدول.</small><ul class="dg-cols-list">${listHtml()}</ul><div class="dg-pop-actions"><button type="button" class="ghost dg-allcols">إظهار الكل</button><button type="button" class="ghost dg-resetw">إعادة الحجم الافتراضي</button><button type="button" class="ghost dg-resetcols">الترتيب الافتراضي</button></div>`;
-  place(pop,e.currentTarget);
+  place(pop,anchor);
   const ul=pop.querySelector('.dg-cols-list');
   const refresh=()=>{ul.innerHTML=listHtml();persist();renderHead();renderBody()};
   pop.querySelector('.dg-x').onclick=closePop;
@@ -717,7 +744,8 @@ export function mountGrid(root,opts){
   pop.querySelector('.dg-allcols').onclick=()=>{st.hidden.clear();refresh()};
   pop.querySelector('.dg-resetcols').onclick=()=>{order.splice(0,order.length,...cols.map(c=>c.key));refresh()};
   pop.querySelector('.dg-resetw')?.addEventListener('click',()=>{st.widths={};refresh()});
- });
+ }
+ $('.dg-cols-btn').addEventListener('click',e=>openColsPop(e.currentTarget));
  // ===== طرق العرض المحفوظة (فلاتر + فرز + أعمدة باسم) =====
  const snapshot=()=>({quick:st.quick,filters:[...st.filters].map(([k,f])=>[k,{...f,set:f.set?[...f.set]:null}]),adv:JSON.parse(JSON.stringify(st.adv)),sort:[...st.sort],groupBy:st.groupBy,hidden:[...st.hidden],order:[...order],widths:{...st.widths},fontSize:st.fontSize,density:st.density,cards:st.cards,filterCollapsed:st.filterCollapsed,pinned:[...st.pinned],colSearch:{...st.colSearch},colSearchOn:st.colSearchOn,searchCol:st.searchCol,span:st.span,tableWidth:st.tableWidth,qaOn:st.qaOn,appear:{...st.appear}});
  function restore(v){
@@ -733,7 +761,8 @@ export function mountGrid(root,opts){
   st.appear=sanitizeAppear(v.appear);applyAppear();rowH=0;
   st.shown=o.pageSize;renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;changeQuery();
  }
- $('.dg-views-btn').addEventListener('click',e=>{
+ function openViewsPop(anchor){
+  if(!anchor)return;
   closePop();pop=document.createElement('div');pop.className='dg-pop';
   const draw=()=>{pop.innerHTML=`<div class="dg-pop-head"><b>طرق العرض المحفوظة</b><button type="button" class="link dg-x">✕</button></div>
    <div class="dg-views">${st.views.map((v,i)=>`<div class="dg-view"><button type="button" class="ghost${st.activeView===v.name?' dg-chip-active':''}" data-vi="${i}">★ ${esc(v.name)}</button><button type="button" class="link" data-vup="${i}" title="تحديث بالحالة الحالية">⟳</button><button type="button" class="link danger" data-vdel="${i}" aria-label="حذف">✕</button></div>`).join('')||'<p class="muted small">لا توجد طرق عرض محفوظة. طبّق الفلاتر والفرز ثم احفظها باسم لتسترجعها بنقرة.</p>'}</div>
@@ -741,12 +770,13 @@ export function mountGrid(root,opts){
    pop.querySelector('.dg-x').onclick=closePop;
    pop.querySelector('.dg-vsave').onsubmit=ev=>{ev.preventDefault();const nm=ev.target.nm.value.trim();if(!nm)return;const i=st.views.findIndex(v=>v.name===nm);const v={name:nm,state:snapshot(),at:new Date().toISOString()};if(i>=0)st.views[i]=v;else st.views.push(v);st.activeView=nm;persist();draw();renderBody()};
   };
-  draw();place(pop,e.currentTarget);
+  draw();place(pop,anchor);
   pop.addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
    if(b.dataset.vi!==undefined){const v=st.views[Number(b.dataset.vi)];st.activeView=v.name;closePop();restore(v.state)}
    else if(b.dataset.vup!==undefined){st.views[Number(b.dataset.vup)].state=snapshot();persist();draw()}
    else if(b.dataset.vdel!==undefined){const [v]=st.views.splice(Number(b.dataset.vdel),1);if(st.activeView===v?.name)st.activeView='';persist();draw();renderBody()}});
- });
+ }
+ $('.dg-views-btn').addEventListener('click',e=>openViewsPop(e.currentTarget));
  // ===== التصفية المركّبة =====
  function renderAdv(){
   const el=$('.dg-adv');
@@ -833,6 +863,103 @@ export function mountGrid(root,opts){
   }catch(error){try{w.close()}catch{}toast(`تعذر إعداد الطباعة: ${error?.message||'خطأ في قراءة السياق'}`,'error');return false}
  }
  function download(content,name,type){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
+ const EXPORT_CAP=2000;
+ async function collectMatchingRows({max=EXPORT_CAP}={}){
+  max=Math.max(1,Math.min(5000,Number(max)||EXPORT_CAP));
+  if(!remote){const src=view||[];return {rows:src.slice(0,max),truncated:src.length>max,from:'view'}}
+  const out=[];let cursor=null,page=0,hasMore=false;
+  while(page++<80&&out.length<max){
+   const query=createGridQuery({...makeQuery(),pagination:{mode:'cursor',size:Math.min(100,max-out.length),cursor,direction:'next',page}});
+   const result=await provider.getRows(query,{columns:cols});
+   const batch=Array.isArray(result?.rows)?result.rows:[];
+   out.push(...batch);
+   hasMore=Boolean(result?.hasMore);
+   cursor=result?.nextCursor||null;
+   if(!batch.length||!hasMore||!cursor)break;
+  }
+  return {rows:out.slice(0,max),truncated:hasMore||out.length>max,from:'query'};
+ }
+ function downloadBlob(blob,name){
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+ }
+ function fillTableCanvas(head,body,caption){
+  const colCount=Math.max(1,head.length);
+  const colW=Math.max(88,Math.min(170,Math.floor(1100/colCount)));
+  const pad=18,titleH=34,rowH=26;
+  const maxRows=Math.min(body.length,55);
+  const w=Math.min(1600,pad*2+colW*colCount);
+  const h=pad*2+titleH+rowH*(maxRows+1);
+  const canvas=document.createElement('canvas');const scale=2;
+  canvas.width=Math.round(w*scale);canvas.height=Math.round(h*scale);
+  const ctx=canvas.getContext('2d');if(!ctx)return null;
+  ctx.scale(scale,scale);
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#111111';ctx.textAlign='right';ctx.direction='rtl';
+  ctx.font='bold 16px Cairo,"Noto Sans Arabic",Tahoma,sans-serif';
+  ctx.fillText(String(caption||o.title||'تقرير'),w-pad,pad+18);
+  const drawRow=(cells,y,header)=>{
+   if(header){ctx.fillStyle='#eef1f5';ctx.fillRect(pad,y,w-pad*2,rowH);ctx.fillStyle='#111111';ctx.font='bold 12px Cairo,"Noto Sans Arabic",Tahoma,sans-serif'}
+   else{ctx.fillStyle='#111111';ctx.font='13px Cairo,"Noto Sans Arabic",Tahoma,sans-serif'}
+   for(let i=0;i<colCount;i++){
+    ctx.save();ctx.beginPath();ctx.rect(w-pad-(i+1)*colW+1,y,colW-2,rowH);ctx.clip();
+    ctx.fillText(String(cells[i]??''),w-pad-i*colW-6,y+rowH-8);
+    ctx.restore();
+   }
+  };
+  drawRow(head,pad+titleH,true);
+  for(let r=0;r<maxRows;r++)drawRow(body[r],pad+titleH+(r+1)*rowH,false);
+  return {canvas,truncated:body.length>maxRows,width:w,height:h};
+ }
+ function canvasToBlob(canvas,type,quality){
+  return new Promise((resolve,reject)=>{
+   if(!canvas?.toBlob){reject(new Error('تصدير الصورة غير مدعوم في هذا المتصفح'));return}
+   canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('تعذر إنشاء ملف الصورة')),type,quality);
+  });
+ }
+ function jpegPdf(bytes,imgW,imgH){
+  const pageW=842,pageH=595;
+  const scale=Math.min((pageW-36)/imgW,(pageH-36)/imgH);
+  const dw=imgW*scale,dh=imgH*scale,ox=(pageW-dw)/2,oy=(pageH-dh)/2;
+  const objects=[];
+  const add=s=>{objects.push(s);return objects.length}
+  add('<< /Type /Catalog /Pages 2 0 R >>');
+  add('<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents 4 0 R /Resources << /XObject << /Im0 5 0 R >> >> >>`);
+  const content=`q ${dw.toFixed(2)} 0 0 ${dh.toFixed(2)} ${ox.toFixed(2)} ${oy.toFixed(2)} cm /Im0 Do Q`;
+  add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  const bin=typeof bytes==='string'?bytes:Array.from(bytes,b=>String.fromCharCode(b)).join('');
+  add(`<< /Type /XObject /Subtype /Image /Width ${Math.round(imgW)} /Height ${Math.round(imgH)} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bin.length} >>\nstream\n${bin}\nendstream`);
+  let out='%PDF-1.4\n',xref=[0],pos=out.length;
+  objects.forEach((body,i)=>{const rec=`${i+1} 0 obj\n${body}\nendobj\n`;xref.push(pos);out+=rec;pos+=rec.length});
+  const start=out.length;
+  out+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`;
+  xref.slice(1).forEach(p=>{out+=String(p).padStart(10,'0')+' 00000 n \n'});
+  out+=`trailer << /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
+  const buf=new Uint8Array(out.length);
+  for(let i=0;i<out.length;i++)buf[i]=out.charCodeAt(i)&255;
+  return buf;
+ }
+ async function exportImage(kind,srcRows,full){
+  const {head,body}=matrix(full,srcRows);
+  const drawn=fillTableCanvas(head,body,o.exportName||o.title||'تقرير');
+  if(!drawn){toast('تعذر رسم صورة الجدول','error');return}
+  const mime=kind==='jpg'?'image/jpeg':'image/png';
+  const blob=await canvasToBlob(drawn.canvas,mime,kind==='jpg'?0.92:undefined);
+  const base=((o.exportName||o.title||'report')+'-'+formatDate(new Date()).replace(/\//g,'-')).replace(/[\\/:*?"<>|]+/g,'-');
+  downloadBlob(blob,base+(kind==='jpg'?'.jpg':'.png'));
+  if(drawn.truncated)toast('الصورة تشمل أول 55 صفًا من النطاق المختار — استخدم Excel أو CSV للمجموعات الأكبر','warn');
+ }
+ async function exportPdf(srcRows,full){
+  const {head,body}=matrix(full,srcRows);
+  const drawn=fillTableCanvas(head,body,o.exportName||o.title||'تقرير');
+  if(!drawn){toast('تعذر إنشاء PDF','error');return}
+  const jpeg=await canvasToBlob(drawn.canvas,'image/jpeg',0.88);
+  const bytes=new Uint8Array(await jpeg.arrayBuffer());
+  const pdf=jpegPdf(bytes,drawn.canvas.width,drawn.canvas.height);
+  const base=((o.exportName||o.title||'report')+'-'+formatDate(new Date()).replace(/\//g,'-')).replace(/[\\/:*?"<>|]+/g,'-');
+  downloadBlob(new Blob([pdf],{type:'application/pdf'}),base+'.pdf');
+  if(drawn.truncated)toast('ملف PDF صورة لأول 55 صفًا من النطاق المختار','warn');
+ }
  function exportGrid(kind,srcRows=null){
   const full=kind.endsWith(':full');kind=kind.replace(':full','');
   const base=((o.exportName||o.title||'report')+'-'+formatDate(new Date()).replace(/\//g,'-')).replace(/[\\/:*?"<>|]+/g,'-');const {head,body}=matrix(full,srcRows);
@@ -840,6 +967,186 @@ export function mountGrid(root,opts){
   else if(kind==='txt'){download('\ufeff'+[head,...body].map(r=>r.map(v=>String(v??'').replace(/[\t\r\n]+/g,' ')).join('\t')).join('\r\n'),base+'.txt','text/plain;charset=utf-8')}
   else if(kind==='xls'){download('\ufeff'+`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" dir="rtl"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${tableHtml(full,srcRows)}</body></html>`,base+'.xls','application/vnd.ms-excel;charset=utf-8')}
   else if(kind==='doc'){const html=docHtml(false,false,srcRows);if(html?.then)return html.then(content=>download('\ufeff'+content,base+'.doc','application/msword;charset=utf-8'));download('\ufeff'+html,base+'.doc','application/msword;charset=utf-8')}
+  else if(kind==='png'||kind==='jpg')return exportImage(kind,srcRows,full);
+  else if(kind==='pdf')return exportPdf(srcRows,full);
+ }
+
+ function getUiState(){return {cards:st.cards,density:st.density,fontSize:st.fontSize,span:st.span,tableWidth:st.tableWidth,filterCount:activeFilterCount(),selected:st.selected.size,viewCount:view.length,activeView:st.activeView,groupBy:st.groupBy,searchCol:st.searchCol,colSearchOn:st.colSearchOn,quick:st.quick,sort:[...st.sort],qaOn:st.qaOn,remote,page:pageIndex+1,hasMore:Boolean(providerMeta.hasMore),fullscreen:root.classList.contains('dg-fullscreen')||document.fullscreenElement===root}}
+ function openWorkspaceDisplay(anchor){
+  if(!anchor)return;
+  closePop();pop=document.createElement('div');pop.className='dg-pop dg-ws-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','إعدادات العرض');
+  const dens=[['','حسب الثيم'],['compact','مضغوط'],['normal','عادي'],['comfortable','مريح'],['mobile','مناسب للموبايل']];
+  const fonts=[['small','صغير'],['medium','متوسط'],['large','كبير']];
+  const spans=[['','عرض عادي'],['wide','واسع'],['full','ملء العرض']];
+  pop.innerHTML=`<div class="dg-pop-head"><b>إعدادات العرض</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
+   <details class="ws-group" open data-collapse-ignore><summary>المظهر والكثافة</summary><div class="ws-body">
+    <div class="ws-row"><label>كثافة العرض<select data-ws-density>${dens.map(([v,l])=>`<option value="${v}"${st.density===v?' selected':''}>${l}</option>`).join('')}</select></label>
+    <label>حجم الخط<select data-ws-font>${fonts.map(([v,l])=>`<option value="${v}"${st.fontSize===v?' selected':''}>${l}</option>`).join('')}</select></label></div>
+    <div class="ws-actions"><button type="button" class="ghost" data-ws-appear>ألوان وخطوط هذا الجدول</button>
+    <label class="ws-row"><input type="checkbox" data-ws-qa ${st.qaOn?'checked':''}> إظهار إجراءات الصف في الجدول</label></div>
+   </div></details>
+   <details class="ws-group" open data-collapse-ignore><summary>الأعمدة</summary><div class="ws-body">
+    <div class="ws-actions"><button type="button" class="ghost" data-ws-cols>إظهار وترتيب وتثبيت الأعمدة</button>
+    <button type="button" class="ghost${st.colSearchOn?' dg-chip-active':''}" data-ws-csearch aria-pressed="${st.colSearchOn}">صف بحث تحت كل عمود</button></div>
+    <p class="ws-hint">يُحفظ ترتيب الأعمدة وإخفاؤها وتثبيتها لهذا الجدول. تغيير العرض من رأس العمود يبقى متاحًا بالسحب.</p>
+   </div></details>
+   <details class="ws-group" open data-collapse-ignore><summary>تنسيق المساحة</summary><div class="ws-body">
+    <div class="ws-row"><label>اتساع الجدول<select data-ws-span>${spans.map(([v,l])=>`<option value="${v}"${st.span===v?' selected':''}>${l}</option>`).join('')}</select></label>
+    <label>عرض الجدول <input type="range" data-ws-width min="100" max="220" step="10" value="${st.tableWidth}"></label></div>
+    <div class="ws-actions"><button type="button" class="ghost" data-ws-full>⛶ ملء الشاشة</button>
+    <button type="button" class="ghost" data-ws-reset>↺ إعادة ضبط إعدادات العرض</button></div>
+   </div></details>
+   <details class="ws-group" open data-collapse-ignore><summary>طرق العرض المحفوظة</summary><div class="ws-body">
+    <div class="ws-actions">${st.views.map((v,i)=>`<button type="button" class="ghost${st.activeView===v.name?' dg-chip-active':''}" data-ws-view="${i}">★ ${esc(v.name)}</button>`).join('')||'<p class="ws-hint">لا توجد طرق عرض محفوظة بعد.</p>'}
+    <button type="button" class="ghost" data-ws-views>حفظ وإدارة طرق العرض</button></div>
+    <p class="ws-hint">طريقة العرض تحفظ البحث والفرز والفلاتر وإعدادات الأعمدة والكثافة كما هي الآن.</p>
+   </div></details>`;
+  place(pop,anchor,440);armPopGuard();
+  pop.querySelector('.dg-x').onclick=closePop;
+  pop.addEventListener('keydown',e=>{if(e.key==='Escape'){closePop();anchor.focus()}});
+  pop.addEventListener('change',e=>{
+   const densEl=e.target.closest('[data-ws-density]');if(densEl){st.density=densEl.value;rowH=0;const s=$('.dg-density');if(s)s.value=st.density;persist();renderBody();return}
+   const fontEl=e.target.closest('[data-ws-font]');if(fontEl){st.fontSize=fontEl.value;const s=$('.dg-font');if(s)s.value=st.fontSize;persist();renderBody();return}
+   const spanEl=e.target.closest('[data-ws-span]');if(spanEl){st.span=spanEl.value;const s=$('.dg-span');if(s)s.value=st.span;persist();applyChrome();return}
+   const qa=e.target.closest('[data-ws-qa]');if(qa){st.qaOn=qa.checked;persist();renderHead();renderBody()}
+  });
+  pop.addEventListener('input',e=>{const w=e.target.closest('[data-ws-width]');if(!w)return;st.tableWidth=Number(w.value)||100;const s=$('.dg-width');if(s)s.value=st.tableWidth;applyChrome()});
+  pop.querySelector('[data-ws-width]')?.addEventListener('change',()=>persist());
+  pop.addEventListener('click',e=>{
+   if(e.target.closest('[data-ws-appear]')){const a=e.target.closest('[data-ws-appear]');closePop();openAppearPop(a);return}
+   if(e.target.closest('[data-ws-cols]')){const a=e.target.closest('[data-ws-cols]');closePop();openColsPop(a);return}
+   if(e.target.closest('[data-ws-views]')){const a=e.target.closest('[data-ws-views]');closePop();openViewsPop(a);return}
+   if(e.target.closest('[data-ws-csearch]')){$('.dg-csearch-btn')?.click();e.target.closest('[data-ws-csearch]').classList.toggle('dg-chip-active',st.colSearchOn);e.target.closest('[data-ws-csearch]').setAttribute('aria-pressed',String(st.colSearchOn));return}
+   if(e.target.closest('[data-ws-full]')){$('.dg-fullscreen')?.click();return}
+   if(e.target.closest('[data-ws-reset]')){$('.dg-reset-btn')?.click();closePop();return}
+   const vb=e.target.closest('[data-ws-view]');if(vb){const v=st.views[Number(vb.dataset.wsView)];if(v){st.activeView=v.name;closePop();restore(v.state)}}
+  });
+ }
+ function openWorkspaceFilters(anchor){
+  if(!anchor)return;
+  closePop();pop=document.createElement('div');pop.className='dg-pop dg-ws-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','الفلاتر');
+  const n=activeFilterCount();
+  const sortRows=st.sort.map((s,i)=>{const c=byKey.get(s.key);return c?`<div class="ws-row" data-ws-sort="${esc(s.key)}"><span>${i+1}. ${esc(c.label)}</span><button type="button" class="ghost small" data-ws-sdir="${esc(s.key)}">${s.dir==='asc'?'تصاعدي ▲':'تنازلي ▼'}</button><button type="button" class="link" data-ws-srm="${esc(s.key)}" aria-label="إلغاء فرز ${esc(c.label)}">✕</button></div>`:''}).join('')||'<p class="ws-hint">لا يوجد فرز. يمكن الفرز من رأس العمود أو بإضافة عمود أدناه.</p>';
+  const filterable=cols.filter(c=>c.filterable);
+  const advRules=st.adv.rules.filter(r=>byKey.has(r.key));
+  pop.innerHTML=`<div class="dg-pop-head"><b>الفلاتر ${n?`· ${fmtN(n)} نشطة`:''}</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
+   <details class="ws-group" open data-collapse-ignore><summary>الفرز</summary><div class="ws-body">${sortRows}
+    <div class="ws-row"><label>إضافة فرز<select data-ws-sadd><option value="">عمود…</option>${cols.filter(c=>c.sortable).map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}</select></label>
+    <button type="button" class="ghost" data-ws-unsort>إلغاء كل الفرز</button></div>
+    <p class="ws-hint">من رأس الجدول: نقرة لتبديل الاتجاه، وShift لفرز متعدد المستويات.</p>
+   </div></details>
+   <details class="ws-group" open data-collapse-ignore><summary>بحث وتجميع</summary><div class="ws-body">
+    <div class="ws-row"><label>نطاق البحث داخل الصفحة<select data-ws-scope><option value="">كل الأعمدة الظاهرة</option>${cols.filter(c=>c.searchable).map(c=>`<option value="${esc(c.key)}"${st.searchCol===c.key?' selected':''}>${esc(c.label)}</option>`).join('')}</select></label>
+    <label>تجميع حسب<select data-ws-group><option value="">بدون تجميع</option>${cols.map(c=>`<option value="${esc(c.key)}"${st.groupBy===c.key?' selected':''}>${esc(c.label)}</option>`).join('')}</select></label></div>
+    <label class="ws-field">بحث داخل الصفحة الحالية<input type="search" data-ws-quick value="${esc(st.quick)}" placeholder="لا يُخلط مع بحث قائمة الملفات"></label>
+    <button type="button" class="ghost${st.colSearchOn?' dg-chip-active':''}" data-ws-csearch aria-pressed="${st.colSearchOn}">صف بحث تحت كل عمود</button>
+   </div></details>
+   <details class="ws-group" ${advRules.length?'open':''} data-collapse-ignore><summary>تصفية مركّبة (و / أو)</summary><div class="ws-body">
+    <label>تطابق الشروط<select data-ws-logic><option value="and"${st.adv.logic==='and'?' selected':''}>كل الشروط (و)</option><option value="or"${st.adv.logic==='or'?' selected':''}>أي شرط (أو)</option></select></label>
+    ${advRules.map((r,i)=>`<div class="ws-row" data-ws-rule="${i}"><select data-ws-rkey>${cols.map(c=>`<option value="${esc(c.key)}"${c.key===r.key?' selected':''}>${esc(c.label)}</option>`).join('')}</select><select data-ws-rop>${(OPS[byKey.get(r.key)?.type||'text']||OPS.text).map(([v,l])=>`<option value="${v}"${v===r.op?' selected':''}>${l}</option>`).join('')}</select>${isValueFreeGridFilter(r.op)?'':`<input data-ws-rv1 value="${esc(r.v1||'')}" placeholder="القيمة">${r.op==='between'?`<input data-ws-rv2 value="${esc(r.v2||'')}" placeholder="إلى">`:''}`}<button type="button" class="link" data-ws-rdel="${i}">✕</button></div>`).join('')||'<p class="ws-hint">لا توجد شروط مركّبة.</p>'}
+    <div class="ws-actions"><button type="button" class="ghost" data-ws-radd>+ شرط</button><button type="button" class="primary small" data-ws-rapply>تطبيق الشروط</button></div>
+   </div></details>
+   <details class="ws-group" open data-collapse-ignore><summary>فلاتر الأعمدة</summary><div class="ws-body">
+    <div class="ws-actions">${filterable.slice(0,24).map(c=>`<button type="button" class="ghost small${st.filters.has(c.key)?' dg-chip-active':''}" data-ws-colf="${esc(c.key)}">${esc(c.label)}</button>`).join('')}</div>
+    <p class="ws-hint">كل زر يفتح تصفية ذلك العمود (شرط، قيم، فرز، تثبيت).</p>
+   </div></details>
+   <details class="ws-group" open data-collapse-ignore><summary>الفلاتر النشطة</summary><div class="ws-body">
+    <p class="ws-hint">${n?`${fmtN(n)} فلترًا نشطًا في الجدول — تُدار أيضًا من الشرائح تحت الشريط.`:'لا توجد فلاتر جدول نشطة.'}</p>
+    <div class="ws-actions"><button type="button" class="ghost" data-ws-savef>حفظ التصفية كطريقة عرض</button>
+    <button type="button" class="ghost" data-ws-clearf>مسح فلاتر الجدول فقط</button></div>
+   </div></details>`;
+  place(pop,anchor,460);armPopGuard();
+  pop.querySelector('.dg-x').onclick=closePop;
+  pop.addEventListener('keydown',e=>{if(e.key==='Escape'){closePop();anchor.focus()}});
+  const readRules=()=>{
+   st.adv.logic=pop.querySelector('[data-ws-logic]')?.value||'and';
+   pop.querySelectorAll('[data-ws-rule]').forEach(div=>{
+    const i=Number(div.dataset.wsRule);const r=st.adv.rules[i];if(!r)return;
+    r.key=div.querySelector('[data-ws-rkey]')?.value||r.key;r.op=div.querySelector('[data-ws-rop]')?.value||r.op;
+    r.v1=div.querySelector('[data-ws-rv1]')?.value??'';r.v2=div.querySelector('[data-ws-rv2]')?.value??'';
+   });
+  };
+  pop.addEventListener('change',e=>{
+   const scope=e.target.closest('[data-ws-scope]');if(scope){st.searchCol=scope.value;const s=$('.dg-scope');if(s)s.value=st.searchCol;changeQuery();return}
+   const group=e.target.closest('[data-ws-group]');if(group){st.groupBy=group.value;const s=$('.dg-groupby');if(s)s.value=st.groupBy;collapsed.clear();changeQuery();return}
+   const logic=e.target.closest('[data-ws-logic]');if(logic){st.adv.logic=logic.value;persist()}
+   const sadd=e.target.closest('[data-ws-sadd]');if(sadd&&sadd.value){const key=sadd.value;if(!st.sort.some(s=>s.key===key))st.sort.push({key,dir:'asc'});sadd.value='';changeQuery();openWorkspaceFilters(anchor)}
+  });
+  let qt=0;
+  pop.querySelector('[data-ws-quick]')?.addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{st.quick=e.target.value;const qel=$('.dg-quick');if(qel)qel.value=st.quick;changeQuery()},140)});
+  pop.addEventListener('click',e=>{
+   const sdir=e.target.closest('[data-ws-sdir]');if(sdir){const s=st.sort.find(x=>x.key===sdir.dataset.wsSdir);if(s)s.dir=s.dir==='asc'?'desc':'asc';changeQuery();openWorkspaceFilters(anchor);return}
+   const srm=e.target.closest('[data-ws-srm]');if(srm){st.sort=st.sort.filter(x=>x.key!==srm.dataset.wsSrm);changeQuery();openWorkspaceFilters(anchor);return}
+   if(e.target.closest('[data-ws-unsort]')){st.sort=[];changeQuery();openWorkspaceFilters(anchor);return}
+   if(e.target.closest('[data-ws-csearch]')){$('.dg-csearch-btn')?.click();e.target.closest('[data-ws-csearch]').classList.toggle('dg-chip-active',st.colSearchOn);return}
+   if(e.target.closest('[data-ws-radd]')){readRules();const c=visibleCols()[0]||cols[0];st.adv.rules.push({key:c.key,op:OPS[c.type||'text'][0][0],v1:'',v2:''});openWorkspaceFilters(anchor);return}
+   const rdel=e.target.closest('[data-ws-rdel]');if(rdel){readRules();st.adv.rules.splice(Number(rdel.dataset.wsRdel),1);openWorkspaceFilters(anchor);return}
+   if(e.target.closest('[data-ws-rapply]')){readRules();changeQuery();toast('تم تطبيق التصفية المركّبة');return}
+   const colf=e.target.closest('[data-ws-colf]');if(colf){const key=colf.dataset.wsColf;const th=root.querySelector(`thead th[data-key="${CSS.escape(key)}"]`);closePop();openFilter(th||anchor,key);return}
+   if(e.target.closest('[data-ws-savef]')){closePop();openViewsPop(anchor);return}
+   if(e.target.closest('[data-ws-clearf]')){clearQueryFilters();closePop()}
+  });
+ }
+ async function resolveExportRows(scope){
+  if(scope==='selected')return {rows:selectedRows(),label:'الصفوف المحددة',truncated:false};
+  if(scope==='page'||scope==='view')return {rows:view,label:'العرض الحالي (هذه الصفحة)',truncated:false};
+  const collected=await collectMatchingRows({max:EXPORT_CAP});
+  return {rows:collected.rows,label:'النتائج المطابقة للفلاتر',truncated:collected.truncated};
+ }
+ async function runWorkspaceIo(kind,scope){
+  const picked=await resolveExportRows(scope);
+  const n=picked.rows.length;
+  if(!n){toast(scope==='selected'?'لا توجد صفوف محددة':'لا توجد سجلات في هذا النطاق','error');return}
+  const {confirmBox}=await import('./modal.js');
+  const extra=picked.truncated?` سيُقتصر على أول ${EXPORT_CAP} سجلًا.`:'';
+  const ok=await confirmBox(`سيتم ${kind==='print'?'طباعة':'تصدير'} ${fmtN(n)} سجلًا (${picked.label}).${extra} لا تُعدَّل أي بيانات.`,{okText:kind==='print'?'طباعة':'تصدير'});
+  if(!ok)return;
+  try{
+   if(kind==='print')await printGrid(picked.rows);
+   else await Promise.resolve(exportGrid(kind,picked.rows));
+  }catch(error){toast(`تعذر التنفيذ: ${error?.message||''}`,'error')}
+ }
+ function openWorkspaceExport(anchor){
+  if(!anchor)return;
+  closePop();pop=document.createElement('div');pop.className='dg-pop dg-ws-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','الطباعة والتصدير');
+  const sel=st.selected.size;
+  const pageNote=remote?'العرض الحالي = هذه الصفحة فقط، وليست كل نتائج البحث.':'';
+  pop.innerHTML=`<div class="dg-pop-head"><b>الطباعة والتصدير</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
+   <p class="ws-hint">التصدير العادي لا يشمل البيانات الحساسة (هاتف، رقم قومي، عنوان). اختر الصيغة الكاملة عند الحاجة وبصلاحية واضحة. ${esc(pageNote)}</p>
+   <div class="ws-io-group"><h3>الطباعة</h3>
+    <button type="button" class="ghost" data-ws-io="print" data-ws-scope="all">طباعة النتائج المطابقة للفلاتر</button>
+    <button type="button" class="ghost" data-ws-io="print" data-ws-scope="selected" ${sel?'':'disabled'}>طباعة الصفوف المحددة${sel?` (${fmtN(sel)})`:''}</button>
+    <button type="button" class="ghost" data-ws-io="print" data-ws-scope="page">طباعة العرض الحالي (هذه الصفحة)</button>
+   </div>
+   <div class="ws-io-group"><h3>التصدير</h3>
+    <p class="ws-hint">النطاق: النتائج المطابقة · المحدد · الصفحة الحالية. الصيغة تطابق امتداد الملف.</p>
+    <div class="ws-row"><label>النطاق<select data-ws-exscope><option value="all">النتائج المطابقة للفلاتر</option><option value="selected" ${sel?'':'disabled'}>الصفوف المحددة</option><option value="page">العرض الحالي (هذه الصفحة)</option></select></label></div>
+    <div class="ws-actions">
+     <button type="button" class="ghost" data-ws-io="xls" data-use-scope>Excel (.xls)</button>
+     <button type="button" class="ghost" data-ws-io="doc" data-use-scope>Word (.doc)</button>
+     <button type="button" class="ghost" data-ws-io="csv" data-use-scope>CSV</button>
+     <button type="button" class="ghost" data-ws-io="txt" data-use-scope>TXT</button>
+     <button type="button" class="ghost" data-ws-io="pdf" data-use-scope>PDF (صورة الجدول)</button>
+     <button type="button" class="ghost" data-ws-io="png" data-use-scope>PNG</button>
+     <button type="button" class="ghost" data-ws-io="jpg" data-use-scope>JPG</button>
+    </div>
+    <div class="ws-sep"></div>
+    <p class="ws-hint">يشمل البيانات الحساسة</p>
+    <div class="ws-actions">
+     <button type="button" class="ghost" data-ws-io="xls:full" data-use-scope>Excel كامل</button>
+     <button type="button" class="ghost" data-ws-io="csv:full" data-use-scope>CSV كامل</button>
+    </div>
+   </div>`;
+  place(pop,anchor,420);armPopGuard();
+  pop.querySelector('.dg-x').onclick=closePop;
+  pop.addEventListener('keydown',e=>{if(e.key==='Escape'){closePop();anchor.focus()}});
+  pop.addEventListener('click',e=>{
+   const b=e.target.closest('[data-ws-io]');if(!b||b.disabled)return;
+   const kind=b.dataset.wsIo;
+   const scope=b.hasAttribute('data-use-scope')?(pop.querySelector('[data-ws-exscope]')?.value||'page'):(b.dataset.wsScope||'page');
+   closePop();
+   Promise.resolve(runWorkspaceIo(kind,scope)).catch(err=>toast(err?.message||'تعذر التنفيذ','error'));
+  });
  }
 
  let menuEl=null;
@@ -879,12 +1186,13 @@ export function mountGrid(root,opts){
  renderAdv();$('.dg-adv').hidden=!st.adv.rules.length||st.filterCollapsed;
  render();
  if(remote)loadProviderRows();
- return {
+ const api={
   setRows(r,meta){if(remote){provider.setRows?.(r||[]);pageIndex=0;pageCursors.splice(1);pageCursors[0]=null;return loadProviderRows()}rows=r||[];if(meta&&typeof meta==='object'&&'more' in meta)o.more=Boolean(meta.more);st.shown=o.pageSize;render()},
   getView:()=>view,
   get rows(){return rows},
   getQuery:()=>makeQuery(),
   reload({resetPage=true}={}){if(remote){if(resetPage){pageIndex=0;pageCursors.splice(1);pageCursors[0]=null}return loadProviderRows()}render();return Promise.resolve()},
+  refresh(){return this.reload({resetPage:false})},
   applyFilter(key,op,v1,v2=''){st.filters.set(key,{op,v1,v2,set:null});changeQuery()},
   applyReferenceFilter(key,id){if(!byKey.get(key)?.references)throw new TypeError('The column has no identity-backed references.');st.filters.set(key,{op:'eq',v1:String(id),v2:'',set:null,valueType:'reference'});changeQuery()},
   clearFilter(key){st.filters.delete(key);changeQuery()},
@@ -897,10 +1205,21 @@ export function mountGrid(root,opts){
   clearSelection(){st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody()},
   setColSearch(key,val){if(val)st.colSearch[key]=val;else delete st.colSearch[key];changeQuery()},
   isColSearchOn(){return st.colSearchOn},
-  exportData:kind=>exportGrid(kind),
+  exportData:(kind,srcRows)=>exportGrid(kind,srcRows??null),
   docHtml:()=>docHtml(false),
   print:srcRows=>printGrid(srcRows??null),
   async getPrintContext({srcRows=null}={}){return resolveDocumentContext(documentSnapshot(true,true,srcRows))},
-  async getPrintDocument({srcRows=null,autoPrint=false}={}){const snapshot=documentSnapshot(true,true,srcRows);return buildDocument(snapshot,await resolveDocumentContext(snapshot),{forPrint:true,autoPrint})}
+  async getPrintDocument({srcRows=null,autoPrint=false}={}){const snapshot=documentSnapshot(true,true,srcRows);return buildDocument(snapshot,await resolveDocumentContext(snapshot),{forPrint:true,autoPrint})},
+  openDisplayMenu:anchor=>openWorkspaceDisplay(anchor),
+  openFiltersMenu:anchor=>openWorkspaceFilters(anchor),
+  openExportMenu:anchor=>openWorkspaceExport(anchor),
+  clearQueryFilters,
+  toggleCards(){st.cards=!st.cards;persist();renderBody();return st.cards},
+  isCards:()=>st.cards,
+  getUi:()=>getUiState(),
+  collectMatchingRows,
+  isWorkspace:()=>Boolean(o.workspace)
  };
+ root.__grid=api;
+ return api;
 }
