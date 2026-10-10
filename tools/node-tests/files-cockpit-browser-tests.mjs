@@ -99,13 +99,18 @@ try{
  });
 
  // ---------- صفحة الملف (File Cockpit) ----------
- await verify('File Cockpit: القمرة: رأس + بطاقة التالي، 5 مناطق + تبويبات فرعية، إجراء أساسي + ⋯',async()=>{
+ await verify('File Cockpit: القمرة: رأس + بطاقة التالي، شريط تبويبات مسطّح (نظرة عامة أولًا)، إجراء أساسي + ⋯',async()=>{
   await page.evaluate(id=>window.__LAW_OFFICE_APP__.go(`file:${id}`),fixture.file.id);
   await page.waitForTimeout(1500);
   assert.equal(await page.locator('.file-head').count(),1,'رأس الملف');
   assert.equal(await page.locator('.cp-fc').count(),1,'بطاقة «التالي في هذا الملف»');
-  assert.equal(await page.locator('.file-areas-bar [data-area]').count(),5,'5 مناطق');
-  assert.ok(await page.locator('.file-subtabs [data-tab]').count()>=2,'تبويبات المنطقة явно');
+  const barTabs=await page.locator('.file-tabs-bar .file-subtabs [data-tab]').allTextContents();
+  assert.ok(barTabs.length>=10,`شريط تبويبات واحد لكل الأقسام: ${barTabs.length}`);
+  assert.equal(await page.locator('.file-areas-bar [data-area]').count(),0,'لا شريط مناطق منفصل — التبويبات مسطّحة');
+  const order=await page.locator('.file-subtabs [data-tab]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  assert.deepEqual(order.slice(0,3),['summary','hearings','procedures'],'الترتيب: نظرة عامة ← الجلسات ← الأعمال الإدارية');
+  assert.equal(await page.locator('.file-subtabs [data-tab="summary"]').getAttribute('aria-selected'),'true','نظرة عامة هو الافتراضي عند فتح الملف');
+  assert.ok(await page.locator('.file-subtabs [data-tab]').count()>=2,'تبويبات الشريط');
   assert.equal(await page.locator('[data-file-quick]').count()>=1,true,'زر إضافة أساسي');
   assert.equal(await page.locator('.head-actions [data-card-menu]').count(),1,'قائمة ⋯');
   assert.ok((await page.locator('.file-head [data-gaps-jump]').count())>=0);
@@ -120,7 +125,7 @@ try{
   assert.ok((await page.locator('[data-file-sticky] .fsb-next').textContent()).includes('التالي'));
  });
 
- await verify('File Cockpit: التنقل بين المناطق — آخر تبويب محفوظ والـcache لا يعيد البناء',async()=>{
+ await verify('File Cockpit: التنقل بين التبويبات — التبويب محفوظ والكاش لا يعيد البناء',async()=>{
   await page.evaluate(id=>window.__LAW_OFFICE_APP__.go(`file:${id}`),fixture.file.id);
   await page.waitForTimeout(1500);
   // افتح تبويب الجلسات
@@ -129,14 +134,14 @@ try{
   assert.ok((await page.locator('#file-tab').textContent()).includes('جلسة')||true);
   const gridCount=await page.locator('#file-tab .dg').count();
   assert.equal(gridCount,1,'جدول الجلسات موجود');
-  // بدّل المنطقة إلى «نظرة» — يجب أن يعود «الملخص» (الم藏 في الكاش)
-  await page.locator('.file-areas-bar [data-area="overview"]').click();
+  // عد إلى «نظرة عامة»
+  await page.locator('.file-subtabs [data-tab="summary"]').click();
   await page.waitForTimeout(400);
   assert.ok((await page.locator('.file-subtabs [data-tab="summary"]').getAttribute('aria-selected'))==='true');
-  // ارجع «الإجراءات» — يجب أن يعود «الجلسات» (آخر تبويب) من الكاش دون إعادة بناء
-  await page.locator('.file-areas-bar [data-area="actions"]').click();
+  // ارجع إلى الجلسات — تُستعاد من الكاش دون إعادة بناء
+  await page.locator('.file-subtabs [data-tab="hearings"]').click();
   await page.waitForTimeout(400);
-  assert.ok((await page.locator('.file-subtabs [data-tab="hearings"]').getAttribute('aria-selected'))==='true','آخر تبويب محفوظ');
+  assert.ok((await page.locator('.file-subtabs [data-tab="hearings"]').getAttribute('aria-selected'))==='true','التبويب محفوظ');
   assert.equal(await page.locator('#file-tab .dg').count(),1,'الشبكة أعيدت من الكاش');
   // لوحة المحتوى قابلة للطي: طي verdure summary لا يحذف الجداول
   const shell=page.locator('.file-tab-shell');
