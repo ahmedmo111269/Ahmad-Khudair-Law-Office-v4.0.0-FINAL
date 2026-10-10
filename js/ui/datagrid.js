@@ -121,6 +121,9 @@ export function mountGrid(root,opts){
   st.toolsCollapsed=false;
  }
  root.dataset.gridId=PK||`grid:anonymous:${instance}`;
+ // شريط التحديد القديم (أرشفة/طباعة المحدد/فتح المحدد) لا يُرسم في وضع مساحة العمل:
+ // «مسح التحديد» في شريط أدوات صفحة الملفات، والطباعة/التصدير للمحدد من قائمة «المزيد»،
+ // والأرشفة من صفحة الملف نفسها. الجداول الأخرى تحتفظ بالشريط كما هو.
  const bodyId=`dg-body-${instance}`,toolsId=`dg-tools-${instance}`;
  root.dataset.collapseReady='true';root.dataset.collapseType='grid';root.dataset.collapseKey=shellCollapseKey;root.dataset.collapseCollapsed=String(st.shellCollapsed);
  root.innerHTML=`<div class="dg-shell-head"><button type="button" class="dg-shell-toggle" aria-expanded="${st.shellCollapsed?'false':'true'}" aria-controls="${bodyId}"><span class="dg-caret" aria-hidden="true">${st.shellCollapsed?'›':'⌄'}</span><span class="dg-shell-title">${esc(o.title||'الجدول')}</span><span class="dg-shell-count"></span></button>${collapsePinMarkup(shellCollapseKey,isCollapsePinned(shellCollapseKey),'collapse-pin dg-shell-pin')}<button type="button" class="dg-head-gear" title="تخصيص مظهر الجدول" aria-label="تخصيص مظهر الجدول" aria-haspopup="dialog">🎨</button></div><div class="dg-body" id="${bodyId}"><div class="dg-tools-summary"><button type="button" class="dg-tools-summary-toggle" aria-expanded="${st.toolsCollapsed?'false':'true'}" aria-controls="${toolsId}"><span class="dg-tools-label">🔍 عوامل التصفية والتخصيص</span><span class="dg-tools-active"></span><span class="dg-tools-view"></span><span class="dg-tools-caret" aria-hidden="true">${st.toolsCollapsed?'›':'⌄'}</span></button>${collapsePinMarkup(toolsCollapseKey,isCollapsePinned(toolsCollapseKey),'collapse-pin dg-tools-pin')}</div><div class="dg-tools-panel" id="${toolsId}"${st.toolsCollapsed?' hidden':''}><div class="dg-toolbar"><button type="button" class="ghost dg-filter-toggle" aria-expanded="${!st.filterCollapsed}" aria-label="${st.filterCollapsed?'فتح':'طي'} عوامل التصفية" title="إظهار أو إخفاء عوامل التصفية">${st.filterCollapsed?'›':'⌄'} عوامل التصفية</button>${collapsePinMarkup(filterCollapseKey,isCollapsePinned(filterCollapseKey),'collapse-pin dg-filter-pin')}
@@ -144,7 +147,7 @@ export function mountGrid(root,opts){
   <button type="button" class="ghost dg-print">طباعة</button>
   <select class="dg-export" aria-label="تصدير"><option value="">تصدير…</option><option value="xls">Excel</option><option value="doc">Word</option><option value="csv">CSV</option><option value="txt">نص TXT</option><optgroup label="يشمل البيانات الحساسة"><option value="xls:full">Excel كامل</option><option value="csv:full">CSV كامل</option></optgroup></select>
  </div>
- <div class="dg-selbar" hidden><b class="dg-sel-count"></b><span class="dg-bulk-slot"></span><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="ghost small dg-open-sel">فتح المحدد</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>
+ ${o.workspace?'':`<div class="dg-selbar" hidden><b class="dg-sel-count"></b><span class="dg-bulk-slot"></span><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="ghost small dg-open-sel">فتح المحدد</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>`}
  <div class="dg-chips" hidden aria-label="التصفية النشطة"></div>
  <div class="dg-adv" hidden></div></div>
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
@@ -386,7 +389,7 @@ export function mountGrid(root,opts){
   ['small','medium','large'].forEach(d=>root.classList.toggle('dg-font-'+d,st.fontSize===d));$('.dg-font').value=st.fontSize;
   $('.dg-views-btn').classList.toggle('dg-chip-active',Boolean(st.activeView));
   $('.dg-cards-btn').textContent=st.cards?'جدول':'بطاقات';
-  try{o.onChrome?.({cards:st.cards,density:st.density,fontSize:st.fontSize,filterCount:nFilt,selected:st.selected.size,viewCount:view.length,activeView:st.activeView,span:st.span,fullscreen:root.classList.contains('dg-fullscreen')||document.fullscreenElement===root})}catch{/* عرض فقط */}
+  syncChrome();
   syncWorkspaceExit();
   $('.dg-filter-toggle').setAttribute('aria-expanded',String(!st.filterCollapsed));
   $('.dg-fullscreen').setAttribute('aria-pressed',String(root.classList.contains('dg-fullscreen')));$('.dg-fullscreen').textContent=root.classList.contains('dg-fullscreen')?'⛶ خروج من الشاشة':'⛶ ملء الشاشة';
@@ -419,8 +422,12 @@ export function mountGrid(root,opts){
    $('.dg-foot-count').textContent=view.length?`عدد الصفوف المعروضة: ${fmtN(view.length)}`:'';
   }
  }
+ // إشعار كروم مساحة العمل (أشرطة صفحة الملفات) بكل تغيير في العرض أو التحديد —
+ // استُخرجت حتى يصل تحديث التحديد (إظهار زر «مسح التحديد» وعدّاده) من كل المسارات.
+ function syncChrome(){try{o.onChrome?.({cards:st.cards,density:st.density,fontSize:st.fontSize,filterCount:activeFilterCount(),selected:st.selected.size,viewCount:view.length,activeView:st.activeView,span:st.span,fullscreen:root.classList.contains('dg-fullscreen')||document.fullscreenElement===root})}catch{/* عرض فقط */}}
  function renderSelbar(){
-  const sb=$('.dg-selbar');const cnt=st.selected.size;
+  const sb=$('.dg-selbar');if(!sb)return;
+  const cnt=st.selected.size;
   sb.hidden=!(o.selectable&&cnt);
   if(cnt){sb.querySelector('.dg-sel-count').textContent=`تم تحديد ${fmtN(cnt)} صف — الإجراءات على الصفوف المحددة`}
   const slot=sb.querySelector('.dg-bulk-slot');
@@ -594,7 +601,7 @@ export function mountGrid(root,opts){
  $('thead').addEventListener('change',e=>{
   const all=e.target.closest('.dg-sel-all');if(!all)return;
   if(all.checked)view.forEach(r=>{const key=rowKey(r);st.selected.add(key);selectedRowsByKey.set(key,r)});else view.forEach(r=>{const key=rowKey(r);st.selected.delete(key);selectedRowsByKey.delete(key)});
-  renderHead();renderBody();
+  renderHead();renderBody();syncChrome();
  });
  $('tbody').addEventListener('change',e=>{
   const chk=e.target.closest('.dg-rowchk');if(!chk)return;
@@ -603,12 +610,12 @@ export function mountGrid(root,opts){
   if(chk.checked){st.selected.add(key);selectedRowsByKey.set(key,r)}else{st.selected.delete(key);selectedRowsByKey.delete(key)}
   chk.closest('tr')?.classList.toggle('dg-checked',chk.checked);
   const all=$('.dg-sel-all');if(all){all.checked=allSelected();all.indeterminate=view.some(isRowSelected)&&!allSelected()}
-  renderSelbar();
+  renderSelbar();syncChrome();
  });
- $('.dg-sel-clear').addEventListener('click',()=>{st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody()});
- $('.dg-sel-export').addEventListener('click',()=>exportGrid('xls',selectedRows()));
- $('.dg-sel-csv').addEventListener('click',()=>exportGrid('csv',selectedRows()));
- $('.dg-sel-print').addEventListener('click',()=>printGrid(selectedRows()));
+ $('.dg-sel-clear')?.addEventListener('click',()=>{st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody();syncChrome()});
+ $('.dg-sel-export')?.addEventListener('click',()=>exportGrid('xls',selectedRows()));
+ $('.dg-sel-csv')?.addEventListener('click',()=>exportGrid('csv',selectedRows()));
+ $('.dg-sel-print')?.addEventListener('click',()=>printGrid(selectedRows()));
  // إعادة ضبط الجدول بالكامل (إعدادات العرض فقط — لا تمس أي بيانات)
  $('.dg-reset-btn').addEventListener('click',()=>{
   if(PK){prefs.remove(PK);try{localStorage.removeItem(PK)}catch{}}
@@ -643,8 +650,15 @@ export function mountGrid(root,opts){
 
  // ===== نافذة تصفية العمود =====
  let pop=null;
- const closePop=()=>{pop?.remove();pop=null;document.removeEventListener('mousedown',outside,true);disarmPopGuard()};
+ const closePop=()=>{pop?.remove();pop=null;document.removeEventListener('mousedown',outside,true);document.removeEventListener('keydown',onPopKey);disarmPopGuard()};
  const outside=e=>{if(pop&&!pop.contains(e.target))closePop()};
+ // Escape يغلق القائمة المنسدلة المفتوحة أينما كان التركيز (كان يعمل فقط والتركيز داخلها).
+ // نتجاوز لو وُجدت نافذة مودال فوقها (تأكيد طباعة/حفظ) حتى لا تُغلق القائمة خلف النافذة.
+ const onPopKey=e=>{
+  if(e.key!=='Escape'||!pop)return;
+  if(document.querySelector('#modal-root .modal-card'))return;
+  closePop();
+ };
  function place(el,anchor,wMax=330){
   document.body.append(el);
   const r=anchor.getBoundingClientRect(),w=Math.min(wMax,window.innerWidth-16);
@@ -653,7 +667,7 @@ export function mountGrid(root,opts){
   el.style.left=left+'px';
   const top=r.bottom+4,h=el.offsetHeight;el.style.top=Math.max(8,Math.min(top,window.innerHeight-h-8))+'px';
   if(wMax>330)el.style.maxHeight=Math.min(window.innerHeight-16,Math.floor(window.innerHeight*0.74))+'px';
-  setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+  setTimeout(()=>{document.addEventListener('mousedown',outside,true);document.addEventListener('keydown',onPopKey)},0);
  }
  function openCellDetails(anchor,column,row){
   closePop();pop=document.createElement('div');pop.className='dg-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label',column.label);
@@ -1171,7 +1185,7 @@ export function mountGrid(root,opts){
   providerObserver=new MutationObserver(()=>{if(root.isConnected)return;providerSequence++;try{providerController?.abort()}catch{}providerObserver?.disconnect()});
   providerObserver.observe(document.documentElement,{childList:true,subtree:true});
  }
- $('.dg-selbar').addEventListener('click',async e=>{
+ $('.dg-selbar')?.addEventListener('click',async e=>{
   const b=e.target.closest('[data-bulk]');if(!b)return;
   const act=(o.bulkActions||[]).find(a=>a.id===b.dataset.bulk);if(!act)return;
   const picked=selectedRows();if(!picked.length)return;
@@ -1202,7 +1216,7 @@ export function mountGrid(root,opts){
   togglePin(key){togglePin(key)},
   getSelection(){return selectedRows()},
   destroy(){providerSequence++;try{providerController?.abort()}catch{}providerObserver?.disconnect();document.removeEventListener('mousedown',onDocDown,true);document.removeEventListener('keydown',onDocKey);closePop();closeMenu()},
-  clearSelection(){st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody()},
+  clearSelection(){st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody();syncChrome()},
   setColSearch(key,val){if(val)st.colSearch[key]=val;else delete st.colSearch[key];changeQuery()},
   isColSearchOn(){return st.colSearchOn},
   exportData:(kind,srcRows)=>exportGrid(kind,srcRows??null),

@@ -24,6 +24,12 @@ body:has(.fw) main{
  flex:1 1 auto;
  overflow:hidden;
 }
+
+/* الشريط العام في صفحة الملفات فقط: main هنا حاوية تمرير (overflow:hidden) فيتحسب
+   position:sticky للشريط نسبةً إليها لا إلى إطار العرض، فينزاح عن موضعه ويغطّي شريط
+   عنوان الصفحة (العنوان وزر «إضافة ملف جديد») في كل الأعراض. اللصق لا وظيفة له في
+   هذه الصفحة لأن main لا يتمرر أصلًا — «static» يعيد الترتيب الطبيعي بلا أثر بصري آخر. */
+body:has(.fw) .topbar{position:static}
 .fw{
  display:flex;
  flex-direction:column;
@@ -67,7 +73,11 @@ body:has(.fw) main{
  flex:none;
  white-space:nowrap;
 }
-.fw-pagebar .fw-addfile{padding:8px 14px;font-weight:700}
+.fw-pagebar .fw-addfile{
+ display:inline-flex;align-items:center;gap:7px;
+ padding:8px 14px;font-weight:700;
+}
+.fw-pagebar .fw-addfile .ic{width:16px;height:16px;flex:none}
 .fw-pagebar .fw-icon{
  width:40px;height:40px;min-width:40px;padding:0;
  display:inline-grid;place-items:center;
@@ -120,6 +130,22 @@ body:has(.fw) main{
 }
 .fw-badge[hidden]{display:none}
 .fw-tb-btn.is-active{border-color:var(--primary-border);background:var(--primary-soft)}
+
+/* زر «مسح التحديد» — عنصر واحد في أقصى يسار شريط الأدوات (نهاية اتجاه RTL).
+   margin-inline-start:auto يثبّته في الطرف الأيسر حتى مع اتساع الشاشة،
+   ولا يظهر إلا مع وجود تحديد فعلي (سمة hidden من المنطق). */
+.fw-sel-clear{
+ margin-inline-start:auto;
+ display:inline-flex;align-items:center;gap:5px;
+}
+.fw-sel-clear[hidden]{display:none}
+.fw-sel-clear .ic{width:14px;height:14px;flex:none}
+.fw-toolbar .fw-sel-clear:not([hidden]){
+ border-color:var(--primary-border);
+ background:var(--primary-soft);
+ color:var(--primary);
+ font-weight:700;
+}
 
 /* ---------- شريط النتائج المضغوط ---------- */
 .fw-strip{
@@ -275,11 +301,6 @@ body:has(.fw) main{
 }
 .fw .dg.dg-workspace .dg-chips{
  padding:4px 10px;
-}
-.fw .dg.dg-workspace .dg-selbar{
- position:sticky;
- bottom:0;
- z-index:2;
 }
 
 /* ملء الشاشة: زر خروج واضح */
