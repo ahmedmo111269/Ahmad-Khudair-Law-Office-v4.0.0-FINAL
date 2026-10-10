@@ -179,7 +179,7 @@ export async function filePage(app,id){
  <nav class="file-tabs-bar" aria-label="أقسام الملف">
   <div class="file-subtabs" role="tablist" aria-label="تبويبات الملف">${orderedFileTabs().map(([k,l,icon])=>{const count=tabCount(k);return `<button type="button" role="tab" data-tab="${k}" data-section-id="${k}" aria-controls="file-tab" title="${esc(l)}" aria-label="${esc(l)}${count?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="subtab-btn${app.__fileTab.tab===k?' active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count?` <small>${count}</small>`:''}</button>`}).join('')}</div>
   <div class="ftb-tools">
-   <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-card-menu aria-haspopup="menu" aria-label="كل الأقسام — قائمة التبويبات" title="كل الأقسام">⋯</button>
+   <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-tabs-menu aria-haspopup="menu" aria-label="كل الأقسام — قائمة التبويبات" title="كل الأقسام">⋯</button>
     <div class="ux-menu ftb-menu" role="menu" hidden>${orderedFileTabs().map(([k,l,icon])=>`<button type="button" role="menuitem" class="ux-menu-item" data-menu-tab="${k}"><span aria-hidden="true">${icon}</span> ${esc(l)}</button>`).join('')}</div></div>
    <button type="button" class="ghost icon-only" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض" aria-label="تخصيص الصفحة">⚙</button>
   </div>
@@ -299,6 +299,13 @@ export async function bindFilePage(app,id){
  app.__fileGotoTab=gotoTab;
  root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.tab));
  // قائمة «كل الأقسام»: نفس التبويبات في قائمة منسدلة للشاشات الضيقة وللوصول السريع.
+ // سمة مستقلة (data-tabs-menu) حتى لا يلتبس زر القائمة هذا مع زر قائمة إجراءات الملف
+ // (data-card-menu) في أي محدد عام؛ الإغلاق خارجًا وبـEscape من المعالج العام لـ .ux-menu.
+ root.querySelectorAll('[data-tabs-menu]').forEach(btn=>{
+  const menu=btn.nextElementSibling;
+  btn.addEventListener('click',e=>{e.stopPropagation();const open=menu.hidden;root.querySelectorAll('.ux-menu:not([hidden])').forEach(m=>{if(m!==menu)m.hidden=true});menu.hidden=!open;if(open)menu.querySelector('.ux-menu-item')?.focus()});
+  menu.addEventListener('click',()=>{menu.hidden=true});
+ });
  root.querySelectorAll('[data-menu-tab]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.menuTab));
  // قفزات المؤشرات والرأس إلى التبويب المعني (الجلسات/الأعمال/الأطراف…).
  root.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.tabJump));

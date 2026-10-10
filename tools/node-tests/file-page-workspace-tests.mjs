@@ -353,6 +353,26 @@ try{
   assert.equal(await page.evaluate(()=>document.querySelector('#main-content').classList.contains('file-focus-mode')),false);
  });
 
+ // (17) قائمة «كل الأقسام»: فتح/إغلاق/Escape/نقر خارجي/تنقل فعلي
+ await verify('17) قائمة «كل الأقسام» تعمل وتُغلق بـEscape والنقر خارجها وتنقل فعليًا',async()=>{
+  await go(`file:${fx.file.id}`);
+  const btn=page.locator('[data-tabs-menu]');
+  assert.equal(await btn.count(),1,'زر قائمة التبويبات واحد且不 يلتبس مع قائمة الملف');
+  await btn.click();await page.waitForTimeout(300);
+  const menu=page.locator('.ftb-menu');
+  assert.equal(await menu.isVisible(),true,'القائمة تفتح');
+  assert.equal(await menu.locator('[data-menu-tab]').count(),15,'كل التبويبات داخل القائمة');
+  await page.keyboard.press('Escape');await page.waitForTimeout(300);
+  assert.equal(await menu.isVisible(),false,'Escape يغلق القائمة');
+  await btn.click();await page.waitForTimeout(300);
+  await page.mouse.click(700,500);await page.waitForTimeout(300);
+  assert.equal(await menu.isVisible(),false,'النقر خارجها يغلقها');
+  await btn.click();await page.waitForTimeout(300);
+  await menu.locator('[data-menu-tab="judgments"]').click();await page.waitForTimeout(900);
+  assert.equal(await page.locator('.file-subtabs [data-tab="judgments"]').getAttribute('aria-selected'),'true','عنصر القائمة ينقل فعليًا إلى التبويب');
+  assert.equal(await menu.isVisible(),false,'القائمة تُغلق بعد الاختيار');
+ });
+
  // لقطات مرجعية
  await go(`file:${fx.file.id}`);
  await page.screenshot({path:path.join(artifactDir,'overview.png'),fullPage:true});
