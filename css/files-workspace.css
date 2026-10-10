@@ -1,0 +1,370 @@
+/* =====================================================================
+   مساحة عمل الملفات — Four-Zone Files Workspace
+   تخص صفحة الملفات فقط (.fw). الشريط العلوي العام لا يُمسّ من هنا.
+   ===================================================================== */
+
+body:has(.fw) #app{
+ height:100dvh;
+ max-height:100dvh;
+ overflow:hidden;
+}
+body:has(.fw) main{
+ display:flex;
+ flex-direction:column;
+ min-width:0;
+ min-height:0;
+ height:100%;
+ overflow:hidden;
+}
+#main-content:has(.fw){
+ padding:0;
+ display:flex;
+ flex-direction:column;
+ min-height:0;
+ flex:1 1 auto;
+ overflow:hidden;
+}
+.fw{
+ display:flex;
+ flex-direction:column;
+ flex:1 1 auto;
+ min-height:0;
+ min-width:0;
+ overflow:hidden;
+ background:var(--bg);
+}
+
+/* ---------- شريط صفحة الملفات ---------- */
+.fw-pagebar{
+ display:flex;
+ flex-direction:row;
+ flex-wrap:nowrap;
+ align-items:center;
+ gap:8px;
+ height:56px;
+ min-height:56px;
+ max-height:56px;
+ padding:0 12px;
+ border-bottom:1px solid var(--border);
+ background:var(--surface);
+ overflow-x:auto;
+ overflow-y:hidden;
+ overscroll-behavior-x:contain;
+ scrollbar-width:thin;
+}
+.fw-title{
+ margin:0;
+ padding:0 4px 0 0;
+ color:var(--primary);
+ font-size:1.28rem;
+ font-weight:800;
+ letter-spacing:.01em;
+ white-space:nowrap;
+ flex:none;
+}
+.fw-pagebar > button,
+.fw-toolbar > button{
+ flex:none;
+ white-space:nowrap;
+}
+.fw-pagebar .fw-addfile{padding:8px 14px;font-weight:700}
+.fw-pagebar .fw-icon{
+ width:40px;height:40px;min-width:40px;padding:0;
+ display:inline-grid;place-items:center;
+}
+.fw-pagebar .fw-icon .ic{width:20px;height:20px}
+.fw-pagebar .fw-quickadd{padding:8px 12px}
+.fw-pagebar .fw-back{padding:8px 10px}
+.fw-pagebar .fw-morebtn{margin-inline-start:auto}
+
+/* ---------- شريط أدوات الجدول ---------- */
+.fw-toolbar{
+ display:flex;
+ flex-direction:row;
+ flex-wrap:nowrap;
+ align-items:center;
+ gap:6px;
+ height:48px;
+ min-height:48px;
+ max-height:48px;
+ padding:0 10px;
+ border-bottom:1px solid var(--border);
+ background:var(--surface2);
+ overflow-x:auto;
+ overflow-y:hidden;
+ overscroll-behavior-x:contain;
+ scrollbar-width:thin;
+}
+.fw-tb-btn{padding:7px 10px;font-size:13px}
+.fw-search{
+ flex:1 1 220px;
+ min-width:140px;
+ max-width:420px;
+ height:36px;
+ margin:0;
+ padding:7px 12px;
+ font-size:14px;
+}
+.fw-badge{
+ display:inline-grid;
+ place-items:center;
+ min-width:18px;
+ height:18px;
+ margin-inline-start:4px;
+ padding:0 5px;
+ border-radius:99px;
+ background:var(--primary);
+ color:var(--on-primary);
+ font-size:11px;
+ font-weight:800;
+}
+.fw-badge[hidden]{display:none}
+.fw-tb-btn.is-active{border-color:var(--primary-border);background:var(--primary-soft)}
+
+/* ---------- شريط النتائج المضغوط ---------- */
+.fw-strip{
+ display:flex;
+ flex-wrap:wrap;
+ align-items:center;
+ gap:6px 10px;
+ min-height:0;
+ padding:4px 12px;
+ background:var(--surface);
+ border-bottom:1px solid var(--border);
+}
+.fw-strip .list-status{margin:0;min-height:0}
+.fw-strip .list-status:empty{display:none}
+.fw-strip .list-filter-summary{margin:0}
+.fw-strip:has(.list-status:empty):has(.list-filter-summary:empty){display:none}
+.fw-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+
+/* ---------- القوائم المنسدلة ---------- */
+.fw-pop,
+.fw-panel.is-open,
+.fw-panel.fw-pop{
+ position:fixed;
+ z-index:240;
+ background:var(--surface);
+ color:var(--text);
+ border:1px solid var(--border);
+ border-radius:var(--radius);
+ box-shadow:0 12px 32px var(--shadow-color,rgba(0,0,0,.28));
+ padding:8px;
+ display:flex;
+ flex-direction:column;
+ gap:4px;
+ overflow:auto;
+ overscroll-behavior:contain;
+}
+.fw-panel[hidden]{display:none}
+.fw-pop[role="menu"] > button,
+.fw-panel[role="menu"] > button{
+ display:flex;
+ align-items:center;
+ gap:8px;
+ width:100%;
+ border:0;
+ background:transparent;
+ color:var(--text);
+ text-align:start;
+ padding:9px 10px;
+ border-radius:8px;
+ font:inherit;
+}
+.fw-pop[role="menu"] > button:hover,
+.fw-pop[role="menu"] > button:focus-visible,
+.fw-panel[role="menu"] > button:hover,
+.fw-panel[role="menu"] > button:focus-visible{
+ background:var(--surface2);
+}
+.fw-time-panel .fw-group{padding:6px 4px 10px;border-bottom:1px solid var(--border)}
+.fw-time-panel .fw-group:last-child{border-bottom:0;padding-bottom:4px}
+.fw-time-panel h3{margin:0 0 8px;font-size:13px;color:var(--text-muted);font-weight:700}
+.fw-time-panel .list-status-chips,
+.fw-time-panel .preset-bar{margin:0;flex-wrap:wrap}
+.fw-time-panel .custom-range{margin-top:8px}
+
+.dg-pop.dg-ws-pop{width:min(440px,calc(100vw - 16px));max-width:calc(100vw - 16px)}
+.dg-ws-pop .ws-group{border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:0 0 8px;background:var(--surface2)}
+.dg-ws-pop .ws-group > summary{
+ cursor:pointer;
+ font-weight:700;
+ font-size:13px;
+ list-style:none;
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:8px;
+}
+.dg-ws-pop .ws-group > summary::-webkit-details-marker{display:none}
+.dg-ws-pop .ws-group > summary::after{content:'▾';color:var(--text-muted);font-size:12px}
+.dg-ws-pop .ws-group:not([open]) > summary::after{content:'▸'}
+.dg-ws-pop .ws-body{display:grid;gap:8px;margin-top:8px}
+.dg-ws-pop .ws-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.dg-ws-pop .ws-row > label,
+.dg-ws-pop .ws-field{
+ display:grid;
+ gap:4px;
+ font-size:12px;
+ color:var(--text-muted);
+ min-width:0;
+ flex:1 1 140px;
+}
+.dg-ws-pop .ws-row select,
+.dg-ws-pop .ws-row input:not([type=checkbox]):not([type=range]),
+.dg-ws-pop .ws-field select,
+.dg-ws-pop .ws-field input{
+ width:100%;
+ padding:7px 8px;
+ border:1px solid var(--border);
+ border-radius:var(--radius-sm);
+ background:var(--surface);
+ color:var(--text);
+}
+.dg-ws-pop .ws-hint{margin:0;font-size:12px;color:var(--text-muted);line-height:1.45}
+.dg-ws-pop .ws-actions{display:flex;flex-wrap:wrap;gap:6px}
+.dg-ws-pop .ws-sep{height:1px;background:var(--border);margin:4px 0}
+.dg-ws-pop .ws-io-group{display:grid;gap:6px;margin-bottom:10px}
+.dg-ws-pop .ws-io-group h3{margin:0 0 2px;font-size:13px}
+.dg-ws-pop .ws-io-group button{text-align:start}
+
+/* ---------- مساحة البيانات ---------- */
+.fw-grid,
+.fw #list-grid{
+ flex:1 1 auto;
+ min-height:0;
+ min-width:0;
+ display:flex;
+ flex-direction:column;
+}
+.fw .dg.dg-workspace{
+ flex:1 1 auto;
+ min-height:0;
+ display:flex;
+ flex-direction:column;
+ border-radius:0;
+ border-inline:0;
+ border-bottom:0;
+ overflow:hidden;
+}
+.fw .dg.dg-workspace .dg-shell-head,
+.fw .dg.dg-workspace .dg-tools-summary,
+.fw .dg.dg-workspace .dg-toolbar,
+.fw .dg.dg-workspace .dg-adv{
+ display:none;
+}
+.fw .dg.dg-workspace .dg-tools-panel{
+ border:0;
+ padding:0;
+ min-width:0;
+}
+.fw .dg.dg-workspace.dg-shell-closed .dg-body{
+ display:flex;
+}
+.fw .dg.dg-workspace .dg-body{
+ flex:1 1 auto;
+ min-height:0;
+ display:flex;
+ flex-direction:column;
+}
+.fw .dg.dg-workspace .dg-scroll{
+ flex:1 1 auto;
+ max-height:none;
+ min-height:min(48vh,420px);
+ overflow:auto;
+}
+.fw .dg.dg-workspace .dg-chips{
+ padding:4px 10px;
+}
+.fw .dg.dg-workspace .dg-selbar{
+ position:sticky;
+ bottom:0;
+ z-index:2;
+}
+
+/* ملء الشاشة: زر خروج واضح */
+.dg-fs-exit{
+ display:none;
+ position:fixed;
+ top:12px;
+ inset-inline-start:12px;
+ z-index:10000;
+}
+.dg.dg-workspace.dg-fullscreen .dg-fs-exit,
+.dg.dg-workspace:fullscreen .dg-fs-exit{
+ display:inline-flex;
+}
+
+/* بطاقات مضغوطة وغنية بالمعلومات */
+.fw .dg.dg-cards .dg-scroll{overflow:auto}
+.fw .dg.dg-cards tbody{
+ display:grid;
+ grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+ gap:8px;
+ padding:8px 10px 14px;
+}
+.fw .dg.dg-cards tbody tr{
+ display:flex;
+ flex-direction:column;
+ gap:2px;
+ margin:0;
+ padding:10px 12px;
+ border:1px solid var(--border);
+ border-radius:var(--radius);
+ background:var(--surface);
+ box-shadow:var(--shadow-sm,none);
+ min-width:0;
+}
+.fw .dg.dg-cards td{
+ display:block;
+ border:0;
+ padding:2px 0;
+ white-space:normal;
+ max-width:none;
+ background:transparent;
+}
+.fw .dg.dg-cards td::before{
+ content:attr(data-label);
+ display:block;
+ font-size:10.5px;
+ color:var(--text-muted);
+ margin-bottom:1px;
+}
+.fw .dg.dg-cards .dg-sel-td{order:-30}
+.fw .dg.dg-cards .dg-sel-td::before{display:none}
+.fw .dg.dg-cards td[data-k="fileNumber"]{order:-20;color:var(--primary);font-weight:800;font-size:1.02em}
+.fw .dg.dg-cards td[data-k="title"]{order:-19;font-weight:700}
+.fw .dg.dg-cards td[data-k="status"],
+.fw .dg.dg-cards td[data-k="priority"]{order:-18}
+.fw .dg.dg-cards td[data-k="nextStep"],
+.fw .dg.dg-cards td[data-k="nextStepDate"]{order:-17}
+.fw .dg.dg-cards td[data-k="partyNames"]{order:-16}
+.fw .dg.dg-cards .dg-qa{order:40}
+.fw .dg.dg-cards .dg-qa::before{display:none}
+.fw .dg.dg-cards td[data-empty="true"]{display:none}
+
+/* جدول أوضح للقراءة العربية */
+.fw .dg.dg-workspace .dg-table thead th{
+ background:var(--dg-head-bg,var(--surface2));
+ color:var(--dg-head-color,var(--text));
+}
+.fw .dg.dg-workspace .dg-table td{
+ color:var(--dg-text,var(--text));
+}
+
+@media(max-width:900px){
+ .fw-title{font-size:1.12rem}
+ .fw-search{max-width:none;flex:1 1 160px}
+ .fw-lbl{display:none}
+}
+@media(max-width:640px){
+ .fw-pagebar,.fw-toolbar{height:48px;min-height:48px;max-height:48px;padding:0 8px;gap:4px}
+ .fw-pagebar .fw-icon{width:36px;height:36px;min-width:36px}
+ .fw-tb-btn{padding:6px 8px;font-size:12px}
+ .fw-search{min-width:96px;font-size:13px}
+ .fw .dg.dg-cards tbody{grid-template-columns:1fr}
+}
+@media print{
+ .fw-pagebar,.fw-toolbar,.fw-strip,.fw-panel,.dg-fs-exit{display:none}
+ .fw .dg.dg-workspace .dg-scroll{max-height:none;overflow:visible}
+}

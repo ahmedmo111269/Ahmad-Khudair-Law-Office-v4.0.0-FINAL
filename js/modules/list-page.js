@@ -16,6 +16,7 @@ import {registerPageLayout,openPageCustomizer} from '../ui/page-layout.js';
 import {getFavorites} from '../services/favorites.js';
 import {updateCollapseSummary} from '../ui/collapsible.js';
 import {PROCEDURES_EXTRAS} from './procedures-extras.js';
+import {filesWorkspaceHtml,bindFilesChrome,paintFilesWorkspace} from './files-workspace.js';
 
 // ===== سجل إضافات القائمة =====
 // صفحة قائمة عامة تستضيف لوحات مخصصة فوق الجدول (ملخص/إحصاء/لوحة حالات)
@@ -118,11 +119,6 @@ function filesChipsHtml(st){
 export function listPage(app,store,query){
  const ent=ENTITIES[store];
  const extras=listExtrasFor(store);
- // اشتراك القائمة في نظام ترتيب الأقسام المركزي (تعريف واحد يعمل لكل القوائم)
- registerPageLayout({pageId:store,title:ent.plural,sections:[
-  ...(extras?[{id:'extras',title:extras.title||'ملخص وإجراءات سريعة',icon:extras.icon||'◈'}]:[]),
-  {id:'filters',title:'عوامل التصفية والفترات'},
-  {id:'grid',title:'جدول السجلات',canHide:false}]});
  const saved=prefs.get(LIST_VIEW_KEY(store),{})||{};
  const st=state(app)[store]=state(app)[store]||{q:saved.q||'',preset:saved.preset||'all',from:saved.from||'',to:saved.to||'',showCal:saved.showCal??Boolean(ent.calendar),status:saved.status||'all',chip:saved.chip||'all'};
  if(query?.get('preset')){st.preset=query.get('preset');st.from=query.get('from')||'';st.to=query.get('to')||''}
@@ -132,9 +128,19 @@ export function listPage(app,store,query){
  saveListView(store,st);
  const hasDate=Boolean(ent.dateField);
  const presetLabel=store==='procedures'?[...PRESETS.slice(0,1),['overdue','المتأخرة'],...PRESETS.slice(1)]:PRESETS;
+ if(store==='files'){
+  // صفحة الملفات: مساحة العمل ذات الأربعة أقسام. لا تُسجَّل لوحة الفلاتر كقسم صفحة
+  // لأنها انتقلت إلى شريط الأدوات — تخصيص الصفحة يبقى لجدول السجلات وإعدادات العرض.
+  registerPageLayout({pageId:store,title:ent.plural,sections:[{id:'grid',title:'جدول السجلات',canHide:false}]});
+  return filesWorkspaceHtml({st,presets:presetLabel,chips:FILE_LIST_CHIPS,hasDate});
+ }
+ // اشتراك القائمة في نظام ترتيب الأقسام المركزي (تعريف واحد يعمل لكل القوائم)
+ registerPageLayout({pageId:store,title:ent.plural,sections:[
+  ...(extras?[{id:'extras',title:extras.title||'ملخص وإجراءات سريعة',icon:extras.icon||'◈'}]:[]),
+  {id:'filters',title:'عوامل التصفية والفترات'},
+  {id:'grid',title:'جدول السجلات',canHide:false}]});
  return `<div class="page-head list-head"><div><h2>${esc(ent.plural)}</h2><p class="muted small">اضغط على أي صف لفتح صفحته. البحث يشمل كل الحقول${['hearings','procedures','judgments','execution','expertReports','fees','caseNotes','documentReferences','appointments','communications','powersOfAttorney','cases'].includes(store)?' وبيانات الملف والقضية والموكل المرتبطة':''}.</p></div>
   <div class="head-actions"><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-qa-custom title="إظهار أو إخفاء إجراءات الصف">إجراءات الصف</button><button class="primary" data-list-add>+ إضافة ${esc(ent.label)}</button></div></div>
- ${store==='files'?filesChipsHtml(st):''}
  ${extras?`<section class="panel list-extras-panel" data-section-id="extras" data-collapse-id="list-extras-${esc(store)}" data-collapse-default="open"><div class="panel-head"><h3>${esc(extras.heading||'◈ ملخص سريع')}</h3><span class="muted small">${esc(extras.hint||'')}</span></div><div id="list-extras" aria-live="polite"><p class="muted small">جارٍ تحميل الملخص…</p></div></section>`:''}
  <section class="panel list-filter-panel" data-section-id="filters" data-collapse-id="list-filters-${esc(store)}"><div class="panel-head"><h3>🔍 عوامل التصفية والفترات</h3><span class="badge" data-list-filter-count>${listFilterCount(st)?`${listFilterCount(st)} فلاتر نشطة`:'لا توجد فلاتر نشطة'}</span></div>
  <div class="list-controls">
@@ -184,6 +190,7 @@ export function bindListPage(app,store){
   summaryHost.innerHTML=chips.map(([id,label])=>`<span class="fs-chip">${esc(label)}<button type="button" data-fs-clear="${id}" aria-label="إزالة الفلتر: ${esc(label)}">✕</button></span>`).join('')+(chips.length>1?`<span class="fs-chip fs-clear"><button type="button" data-fs-clear="all">مسح الكل</button></span>`:'');
   // الملخص يبقى ظاهرًا في رأس القسم حتى بعد الطي — مع عدّ الفلاتر النشطة.
   updateCollapseSummary(root.querySelector('.list-filter-panel'),chips.length?`${chips.length} فلاتر نشطة · ${chips.map(([,l])=>l).join(' · ')}`:'');
+  if(store==='files')paintFilesWorkspace(root,st,grid);
  };
  summaryHost?.addEventListener('click',e=>{
   const b=e.target.closest('[data-fs-clear]');if(!b)return;
@@ -229,6 +236,7 @@ export function bindListPage(app,store){
     columns:columnsFor(store,gridRefs,{relations}),rows:[],dataProvider:provider,pageSize:25,
     ...relations.gridOptions(()=>({filters:scopeSummary()?[scopeSummary()]:[]})),
     title:ent.plural,storageKey:'list:'+store,collapseKey:`list:${store}:grid`,
+    ...(store==='files'?{workspace:true,onChrome:()=>paintFilesWorkspace(root,st,grid)}:{}),
     // References are already hydrated before the provider applies filters/search.
     onProviderState:({phase,error})=>{
      if(phase==='loading')status.textContent='جارٍ تحميل الصفحة المطلوبة…';
@@ -242,18 +250,19 @@ export function bindListPage(app,store){
    });
   }else await grid.reload({resetPage:true});
  }
- root.querySelector('[data-list-add]').onclick=async()=>store==='files'?(await import('./client-file.js')).startNewLegalFile(app):openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
+ const addBtn=root.querySelector('[data-list-add]');
+ if(addBtn)addBtn.onclick=async()=>store==='files'?(await import('./client-file.js')).startNewLegalFile(app):openEntityForm(app,store,{onSaved:async(row,isNew)=>{if(isNew&&store==='files')return app.go('file:'+row.id);if(isNew&&['clients','opponents','cases'].includes(store))return app.go(routeFor(store,row));await load()}});
  root.querySelector('[data-qa-custom]')?.addEventListener('click',()=>customizeRowActions().then(()=>load()).catch(err=>app.fail(err)));
  root.querySelector('[data-customize-page]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:store,root}));
  let t=0;
- root.querySelector('#list-q').addEventListener('input',e=>{clearTimeout(t);st.q=e.target.value;saveListView(store,st);syncFilterSummary();t=setTimeout(()=>load().catch(err=>app.fail(err)),250)});
+ root.querySelector('#list-q')?.addEventListener('input',e=>{clearTimeout(t);st.q=e.target.value;saveListView(store,st);syncFilterSummary();t=setTimeout(()=>load().catch(err=>app.fail(err)),250)});
  // «/» يقفز لبحث القائمة من أي موضع في الصفحة، وEsc يمسحه
  root.addEventListener('keydown',e=>{
   const q=root.querySelector('#list-q');if(!q)return;
   if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){e.preventDefault();q.focus();q.select()}
   else if(e.key==='Escape'&&e.target===q&&q.value){q.value='';st.q='';saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err))}
  });
- root.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{st.preset=b.dataset.preset;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x===b));root.querySelector('.custom-range').hidden=st.preset!=='custom';saveListView(store,st);syncFilterSummary();if(st.preset!=='custom')load().catch(err=>app.fail(err))});
+ root.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{st.preset=b.dataset.preset;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x===b));const cr=root.querySelector('.custom-range');if(cr)cr.hidden=st.preset!=='custom';saveListView(store,st);syncFilterSummary();if(st.preset!=='custom')load().catch(err=>app.fail(err))});
  root.querySelectorAll('[data-file-chip]').forEach(b=>b.onclick=()=>{
   st.chip=b.dataset.fileChip;
   root.querySelectorAll('[data-file-chip]').forEach(x=>{const on=x===b;x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on))});
@@ -265,6 +274,9 @@ export function bindListPage(app,store){
   mountCalendar(root.querySelector('#list-calendar'),{selected:st.preset==='custom'&&st.from&&st.from===st.to?st.from:undefined,
    onMonthChange:async(y,m)=>{const first=`${y}-${String(m).padStart(2,'0')}-01`,last=`${y}-${String(m).padStart(2,'0')}-31`;const {rows}=await scan(app.office,store,{index:ent.dateIndex||ent.dateField,lower:first,upper:last+'\uffff',limit:3000,direction:'next'});const mm=new Map();for(const r of rows){const d=String(r[ent.dateField]||'').slice(0,10);mm.set(d,(mm.get(d)||0)+1)}return mm},
    onSelect:d=>{st.preset='custom';st.from=d;st.to=d;root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset==='custom'));const cr=root.querySelector('.custom-range');cr.hidden=false;cr.querySelector('#list-from').value=d;cr.querySelector('#list-to').value=d;saveListView(store,st);syncFilterSummary();load().catch(err=>app.fail(err))}});
+ }
+ if(store==='files'){
+  bindFilesChrome(app,{root,st,getGrid:()=>grid,load:()=>load().catch(err=>app.fail(err)),syncFilterSummary,saveListView:()=>saveListView(store,st)});
  }
  if(extras?.mount){
   const host=root.querySelector('#list-extras');
