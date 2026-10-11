@@ -597,6 +597,21 @@ function gearHeadOf(el){
  // الحدّ: أقرب قسم/مكوّن (موسوم) يحيط بالرأس يجب أن يكون هذا العنصر نفسه — فلا يسرق رأس قسم داخلي
  return [...el.querySelectorAll(GEAR_HEAD_SEL)].find(h=>isGearable(h)&&h.closest('[data-uxc-id],[data-section-id]')===el)||null;
 }
+/**
+ * موضع زر ⚙ لعنصر: إن أعلن العنصر موضعًا صريحًا عبر data-uxc-gear-target
+ * (مُحدِّد CSS) يُركَّب فيه الزر داخل التدفق الطبيعي — مثل شريط أدوات الصفحة —
+ * وإلا فالقاعدة القديمة: رأس القسم، ثم شريط صغير أعلى المحتوى.
+ * البحث يقتصر على نطاق الصفحة (main) ثم المستند: لا موضع عشوائي من صفحة أخرى.
+ */
+function gearTargetFor(el){
+ const selector=String(el.dataset?.uxcGearTarget||'').trim();
+ if(selector){
+  const scope=el.closest('[data-uxc-gear-scope]')||el.closest('main')||el.parentElement||document;
+  const target=scope?.querySelector?.(selector)||document.querySelector(selector);
+  if(target&&!target.contains(el))return target;
+ }
+ return gearHeadOf(el);
+}
 function ensureGear(el,{id,title}){
  if(!isGearable(el))return;
  // idempotent: ⚙ يخص هذا العنصر فقط — لا نعتبر ⚙ عنصرٍ موسوم داخله كأنه ⚙ لنا
@@ -610,7 +625,9 @@ function ensureGear(el,{id,title}){
  btn.innerHTML=icon('settings');
  btn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();openCustomizerForElement(el,btn)});
  const head=gearHeadOf(el);
- if(head)head.append(btn);
+ const mount=gearTargetFor(el)||head;
+ if(mount&&isGearable(mount))mount.append(btn);
+ else if(head)head.append(btn);
  else{
   // لا رأس واضح: شريط صغير في التدفق أعلى المحتوى، بلا أي تموضع مطلق
   const bar=document.createElement('div');bar.className='uxc-gear-bar';bar.append(btn);el.prepend(bar);

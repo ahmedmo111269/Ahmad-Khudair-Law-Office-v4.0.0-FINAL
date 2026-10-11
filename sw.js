@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.3.0-subbar-compact';
+const CACHE='ahmad-khudair-law-office-v6.4.0-files-bar-undo';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -65,6 +65,7 @@ const ASSETS=[
   "./js/ui/status.js",
   "./js/core/errors.js",
   "./js/core/events.js",
+  "./js/core/undo-stack.js",
   "./js/core/file-number.js",
   "./js/core/format.js",
   "./js/core/display-prefs.js",

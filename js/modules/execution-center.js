@@ -502,8 +502,11 @@ export async function bindExecutionCenter(app, query) {
     return hit ? hit[0] : String(label || '').trim();
   };
 
+  // sameAction: الإجراء نفسه الذي يعرضه الإشعار يُسجَّل في سجل «العودة» العام
+  // (زر عودة في شريط صفحات القوائم) فيبقى قابلًا للتنفيذ بعد انقضاء مدة الإشعار.
   const withUndo = (message, undo) => toast(message, 'ok', {
-    actionLabel: 'تراجع', action: async () => { await undo(); toast('تم التراجع — السجل مشطوب بسبب ولم يُحذف'); }
+    actionLabel: 'تراجع', undoable: true, undoLabel: message,
+    action: async () => { await undo(); toast('تم التراجع — السجل مشطوب بسبب ولم يُحذف'); }
   });
 
   async function submitForm(form) {
@@ -1519,7 +1522,7 @@ export async function bindExecutionDetail(app, executionId) {
       if (!answer?.ok) return undefined;
       if (!String(answer.value || '').trim()) { toast('سبب الإلغاء مطلوب', 'error'); return undefined; }
       await S.voidSimpleRecord(app.office, {kind, id, reason: answer.value});
-      toast('تم الإلغاء — يمكنك التراجع الآن', 'ok', {actionLabel: 'تراجع', action: async () => {
+      toast('تم الإلغاء — يمكنك التراجع الآن', 'ok', {actionLabel: 'تراجع', undoable: true, undoLabel: 'إلغاء سجل تنفيذ', action: async () => {
         await S.undoVoidSimpleRecord(app.office, {kind, id});
         await app.refresh();
       }});
