@@ -8,7 +8,7 @@
 | `js/ui/collapsible.js` | ملخص حي (`updateCollapseSummary`)، فتح مؤقت (`openCollapseTransient` + حارس focusin)، `collapse:reset`، أكورديون (`data-collapse-accordion`)، عناصر رأس دائمة (`[data-collapse-alert]`) |
 | `js/ui/card.js`, `js/ui/datagrid.js` | دعم `collapse:reset` |
 | `js/ui/cockpit.js` | `fileNextStep()` — الآلية المشتركة الوحيدة لحساب «التالي» في الملف (تستخدمها القمرة والشريط الثابت) |
-| `js/modules/file-page.js` | قمرة علوية (إجراء أساسي + ⋯)، «نواقص الملف» (`fileGaps`)، شريط ثابت عند التمرير، 5 مناطق تبويبات + شريط فرعي، كاش in-memory للتبويبات (lazy)، آخر تبويب محفوظ، نسخ ملخص، فحص قبل الإنهاء/الأرشفة، وضع تركيز، «تغيّر منذ زيارتي»، السابق/التالي |
+| `js/modules/file-page.js` | رأس هوية قانونية (عنوان القضية/المحكمة يمينًا + رقم الملف الفرعي يسارًا + صف أطراف كامل)، شريط تبويبات مسطّح واحد (15 تبويبًا، نظرة عامة افتراضيًا) + قائمة «كل الأقسام»، تبويب نظرة عامة: شريطا «بيانات الدعوى والملف» و«المرحلة والتسلسل القضائي» القابلان للطي + مؤشرات عملية + القمرة وشريط التنفيذ ومهام الملف، كاش in-memory للتبويبات (lazy) يُصفّر بعد الحفظ، آخر تبويب لكل ملف (`ui:file-last-tab` بصيغة `byFile`) + دعم `?tab=`، نسخ ملخص، فحص قبل الإنهاء/الأرشفة، وضع تركيز، السابق/التالي — التفاصيل: `docs/FILE-WORKSPACE-REDESIGN.md` |
 | `js/modules/client-file.js` | اتصال/واتساب، ترتيب «تحتاج متابعة» أولًا (Register + DOM)، شارات تنبيه، أكور |
 | `js/modules/list-page.js` | `FILE_LIST_CHIPS` (6 شرائح)، ملخص فلاتر قابل للإزالة، `listNavFor`/`listNavHtml`/`bindListNav`، عمودا «الخطوة التالية» |
 | `js/modules/record-page.js` | السابق/التالي في رأس السجل |

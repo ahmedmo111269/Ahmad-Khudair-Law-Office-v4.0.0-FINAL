@@ -165,3 +165,109 @@ select option{background:var(--surface);color:var(--text)}
  .file-head{flex-direction:column}
  .file-head .head-actions{width:100%}
 }
+
+/* ==========================================================================
+   مساحة عمل الملف — Data-First Legal Workspace
+   البيانات القانونية أكبر وأوضح من أدوات التحكم؛ ألوان هادئة من الثيم الحالي؛
+   RTL كامل واستجابة للشاشات الصغيرة. كل الأصناف هنا خاصة بصفحة الملف فقط.
+   ========================================================================== */
+.file-id{display:block;padding:14px 16px 12px;border:1px solid var(--border);border-inline-start:4px solid var(--cat,var(--primary));border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow-sm)}
+.fid-top{display:flex;gap:18px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+.fid-case{flex:1 1 420px;min-width:0}
+.fid-kicker{font-size:12.5px;color:var(--text-muted);margin:0 0 4px}
+.fid-title{font-size:clamp(20px,2.4vw,27px);line-height:1.4;font-weight:800;color:var(--text-strong);margin:0 0 6px;overflow-wrap:anywhere}
+.fid-court{font-size:15px;color:var(--text);margin:0 0 6px;font-weight:600}
+.fid-sub{font-size:13.5px;color:var(--text-muted);margin:0 0 6px}
+.fid-badges{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+.fid-meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px;text-align:end}
+.fid-fno{display:inline-flex;align-items:baseline;gap:8px;border:1px solid var(--border);background:var(--surface2);border-radius:var(--radius-sm);padding:8px 14px}
+.fid-fno-kind{font-size:12.5px;color:var(--text-muted);font-weight:600}
+.fid-fno b{font-size:24px;line-height:1.1;color:var(--text-strong);font-weight:800;letter-spacing:.5px}
+.fid-fno-note{font-size:11px;max-width:26ch}
+.fid-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.fid-parties{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0;padding:12px 0 0;border-top:1px dashed var(--border)}
+.fid-party{display:inline-flex;align-items:baseline;gap:8px;flex-wrap:wrap;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-sm);padding:8px 12px;min-height:44px;font:inherit;color:var(--text);text-align:start;cursor:pointer}
+.fid-party:hover{border-color:var(--primary)}
+.fid-party:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.fid-party-role{font-size:11.5px;color:var(--text-muted);background:var(--surface2);border-radius:999px;padding:2px 9px;white-space:nowrap;font-weight:700}
+.fid-party--client .fid-party-role{color:var(--primary)}
+.fid-party--opponent .fid-party-role{color:var(--danger)}
+.fid-party-name{font-size:16.5px;font-weight:700;color:var(--text-strong)}
+.fid-party-cap{font-size:12.5px;color:var(--text-muted)}
+.fid-party--more{border-style:dashed;color:var(--text-muted);font:inherit;font-size:13px}
+.fid-party-empty{font-size:13.5px;color:var(--text-muted)}
+.fid-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* شريط التبويبات المسطّح: صف واحد قابل للتمرير + قائمة «كل الأقسام» للشاشات الضيقة */
+.file-tabs-bar{display:flex;align-items:stretch;gap:6px;margin:14px 0 10px}
+.file-tabs-bar .file-subtabs{display:flex;gap:2px;overflow-x:auto;flex:1 1 auto;min-width:0;flex-wrap:nowrap;margin:0;padding:2px 2px 0;scrollbar-width:thin;border-bottom:2px solid var(--border)}
+.file-tabs-bar .file-subtabs .subtab-btn{border:0;background:transparent;color:var(--text-muted);padding:9px 14px;min-height:44px;border-radius:10px 10px 0 0;cursor:pointer;font:inherit;font-size:13.5px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;border-bottom:3px solid transparent;margin-bottom:-2px}
+.file-tabs-bar .file-subtabs .subtab-btn:hover{color:var(--text-strong);background:var(--surface2)}
+.file-tabs-bar .file-subtabs .subtab-btn.active{color:var(--text-strong);font-weight:800;border-bottom-color:var(--primary);background:color-mix(in srgb,var(--primary) 9%,transparent)}
+.file-tabs-bar .file-subtabs .subtab-btn small{background:var(--surface2);border-radius:99px;padding:1px 7px;font-size:11px}
+.ftb-tools{display:flex;gap:4px;align-items:center;padding-bottom:2px}
+.ftb-menu{max-height:62vh;overflow:auto;min-width:220px}
+
+/* أقسام البيانات القابلة للطي داخل «نظرة عامة» */
+.fp-data{margin:0 0 14px}
+.fp-data>.panel-head h3{font-size:17px;color:var(--text-strong)}
+.fp-kv{padding:2px 2px 6px}
+.fp-kv-h{font-size:13px;color:var(--text-muted);margin:16px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border);font-weight:700}
+.fp-kv-h:first-child{margin-top:4px}
+.fp-kv .kv{grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:10px 24px}
+.fp-kv .kv dt{font-size:12.5px}
+.fp-kv .kv dd{font-size:15.5px;color:var(--text-strong);font-weight:600;line-height:1.65}
+.fp-kv-note{font-size:13.5px;margin:10px 0 0}
+
+/* الملخص العملي: مؤشرات صغيرة منضبطة قابلة للنقر */
+.fp-metrics{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.fp-metric{display:flex;flex-direction:column;gap:2px;align-items:flex-start;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-sm);padding:8px 14px;min-width:132px;font:inherit;color:var(--text);cursor:pointer;text-align:start}
+.fp-metric.is-static{cursor:default}
+.fp-metric:not(.is-static):hover{border-color:var(--primary)}
+.fp-metric-k{font-size:11.5px;color:var(--text-muted);font-weight:600}
+.fp-metric-v{font-size:17px;font-weight:800;color:var(--text-strong)}
+.fp-metric small{font-size:11.5px;color:var(--text-muted)}
+.fp-metric.is-warn .fp-metric-v{color:var(--warn)}
+.fp-metric.is-danger .fp-metric-v{color:var(--danger)}
+.fp-client-line{margin:0 0 10px}
+
+/* تسلسل المراحل */
+.fss-current{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;background:color-mix(in srgb,var(--primary) 9%,transparent);border:1px solid var(--border);border-inline-start:4px solid var(--primary);border-radius:var(--radius-sm);padding:10px 14px;margin:0 0 12px}
+.fss-current-k{font-size:12px;color:var(--text-muted);font-weight:700}
+.fss-current-v{font-size:19px;font-weight:800;color:var(--text-strong)}
+.fss-current-meta{font-size:13px;color:var(--text)}
+.fss-chain{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:10px}
+.fss-stage{border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;background:var(--surface)}
+.fss-stage.is-current{border-color:var(--primary)}
+.fss-stage.fss-lc-planned{opacity:.85}
+.fss-stage.fss-lc-skipped{opacity:.7}
+.fss-stage-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.fss-idx{width:24px;height:24px;border-radius:50%;background:var(--surface2);color:var(--text-muted);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:0 0 auto}
+.fss-stage-name{font-size:16.5px;color:var(--text-strong)}
+.fss-kv{margin:0 0 10px}
+.fss-children{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px}
+.fss-child{background:var(--surface2);border-radius:var(--radius-sm);padding:8px 10px}
+.fss-child-k{display:block;font-size:12px;color:var(--text-muted);font-weight:700;margin-bottom:5px}
+.fss-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.fss-rows li{font-size:13px;display:flex;gap:6px;flex-wrap:wrap;align-items:baseline}
+.fss-rows .link{padding:0;font-size:13.5px;font-weight:700}
+.fss-actions{margin-top:9px}
+.fss-related{margin-top:12px}
+.fss-rel-list{list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:5px}
+.fss-rel-list li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:13.5px}
+
+@media(max-width:760px){
+ .file-id{padding:12px}
+ .fid-top{flex-direction:column;gap:10px}
+ .fid-meta{align-items:flex-start;text-align:start;width:100%}
+ .fid-actions{justify-content:flex-start}
+ .fid-fno b{font-size:21px}
+ .fid-party-name{font-size:15px}
+ .fp-kv .kv{grid-template-columns:1fr 1fr}
+ .fss-children{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+ .fp-kv .kv{grid-template-columns:1fr}
+ .fid-title{font-size:19px}
+ .fp-metric{min-width:calc(50% - 6px)}
+}
