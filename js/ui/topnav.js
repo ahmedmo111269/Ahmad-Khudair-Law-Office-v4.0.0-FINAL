@@ -1,25 +1,20 @@
 // =====================================================================
 // شريط التنقل العلوي الموحّد — v6
 // ---------------------------------------------------------------------
-// القائمة الجانبية القديمة صارت شريطًا أفقيًا أعلى البرنامج (Top Navigation):
-// • تبويبات رئيسية بعرض مساحة البرنامج بالكامل، وكل تبويب يفتح لوحة صغيرة
-//   منظمة بعناصره (Dropdown / Panel) مع الحالة النشطة الواضحة.
-// • عند ضيق المساحة: تمرير أفقي داخل الشريط نفسه فقط + زر «المزيد» يجمع
-//   التبويبات التي لم تتّسع — بلا أي تجاوز أفقي للصفحة.
-// • الطي/التوسيع: الوضع المطوي شريط قصير جدًا مع زر إظهار واضح، والمحتوى
-//   يستغل كامل العرض دائمًا (لا فراغ رأسي).
-// • تخصيص كامل للتبويبات وعناصرها: إظهار/إخفاء/ترتيب (ui:topnav-config).
-// • RTL كامل، أيقونات المشروع نفسها، وحفظ الحالة عند الانتقال بين الصفحات
-//   (الشريط خارج #main-content فلا يُعاد بناؤه مع كل تنقل).
-// • المسارات (routes) ومنطق الصفحات لم يتغيّر إطلاقًا.
+// التنقل المشترك: شريط أفقي قابل للتخصيص على سطح المكتب، وخمسة اختصارات ثابتة
+// مع «المزيد» على الهاتف. كلاهما ولوحات الأوامر يقرآن NAV_GROUPS دون موجه بديل.
+// • لوحات كل قسم، حالة نشطة، overflow مكتبي، وتخصيص محفوظ على المفتاح الحالي.
+// • يحتفظ الهاتف بكل الوجهات في لوحة «المزيد»؛ الروابط تمر عبر app.go الحالي.
+// • RTL، الأيقونات والثيمات نفسها، ولا يغيّر هذا الملف URL أو سجل الرجوع/التقدم.
 // =====================================================================
 import {icon} from './icons.js';
 import {prefs} from '../core/preferences.js';
 import {esc} from './dom.js';
 import {open as overlayOpen} from './overlay-stack.js';
 import {
-  NAV_GROUPS, NAV_CONFIG_KEY, defaultNavConfig, normalizeNavConfig, orderedGroups, groupItems,
-  groupIdForRoute, groupById, planOverflow, countLabel, sectionsLabel
+  NAV_GROUPS, NAV_CONFIG_KEY, NAV_MOBILE_PRIMARY, defaultNavConfig,
+  normalizeNavConfig, orderedGroups, groupItems, mobilePrimaryItems, mobileMoreGroups,
+  navRouteInfo, groupIdForRoute, groupById, planOverflow, countLabel, sectionsLabel
 } from './nav-model.js';
 
 export {NAV_GROUPS, NAV_CONFIG_KEY};
@@ -29,7 +24,7 @@ export const GROUPS_KEY = 'ui:nav-groups'; // مفتاح قديم (طي مجمو
 export const MOBILE_BP = '(max-width:900px)';
 export const COMPACT_BP = '(max-width:640px)';
 
-const MORE = '__more__', ALL = '__all__';
+const MORE = '__more__', ALL = '__all__', MOBILE_MORE = '__mobile_more__';
 const HOVER_QUERY = '(hover:hover) and (pointer:fine)';
 
 let cfg = null;              // تكوين التنقل الحالي (مطبَّع)
@@ -45,6 +40,7 @@ const onFrame = fn => {
   return setTimeout(fn, 16);
 };
 const clean = v => String(v == null ? '' : v).replace(/[^\w-]/g, '');
+const MOBILE_PRIMARY_IDS = new Set(NAV_MOBILE_PRIMARY);
 
 /* ---------------------------------------------------------------------
    البناء
@@ -60,6 +56,7 @@ export function buildTopNav() {
   bar.innerHTML = '<div class="tn-inner" id="tn-inner"></div><div class="tn-panels" id="tn-panels"></div>';
   bar.dataset.navReady = '1';
   cfg = normalizeNavConfig(prefs.get(NAV_CONFIG_KEY, null));
+  ensureMobileNav();
   ensureBackdrop();
   render();
   bindTopNav();
@@ -68,6 +65,18 @@ export function buildTopNav() {
 /** اسم قديم للتوافق مع بقية الوحدات (app.js / الإعدادات / الاختبارات). */
 export function buildSidebar() { return buildTopNav(); }
 
+function ensureMobileNav() {
+  let nav = document.querySelector('#tn-mobilebar');
+  if (!nav) {
+    nav = document.createElement('nav');
+    nav.id = 'tn-mobilebar';
+    nav.className = 'tn-mobilebar';
+    nav.setAttribute('aria-label', 'التنقل السريع');
+    document.querySelector('#sidebar')?.insertAdjacentElement('afterend', nav);
+  }
+  return nav;
+}
+
 function render() {
   const bar = document.querySelector('#sidebar');
   if (!bar) return;
@@ -75,6 +84,7 @@ function render() {
   if (!inner || !panels) return;
   closePanel(); // أي إعادة رسم تُغلق اللوحة القديمة (تخصيص مثلًا)
   const groups = orderedGroups(cfg);
+  const moreGroups = mobileMoreGroups(cfg);
   inner.innerHTML = `
    ${brandHtml()}
    <span class="tn-sep" aria-hidden="true"></span>
@@ -88,7 +98,9 @@ function render() {
     <button type="button" class="tn-btn tn-toggle" id="tn-toggle" aria-pressed="false" title="طي شريط التنقل">${icon('panelCollapse')}<span class="tn-btn-txt tn-toggle-txt">طي</span></button>
     <span class="tn-db" title="قاعدة البيانات الحالية">${icon('database')}<span class="tn-db-name" id="sb-db-name">قاعدة المكتب</span></span>
    </div>`;
-  panels.innerHTML = `${groups.map(panelHtml).join('')}${morePanelHtml()}${allPanelHtml(groups)}`;
+  panels.innerHTML = `${groups.map(panelHtml).join('')}${morePanelHtml()}${allPanelHtml(groups)}${mobileMorePanelHtml(moreGroups)}`;
+  const mobileNav = ensureMobileNav();
+  mobileNav.innerHTML = mobileNavHtml(mobilePrimaryItems(cfg));
   observeBadges(panels);
   syncToggle();
   layout();
@@ -114,6 +126,20 @@ function panelHtml(g) {
 function itemHtml(it) {
   return `<button type="button" class="tn-item" data-route="${it.route}">${icon(it.icon)}<span class="tn-item-label">${esc(it.label)}</span></button>`;
 }
+function mobileNavHtml(items) {
+  return `<div class="tn-mobile-items" style="--tn-mobile-count:${items.length + 1}">
+   ${items.map(it => `<button type="button" class="tn-mobile-item" data-route="${it.route}" aria-label="${esc(it.label)}" title="${esc(it.label)}">${icon(it.icon)}<span class="tn-mobile-label">${esc(it.label)}</span></button>`).join('')}
+   <button type="button" class="tn-mobile-item tn-mobile-more" id="tn-mobile-more" aria-label="المزيد من الأقسام" title="المزيد من الأقسام" aria-expanded="false" aria-haspopup="true" aria-controls="tn-panel-mobile-more">${icon('dots')}<span class="tn-mobile-label">المزيد</span></button>
+  </div>`;
+}
+function mobileMorePanelHtml(groups) {
+  const total = groups.reduce((sum, group) => sum + group.items.length, 0);
+  return `<div class="tn-panel tn-panel-all tn-panel-mobile-more" id="tn-panel-mobile-more" role="group" aria-label="بقية الأقسام" hidden>
+   <div class="tn-panel-head"><span class="tn-ph-ic">${icon('dots')}</span><span class="tn-ph-txt"><strong>بقية الأقسام</strong><small>${esc(sectionsLabel(groups.length))} · ${esc(countLabel(total))}</small></span></div>
+   ${groups.map(group => `<section class="tn-sec"><h4 class="tn-sec-head">${icon(group.icon)}<span>${esc(group.label)}</span></h4><div class="tn-sec-items">${group.items.map(itemHtml).join('')}</div></section>`).join('')}
+   <div class="tn-panel-foot"><span class="tn-foot-hint">Ctrl + K للبحث والتنقل الفوري</span><button type="button" class="tn-foot-link" data-cust-open>${icon('settings')} تخصيص التبويبات</button></div>
+  </div>`;
+}
 function morePanelHtml() {
   return `<div class="tn-panel tn-panel-more" id="tn-panel-more" role="group" aria-label="المزيد من الأقسام" hidden>
    <div class="tn-panel-head"><span class="tn-ph-ic">${icon('dots')}</span><span class="tn-ph-txt"><strong>المزيد</strong><small>أقسام إضافية لم تتّسع في الشريط</small></span></div>
@@ -134,15 +160,19 @@ function allPanelHtml(groups) {
    --------------------------------------------------------------------- */
 /**
  * قياس ارتفاع الشريط وضبط إزاحة شريط الأدوات الملتصق تحته بدقة.
- * • يُقرأ الارتفاع الفعلي (getBoundingClientRect ثم offsetHeight) بكسور مقرّبة لأعلى،
- *   فالشريط قد يزيد ارتفاعه على الهاتف (أزرار أكبر/خط مختلف/شريط حالة).
- * • لا نكتب صفرًا أبدًا: قياس فاشل أو شريط غير مرسوم يجب ألا يجعل شريط الأدوات
- *   يلتصق في أعلى الشاشة فوق شريط التنقل.
- * يعيد الارتفاع المقيس بالبكسل (0 عند تعذّر القياس).
+ * • يُقرأ الارتفاع الفعلي (getBoundingClientRect ثم offsetHeight) بكسور مقرّبة لأعلى.
+ * • على عرض الهاتف يُكتب الصفر عمدًا لأن واجهة التنقل انتقلت إلى الأسفل؛ أما
+ *   فشل القياس في المقاسات الأخرى فلا يمحو إزاحة شريط موجود.
+ * يعيد الارتفاع المقيس بالبكسل (0 عند تعذّر القياس أو إخفاء الشريط على الهاتف).
  */
 function measureHeight(bar) {
   const el = bar || document.querySelector('#sidebar');
   if (!el) return 0;
+  if (isCompact()) {
+    // على الهاتف حلّ شريط التنقل السفلي محل الشريط العلوي؛ لا نبقي إزاحة قديمة.
+    document.documentElement.style.setProperty('--topnav-h', '0px');
+    return 0;
+  }
   const h = Math.ceil(el.getBoundingClientRect?.().height || el.offsetHeight || 0);
   if (h > 0) document.documentElement.style.setProperty('--topnav-h', `${h}px`);
   return h;
@@ -208,6 +238,7 @@ function panelFor(id) {
   if (!bar) return null;
   if (id === MORE) return bar.querySelector('#tn-panel-more');
   if (id === ALL) return bar.querySelector('#tn-panel-all');
+  if (id === MOBILE_MORE) return bar.querySelector('#tn-panel-mobile-more');
   return bar.querySelector(`#tn-panel-${clean(id)}`);
 }
 function ensureBackdrop() {
@@ -229,7 +260,7 @@ function showBackdrop(on) {
 export function openPanel(id, anchor, {focusFirst = false} = {}) {
   const bar = document.querySelector('#sidebar');
   if (!bar || !anchor) return;
-  if (isCollapsed() && id !== ALL && id !== MORE) return; // لا تبويبات في الوضع المطوي
+  if (isCollapsed() && id !== ALL && id !== MORE && id !== MOBILE_MORE) return; // لا تبويبات في الوضع المطوي
   const panel = panelFor(id);
   if (!panel) return;
   if (openId && openId !== id) closePanel({keepTriggers: true});
@@ -239,7 +270,7 @@ export function openPanel(id, anchor, {focusFirst = false} = {}) {
   panel.hidden = false;
   syncTriggers();
   positionPanel(panel, anchor);
-  const lock = id === ALL && !isDesktop();
+  const lock = (id === ALL || id === MOBILE_MORE) && !isDesktop();
   showBackdrop(lock);
   document.body.classList.toggle('tn-lock', lock);
   if (focusFirst) panel.querySelector('.tn-item')?.focus?.({preventScroll: true});
@@ -274,7 +305,25 @@ export function closePanel({keepTriggers = false} = {}) {
 function positionPanel(panel, anchor) {
   const bar = document.querySelector('#sidebar');
   if (!bar || !anchor) return;
-  if (isCompact()) { // الهاتف: لوحة بعرض الشاشة تحت الشريط
+  if (isCompact() && (panel.id === 'tn-panel-all' || panel.id === 'tn-panel-mobile-more')) {
+    // لوحة الهاتف طبقة ثابتة فوق شريط التنقل السفلي، لا تعتمد على موضع زر داخل الشريط العلوي.
+    panel.classList.add('tn-panel-sheet');
+    panel.style.position = 'fixed';
+    panel.style.top = 'auto';
+    panel.style.bottom = 'calc(var(--tn-mobilebar-h,64px) + env(safe-area-inset-bottom,0px) + 8px)';
+    panel.style.left = '8px';
+    panel.style.right = '8px';
+    panel.style.width = 'auto';
+    panel.style.maxWidth = 'none';
+    panel.style.zIndex = '45';
+    return;
+  }
+  panel.classList.remove('tn-panel-sheet');
+  panel.style.position = '';
+  panel.style.top = '';
+  panel.style.bottom = '';
+  panel.style.zIndex = '';
+  if (isCompact()) {
     panel.style.left = '8px';
     panel.style.right = '8px';
     panel.style.width = 'auto';
@@ -294,10 +343,17 @@ function positionPanel(panel, anchor) {
 }
 function syncTriggers() {
   const bar = document.querySelector('#sidebar');
+  const mobileNav = document.querySelector('#tn-mobilebar');
   if (!bar) return;
   bar.querySelectorAll('[data-tab],[data-tab-open],#tn-more,#tn-all').forEach(b => b.setAttribute('aria-expanded', 'false'));
-  const active = openId === MORE ? bar.querySelector('#tn-more') : openId === ALL ? bar.querySelector('#tn-all') : bar.querySelector(`.tn-tab[data-tab="${clean(openId || '')}"]`);
+  mobileNav?.querySelectorAll('#tn-mobile-more').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  const active = openId === MORE ? bar.querySelector('#tn-more')
+    : openId === ALL ? bar.querySelector('#tn-all')
+    : openId === MOBILE_MORE ? mobileNav?.querySelector('#tn-mobile-more')
+    : bar.querySelector(`.tn-tab[data-tab="${clean(openId || '')}"]`);
   if (active) active.setAttribute('aria-expanded', 'true');
+  const menu = document.querySelector('#mobile-menu');
+  if (menu && !isDesktop()) menu.setAttribute('aria-expanded', String(openId === ALL || openId === MOBILE_MORE));
 }
 function openCustomizer() {
   closePanel();
@@ -318,6 +374,12 @@ function bindTopNav() {
   bar.dataset.navBound = '1';
   bar.addEventListener('click', onBarClick);
   bar.addEventListener('keydown', onBarKeydown);
+  const mobileNav = ensureMobileNav();
+  if (mobileNav && mobileNav.dataset.navBound !== '1') {
+    mobileNav.dataset.navBound = '1';
+    mobileNav.addEventListener('click', onMobileNavClick);
+    mobileNav.addEventListener('keydown', onMobileNavKeydown);
+  }
   bar.addEventListener('mouseover', onBarHover);
   bar.addEventListener('mouseenter', () => clearTimeout(leaveTimer));
   bar.addEventListener('mouseleave', onBarLeave);
@@ -328,7 +390,10 @@ function bindTopNav() {
   }, {passive: true});
   if (!bindTopNav._docBound) { // مستمعا المستند مرة واحدة فقط مهما أُعيد بناء الشريط
     bindTopNav._docBound = true;
-    document.addEventListener('pointerdown', e => { const b = document.querySelector('#sidebar'); if (openId && b && !b.contains(e.target)) closePanel(); }, true);
+    document.addEventListener('pointerdown', e => {
+      const b = document.querySelector('#sidebar'), mobile = document.querySelector('#tn-mobilebar');
+      if (openId && b && !b.contains(e.target) && !mobile?.contains(e.target)) closePanel();
+    }, true);
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId) closePanel(); });
   }
   bar.addEventListener('focusout', e => { const to = e.relatedTarget; if (openId && (!to || !bar.contains(to))) closePanel(); });
@@ -364,6 +429,36 @@ function onBarClick(e) {
   if (hit('#tn-cust') || hit('[data-cust-open]')) { openCustomizer(); return; }
   if (hit('#tn-toggle')) { toggleCollapsed(!isCollapsed()); return; }
   if (hit('.tn-item[data-route]')) closePanel(); // التنقل نفسه يُربط في app.js (تفويض على #sidebar)
+}
+function onMobileNavClick(e) {
+  const hit = sel => e.target?.closest?.(sel) || null;
+  const more = hit('#tn-mobile-more');
+  if (more) {
+    if (openId === MOBILE_MORE) closePanel();
+    else openPanel(MOBILE_MORE, more, {focusFirst: true});
+    return;
+  }
+  if (hit('.tn-mobile-item[data-route]')) closePanel(); // يبقى التوجيه عبر تفويض app.js
+}
+function onMobileNavKeydown(e) {
+  if (e.key === 'Escape' && openId) {
+    e.preventDefault();
+    e.stopPropagation();
+    const anchor = openAnchor;
+    closePanel();
+    anchor?.focus?.({preventScroll: true});
+    return;
+  }
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  const nav = e.currentTarget;
+  const items = [...nav.querySelectorAll('.tn-mobile-item:not([hidden])')];
+  const at = items.indexOf(e.target?.closest?.('.tn-mobile-item'));
+  if (at < 0 || !items.length) return;
+  const rtl = (document.documentElement.getAttribute('dir') || 'rtl') !== 'ltr';
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+    : (at + ((e.key === 'ArrowLeft') === rtl ? 1 : -1) + items.length) % items.length;
+  e.preventDefault();
+  items[next]?.focus?.({preventScroll: true});
 }
 function togglePanel(id, anchor) {
   if (openId === id) closePanel();
@@ -441,6 +536,8 @@ export function setActiveRoute(navKey) {
 function applyActive(navKey) {
   const bar = document.querySelector('#sidebar');
   if (!bar) return;
+  const routeInfo = navRouteInfo(navKey);
+  const currentRoute = routeInfo?.route || navKey;
   const activeTab = groupIdForRoute(navKey);
   bar.querySelectorAll('.tn-tab[data-tab]').forEach(b => {
     const on = b.dataset.tab === activeTab;
@@ -448,10 +545,23 @@ function applyActive(navKey) {
     if (on) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
   });
   bar.querySelectorAll('.tn-item[data-route]').forEach(b => {
-    const on = b.dataset.route === navKey;
+    const on = b.dataset.route === currentRoute;
     b.classList.toggle('active', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
+  const mobileNav = document.querySelector('#tn-mobilebar');
+  mobileNav?.querySelectorAll('.tn-mobile-item[data-route]').forEach(b => {
+    const on = b.dataset.route === currentRoute;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+  const mobileMore = mobileNav?.querySelector('#tn-mobile-more');
+  if (mobileMore) {
+    const on = Boolean(routeInfo) && !MOBILE_PRIMARY_IDS.has(routeInfo.route);
+    mobileMore.classList.toggle('active', on);
+    mobileMore.setAttribute('aria-label', on ? `المزيد — الصفحة الحالية: ${routeInfo.label}` : 'المزيد من الأقسام');
+    if (on) mobileMore.setAttribute('aria-current', 'true'); else mobileMore.removeAttribute('aria-current');
+  }
   const more = bar.querySelector('#tn-more');
   if (more) {
     const tabBtn = activeTab ? bar.querySelector(`.tn-tab[data-tab="${clean(activeTab)}"]`) : null;
@@ -487,6 +597,17 @@ function syncBadges() {
     let mirror = tab.querySelector('.tn-badge');
     if (val) {
       if (!mirror) { mirror = document.createElement('span'); mirror.className = 'tn-badge'; tab.append(mirror); }
+      if (mirror.textContent !== val) mirror.textContent = val;
+    } else if (mirror) mirror.remove();
+  });
+  const mobileNav = document.querySelector('#tn-mobilebar');
+  mobileNav?.querySelectorAll('.tn-mobile-item[data-route]').forEach(button => {
+    const src = [...bar.querySelectorAll('.tn-item[data-route] .nav-badge')]
+      .find(badge => badge.closest('.tn-item')?.dataset.route === button.dataset.route);
+    const val = src?.textContent?.trim();
+    let mirror = button.querySelector('.tn-mobile-badge');
+    if (val) {
+      if (!mirror) { mirror = document.createElement('span'); mirror.className = 'tn-mobile-badge'; button.append(mirror); }
       if (mirror.textContent !== val) mirror.textContent = val;
     } else if (mirror) mirror.remove();
   });
@@ -533,7 +654,8 @@ export function toggleMobile(force) {
   const bar = document.querySelector('#sidebar');
   if (!bar) return;
   const open = force === undefined ? openId !== ALL : Boolean(force);
-  if (open) openPanel(ALL, bar.querySelector('#tn-all') || bar.querySelector('#tn-toggle'));
+  const anchor = (isCompact() && document.querySelector('#mobile-menu')) || bar.querySelector('#tn-all') || bar.querySelector('#tn-toggle');
+  if (open) openPanel(ALL, anchor, {focusFirst: true});
   else closePanel();
 }
 export const closeMobile = () => { const was = Boolean(openId); closePanel(); return was; };

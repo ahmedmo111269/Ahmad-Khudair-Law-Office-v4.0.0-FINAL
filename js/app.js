@@ -191,6 +191,7 @@ class App{
   $('#nav-home').onclick=()=>this.go('dashboard');
   // تفويض واحد لكل عناصر التنقل، فيبقى صالحًا بعد أي إعادة رسم للشريط (التخصيص مثلًا)
   $('#sidebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
+  $('#tn-mobilebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
   this.initShortcuts();
   this.bindNetworkAwareness();
  }

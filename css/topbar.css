@@ -163,3 +163,47 @@
 
 /* ---------- 6) الطباعة: لا تدخل قواعد هذه الطبقة ---------- */
 @media print{.topbar,.top-actions{position:static!important;min-height:0;height:auto}}
+
+/* ---------- 7) W1: تنقل الهاتف السفلية من سجل المسارات نفسه ---------- */
+@media(max-width:640px){
+ :root{--tn-mobilebar-h:72px}
+ #sidebar.tn-bar{
+  height:0;min-height:0;max-height:0;padding:0;
+  border:0;box-shadow:none;background:transparent;overflow:visible;
+ }
+ #sidebar.tn-bar::after{display:none}
+ #sidebar.tn-bar .tn-inner{display:none}
+ #tn-mobilebar{
+  position:fixed;inset-inline:0;bottom:0;z-index:12;display:block;
+  height:calc(var(--tn-mobilebar-h,72px) + env(safe-area-inset-bottom,0px));
+  padding:4px max(6px,env(safe-area-inset-right,0px)) calc(4px + env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px));
+  background:var(--chrome);color:var(--chrome-text);
+  border-top:1px solid var(--chrome-border);box-shadow:var(--shadow-md);
+ }
+ .tn-mobile-items{
+  display:grid;grid-template-columns:repeat(var(--tn-mobile-count,6),minmax(0,1fr));
+  gap:3px;align-items:stretch;height:100%;direction:inherit;
+ }
+ .tn-mobile-item{
+  position:relative;display:grid;grid-template-rows:22px auto;place-items:center;align-content:center;gap:3px;
+  min-width:0;min-height:44px;padding:4px 2px;border:1px solid transparent;border-radius:var(--radius-sm);
+  background:transparent;color:var(--chrome-text);text-align:center;line-height:1.15;
+  transition:background var(--transition),color var(--transition),border-color var(--transition);
+ }
+ .tn-mobile-item svg{width:20px;height:20px;flex:none}
+ .tn-mobile-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:650}
+ .tn-mobile-item:hover,.tn-mobile-item[aria-expanded="true"]{background:var(--chrome-hover);color:var(--on-chrome)}
+ .tn-mobile-item.active{background:var(--chrome-hover);color:var(--on-chrome);border-color:var(--chrome-border)}
+ .tn-mobile-item.active svg{color:var(--primary)}
+ .tn-mobile-item:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+ .tn-mobile-badge{
+  position:absolute;top:0;inset-inline-start:calc(50% + 7px);min-width:17px;height:17px;padding:0 4px;
+  display:inline-flex;align-items:center;justify-content:center;border-radius:999px;
+  background:var(--primary-gradient);color:var(--on-primary);font-size:9px;font-weight:800;
+ }
+ .tn-panel-sheet{z-index:45;max-height:min(70dvh,520px);overscroll-behavior:contain}
+ #main-content{padding-bottom:calc(20px + var(--tn-mobilebar-h,72px) + env(safe-area-inset-bottom,0px))}
+ .shell-quick-note-fab{bottom:calc(var(--tn-mobilebar-h,72px) + env(safe-area-inset-bottom,0px) + 14px)}
+ #toast-stack{bottom:calc(var(--tn-mobilebar-h,72px) + env(safe-area-inset-bottom,0px) + 10px)}
+}
+@media(prefers-reduced-motion:reduce){.tn-mobile-item{transition:none}}

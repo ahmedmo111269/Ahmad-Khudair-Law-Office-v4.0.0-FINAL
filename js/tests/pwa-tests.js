@@ -131,6 +131,29 @@ export async function runPwaTests(test, expect) {
     history.dispose();
   });
 
+  test('PWA: navigation chosen while closing an overlay commits after guard release and keeps its URL', async () => {
+    clearOverlays();
+    const win = fakeWindow();
+    const seen = [];
+    const history = controller(win, seen);
+    history.start('dashboard');
+    overlays.bindOverlayStack(history);
+    const release = overlays.open('nav-panel', () => true);
+    expect(history.depth).toBe(1);
+    release(); // يبدأ history.back() لتحرير حماية اللوحة
+    history.record('executionCenter'); // يُستدعى فورًا بعد الإغلاق، قبل popstate
+    await tick();
+    expect(win.location.hash).toBe('#/executionCenter');
+    expect(history.currentRoute).toBe('executionCenter');
+    expect(history.depth).toBe(1);
+    history.back();
+    await tick();
+    expect(seen.join()).toBe('dashboard');
+    expect(win.location.hash).toBe('#/dashboard');
+    overlays.bindOverlayStack(null);
+    history.dispose();
+  });
+
   test('PWA: stacked layers close one at a time and keep the lower layer open', async () => {
     clearOverlays();
     const win = fakeWindow();

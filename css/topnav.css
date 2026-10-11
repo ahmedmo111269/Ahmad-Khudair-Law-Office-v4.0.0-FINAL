@@ -34,6 +34,7 @@
 }
 #sidebar.tn-bar [hidden]{display:none}   /* القيم المخصّصة للعرض لا تتجاوز خاصية hidden */
 #sidebar.tn-bar :focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+#tn-mobilebar{display:none}
 
 /* ---------- 3) الصف الداخلي ---------- */
 .tn-inner{

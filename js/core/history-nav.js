@@ -67,6 +67,7 @@ export class RouteHistory {
     this.suspended = false;
     this.pendingUntil = 0; // رجوع برمجي قيد التنفيذ (نوعه في pendingMode)
     this.pendingMode = null; // 'silent' = تحرير مدخل حماية، 'navigate' = رجوع طلبه زر البرنامج
+    this.pendingRouteAfterGuard = null; // تنقل اختاره المستخدم أثناء تحرير مدخل طبقة علوية
     this.handlePop = (event) => this.#onPop(event);
   }
 
@@ -91,6 +92,13 @@ export class RouteHistory {
   /** يسجّل انتقالًا جديدًا. replace=true يستبدل المدخل الحالي (بلا تاريخ إضافي). */
   record(route, { replace = false } = {}) {
     if (!this.supported || !this.started) { this.currentRoute = route || null; return; }
+    // إغلاق طبقة من الواجهة يبدأ history.back() غير متزامنًا لتحرير مدخل الحماية.
+    // إذا اختيرت صفحة في النافذة نفسها، نؤجل push/replace إلى ما بعد popstate
+    // حتى لا يستهلك الرجوع البرمجي مدخل الصفحة الجديدة أو يعيد الـhash القديم.
+    if (this.pendingMode === 'silent' && Date.now() <= this.pendingUntil) {
+      this.pendingRouteAfterGuard = {route, replace};
+      return;
+    }
     // أول إقلاع: مدخل الإقلاع نفسه يحمل المسار الابتدائي، فلا نضيف مدخلاً مكررًا
     // (وبذلك يخرج زر الرجوع من التطبيق من الشاشة الرئيسية، ويعود إليها من غيرها).
     if (!replace && this.depth === 0 && (route || null) === this.currentRoute) {
@@ -149,7 +157,12 @@ export class RouteHistory {
     const mode = programmatic ? this.pendingMode : null;
     if (programmatic) { this.pendingUntil = 0; this.pendingMode = null; }
     if (!programmatic && this.depth > 0) this.depth -= 1;
-    if (mode === 'silent') return;
+    if (mode === 'silent') {
+      const pending = this.pendingRouteAfterGuard;
+      this.pendingRouteAfterGuard = null;
+      if (pending) this.record(pending.route, {replace: pending.replace});
+      return;
+    }
     // مستخدم يُعيد التقدّم إلى مدخل حماية: لا معنى لإعادة فتح الطبقات.
     if (state && state.akl === OVERLAY) { this.depth += 1; return; }
     if (this.hasOverlay()) {
@@ -176,5 +189,6 @@ export class RouteHistory {
     this.win.removeEventListener?.('popstate', this.handlePop);
     this.started = false;
     this.depth = 0;
+    this.pendingRouteAfterGuard = null;
   }
 }

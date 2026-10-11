@@ -1,9 +1,9 @@
 // =====================================================================
 // نموذج التنقل الموحّد — بيانات ومنطق خالص (قابل للاختبار بلا DOM)
 // ---------------------------------------------------------------------
-// • المصدر الوحيد لعناصر التنقل هو NAV_GROUPS: 6 مجموعات / 29 مسارًا (مركز التنفيذ والمزامنة).
-//   المسارات (routes) وأسماء العناصر لم تتغيّر إطلاقًا — أُعيد تنظيم
-//   المجموعات نفسها فقط لتُعرض كتبويبات أفقية أعلى البرنامج.
+// • المصدر الوحيد لعناصر التنقل هو NAV_GROUPS: 6 مجموعات / 31 مسارًا.
+//   يتضمن السجل مركز التنفيذ والمزامنة ودفعات الأتعاب؛ لا تُنشأ نسخة موازية للمسارات.
+// • البيانات نفسها تخدم الشريط المكتبي، شريط الهاتف، ولوحة الأوامر؛ التخصيص الحالي محفوظ.
 // • التخصيص الكامل (إظهار/إخفاء/ترتيب التبويبات وعناصرها) يُحفظ في
 //   تفضيلات المستخدم (ui:topnav-config) ويُطبَّع هنا قبل الاستخدام.
 // • الدوال هنا خالصة بلا DOM حتى تُختبر مباشرة في Node والمتصفح.
@@ -14,45 +14,81 @@ export const NAV_CONFIG_KEY = 'ui:topnav-config';
 // label = الاسم الكامل (كما كان في الشريط الجانبي) | tab = الاسم المختصر على التبويب
 export const NAV_GROUPS = [
   {id: 'general', label: 'عام', tab: 'عام', icon: 'home', items: [
-    {route: 'dashboard', label: 'الرئيسية', icon: 'home'},
-    {route: 'actionCenter', label: 'مركز العمل', icon: 'target'}]},
+    {route: 'dashboard', label: 'الرئيسية', icon: 'home', keywords: 'لوحة الأجندة'},
+    {route: 'actionCenter', label: 'مركز العمل', icon: 'target', keywords: 'مهام متابعة متأخر'}]},
   {id: 'data', label: 'البيانات الأساسية', tab: 'البيانات', icon: 'folder', items: [
-    {route: 'files', label: 'الملفات', icon: 'folder'},
-    {route: 'clients', label: 'الموكلون', icon: 'users'},
-    {route: 'opponents', label: 'الخصوم', icon: 'userX'},
-    {route: 'cases', label: 'القضايا والمراحل', icon: 'gavel'},
-    {route: 'powersOfAttorney', label: 'التوكيلات', icon: 'stamp'}]},
+    {route: 'files', label: 'الملفات', icon: 'folder', keywords: 'legal files'},
+    {route: 'clients', label: 'الموكلون', icon: 'users', keywords: 'موكلين'},
+    {route: 'opponents', label: 'الخصوم', icon: 'userX', keywords: 'خصوم'},
+    {route: 'cases', label: 'القضايا والمراحل', icon: 'gavel', keywords: 'قضايا'},
+    {route: 'powersOfAttorney', label: 'التوكيلات', icon: 'stamp', keywords: 'توكيل'}]},
   {id: 'daily', label: 'العمل اليومي', tab: 'العمل اليومي', icon: 'calendar', items: [
-    {route: 'hearings', label: 'الجلسات', icon: 'calendar'},
-    {route: 'procedures', label: 'الأعمال الإدارية', icon: 'clipboard'},
-    {route: 'serviceRecords', label: 'الإعلانات والمحضرون', icon: 'send'},
-    {route: 'bailiffs', label: 'دليل المحضرين', icon: 'userCheck'},
-    {route: 'appointments', label: 'المواعيد', icon: 'clock'},
-    {route: 'communications', label: 'الاتصالات', icon: 'phone'},
-    {route: 'caseNotes', label: 'الملاحظات السريعة', icon: 'note'},
-    {route: 'reminders', label: 'التذكيرات', icon: 'bell'}]},
+    {route: 'hearings', label: 'الجلسات', icon: 'calendar', keywords: 'جلسات محكمة'},
+    {route: 'procedures', label: 'الأعمال الإدارية', icon: 'clipboard', keywords: 'مهام إجراءات'},
+    {route: 'serviceRecords', label: 'الإعلانات والمحضرون', icon: 'send', commandLabel: 'المحضرون والإعلانات', keywords: 'إعلان إنذار محضر'},
+    {route: 'bailiffs', label: 'دليل المحضرين', icon: 'userCheck', keywords: 'محضرين'},
+    {route: 'appointments', label: 'المواعيد', icon: 'clock', keywords: 'مواعيد'},
+    {route: 'communications', label: 'الاتصالات', icon: 'phone', keywords: 'هاتف اتصال'},
+    {route: 'caseNotes', label: 'الملاحظات السريعة', icon: 'note', keywords: 'ملاحظات سريعة التقاط inbox'},
+    {route: 'reminders', label: 'التذكيرات', icon: 'bell', keywords: 'تذكير تنبيه إشعار جرس reminder bell'}]},
   {id: 'judicial', label: 'القضائي والمالي', tab: 'القضائي والمالي', icon: 'landmark', items: [
-    {route: 'judgments', label: 'الأحكام', icon: 'landmark'},
-    {route: 'expertReports', label: 'تقارير الخبراء', icon: 'microscope'},
-    {route: 'executionCenter', label: 'مركز التنفيذ', icon: 'hammer'},
-    {route: 'execution', label: 'التنفيذ (السجل العام)', icon: 'scale'},
-    {route: 'fees', label: 'الأتعاب والمدفوعات', icon: 'wallet'},
-    {route: 'documentReferences', label: 'المستندات', icon: 'file'}]},
+    {route: 'judgments', label: 'الأحكام', icon: 'landmark', keywords: 'أحكام'},
+    {route: 'expertReports', label: 'تقارير الخبراء', icon: 'microscope', commandLabel: 'الخبراء', keywords: 'خبراء تقارير'},
+    {route: 'executionCenter', label: 'مركز التنفيذ', icon: 'hammer', keywords: 'تنفيذ'},
+    {route: 'execution', label: 'التنفيذ (السجل العام)', icon: 'scale', commandLabel: 'التنفيذ', keywords: 'تنفيذ'},
+    {route: 'fees', label: 'الأتعاب والمدفوعات', icon: 'wallet', commandLabel: 'الأتعاب', keywords: 'فلوس أتعاب دفعات'},
+    {route: 'feePayments', label: 'دفعات الأتعاب', icon: 'wallet', keywords: 'أتعاب دفعات تحصيل إثبات سداد'},
+    {route: 'documentReferences', label: 'المستندات', icon: 'file', keywords: 'مستندات وثائق'}]},
   {id: 'insight', label: 'التحليل والتقارير', tab: 'التحليل والتقارير', icon: 'chart', items: [
-    {route: 'search', label: 'البحث الشامل', icon: 'search'},
-    {route: 'reports', label: 'التقارير', icon: 'report'},
-    {route: 'analytics', label: 'الإحصاءات', icon: 'chart'}]},
+    {route: 'search', label: 'البحث الشامل', icon: 'search', commandLabel: 'البحث الموحد', keywords: 'بحث شامل'},
+    {route: 'reports', label: 'التقارير', icon: 'report', keywords: 'تقارير'},
+    {route: 'analytics', label: 'الإحصاءات', icon: 'chart', keywords: 'إحصاءات تحليل'}]},
   {id: 'system', label: 'النظام', tab: 'النظام', icon: 'settings', items: [
-    {route: 'integrity', label: 'سلامة البيانات', icon: 'shield'},
-    {route: 'repair', label: 'الإصلاح والاسترداد', icon: 'wrench'},
-    {route: 'databases', label: 'قواعد البيانات', icon: 'database'},
-    {route: 'backup', label: 'النسخ الاحتياطي', icon: 'save'},
-    {route: 'sync', label: 'المزامنة', icon: 'refreshCw'},
-    {route: 'settings', label: 'الإعدادات', icon: 'settings'}]}
+    {route: 'integrity', label: 'سلامة البيانات', icon: 'shield', keywords: 'فحص تدقيق'},
+    {route: 'repair', label: 'الإصلاح والاسترداد', icon: 'wrench', keywords: 'إصلاح'},
+    {route: 'databases', label: 'قواعد البيانات', icon: 'database', keywords: 'قواعد تبديل'},
+    {route: 'backup', label: 'النسخ الاحتياطي', icon: 'save', keywords: 'نسخة احتياطية تصدير'},
+    {route: 'sync', label: 'المزامنة', icon: 'refreshCw', keywords: 'مزامنة'},
+    {route: 'settings', label: 'الإعدادات', icon: 'settings', keywords: 'إعدادات مظهر ثيم'}]}
 ];
 
 export const NAV_GROUP_IDS = NAV_GROUPS.map(g => g.id);
 export const NAV_ROUTES = NAV_GROUPS.flatMap(g => g.items.map(i => i.route));
+
+// عضوية الوجهات الرئيسية للهاتف؛ ترتيب المجموعة/العناصر المحفوظ يظل هو الحاكم للعرض.
+export const NAV_MOBILE_PRIMARY = Object.freeze(['dashboard', 'actionCenter', 'files', 'clients', 'hearings']);
+
+// مسارات توافقية كانت تستخدم أسماء مختلفة للصفحة نفسها — لا تُنشئ وجهات جديدة.
+export const NAV_ROUTE_ALIASES = Object.freeze({quickNotes: 'caseNotes'});
+export const NAV_COMMAND_ROUTES = Object.freeze(Object.fromEntries(
+  Object.entries(NAV_ROUTE_ALIASES).map(([alias, canonical]) => [canonical, alias])
+));
+
+export const NAV_ROUTE_REGISTRY = Object.freeze(NAV_GROUPS.flatMap(group => group.items.map(item => Object.freeze({
+  ...item, groupId: group.id, groupLabel: group.label
+}))));
+const NAV_ROUTE_INDEX = new Map(NAV_ROUTE_REGISTRY.map(item => [item.route, item]));
+
+/** معلومات مسار/اسم توافقّي، مع تجاهل سياق الاستعلام دون تغيير عنوان URL. */
+export function navRouteInfo(route) {
+  const raw = String(route ?? '').split(/[?#]/, 1)[0];
+  const canonical = NAV_ROUTE_ALIASES[raw] || raw;
+  return NAV_ROUTE_INDEX.get(canonical) || null;
+}
+
+/** العناصر الرئيسية للهاتف وفق ترتيب المستخدم وإعدادات الإظهار المحفوظة. */
+export function mobilePrimaryItems(cfg) {
+  const primary = new Set(NAV_MOBILE_PRIMARY);
+  return orderedGroups(cfg).flatMap(group => group.items.filter(item => primary.has(item.route)));
+}
+
+/** مجموعات «المزيد» للهاتف، مع استبعاد الوجهات الخمس المعروضة مباشرة. */
+export function mobileMoreGroups(cfg) {
+  const primary = new Set(mobilePrimaryItems(cfg).map(item => item.route));
+  return orderedGroups(cfg).map(group => ({
+    ...group, items: group.items.filter(item => !primary.has(item.route))
+  })).filter(group => group.items.length);
+}
 
 /** التكوين الافتراضي: كل التبويبات وكل العناصر ظاهرة بترتيبها الأصلي. */
 export function defaultNavConfig() {
@@ -136,8 +172,7 @@ export function groupItems(group, cfg) {
 
 /** التبويب (المجموعة) الذي ينتمي إليه مسار معيّن — لتحديد التبويب النشط. */
 export function groupIdForRoute(route) {
-  const g = NAV_GROUPS.find(x => x.items.some(i => i.route === route));
-  return g ? g.id : null;
+  return navRouteInfo(route)?.groupId || null;
 }
 
 export function groupById(id) {

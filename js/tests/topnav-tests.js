@@ -7,6 +7,7 @@
 import {
   NAV_GROUPS, NAV_ROUTES, NAV_CONFIG_KEY, defaultNavConfig, normalizeNavConfig, orderedGroups,
   groupItems, orderedTabIds, itemRoutesInOrder, groupIdForRoute, planOverflow, moveInList,
+  NAV_MOBILE_PRIMARY, NAV_ROUTE_REGISTRY, navRouteInfo, mobilePrimaryItems, mobileMoreGroups,
   countLabel, sectionsLabel
 } from '../ui/nav-model.js';
 import {buildTopNav, buildSidebar, toggleCollapsed, isCollapsed, setActiveRoute, openPanel, closePanel, toggleMobile, closeMobile} from '../ui/topnav.js';
@@ -14,15 +15,19 @@ import {icon} from '../ui/icons.js';
 import {prefs} from '../core/preferences.js';
 
 const SHELL = '<div id="app"><nav id="sidebar" class="tn-bar" data-nav="top"></nav><main><section id="main-content"></section></main></div><div id="modal-root"></div>';
-const ALL_ROUTES = ['dashboard', 'actionCenter', 'files', 'clients', 'opponents', 'cases', 'powersOfAttorney', 'hearings', 'procedures', 'serviceRecords', 'bailiffs', 'appointments', 'communications', 'caseNotes', 'reminders', 'judgments', 'expertReports', 'execution', 'fees', 'documentReferences', 'search', 'reports', 'analytics', 'integrity', 'repair', 'databases', 'backup', 'sync', 'settings'];
+const ALL_ROUTES = ['dashboard', 'actionCenter', 'files', 'clients', 'opponents', 'cases', 'powersOfAttorney', 'hearings', 'procedures', 'serviceRecords', 'bailiffs', 'appointments', 'communications', 'caseNotes', 'reminders', 'judgments', 'expertReports', 'executionCenter', 'execution', 'fees', 'feePayments', 'documentReferences', 'search', 'reports', 'analytics', 'integrity', 'repair', 'databases', 'backup', 'sync', 'settings'];
 const fresh = () => { document.body.innerHTML = SHELL; return buildTopNav(); };
 
 export async function runTopNavTests(test, expect) {
-  test('تنقل علوي: كل عناصر القائمة السابقة محفوظة مع مسار المزامنة (30 مسارًا)', () => {
+  test('التنقل المشترك: سجل الوجهات يحفظ القائمة ويضيف دفعات الأتعاب دون فصل المصدر', () => {
     expect(new Set(NAV_ROUTES).size).toBe(NAV_ROUTES.length);
-    expect(NAV_ROUTES.length).toBe(30);
+    expect(NAV_ROUTES.length).toBe(31);
+    expect(NAV_ROUTE_REGISTRY.length).toBe(NAV_ROUTES.length);
     for (const r of ALL_ROUTES) expect(NAV_ROUTES.includes(r)).toBe(true);
     expect(NAV_GROUPS.length).toBe(6);
+    expect(groupIdForRoute('quickNotes')).toBe('daily');
+    expect(navRouteInfo('quickNotes').route).toBe('caseNotes');
+    expect(navRouteInfo('feePayments').label).toBe('دفعات الأتعاب');
   });
   test('تنقل علوي: كل عنصر له أيقونة موجودة فعلًا', () => {
     for (const g of NAV_GROUPS) {
@@ -35,7 +40,7 @@ export async function runTopNavTests(test, expect) {
     expect(orderedTabIds(cfg).length).toBe(6);
     const groups = orderedGroups(cfg);
     expect(groups.length).toBe(6);
-    expect(groups.flatMap(g => g.items.map(i => i.route)).length).toBe(30);
+    expect(groups.flatMap(g => g.items.map(i => i.route)).length).toBe(31);
   });
   test('تنقل علوي: تطبيع التخصيص يتجاهل المجهول ويحمي من الإخفاء الكامل', () => {
     const bad = normalizeNavConfig({tabOrder: ['system', 'ghost', 'general', 'system'], hiddenTabs: ['ghost'], hiddenItems: ['ghostRoute'], itemOrder: {data: ['clients', 'ghostRoute']}});
@@ -60,6 +65,8 @@ export async function runTopNavTests(test, expect) {
     const general = NAV_GROUPS.find(g => g.id === 'general');
     expect(itemRoutesInOrder(general, cfg)[0]).toBe('actionCenter');
     expect(groupItems(general, cfg).map(i => i.route).join()).toBe('actionCenter,dashboard');
+    const mobile = normalizeNavConfig({tabOrder: ['daily', 'data', 'general'], itemOrder: {data: ['clients', 'files'], general: ['actionCenter', 'dashboard']}});
+    expect(mobilePrimaryItems(mobile).map(i => i.route).join()).toBe('hearings,clients,files,actionCenter,dashboard');
   });
   test('تنقل علوي: نقل عنصر داخل قائمة يحترم الحدود', () => {
     expect(moveInList(['a', 'b', 'c'], 0, 1).join()).toBe('b,a,c');
@@ -100,6 +107,57 @@ export async function runTopNavTests(test, expect) {
     const routes = [...bar.querySelectorAll('[data-route]')].map(b => b.dataset.route);
     for (const r of ALL_ROUTES) if (!routes.includes(r)) throw Error('مسار غير متاح من الشريط العلوي: ' + r);
     expect(routes.length >= NAV_ROUTES.length).toBe(true);
+  });
+  test('تنقل الهاتف: خمسة اختصارات مباشرة و«المزيد» لكل الوجهات الباقية', () => {
+    const bar = fresh();
+    const mobileNav = document.querySelector('#tn-mobilebar');
+    const direct = [...mobileNav.querySelectorAll('.tn-mobile-item[data-route]')].map(button => button.dataset.route);
+    expect(direct.join()).toBe(NAV_MOBILE_PRIMARY.join());
+    const moreRoutes = [...bar.querySelectorAll('#tn-panel-mobile-more .tn-item[data-route]')].map(button => button.dataset.route);
+    expect(moreRoutes.length).toBe(NAV_ROUTES.length - NAV_MOBILE_PRIMARY.length);
+    for (const route of NAV_ROUTES) {
+      const available = direct.includes(route) || moreRoutes.includes(route);
+      if (!available) throw Error('وجهة هاتفية غير متاحة: ' + route);
+    }
+    expect(moreRoutes.includes('feePayments')).toBe(true);
+    expect(moreRoutes.includes('sync')).toBe(true);
+    expect(moreRoutes.some(route => NAV_MOBILE_PRIMARY.includes(route))).toBe(false);
+    const moreButton = mobileNav.querySelector('#tn-mobile-more');
+    moreButton.click();
+    expect(bar.querySelector('#tn-panel-mobile-more').hidden).toBe(false);
+    expect(moreButton.getAttribute('aria-expanded')).toBe('true');
+    closePanel();
+    expect(moreButton.getAttribute('aria-expanded')).toBe('false');
+    setActiveRoute('hearings');
+    expect(mobileNav.querySelector('[data-route="hearings"]').getAttribute('aria-current')).toBe('page');
+    setActiveRoute('executionCenter');
+    expect(moreButton.classList.contains('active')).toBe(true);
+    expect(moreButton.getAttribute('aria-current')).toBe('true');
+    setActiveRoute('quickNotes');
+    expect(bar.querySelector('.tn-tab[data-tab="daily"]').classList.contains('active')).toBe(true);
+  });
+  test('تنقل الهاتف: الأسهم وHome/End والتنقل بـEscape قابلة للوحة المفاتيح', () => {
+    const bar = fresh();
+    const nav = document.querySelector('#tn-mobilebar');
+    const buttons = [...nav.querySelectorAll('.tn-mobile-item')];
+    const more = nav.querySelector('#tn-mobile-more');
+    const focused = [];
+    buttons.forEach(button => { button.focus = () => focused.push(button); });
+    buttons[0].dispatchEvent(new KeyboardEvent('keydown', {key: 'End', bubbles: true, cancelable: true}));
+    expect(focused.at(-1)).toBe(more);
+    more.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowLeft', bubbles: true, cancelable: true}));
+    expect(focused.at(-1)).toBe(buttons[0]); // RTL: السهم الأيسر ينتقل إلى التالي
+    buttons[0].dispatchEvent(new KeyboardEvent('keydown', {key: 'Home', bubbles: true, cancelable: true}));
+    expect(focused.at(-1)).toBe(buttons[0]);
+    const panel = bar.querySelector('#tn-panel-mobile-more');
+    const first = panel.querySelector('.tn-item');
+    first.focus = () => focused.push(first);
+    more.click();
+    expect(focused.at(-1)).toBe(first);
+    first.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+    expect(panel.hidden).toBe(true);
+    expect(focused.at(-1)).toBe(more);
+    expect(more.getAttribute('aria-expanded')).toBe('false');
   });
   test('تنقل علوي: كل تبويب يفتح لوحة منظمة بكل عناصره (aria)', () => {
     const bar = fresh();

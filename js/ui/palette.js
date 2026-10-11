@@ -3,6 +3,7 @@
 import {esc} from './dom.js';
 import {normalizeArabic,normalizeDigits} from '../core/search-normalizer.js';
 import {icon,ROUTE_ICONS} from './icons.js';
+import {NAV_ROUTE_REGISTRY,NAV_COMMAND_ROUTES} from './nav-model.js';
 import {ENTITIES} from '../domain/entities.js';
 import {getRecent} from '../services/recents.js';
 import {closeModal,modal} from './modal.js';
@@ -40,34 +41,12 @@ export function filterCommands(commands,q,{limit=14}={}){
 export function staticCommands(app){
  const cmds=[];
  const nav=(route,label,iconKey,keywords='')=>cmds.push({id:'nav:'+route,label,icon:iconKey,group:'التنقل',keywords,run:()=>app.go(route)});
- nav('dashboard','الرئيسية',ROUTE_ICONS.dashboard,'لوحة الأجندة');
- nav('actionCenter','مركز العمل',ROUTE_ICONS.actionCenter,'مهام متابعة متأخر');
- nav('files','الملفات',ROUTE_ICONS.files,'legal files');
- nav('clients','الموكلون',ROUTE_ICONS.clients,'موكلين');
- nav('opponents','الخصوم',ROUTE_ICONS.opponents,'خصوم');
- nav('cases','القضايا والمراحل',ROUTE_ICONS.cases,'قضايا');
- nav('powersOfAttorney','التوكيلات',ROUTE_ICONS.powersOfAttorney,'توكيل');
- nav('hearings','الجلسات',ROUTE_ICONS.hearings,'جلسات محكمة');
- nav('procedures','الأعمال الإدارية',ROUTE_ICONS.procedures,'مهام إجراءات');
- nav('serviceRecords','المحضرون والإعلانات','stamp','إعلان إنذار محضر');
- nav('bailiffs','دليل المحضرين','scale','محضرين');
- nav('appointments','المواعيد',ROUTE_ICONS.appointments,'مواعيد');
- nav('communications','الاتصالات',ROUTE_ICONS.communications,'هاتف اتصال');
-  nav('quickNotes','الملاحظات السريعة',ROUTE_ICONS.caseNotes,'ملاحظات سريعة التقاط inbox');
- nav('reminders','التذكيرات',ROUTE_ICONS.reminders,'تذكير تنبيه إشعار جرس reminder bell');
- nav('judgments','الأحكام',ROUTE_ICONS.judgments,'أحكام');
- nav('expertReports','الخبراء',ROUTE_ICONS.expertReports,'خبراء تقارير');
- nav('execution','التنفيذ',ROUTE_ICONS.execution,'تنفيذ');
- nav('fees','الأتعاب',ROUTE_ICONS.fees,'فلوس أتعاب دفعات');
- nav('documentReferences','المستندات',ROUTE_ICONS.documentReferences,'مستندات وثائق');
- nav('search','البحث الموحد',ROUTE_ICONS.search,'بحث شامل');
- nav('reports','التقارير',ROUTE_ICONS.reports,'تقارير');
- nav('analytics','الإحصاءات',ROUTE_ICONS.analytics,'إحصاءات تحليل');
- nav('integrity','سلامة البيانات',ROUTE_ICONS.integrity,'فحص تدقيق');
- nav('repair','الإصلاح والاسترداد',ROUTE_ICONS.repair,'إصلاح');
- nav('databases','قواعد البيانات',ROUTE_ICONS.databases,'قواعد تبديل');
- nav('backup','النسخ الاحتياطي',ROUTE_ICONS.backup,'نسخة احتياطية تصدير');
- nav('settings','الإعدادات',ROUTE_ICONS.settings,'إعدادات مظهر ثيم');
+ // لوحة الأوامر تقرأ الوجهات والتسميات من السجل المشترك؛ alias quickNotes يبقى متوافقًا.
+ for(const item of NAV_ROUTE_REGISTRY){
+  const route=NAV_COMMAND_ROUTES[item.route]||item.route;
+  const keywords=[item.groupLabel,item.keywords,item.route].filter(Boolean).join(' ');
+  nav(route,item.commandLabel||item.label,ROUTE_ICONS[item.route]||item.icon,keywords);
+ }
  // إجراءات سريعة
  const quick=(label,store,iconKey,keywords='')=>cmds.push({id:'qa:'+store,label:`${label} (إضافة جديدة)`,icon:iconKey,group:'إجراءات سريعة',keywords,kbd:'+',run:async()=>{
   if(store==='files'){const {startNewLegalFile}=await import('../modules/client-file.js');return startNewLegalFile(app)}

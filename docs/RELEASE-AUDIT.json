@@ -1,12 +1,14 @@
 {
-  "timestamp": "2026-10-08T13:55:55.752Z",
+  "timestamp": "2026-10-11T10:04:53.598Z",
   "version": "5.17.0",
-  "files": 332,
-  "javascript": 236,
-  "relativeImportsChecked": 1189,
-  "failures": [],
+  "files": 375,
+  "javascript": 263,
+  "relativeImportsChecked": 1311,
+  "failures": [
+    "VERSION constants=5.17.0 changelog=6.2.1"
+  ],
   "warnings": [
     "REVIEW /location\\.reload\\s*\\(/"
   ],
-  "status": "PASS"
+  "status": "FAIL"
 }
