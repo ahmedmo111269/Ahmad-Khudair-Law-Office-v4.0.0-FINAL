@@ -360,13 +360,21 @@ export async function hydrateSimpleRows(office, executions = []) {
 export async function simpleCardBundle(office, executionId, {asOf = '', allowFuture = true} = {}) {
   const data = await simpleSchedule(office, executionId, {asOf, allowFuture});
   const execution = data.execution;
-  const [client, file] = await Promise.all([
-    execution.clientId ? office.r.clients.get(execution.clientId).catch(() => null) : null,
-    execution.fileId ? office.r.files.get(execution.fileId).catch(() => null) : null
+  const liveEntity = async (store, id) => {
+    if (!id) return null;
+    const row = await office.r[store].get(id).catch(() => null);
+    return row && !row.isDeleted ? row : null;
+  };
+  const [client, file, caseRecord] = await Promise.all([
+    liveEntity('clients', execution.clientId),
+    liveEntity('files', execution.fileId),
+    liveEntity('cases', execution.caseId)
   ]);
   const activeParties = data.parties.filter(party => !party.isDeleted);
   const creditor = activeParties.find(party => party.side === 'creditor') || null;
   const debtor = activeParties.find(party => party.side === 'debtor') || null;
+  const opponentParty = activeParties.find(party => party.side === 'debtor' && party.opponentId) || null;
+  const opponent = opponentParty?.opponentId ? await liveEntity('opponents', opponentParty.opponentId) : null;
   const actions = [...data.actions].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const today = localDate();
   const planned = data.actions.filter(action => action.nextActionDate).sort((a, b) => String(a.nextActionDate).localeCompare(String(b.nextActionDate)));
@@ -374,7 +382,7 @@ export async function simpleCardBundle(office, executionId, {asOf = '', allowFut
   const lastAction = actions.find(action => String(action.date || '') <= today) || actions[0] || null;
   const poas = [...data.poas].sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).reverse();
   return {
-    ...data, client, file, creditor, debtor, actions, lastAction, nextAction, poas,
+    ...data, client, file, caseRecord, opponent, opponentParty, creditor, debtor, actions, lastAction, nextAction, poas,
     expenses: expensesFrom(data.ledger, data.settings),
     status: derivedStatus(execution, data.schedule, today),
     hints: completionHints(data.schedule, {execution, judgments: data.judgments, slices: data.slices}),

@@ -70,6 +70,23 @@ try{
   await page.locator('.pal-q').fill('جلسة في الملف');
   await page.waitForFunction(()=>[...document.querySelectorAll('.pal-item')].some(item=>item.textContent.includes('جلسة في الملف')));
   await page.keyboard.press('Escape');
+  await page.waitForSelector('.palette-card',{state:'detached'});
+ });
+
+ await verify('لوحة الأوامر تفتح مركز التنفيذ والمزامنة والملاحظات عبر الوجهات المسجلة والاسم التوافقي',async()=>{
+  const openRoute=async(query,label,route,selector)=>{
+   await page.keyboard.press('Control+k');
+   const input=page.locator('.palette-card .pal-q');await input.waitFor({state:'visible'});
+   await input.fill(query);
+   const command=page.locator('.palette-card .pal-item').filter({hasText:label}).first();
+   await command.waitFor({state:'visible',timeout:10000});
+   await command.click();
+   await page.waitForFunction(expected=>String(window.__LAW_OFFICE_APP__.route||'').split('?')[0]===expected,route,{timeout:20000});
+   await page.waitForSelector(selector,{timeout:20000});
+  };
+  await openRoute('مركز التنفيذ','مركز التنفيذ','executionCenter','.exec-head.wc-head h2');
+  await openRoute('المزامنة','المزامنة','sync','.sync-page-head h2');
+  await openRoute('الملاحظات السريعة','الملاحظات السريعة','quickNotes','#quick-notes-root');
  });
 
  await verify('معاينة السجل تفتح من قائمة إجراءات DataGrid وتخفي بيانات الاتصال والهوية',async()=>{

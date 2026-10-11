@@ -214,13 +214,15 @@ export function validateSyncBundle(bundle, {deviceId = getDeviceId()} = {}) {
 }
 
 function decideRemoteApplication(localRow, localHead, remoteChange) {
-  if (!localRow) return {kind: 'apply'};
-  if (!localHead) return sameValue(localRow, remoteChange.payload) ? {kind: 'same'} : {kind: 'conflict'};
+  if (!localHead) return localRow ? (sameValue(localRow, remoteChange.payload) ? {kind: 'same'} : {kind: 'conflict'}) : {kind: 'apply'};
+  // A locally purged row is physically absent; its applied change-log head still
+  // prevents an older offline branch from recreating it on a later exchange.
   const relation = vectorRelation(remoteChange.causalVector, localHead.causalVector);
   if (relation === 'after') return {kind: 'apply'};
   if (relation === 'before') return {kind: 'stale'};
-  if (sameValue(localRow, remoteChange.payload)) return {kind: 'same'};
-  // Equal vectors with different data are treated as an anomaly/conflict, never as a timestamp tie-break.
+  if (localRow && sameValue(localRow, remoteChange.payload)) return {kind: 'same'};
+  if (!localRow && remoteChange.operation === 'delete' && remoteChange.payload?.isPurged === true && localHead.operation === 'delete' && localHead.payload?.isPurged === true && sameValue(localHead.payload, remoteChange.payload)) return {kind: 'same'};
+  // Equal or concurrent vectors with different data are anomalies/conflicts, never timestamp ties.
   return {kind: 'conflict'};
 }
 
@@ -590,7 +592,8 @@ async function applySyncBundleInner(ctx, bundle, {batchSize = BATCH_SIZE, signal
             }
             outcome.conflicts += 1;
           } else if (decision.kind === 'apply') {
-            await request(store.put(clone(change.payload)));
+            if (change.operation === 'delete' && change.payload?.isPurged === true) await request(store.delete(change.entityId));
+            else await request(store.put(clone(change.payload)));
             touched.push({entityType: change.entity, id: change.entityId});
             outcome.applied += 1;
           } else outcome.skipped += 1;

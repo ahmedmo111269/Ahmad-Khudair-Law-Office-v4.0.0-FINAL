@@ -6,6 +6,7 @@ import {ERR} from '../core/errors.js';
 import {Office} from '../services/office.js';
 import {createLegalFile} from '../services/legal-files.js';
 import * as QN from '../services/quick-notes.js';
+import {resolveQuickNoteContexts} from '../modules/quick-notes.js';
 import {saveWorkItemFromQuickNote} from '../services/work-items.js';
 import {searchStore} from '../services/search-engine.js';
 
@@ -88,6 +89,30 @@ export async function runQuickNotesTests(test, expect) {
       const bad = await rejects(() => QN.saveQuickNote(e.office, {content: 'لا تحفظ'}, {links: [{entityType: 'LEGAL_FILE', entityId: 'missing-file'}]}));
       expect(bad.code).toBe(ERR.NOT_FOUND);
       expect((await e.office.r.caseNotes.all()).some(row => row.content === 'لا تحفظ')).toBe(false);
+    } finally { close(e); }
+  });
+
+  test('ملاحظات سريعة/سياق: الروابط الحية تستخدم المسارات المسجلة ويُحجب السجل المحذوف دون مسح المخازن', async () => {
+    const e = await env();
+    try {
+      const executionId='execution-context-route-test';
+      await e.office.r.execution.put({id:executionId,internalNumber:'EX-CONTEXT',isDeleted:false});
+      const note=await QN.saveQuickNote(e.office,{title:'سياق قابل للتنقل',content:'اختبار الروابط'}, {links:[
+        {entityType:'CLIENT',entityId:e.client.id},{entityType:'LEGAL_FILE',entityId:e.file.id},
+        {entityType:'CASE',entityId:e.stage.id},{entityType:'EXECUTION',entityId:executionId}
+      ]});
+      const contexts=await resolveQuickNoteContexts(e.office,[note]);
+      const resolved=contexts.get(note.id);
+      expect(resolved.items.map(item=>item.route).join('|')).toContain(`client:${e.client.id}`);
+      expect(resolved.items.map(item=>item.route).join('|')).toContain(`file:${e.file.id}`);
+      expect(resolved.items.map(item=>item.route).join('|')).toContain(`case:${e.stage.id}`);
+      expect(resolved.items.map(item=>item.route).join('|')).toContain(`exc:${executionId}`);
+      expect(resolved.unavailableCount).toBe(0);
+      await e.office.softDelete('cases',e.stage.id);
+      const afterDelete=(await resolveQuickNoteContexts(e.office,[note])).get(note.id);
+      expect(afterDelete.items.some(item=>item.route===`case:${e.stage.id}`)).toBe(false);
+      expect(afterDelete.unavailableCount>0).toBe(true);
+      expect((await QN.linksForNote(e.office,note.id,{limit:2})).length<=2).toBe(true);
     } finally { close(e); }
   });
 

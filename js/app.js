@@ -58,11 +58,38 @@ const PAGES={
  databases:{title:'قواعد البيانات',render:async app=>(await import('./modules/databases.js')).renderDatabases(app),bind:async app=>(await import('./modules/databases.js')).bindDatabases(app)},
  backup:{title:'النسخ الاحتياطي',render:async app=>(await import('./modules/databases.js')).renderBackup(app),bind:async app=>(await import('./modules/databases.js')).bindBackup(app)},
  sync:{title:'المزامنة',render:async app=>(await import('./modules/sync.js')).renderSyncPage(app),bind:async app=>(await import('./modules/sync.js')).bindSyncPage(app)},
- settings:{title:'الإعدادات',render:async app=>(await import('./modules/settings.js')).renderSettings(app),bind:async app=>(await import('./modules/settings.js')).bindSettings(app)}
+ settings:{title:'الإعدادات',render:async(app,q)=>(await import('./modules/settings.js')).renderSettings(app,q),bind:async app=>(await import('./modules/settings.js')).bindSettings(app)}
 };
 for(const s of LIST_STORES)PAGES[s]={title:ENTITIES[s].plural,render:(app,q)=>listPage(app,s,q),bind:app=>bindListPage(app,s)};
 // المسار القديم caseNotes يبقى رابط توافق إلى شاشة الملاحظات السريعة، لا شاشة Notes ثانية.
 PAGES.caseNotes=PAGES.quickNotes;
+
+function routeWithTab(route,tab){
+ const i=String(route||'').indexOf('?');const base=i<0?String(route||''):String(route).slice(0,i);const params=new URLSearchParams(i<0?'':String(route).slice(i+1));
+ params.set('tab',String(tab));return `${base}?${params.toString()}`;
+}
+/** حالة تبويب الصفحة الحالية فقط؛ PAGES/App.go يظلان مصدر معالجة المسار. */
+function internalTabState(app,baseRoute){
+ if(baseRoute==='settings'&&typeof app.__settingsTabValid==='function')return {
+  current:()=>app.__settingsTab||'appearance',valid:app.__settingsTabValid,
+  apply:(tab,opts={})=>app.__settingsTabApply?.(tab,opts)
+ };
+ const file=/^file:(.+)$/.exec(baseRoute);
+ if(file&&String(app.__fileTab?.id||'')===file[1]&&typeof app.__fileTabValid==='function')return {
+  current:()=>app.__fileTab?.tab||'summary',valid:app.__fileTabValid,
+  apply:(tab,opts={})=>app.__fileApplyTab?.(tab,opts)
+ };
+ const execution=/^exc:(.+)$/.exec(baseRoute);
+ if(execution&&String(app.__executionTabId||'')===execution[1]&&typeof app.__executionTabValid==='function')return {
+  current:()=>app.__executionTab||'account',valid:app.__executionTabValid,
+  apply:(tab,opts={})=>app.__executionApplyTab?.(tab,opts)
+ };
+ return null;
+}
+function internalTabForCurrentRoute(app,baseRoute){
+ const state=internalTabState(app,baseRoute);const tab=state?.current?.();
+ return state&&state.valid(tab)?tab:null;
+}
 
 // صفحات السجل: client:ID, opponent:ID, file:ID, case:ID, rec:STORE:ID
 function recordRoute(route){
@@ -70,7 +97,7 @@ function recordRoute(route){
  if(m){const map={client:['clients',clientPage,bindClientPage,'سجل الموكل'],opponent:['opponents',opponentPage,bindOpponentPage,'سجل الخصم'],file:['files',filePage,bindFilePage,'الملف'],case:['cases',(a,id)=>recordPage(a,'cases',id),(a,id)=>bindRecordPage(a,'cases',id),'القضية / المرحلة']}[m[1]];const layouts={client:'client-details',opponent:'opponent-details',file:'file-details',case:'rec:cases'};return {title:map[3],render:app=>map[1](app,m[2]),bind:app=>map[2](app,m[2]),store:map[0],layoutId:layouts[m[1]]}}
  // بطاقة التنفيذ: مسار ثابت يُستخدم من الجدول والبحث والخط الزمني
  m=/^exc:(.+)$/.exec(route);
- if(m)return {title:'بطاقة التنفيذ',render:async app=>(await import('./modules/execution-center.js')).executionDetailPage(app,m[1]),bind:async app=>(await import('./modules/execution-center.js')).bindExecutionDetail(app,m[1]),store:'executionCenter',layoutId:'execution:card'};
+ if(m)return {title:'بطاقة التنفيذ',render:async(app,q)=>(await import('./modules/execution-center.js')).executionDetailPage(app,m[1],q),bind:async app=>(await import('./modules/execution-center.js')).bindExecutionDetail(app,m[1]),store:'executionCenter',layoutId:'execution:card'};
  m=/^cfile:(.+)$/.exec(route);
  if(m)return {title:'ملف الموكل',render:(app,q)=>clientFilePage(app,m[1],q),bind:app=>bindClientFilePage(app,m[1]),store:'clients',layoutId:'client-file'};
  m=/^rec:([A-Za-z]+):(.+)$/.exec(route);
@@ -191,6 +218,7 @@ class App{
   $('#nav-home').onclick=()=>this.go('dashboard');
   // تفويض واحد لكل عناصر التنقل، فيبقى صالحًا بعد أي إعادة رسم للشريط (التخصيص مثلًا)
   $('#sidebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
+  $('#tn-mobilebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
   this.initShortcuts();
   this.bindNetworkAwareness();
  }
@@ -223,14 +251,14 @@ class App{
  initShortcuts(){
   document.addEventListener('keydown',e=>{
    const typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
-   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='t'){e.preventDefault();if(String(this.route||'').startsWith('exc:')){document.dispatchEvent(new CustomEvent('exec:record'));return}return}
-   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();openQuickNoteCapture(this);return}
-   if((e.ctrlKey||e.metaKey)&&e.code==='KeyK'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
-   if((e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
+   if(!typing&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='t'){e.preventDefault();if(String(this.route||'').startsWith('exc:')){document.dispatchEvent(new CustomEvent('exec:record'));return}return}
+   if(!typing&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='n'){e.preventDefault();openQuickNoteCapture(this);return}
+   if(!typing&&(e.ctrlKey||e.metaKey)&&e.code==='KeyK'){e.preventDefault();paletteOpen()?closePalette():openPalette(this);return}
+   if(!typing&&(e.ctrlKey||e.metaKey)&&e.key==='\\'){e.preventDefault();isDesktop()?toggleCollapsed():toggleMobile();return}
    if(e.key==='Escape'&&!document.querySelector('.dg-pop')){
     if(!isDesktop()&&closeMobile())return; // إغلاق لوحة تنقل الهاتف المفتوحة إن وُجدت
     if(paletteOpen()){closePalette();return}closeModal();return}
-   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
+   if(!typing&&e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();const routes=['dashboard','actionCenter','files','clients','cases','hearings','procedures','search','reports'];const r=routes[Number(e.key)-1];if(r)this.go(r);return}
    // G في الرئيسية: افتح «الخطوة التالية» مباشرة (من بطاقة «الآن») — مسار لوحة مفاتيح بلا فأرة.
    if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&e.key.toLowerCase()==='g'&&this.route==='dashboard'){const nextBtn=document.querySelector('[data-section-id="focus"] [data-route]');if(nextBtn){e.preventDefault();nextBtn.click()}}
    if(!typing&&(e.key==='?')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();if(!document.querySelector('#modal-root .modal-card'))this.showShortcutsHelp()}
@@ -245,6 +273,35 @@ class App{
   // Navigation handlers are bound before the initial IndexedDB open completes. Queue any early click
   // instead of rendering a page with a null Office context; recovery mode intentionally has no context.
   if(!this.office&&(this.booting||this.registry.recoveryMode)){if(this.booting)this.pendingRoute=route;return}
+  const nextBase=String(route||'').split('?')[0],currentBase=String(this.route||'').split('?')[0];
+  if(!opts.forceRender&&nextBase===currentBase){
+   const tabState=internalTabState(this,nextBase);
+   if(tabState&&typeof tabState.apply==='function'){
+    const query=new URLSearchParams(String(route||'').split('?')[1]||'');
+    const requested=query.get('tab'),validRequested=tabState.valid(requested),scrollTo=opts.tabScrollTo||'';
+    const tab=validRequested?requested:tabState.current();
+    const currentQuery=new URLSearchParams(String(this.route||'').split('?')[1]||'');
+    // إعادة فتح المسار نفسه بلا tab مع بقاء التبويب نفسه تعيد رسم الصفحة عند الحاجة
+    // لكن تستبدل المدخل الحالي بدل تكرار الحالة ذاتها في تاريخ المتصفح.
+    if(!validRequested&&!scrollTo&&currentQuery.get('tab')===tab)opts={...opts,replace:true};
+    if(tabState.valid(tab)&&(validRequested||scrollTo)){
+     const targetRoute=routeWithTab(route,tab),changed=this.route!==targetRoute;
+     if(changed){
+      if(!opts.replace&&!opts.fromHistory&&validRequested)this.history.push(this.route);
+      this.history=this.history.slice(-50);
+      this.route=targetRoute;appStore.set({route:targetRoute});
+      this.routeHistory?.record(targetRoute,{replace:Boolean(opts.replace)||Boolean(opts.fromHistory)||!validRequested});
+      this.navSeq+=1;
+      $('#nav-back').disabled=!(this.routeHistory?.canGoBack?.()||this.history.length);
+      prefs.set(scopedPreferenceKey('ui:last-route',this.ctx?.profile?.id),{route:targetRoute,title:$('#page-title')?.textContent||'',at:Date.now()});
+     }else if(opts.fromHistory||opts.replace){
+      // قد يعود سجل أقدم بلا ?tab؛ صحّح عنوانه إلى الحالة المرئية دون إضافة مدخل.
+      this.route=targetRoute;appStore.set({route:targetRoute});this.routeHistory?.record(targetRoute,{replace:true});
+     }else if(!scrollTo)return true;
+     try{return await tabState.apply(tab,{fromHistory:Boolean(opts.fromHistory),scrollTo})}catch(error){this.fail(error);return false}
+    }
+   }
+  }
   const my=++this.navSeq;
   closeModal();document.querySelectorAll('.dg-pop').forEach(p=>p.remove());
   if(this.route&&this.route!==route&&!opts.replace&&!opts.fromHistory)this.history.push(this.route);
@@ -255,7 +312,7 @@ class App{
   // كل انتقال يُسجَّل في تاريخ المتصفح، فيعمل زر الرجوع في Android كما يتوقع المستخدم.
   this.routeHistory?.record(route,{replace:Boolean(opts.replace)||Boolean(opts.fromHistory)});
   const baseRoute=route.split('?')[0];const query=new URLSearchParams(route.includes('?')?route.split('?')[1]:'');
-  const page=recordRoute(baseRoute)||PAGES[baseRoute]||PAGES.dashboard;
+  const page=recordRoute(baseRoute,query)||PAGES[baseRoute]||PAGES.dashboard;
   const navKey=page.store||baseRoute; // صفحة السجل تُبرز قائمة كيانها في شريط التنقل العلوي
   setActiveRoute(navKey);
   $('#page-title').textContent=page.title;
@@ -264,8 +321,15 @@ class App{
   const main=$('#main-content');const scrollTop=opts.replace?window.scrollY:0;
   if(!opts.replace)main.innerHTML='<div class="skel-page" role="status" aria-live="polite" aria-label="جارٍ التحميل"><div class="skel skel-hero"></div><div class="skel-row"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div><div class="skel skel-block"></div><div class="skel skel-block"></div></div>';
   try{
-   const html=await page.render(this,query);
+   let html=await page.render(this,query);
    if(my!==this.navSeq)return; // انتقال أحدث بدأ أثناء التحميل
+   // عند الفتح بلا tab، استبدل مدخل الإقلاع/المسار بالحالة الفعلية المختارة
+   // (تفضيل الملف/بطاقة التنفيذ/الإعداد الحالي) كي يكون الرجوع قابلًا للعكس.
+   const resolvedTab=internalTabForCurrentRoute(this,baseRoute);
+   if(resolvedTab){
+    const canonicalRoute=routeWithTab(route,resolvedTab);
+    if(canonicalRoute!==route){route=canonicalRoute;this.route=canonicalRoute;appStore.set({route:canonicalRoute});this.routeHistory?.record(canonicalRoute,{replace:true})}
+   }
    main.innerHTML=html;
    await page.bind?.(this,query);
    enhanceCollapsiblePanels(main,baseRoute);
@@ -314,8 +378,8 @@ class App{
  }
  /** التحديث عبر إعادة تحميل واحدة: لا يلمس IndexedDB ولا التفضيلات. */
  reloadForUpdate(){try{location.reload()}catch{/* متجاهَل */}}
- refresh(){return this.go(this.route,{replace:true})}
- fail(e){const err=normalizeError(e);console.error(err.code,err,e);const retry=this.route||'dashboard';$('#main-content').innerHTML=`<div class="error-box" role="alert"><h2>تعذر تنفيذ العملية</h2><p>${esc(userError(err))}</p><div class="error-actions"><button class="primary" data-retry>إعادة المحاولة</button><button class="ghost" data-error-home>الرئيسية</button><button class="ghost" data-error-diagnostics>سلامة البيانات</button></div><small class="muted">رمز التشخيص: ${esc(err.code)}</small></div>`;document.querySelector('[data-retry]')?.addEventListener('click',()=>this.go(retry,{replace:true}));document.querySelector('[data-error-home]')?.addEventListener('click',()=>this.go('dashboard'));document.querySelector('[data-error-diagnostics]')?.addEventListener('click',()=>this.go('integrity'))}
+ refresh(){return this.go(this.route,{replace:true,forceRender:true})}
+ fail(e){const err=normalizeError(e);console.error(err.code,err,e);const retry=this.route||'dashboard';$('#main-content').innerHTML=`<div class="error-box" role="alert"><h2>تعذر تنفيذ العملية</h2><p>${esc(userError(err))}</p><div class="error-actions"><button class="primary" data-retry>إعادة المحاولة</button><button class="ghost" data-error-home>الرئيسية</button><button class="ghost" data-error-diagnostics>سلامة البيانات</button></div><small class="muted">رمز التشخيص: ${esc(err.code)}</small></div>`;document.querySelector('[data-retry]')?.addEventListener('click',()=>this.go(retry,{replace:true,forceRender:true}));document.querySelector('[data-error-home]')?.addEventListener('click',()=>this.go('dashboard'));document.querySelector('[data-error-diagnostics]')?.addEventListener('click',()=>this.go('integrity'))}
 }
 const app=new App();
 function updateNetworkBadge(status=networkStatus.getState()){

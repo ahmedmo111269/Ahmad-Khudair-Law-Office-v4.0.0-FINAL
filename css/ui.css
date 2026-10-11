@@ -153,7 +153,7 @@
 .record-head h2{margin:2px 0 6px;font-size:21px}
 .record-head .badges{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 4px}
 .file-no{font-family:ui-monospace,Consolas,monospace;background:var(--selected-bg);color:var(--selected-text);border-radius:var(--radius-sm);padding:2px 8px;font-size:16px;direction:ltr;display:inline-block}
-.parent-links{display:flex;gap:6px;flex-wrap:wrap}
+.parent-links{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.record-context-current,.record-context-unavailable,.record-ref-unavailable{font-size:.82rem}.record-context-current{color:var(--text-muted)}.record-context-unavailable,.record-ref-unavailable{color:var(--text-muted)}.record-ref-unavailable{display:block;margin-top:.2rem}
 .rec-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
 .rec-section>summary{cursor:pointer;padding:12px 16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;list-style:none;background:var(--surface2)}
 .rec-section>summary::-webkit-details-marker{display:none}

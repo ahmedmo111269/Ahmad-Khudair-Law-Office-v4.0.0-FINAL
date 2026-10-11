@@ -7,6 +7,7 @@ import {timelineHtml,timelineSummary,bindTimeline} from '../modules/timeline-vie
 import {toast,clearToasts} from '../ui/toast.js';
 import {rowText} from '../services/entity-query.js';
 import {FILE_LIST_CHIPS,listNavFor,listNavHtml} from '../modules/list-page.js';
+import {NAV_ROUTE_REGISTRY,NAV_COMMAND_ROUTES} from '../ui/nav-model.js';
 
 export function runUxTests(test,expect){
  test('آخر ما فُتح: يضيف ويزيل التكرار ويحفظ الترتيب',()=>{
@@ -83,6 +84,37 @@ export function runUxTests(test,expect){
   const cmds=staticCommands(app);
   expect(cmds.some(command=>command.group==='في السياق الحالي'&&command.label==='جلسة في الملف')).toBe(true);
   expect(cmds.some(command=>command.id==='qa:quick-add')).toBe(true);
+ });
+ test('لوحة الأوامر: وجهات التنقل مشتقة من سجل موحد مع حفظ الأسماء التوافقية',()=>{
+  const commands=staticCommands({go(){}}).filter(command=>command.group==='التنقل');
+  expect(commands.length).toBe(NAV_ROUTE_REGISTRY.length);
+  const ids=new Set(commands.map(command=>command.id));
+  for(const item of NAV_ROUTE_REGISTRY){
+   const route=NAV_COMMAND_ROUTES[item.route]||item.route;
+   if(!ids.has('nav:'+route))throw Error('وجهة لوحة الأوامر ناقصة: '+route);
+  }
+  expect(ids.has('nav:quickNotes')).toBe(true);
+  expect(ids.has('nav:caseNotes')).toBe(false);
+  expect(ids.has('nav:executionCenter')).toBe(true);
+  expect(ids.has('nav:feePayments')).toBe(true);
+  expect(ids.has('nav:sync')).toBe(true);
+ });
+ test('لوحة الأوامر: وجهات التنفيذ والمزامنة والاسم التوافقي تستخدم App.go مرة واحدة بلا أوامر بحث/نسخ احتياطي مكررة',()=>{
+  const calls=[],commands=staticCommands({go:route=>calls.push(route)});
+  for(const route of ['quickNotes','executionCenter','sync']){
+   const command=commands.find(item=>item.id==='nav:'+route);
+   if(!command)throw Error('وجهة لوحة الأوامر ناقصة: '+route);
+   command.run();
+  }
+  expect(calls.join('|')).toBe('quickNotes|executionCenter|sync');
+  expect(commands.filter(item=>item.id==='nav:search').length).toBe(1);
+  expect(commands.some(item=>item.id==='qa:search')).toBe(false);
+  expect(commands.filter(item=>item.id==='nav:backup').length).toBe(1);
+  expect(commands.some(item=>item.id==='qa:backup')).toBe(false);
+  expect(scoreCommand(commands.find(item=>item.id==='nav:search'),'بحث')>0).toBe(true);
+  expect(scoreCommand(commands.find(item=>item.id==='nav:backup'),'إنشاء الآن')>0).toBe(true);
+  expect(commands.filter(item=>item.id==='qa:quick-add').length).toBe(1);
+  expect(commands.some(item=>item.id==='qa:quick-note'&&item.group==='إجراءات سريعة')).toBe(true);
  });
  test('التحية حسب الوقت والتاريخ العربي الكامل',()=>{
   expect(greetingKey(7)).toBe('morning');

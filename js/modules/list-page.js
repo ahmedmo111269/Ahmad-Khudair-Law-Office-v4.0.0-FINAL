@@ -7,7 +7,7 @@ import {createGridRelations,gridPageContext,hasLegalFileColumns} from '../servic
 import {mountCalendar} from '../ui/calendar.js';
 import {openEntityForm} from '../ui/form.js';
 import {toast} from '../ui/toast.js';
-import {ENTITIES,FILE_TYPE_GROUPS,displayValue,columnType,phonesOf,isClosedFile} from '../domain/entities.js';
+import {ENTITIES,FILE_TYPE_GROUPS,displayValue,columnType,phonesOf,isClosedFile,entityRoute} from '../domain/entities.js';
 import {createEntityGridProvider,resolveRefs,presetRange,PRESETS,scan} from '../services/entity-query.js';
 import {fmtDate} from '../domain/entities.js';
 import {formatFileNumber} from '../core/file-number.js';
@@ -50,7 +50,7 @@ registerListExtras('procedures', PROCEDURES_EXTRAS);
  const replaced=new Set(shared.map(column=>column.key));
  return [...shared,...cols.filter(column=>!replaced.has(column.key)),...extra];
 }
-export function routeFor(store,row){const r=ENTITIES[store]?.route;if(!r)return null;return r.startsWith('rec:')?`${r}:${row.id}`:`${r}:${row.id}`}
+export function routeFor(store,row){return entityRoute(store,row?.id)}
 export function openRow(app,store,row){const r=routeFor(store,row);if(r)app.go(r)}
 
 // شبكة داخل قسم (صفحات السجل): صفوف معروفة مسبقًا

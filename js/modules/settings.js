@@ -17,6 +17,8 @@ import {openGlobalStyleCustomizer,openTypeDefaultCustomizer} from '../ui/compone
 /** وحدة حذف البيانات التجريبية (تُحمَّل عند الحاجة فقط) — تُستخدم لتحديث العدّاد بعد أي زرع. */
 let demoCleanup=null;
 const refreshDemoCleanupCount=app=>demoCleanup?.refreshDemoCount?.(app);
+const SETTINGS_TAB_IDS=new Set(['appearance','taxonomy','general']);
+const isSettingsTab=tab=>SETTINGS_TAB_IDS.has(String(tab||''));
 
 const COLLAPSE_DESCRIPTIONS={
  collapsed:'العناصر الجديدة غير المهيأة — الأقسام والبطاقات — تبدأ مطوية؛ تبقى الجداول الرئيسية ظاهرة. الحالات التي اخترتها سابقًا لا تتغير.',
@@ -25,8 +27,16 @@ const COLLAPSE_DESCRIPTIONS={
  pinned:'كل تغيير تقوم به يُثبّت لهذا العنصر فلا يغيّره تعديل الوضع الافتراضي؛ يمكنك إلغاء تثبيت أي عنصر من رأسه.'
 };
 
-export async function renderSettings(app){
- const tab=app.__settingsTab||'appearance';
+export async function renderSettings(app,query=null){
+ app.__settingsTabValid=isSettingsTab;
+ app.__settingsTabApply=(tab,opts={})=>{
+  if(!isSettingsTab(tab))return false;
+  app.__settingsTab=tab;
+  return app.go(app.route,{replace:true,forceRender:true,fromHistory:Boolean(opts.fromHistory)});
+ };
+ const requested=query?.get?.('tab');
+ const tab=isSettingsTab(requested)?requested:(isSettingsTab(app.__settingsTab)?app.__settingsTab:'appearance');
+ app.__settingsTab=tab;
  const tabs=`<div class="tabs" role="tablist"><button role="tab" data-stab="appearance" class="${tab==='appearance'?'active':''}">🎨 المظهر والثيمات</button><button role="tab" data-stab="taxonomy" class="${tab==='taxonomy'?'active':''}">📂 الأقسام وأنواع الأعمال</button><button role="tab" data-stab="general" class="${tab==='general'?'active':''}">القوائم والنظام</button></div>`;
  if(tab==='appearance')return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">خصّص المظهر بالكامل — التغييرات تُطبَّق فورًا وتُحفظ على هذا الجهاز لهذا المستخدم.</p></div></div>${tabs}<div id="appearance-root">${renderAppearance()}</div>`;
  if(tab==='taxonomy'){const {renderTaxonomyEditor}=await import('./taxonomy-editor.js');return `<div class="page-head"><div><h2>الإعدادات</h2><p class="muted small">الأقسام وأنواع الأعمال والمسارات المقترحة والحقول الخاصة — كلها بيانات قابلة للتعديل دون برمجة.</p></div></div>${tabs}${await renderTaxonomyEditor(app)}`}
@@ -131,7 +141,7 @@ function renderCollapseSettings(){
 
 export function bindSettings(app){
  const root=document.querySelector('#main-content');const cat=app.__lookupCat;
- root.querySelectorAll('[data-stab]').forEach(b=>b.onclick=()=>{app.__settingsTab=b.dataset.stab;app.refresh()});
+ root.querySelectorAll('[data-stab]').forEach(b=>b.onclick=()=>app.go(`settings?tab=${encodeURIComponent(b.dataset.stab)}`));
  // الإعداد العام للعرض: تطبيق فوري على الصفحة الحالية + حفظ عبر DisplayPreferences
  const liveApply=()=>applyPageDisplay(document.querySelector('#main-content'),app.__layoutId||'settings');
  root.querySelectorAll('[data-gseg] button').forEach(b=>b.addEventListener('click',()=>{

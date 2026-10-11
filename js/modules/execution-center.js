@@ -16,12 +16,14 @@ import {createIndexedDbDataProvider} from '../db/grid-data-provider.js';
 import {registerPageLayout, openPageCustomizer} from '../ui/page-layout.js';
 import {prefs} from '../core/preferences.js';
 import {formatFileNumber} from '../core/file-number.js';
+import {refLabel} from '../services/entity-query.js';
 import {localDate} from '../core/clock.js';
 import {userError} from '../core/errors.js';
 import {fromMinorUnits} from '../domain/execution-money.js';
 import {isCivilDate, addCivilDays} from '../domain/execution-calendar.js';
 import {PERIOD_STATUS} from '../domain/execution-schedule.js';
 import {EXECUTION_TYPE_LABELS} from '../domain/execution.js';
+import {entityRoute} from '../domain/entities.js';
 import * as S from '../services/execution-simple.js';
 import {executionWorkQueue, describeExecutions, countQueue, matchesLane, searchableText, queueSections, refreshExecutionItem, executionsForFile, executionsForClient, QUEUE_SCAN_CAP} from '../services/execution-work.js';
 import {executionSettings, actionKindOptions, collectionMethodOptions} from '../services/execution-settings.js';
@@ -970,7 +972,20 @@ export function openHelp(app) {
 }
 
 /* ============================ بطاقة التنفيذ ============================ */
-export async function executionDetailPage(app, executionId) {
+function executionContextHtml(bundle){
+  const {execution,client,file,caseRecord,opponent,opponentParty,debtor}=bundle;
+  const links=[],unavailable=[];
+  const add=(store,id,label,text)=>{const route=entityRoute(store,id);if(route)links.push(`<button type="button" class="ghost small" data-route="${esc(route)}">${esc(label)}: ${esc(text)}</button>`)};
+  const missing=label=>unavailable.push(`<span class="record-context-unavailable muted" role="status">${esc(label)}: السجل المرتبط غير متاح حاليًا.</span>`);
+  if(client)add('clients',client.id,'الموكل',client.fullName||'الموكل');else if(execution.clientId)missing('الموكل');
+  if(file)add('files',file.id,'الملف',refLabel('files',file)||file.title||'الملف');else if(execution.fileId)missing('الملف');
+  if(caseRecord)add('cases',caseRecord.id,'القضية / المرحلة',refLabel('cases',caseRecord)||'القضية');else if(execution.caseId)missing('القضية / المرحلة');
+  const opponentId=opponentParty?.opponentId||debtor?.opponentId||'';
+  if(opponent)add('opponents',opponent.id,'الخصم',opponent.name||debtor?.name||'الخصم');else if(opponentId)missing('الخصم');
+  if(!file&&execution.fileId)missing('الملف');
+  return `<nav class="parent-links record-context-links" aria-label="سجلات مرتبطة ببطاقة التنفيذ"><span class="record-context-current" aria-current="page">أنت هنا: بطاقة التنفيذ</span>${links.join('')}${unavailable.join('')}</nav>`;
+}
+export async function executionDetailPage(app, executionId, query=null) {
   registerPageLayout({
     pageId: 'execution:card', title: 'بطاقة التنفيذ',
     sections: [
@@ -992,10 +1007,18 @@ export async function executionDetailPage(app, executionId) {
   const {execution, client, file, creditor, debtor, schedule, status} = bundle;
   const title = execution.internalNumber || execution.officialNumber || 'تنفيذ بلا رقم';
   const parties = `${esc(creditor?.name || client?.fullName || 'بلا موكل')} <span class="muted">ضد</span> ${esc(debtor?.name || 'بلا منفذ ضده')}`;
-  const tab = TAB_LABELS[prefs.get(TAB_KEY, 'account')] ? prefs.get(TAB_KEY, 'account') : 'account';
+  const requestedTab=query?.get?.('tab');
+  const storedTab=prefs.get(TAB_KEY,'account');
+  const tab=TAB_LABELS[requestedTab]?requestedTab:(TAB_LABELS[storedTab]?storedTab:'account');
+  app.__executionTabId=String(executionId);app.__executionTab=tab;
+  app.__executionTabValid=value=>Boolean(TAB_LABELS[value]);
+  // الكاش مؤقت في الذاكرة لهذه الفتحة فقط؛ لا تُخزن به بيانات سجل ولا تفضيل جديد.
+  app.__executionTabCache={id:String(executionId),map:new Map()};
+  if(TAB_LABELS[requestedTab])void prefs.set(TAB_KEY,tab);
   return `<div class="page-head exec-head"><div>
       <h2>${esc(title)} · ${parties}${file ? ` · ملف ${esc(formatFileNumber(file.fileNumber))}` : ''} <span class="exec-status exec-status-${esc(status.key)}">${esc(status.label)}</span></h2>
       <p class="muted small">${esc(EXECUTION_TYPE_LABELS[execution.executionType] || 'نوع غير محدد')}${execution.authority ? ` · ${esc(execution.authority)}` : ''} · فُتح في ${esc(dateText(execution.openedDate))}</p>
+      ${executionContextHtml(bundle)}
     </div><div class="head-actions">
       <button class="ghost" data-route="executionCenter">↩ المركز</button>
       <button class="ghost" data-help>؟ مساعدة</button>
@@ -1409,16 +1432,29 @@ export async function bindExecutionDetail(app, executionId) {
     'print-balance': () => printBalanceDialog(app, executionId)
   };
 
-  const showTab = async (tab, {scrollTo = ''} = {}) => {
-    prefs.set(TAB_KEY, tab);
-    root.querySelectorAll('[data-tab]').forEach(button => {
-      const active = button.dataset.tab === tab;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-selected', String(active));
+  const tabCache=app.__executionTabCache?.id===String(executionId)?app.__executionTabCache:(app.__executionTabCache={id:String(executionId),map:new Map()});
+  const currentTab=()=>app.__executionTab||'account';
+  tabCache.map.set(currentTab(),[...panel.childNodes]);
+  const applyTab=async(tab,{scrollTo=''}={})=>{
+    if(!TAB_LABELS[tab])return false;
+    const previous=currentTab();
+    if(tab!==previous){tabCache.map.set(previous,[...panel.childNodes]);app.__executionTab=tab;void prefs.set(TAB_KEY,tab)}
+    root.querySelectorAll('[data-tab]').forEach(button=>{
+      const active=button.dataset.tab===tab;
+      button.classList.toggle('is-active',active);button.setAttribute('aria-selected',String(active));
     });
-    panel.innerHTML = renderTab(bundle, tab);
-    bindContainer(panel);
-    if (scrollTo) panel.querySelector(scrollTo)?.scrollIntoView?.({block: 'start'});
+    if(tab!==previous){
+      if(tabCache.map.has(tab))panel.replaceChildren(...tabCache.map.get(tab));
+      else{panel.innerHTML=renderTab(bundle,tab);bindContainer(panel);tabCache.map.set(tab,[...panel.childNodes])}
+    }
+    if(scrollTo)panel.querySelector(scrollTo)?.scrollIntoView?.({block:'start'});
+    return true;
+  };
+  app.__executionApplyTab=applyTab;
+  const showTab=(tab,{scrollTo=''}={})=>{
+    if(!TAB_LABELS[tab])return false;
+    const base=String(app.route||`exc:${executionId}`).split('?')[0],params=new URLSearchParams(String(app.route||'').split('?')[1]||'');
+    params.set('tab',tab);return app.go(`${base}?${params.toString()}`,{tabScrollTo:scrollTo});
   };
 
   const bindContainer = container => {
@@ -1467,6 +1503,7 @@ export async function bindExecutionDetail(app, executionId) {
       prefs.set(accountFilterKey(bundle.execution.id), button.dataset.accountFilter);
       panel.innerHTML = renderTab(bundle, 'account');
       bindContainer(panel);
+      tabCache.map.set('account',[...panel.childNodes]);
     }));
     container.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', guard(() => {
       const {kind, edit} = button.dataset;

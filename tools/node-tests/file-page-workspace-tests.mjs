@@ -248,10 +248,16 @@ try{
   const input=page.locator('#file-tab [data-meta]').first();
   await input.fill('مسودة غير محفوظة '+fx.suffix);
   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'hearings');
-  await page.waitForTimeout(800);
-  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'typeData');
-  await page.waitForTimeout(800);
-  assert.equal(await page.locator('#file-tab [data-meta]').first().inputValue(),'مسودة غير محفوظة '+fx.suffix,'الكاش يحتفظ بقيم النموذج');
+  await page.waitForFunction(id=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=hearings`,fx.file.id,{timeout:10000});
+  assert.ok(await activeTabCheck('hearings'),'اختيار التبويب يحدّث الحالة النشطة');
+  await page.goBack();
+  await page.waitForFunction(id=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=typeData`,fx.file.id,{timeout:10000});
+  assert.equal(await page.locator('#file-tab [data-meta]').first().inputValue(),'مسودة غير محفوظة '+fx.suffix,'Back يعيد عقدة النموذج المحفوظة وقيمتها');
+  await page.goForward();
+  await page.waitForFunction(id=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=hearings`,fx.file.id,{timeout:10000});
+  await page.goBack();
+  await page.waitForFunction(id=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=typeData`,fx.file.id,{timeout:10000});
+  assert.equal(await page.locator('#file-tab [data-meta]').first().inputValue(),'مسودة غير محفوظة '+fx.suffix,'Forward/Back لا يفقدان المسودة');
  });
 
  // (11) عزل الملفات
@@ -602,6 +608,13 @@ try{
   assert.equal(await page.locator('.ftb-group[data-group="gFollow"]').getAttribute('class').then(c=>c.includes('is-active')),true,'مجموعة الارتباطات نشطة');
   assert.equal(await page.locator('.ftb-group[data-group="gRecords"]').getAttribute('class').then(c=>c.includes('is-active')),false,'المجموعة السابقة فقدت التعليل');
   assert.equal(await page.locator('.ftb-group[data-group="gFollow"] [data-tab="relations"]').getAttribute('aria-checked'),'true');
+  const expectedRoute=`file:${fx.file.id}?tab=relations`;
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:60000});
+  await page.waitForFunction(route=>window.__LAW_OFFICE_APP__?.route===route,expectedRoute,{timeout:30000});
+  await page.waitForSelector('.file-tabs-bar',{timeout:30000});
+  assert.ok(await activeTabCheck('relations'),'تحديث الرابط المباشر يعيد القسم نفسه');
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'العلاقات والملفات المرتبطة');
  });
 
  // (26) الطباعة: الشريط غير ملتصق والمحتوى كامل بلا قوائم مفتوحة عابرة
@@ -825,43 +838,33 @@ try{
   assert.equal(unnamed.length,0,`لا عناصر تفاعلية بلا اسم وصول — ${unnamed.slice(0,6).join(' · ')||'—'}`);
  });
 
- // (31) تبديل الأقسام داخل الصفحة بلا إعادة تحميل + سلامة زر الرجوع
- await verify('31) تبديل الأقسام بلا إعادة تحميل كاملة وزر الرجوع لا يكسر الصفحة',async()=>{
-  await go(`file:${fx.file.id}`);
-  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
-  await page.waitForTimeout(900);
-  // علامة على كائن النافذة: تختفي حتمًا لو أُعيد تحميل المستند
+ // (31) تبديل الأقسام بلا إعادة تحميل + Back/Forward يعيدان الحالة المرئية
+ await verify('31) تبويبات الملف تُسجل في الرابط وتعود عبر Back/Forward دون إعادة تحميل أو فقد المسودة',async()=>{
+  await go(`file:${fx.file.id}?tab=summary`);
+  await page.waitForFunction(id=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=summary`,fx.file.id,{timeout:10000});
   await page.evaluate(()=>{window.__fpSentinel='alive'});
-  const histBefore=await page.evaluate(()=>history.length);
-  const hashBeforeTabs=await page.evaluate(()=>location.hash);
+  const histBefore=await page.evaluate(()=>window.__LAW_OFFICE_APP__.routeHistory.depth);
   await page.locator('.file-tabs-bar [data-tab="hearings"]').click();
-  await page.waitForTimeout(800);
+  await page.waitForFunction(({id,title})=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=hearings`&&document.querySelector('[data-tab-shell-title]')?.textContent.trim()===title,{id:fx.file.id,title:'الجلسات'},{timeout:10000});
   await page.locator('.ftb-group[data-group="gRecords"] .ftb-group-btn').click();
   await page.waitForTimeout(250);
   await page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]').click();
-  await page.waitForTimeout(900);
-  assert.equal(await page.evaluate(()=>window.__fpSentinel),'alive','لا إعادة تحميل كاملة عند تبديل الأقسام');
+  await page.waitForFunction(({id,title})=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=notes`&&document.querySelector('[data-tab-shell-title]')?.textContent.trim()===title,{id:fx.file.id,title:'الملاحظات'},{timeout:10000});
+  assert.equal(await page.evaluate(()=>window.__fpSentinel),'alive','التبديل داخلي لا يعيد تحميل المستند');
   assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الملاحظات','القسم المطلوب ظاهر بعد تبديلين');
   assert.ok(await activeTabCheck('notes'),'عنصر القائمة النشط معلَّم بعد التبديل');
-  const nav=await page.evaluate(hb=>({hist:history.length,hash:location.hash,same:hb===history.length}),histBefore);
-  assert.equal(nav.hist,histBefore,'تبديل الأقسام داخل الصفحة لا يضيف مدخلات لتاريخ المتصفح');
-  assert.equal(nav.hash,hashBeforeTabs,'العنوان (hash) لا يتغيّر جزئيًا عند تبديل الأقسام');
-  // زر الرجوع في المتصفح: نهاية سليمة بلا أخطاء JS وبلا شاشة فارغة
+  assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.routeHistory.depth),histBefore+2,'كل اختيار يضيف مدخلًا واحدًا فقط');
+  assert.equal(await page.evaluate(()=>location.hash),'#/'+encodeURIComponent(`file:${fx.file.id}?tab=notes`),'hash يحفظ هوية الملف والتبويب');
   const errsBefore=report.errors.length;
-  const stateBefore=await page.evaluate(()=>({hash:location.hash,route:String(window.__LAW_OFFICE_APP__.route)}));
-  await page.evaluate(()=>history.back());
-  await page.waitForTimeout(1100);
-  const afterBack=await page.evaluate(()=>({hash:location.hash,route:String(window.__LAW_OFFICE_APP__.route),
-   sentinel:window.__fpSentinel||null,main:document.querySelector('#main-content')?.children.length||0,
-   heading:(document.querySelector('#page-title')?.textContent||'').trim().slice(0,40)}));
-  if(process.env.FPW_DEBUG)console.log('DEBUG back:',JSON.stringify({stateBefore,afterBack}));
-  assert.equal(report.errors.length,errsBefore,`زر الرجوع لا يُنتج أخطاء JS (${report.errors.slice(errsBefore).join(' | ')})`);
-  assert.ok(afterBack.main>0,'المحتوى مرسوم بعد الرجوع (لا شاشة فارغة)');
-  // سلوك مقصود: الأقسام ليست مسارات، فالرجوع يخرج من الملف إلى الصفحة السابقة (رئيسية/ملفات) بحالة سليمة
-  const landed=['dashboard','files'].includes(afterBack.route)||Boolean(await page.locator('.file-tabs-bar').count());
-  assert.ok(landed,`الرجوع ينتهي إلى صفحة سليمة (${afterBack.route} · «${afterBack.heading}»)`);
-  assert.ok(afterBack.heading.length>0,'عنوان الصفحة المرسوم غير فارغ بعد الرجوع');
-  await go(`file:${fx.file.id}`);
+  await page.goBack();
+  await page.waitForFunction(({id,title})=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=hearings`&&document.querySelector('[data-tab-shell-title]')?.textContent.trim()===title,{id:fx.file.id,title:'الجلسات'},{timeout:10000});
+  assert.ok(await activeTabCheck('hearings'),'Back يعيد تبويب الجلسات');
+  assert.equal(await page.evaluate(()=>window.__fpSentinel),'alive','Back لا يعيد تحميل المستند');
+  await page.goForward();
+  await page.waitForFunction(({id,title})=>window.__LAW_OFFICE_APP__?.route===`file:${id}?tab=notes`&&document.querySelector('[data-tab-shell-title]')?.textContent.trim()===title,{id:fx.file.id,title:'الملاحظات'},{timeout:10000});
+  assert.ok(await activeTabCheck('notes'),'Forward يعيد تبويب الملاحظات');
+  assert.equal(report.errors.length,errsBefore,`Back/Forward بلا أخطاء JS (${report.errors.slice(errsBefore).join(' | ')})`);
+  await go(`file:${fx.file.id}?tab=summary`);
  });
 
  // (32) تباين الألوان الفعلي لعناصر المساحة الجديدة في الثيمين — معيار WCAG AA

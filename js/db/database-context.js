@@ -104,7 +104,7 @@ function makeCaptureQueue(rawTx, context) {
   return {enqueue};
 }
 
-function wrapStore(rawStore, name, captureQueue) {
+function wrapStore(rawStore, name, captureQueue, {hardDelete = false} = {}) {
   if (!captureQueue || !CAPTURE_STORES.has(name)) return rawStore;
   return new Proxy(rawStore, {
     get(target, property) {
@@ -156,17 +156,21 @@ function wrapStore(rawStore, name, captureQueue) {
               isDeleted: true,
               deletedAt: oldRow?.deletedAt || stamp,
               updatedAt: stamp,
-              version: Number(oldRow?.version || 0) + 1
+              version: Number(oldRow?.version || 0) + 1,
+              ...(hardDelete ? {isPurged: true} : {})
             };
-            const tombstoneRequest = target.put(tombstone);
-            listen(tombstoneRequest, 'success', () => captureQueue.enqueue({
+            const recordChange = () => captureQueue.enqueue({
               entity: name,
               entityId: String(id),
               operation: 'delete',
               changedAt: stamp,
               oldRow,
               payload: tombstone
-            }));
+            });
+            // الإزالة النهائية لا تعيد الصف المحلي، لكنها تحتفظ ببيانات Tombstone في Change Log كي تصل للأجهزة الأخرى.
+            if (hardDelete) { recordChange(); return; }
+            const tombstoneRequest = target.put(tombstone);
+            listen(tombstoneRequest, 'success', recordChange);
           });
           return deleteRequest;
         };
@@ -183,7 +187,7 @@ function wrapStore(rawStore, name, captureQueue) {
   });
 }
 
-function wrapTransaction(rawTx, context, captureEnabled) {
+function wrapTransaction(rawTx, context, captureEnabled, {hardDelete = false} = {}) {
   if (!captureEnabled) return rawTx;
   const captureQueue = makeCaptureQueue(rawTx, context);
   const stores = new Map();
@@ -192,7 +196,7 @@ function wrapTransaction(rawTx, context, captureEnabled) {
       if (property === 'objectStore') {
         return name => {
           const key = String(name);
-          if (!stores.has(key)) stores.set(key, wrapStore(target.objectStore(name), key, captureQueue));
+          if (!stores.has(key)) stores.set(key, wrapStore(target.objectStore(name), key, captureQueue, {hardDelete}));
           return stores.get(key);
         };
       }
@@ -210,12 +214,14 @@ function instrumentDatabase(db, context) {
         return (requestedNames, mode = 'readonly', options = undefined) => {
           const names = storeNames(requestedNames);
           const supportsSync = target.objectStoreNames?.contains?.(STORE.syncChanges) && target.objectStoreNames?.contains?.(STORE.syncState);
+          const hardDelete = options?.hardDelete === true;
           const captureEnabled = supportsSync && mode === 'readwrite' && options?.captureChanges !== false && names.some(name => CAPTURE_STORES.has(name));
           const txNames = captureEnabled ? [...new Set([...names, ...SYSTEM_STORES])] : requestedNames;
           let nativeOptions = options;
-          if (nativeOptions && Object.prototype.hasOwnProperty.call(nativeOptions, 'captureChanges')) {
+          if (nativeOptions && (Object.prototype.hasOwnProperty.call(nativeOptions, 'captureChanges') || Object.prototype.hasOwnProperty.call(nativeOptions, 'hardDelete'))) {
             nativeOptions = {...nativeOptions};
             delete nativeOptions.captureChanges;
+            delete nativeOptions.hardDelete;
             if (!Object.keys(nativeOptions).length) nativeOptions = undefined;
           }
           let rawTx;
@@ -232,7 +238,7 @@ function instrumentDatabase(db, context) {
               notifyWritesAcrossTabs(context);
             });
           }
-          return wrapTransaction(rawTx, context, captureEnabled);
+          return wrapTransaction(rawTx, context, captureEnabled, {hardDelete});
         };
       }
       const result = Reflect.get(target, property, target);

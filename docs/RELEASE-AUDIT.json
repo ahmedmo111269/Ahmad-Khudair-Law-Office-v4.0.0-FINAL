@@ -1,12 +1,13 @@
 {
-  "timestamp": "2026-10-08T13:55:55.752Z",
+  "timestamp": "2026-10-11T16:32:06.020Z",
   "version": "5.17.0",
-  "files": 332,
-  "javascript": 236,
-  "relativeImportsChecked": 1189,
+  "files": 378,
+  "javascript": 266,
+  "relativeImportsChecked": 1321,
   "failures": [],
-  "warnings": [
-    "REVIEW /location\\.reload\\s*\\(/"
+  "warnings": [],
+  "reviews": [
+    "REVIEWED location.reload: الوحيد في المصدر، مرتبط بقبول زر تحديث PWA، ولا يعمل بلا عامل ينتظر"
   ],
   "status": "PASS"
 }

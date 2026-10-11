@@ -135,6 +135,8 @@ await verify('العدّاد يصفّي الشبكة على التنفيذات �
 // مثال عملي جاهز: نفس مسار المستخدم (زر ← بطاقة)
 let exampleNumber = '';
 await verify('زر «مثال عملي جاهز» يبني المثال ويفتح بطاقته', async () => {
+  // زر المثال محفوظ داخل قائمة الأدوات المنسدلة؛ افتحها كما يفعل المستخدم.
+  await page.locator('.wc-tools summary').click();
   await page.locator('[data-demo-example]').click();
   clicks('S0-example', 1);
   await page.waitForSelector('.exec-numbers', {timeout: 30000});
@@ -142,7 +144,46 @@ await verify('زر «مثال عملي جاهز» يبني المثال ويفت
   const title = await page.locator('#main-content h2').first().textContent();
   exampleNumber = (title.match(/EX-\d{4}-\d+/) || [''])[0];
   assert.ok(exampleNumber, `لا يظهر رقم تنفيذ في العنوان: ${title}`);
-  exampleId = await page.evaluate(() => window.__LAW_OFFICE_APP__.route.replace('exc:', ''));
+  exampleId = await page.evaluate(() => window.__LAW_OFFICE_APP__.route.replace(/^exc:/, '').split('?')[0]);
+});
+
+await verify('W2 — تبويبات بطاقة التنفيذ تحفظ الرابط والسجل عبر Back/Forward وRefresh وتفضيل بلا query', async () => {
+  const waitTab = async tab => page.waitForFunction(({id, tab: expected}) => {
+    const app = window.__LAW_OFFICE_APP__;
+    const button = document.querySelector(`.exec-tab[data-tab="${expected}"]`);
+    return app?.route === `exc:${id}?tab=${expected}` && button?.getAttribute('aria-selected') === 'true';
+  }, {id: exampleId, tab}, {timeout: 20000});
+
+  await page.locator('.exec-tab[data-tab="log"]').click();
+  await waitTab('log');
+  await page.locator('[data-log-q]').fill('مسودة مرشح محفوظ');
+  await page.locator('.exec-tab[data-tab="data"]').click();
+  await waitTab('data');
+  await page.goBack();
+  await waitTab('log');
+  assert.equal(await page.locator('[data-log-q]').inputValue(), 'مسودة مرشح محفوظ', 'Back يعيد محتوى DOM غير المحفوظ');
+  await page.goForward();
+  await waitTab('data');
+  const depthBeforeScroll = await page.evaluate(() => window.__LAW_OFFICE_APP__.routeHistory.depth);
+  await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}?tab=data`, {tabScrollTo: 'h3'}), exampleId);
+  await waitTab('data');
+  assert.equal(await page.evaluate(() => window.__LAW_OFFICE_APP__.routeHistory.depth), depthBeforeScroll, 'scroll داخل التبويب الحالي لا يضيف مدخل تاريخ');
+
+  await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}?tab=poa`), exampleId);
+  await waitTab('poa');
+  const hashBeforeReload = await page.evaluate(() => location.hash);
+  assert.equal(hashBeforeReload, `#/${encodeURIComponent(`exc:${exampleId}?tab=poa`)}`, `الرابط لا يعكس التبويب: ${hashBeforeReload}`);
+  await page.reload({waitUntil: 'domcontentloaded'});
+  await page.waitForSelector('.exec-tabs', {timeout: 30000});
+  await waitTab('poa');
+
+  // غياب tab لا يُسقط التفضيل، وإعادة فتح المسار نفسه تستبدل المدخل بدل تكراره.
+  const depthBeforeFallback = await page.evaluate(() => window.__LAW_OFFICE_APP__.routeHistory.depth);
+  await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`exc:${id}`), exampleId);
+  await waitTab('poa');
+  assert.equal(await page.evaluate(() => window.__LAW_OFFICE_APP__.routeHistory.depth), depthBeforeFallback, 'fallback بلا tab لا يكرر مدخل التاريخ نفسه');
+  await page.locator('.exec-tab[data-tab="account"]').click();
+  await waitTab('account');
 });
 
 /* ---------------------------------------------------------------- S4 */
@@ -346,6 +387,10 @@ await closeAllModals();
 });
 
 await verify('S6b — قرار منتصف الفترة ونهايتها في المتصفح: مقارنة جانبية ثم حفظ السبب والفاعل والتاريخ وظهورها في Trace', async () => {
+  const waitJudgmentSaved = async stage => {
+    try { await page.waitForSelector('#modal-root [data-form="later-judgment"]', {state: 'detached', timeout: 15000}); }
+    catch (error) { console.log(`DEBUG — ${stage}: ${String(await modal().textContent().catch(() => '')).replace(/\s+/g, ' ').slice(0, 900)}`); throw error; }
+  };
   await closeAllModals();
   await page.locator('.exec-toolbar [data-record]').first().click();
   await page.waitForSelector('#modal-root .record-tile', {timeout: 10000});
@@ -363,7 +408,7 @@ await verify('S6b — قرار منتصف الفترة ونهايتها في ا�
   await modal().locator('[name="midPeriodChoice"]').selectOption('USE_NEW_VALUE');
   await modal().locator('[name="midPeriodReason"]').fill('منطوق الحكم يحدد القيمة الجديدة عن كامل الفترة');
   await modal().locator('[data-save]').click();
-  await page.waitForSelector('#modal-root [data-form="later-judgment"]', {state: 'detached', timeout: 15000});
+  await waitJudgmentSaved('mid-period decision');
 
   await page.locator('.exec-toolbar [data-record]').first().click();
   await page.waitForSelector('#modal-root .record-tile', {timeout: 10000});
@@ -382,7 +427,7 @@ await verify('S6b — قرار منتصف الفترة ونهايتها في ا�
   await modal().locator('[name="endPeriodChoice"]').selectOption('INCLUDE_FULL');
   await modal().locator('[name="endPeriodReason"]').fill('منطوق الحكم يشمل كامل شهر ديسمبر');
   await modal().locator('[data-save]').click();
-  await page.waitForSelector('#modal-root [data-form="later-judgment"]', {state: 'detached', timeout: 15000});
+  await waitJudgmentSaved('end-period decision');
 
   const stored = await page.evaluate(async id => {
     const app = window.__LAW_OFFICE_APP__;
@@ -501,8 +546,15 @@ await verify('الموبايل: الشريط الثابت أسفل الشاشة 
   await page.setViewportSize({width: 1440, height: 1000});
   await page.waitForTimeout(800);
 });
-await verify('لوحة المفاتيح: Ctrl+Shift+T يفتح أيقونات التسجيل على البطاقة', async () => {
-await closeAllModals();
+await verify('لوحة المفاتيح: Ctrl+Shift+T يتجاهل حقل الكتابة ويفتح أيقونات التسجيل خارجه', async () => {
+  await closeAllModals();
+  await page.locator('.exec-tab[data-tab="log"]').click();
+  const logQuery=page.locator('[data-log-q]');
+  await logQuery.waitFor({state:'visible',timeout:10000});
+  await logQuery.focus();
+  await page.keyboard.press('Control+Shift+T');
+  assert.equal(await page.locator('#modal-root .record-tile').count(),0,'Ctrl+Shift+T فتح التسجيل أثناء الكتابة في مرشح السجل');
+  await logQuery.evaluate(input=>input.blur());
   await page.keyboard.down('Control'); await page.keyboard.down('Shift');
   await page.keyboard.press('KeyT');
   await page.keyboard.up('Shift'); await page.keyboard.up('Control');

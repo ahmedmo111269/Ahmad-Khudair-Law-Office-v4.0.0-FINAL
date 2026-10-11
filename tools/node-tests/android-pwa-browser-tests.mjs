@@ -28,6 +28,27 @@ process.env.LD_LIBRARY_PATH=path.join(process.env.TMPDIR||'/tmp','al2023','lib')
 const browser=await chromium.launch({executablePath:await slim.executablePath(),headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
 
 const report={date:new Date().toISOString(),browser:browser.version(),environment:'Chromium mobile emulation (Android-like) — NOT a physical Android device',checks:[],errors:[],limitations:[]};
+const appOrigin=new URL(base).origin;
+const expectedConsoleEvents=[];
+const unexpectedConsoleErrors=[];
+let intentionalQuotaProbePage=null;
+let consoleTrackedPages=0;
+const trackConsole=page=>{
+ consoleTrackedPages++;
+ page.on('pageerror',error=>report.errors.push(error.message));
+ page.on('console',message=>{
+  if(message.type()!=='error')return;
+  const text=message.text();
+  const url=message.location().url||'';
+  let source=null;
+  try{source=new URL(url)}catch{}
+  const knownRemoteFont=source&&source.origin!==appOrigin&&['fonts.googleapis.com','fonts.gstatic.com'].includes(source.hostname);
+  if(page===intentionalQuotaProbePage&&/unhandled rejection QuotaExceededError: quota/.test(text))expectedConsoleEvents.push({kind:'intentional-quota-probe',message:text,url});
+  else if(knownRemoteFont&&/Failed to load resource: net::ERR_(?:CONNECTION_CLOSED|INTERNET_DISCONNECTED|FAILED)/.test(text))expectedConsoleEvents.push({kind:'remote-font-unavailable',message:text,url});
+  else unexpectedConsoleErrors.push({message:text,url});
+ });
+ return page;
+};
 const verify=async(name,fn,status='VERIFIED — real browser output (emulated Android viewport)')=>{await fn();report.checks.push({name,status});console.log(`VERIFIED — ${name}`)};
 
 const phone={viewport:{width:412,height:915},deviceScaleFactor:2.625,isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'};
@@ -57,10 +78,7 @@ const counts=page=>page.evaluate(async()=>{
 // =====================================================================
 {
  const context=await browser.newContext(phone);
- const page=await context.newPage();
- const consoleErrors=[];
- page.on('pageerror',error=>report.errors.push(error.message));
- page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text())});
+ const page=trackConsole(await context.newPage());
  await boot(page);
  const cdp=await context.newCDPSession(page);
 
@@ -119,6 +137,27 @@ const counts=page=>page.evaluate(async()=>{
   assert.equal(layout.docScroll,0,'no horizontal scrolling of the page');
  });
 
+ await verify('Responsive navigation: phone widths through desktop keep their intended surface without page overflow',async()=>{
+  const checks=[];
+  for(const width of [320,360,390,412,640,768,1024,1280]){
+   await page.setViewportSize({width,height:915});
+   await page.waitForTimeout(180);
+   checks.push(await page.evaluate(()=>{
+    const mobile=document.querySelector('#tn-mobilebar'),mobileRect=mobile?.getBoundingClientRect();
+    const touch=[...document.querySelectorAll('#tn-mobilebar .tn-mobile-item')].map(button=>{const r=button.getBoundingClientRect();return {w:r.width,h:r.height}});
+    return {width:innerWidth,overflow:document.documentElement.scrollWidth-innerWidth,mobileDisplay:mobile?getComputedStyle(mobile).display:'missing',mobileHeight:mobileRect?.height||0,touch,topnavHeight:document.querySelector('#sidebar')?.getBoundingClientRect().height||0};
+   }));
+  }
+  for(const sample of checks){
+   assert.equal(sample.overflow,0,`horizontal overflow at ${sample.width}px`);
+   assert.equal(sample.mobileDisplay,sample.width<=640?'block':'none',`unexpected navigation surface at ${sample.width}px`);
+   if(sample.width<=640){assert.ok(sample.touch.length===6&&sample.touch.every(item=>item.w>=44&&item.h>=44),`touch targets at ${sample.width}px: ${JSON.stringify(sample.touch)}`)}
+   else assert.ok(sample.topnavHeight>0,`desktop/tablet navigation missing at ${sample.width}px`);
+  }
+  report.navViewports=checks.map(({width,overflow,mobileDisplay,topnavHeight})=>({width,overflow,mobileDisplay,topnavHeight:Math.round(topnavHeight)}));
+  await page.setViewportSize({width:412,height:915});await page.waitForTimeout(250);
+ });
+
  await verify('Touch: primary controls on a phone reach the ~44px target and inputs are keyboard-safe',async()=>{
   const audit=await page.evaluate(async()=>{
    const visit=async route=>{window.__LAW_OFFICE_APP__.go(route);await new Promise(r=>setTimeout(r,1400));
@@ -136,6 +175,31 @@ const counts=page=>page.evaluate(async()=>{
   assert.deepEqual(bad,[],`small touch targets: ${JSON.stringify(bad)}`);
   assert.ok(audit.margins!=='0px'&&audit.margins!==null,'focused fields keep scroll margin for the on-screen keyboard');
   report.touch=audit.out.map(x=>({route:x.route,controls:x.total}));
+ });
+
+ await verify('W2 Settings tabs: query/hash, Back/Forward and refresh restore the selected tab',async()=>{
+  await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('settings?tab=appearance'));
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='settings?tab=appearance'&&document.querySelector('[data-stab="appearance"]')?.classList.contains('active'),null,{timeout:30000});
+  await page.locator('[data-stab="taxonomy"]').click();
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='settings?tab=taxonomy'&&document.querySelector('[data-stab="taxonomy"]')?.classList.contains('active'),null,{timeout:30000});
+  assert.equal(await page.evaluate(()=>location.hash),'#/settings%3Ftab%3Dtaxonomy','tab is encoded in the existing hash route');
+  assert.ok(await page.locator('[data-stab="taxonomy"]').getAttribute('class').then(value=>value.includes('active')),'selected settings tab is active');
+  await page.goBack();
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='settings?tab=appearance'&&document.querySelector('[data-stab="appearance"]')?.classList.contains('active'),null,{timeout:15000});
+  assert.ok(await page.locator('[data-stab="appearance"]').getAttribute('class').then(value=>value.includes('active')),'Back restores appearance');
+  await page.goForward();
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='settings?tab=taxonomy'&&document.querySelector('[data-stab="taxonomy"]')?.classList.contains('active'),null,{timeout:15000});
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='settings?tab=taxonomy'&&document.querySelector('[data-stab="taxonomy"]')?.classList.contains('active'),null,{timeout:30000});
+  assert.ok(await page.locator('[data-stab="taxonomy"]').getAttribute('class').then(value=>value.includes('active')),'deep-link refresh restores taxonomy');
+  const settingsDepth=await page.evaluate(()=>window.__LAW_OFFICE_APP__.routeHistory.depth);
+  await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('settings'));
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='settings?tab=taxonomy'&&document.querySelector('[data-stab="taxonomy"]')?.classList.contains('active'),null,{timeout:30000});
+  assert.ok(await page.locator('[data-stab="taxonomy"]').getAttribute('class').then(value=>value.includes('active')),'opening settings without tab keeps the current tab fallback');
+  assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.routeHistory.depth),settingsDepth,'opening the same settings tab adds no duplicate history entry');
+  await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('dashboard'));
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.route==='dashboard',null,{timeout:30000});
  });
 
  await verify('Mobile DataGrid + RTL: table scrolls inside its own container, page never overflows, Arabic layout stays RTL',async()=>{
@@ -182,7 +246,72 @@ const counts=page=>page.evaluate(async()=>{
   await page.waitForTimeout(600);
  });
 
+ await verify('Mobile bottom navigation: five direct routes, remaining routes in More, URL/back and sheet behavior',async()=>{
+  const state=await page.evaluate(async()=>{
+   const nav=document.querySelector('#tn-mobilebar'),rect=nav?.getBoundingClientRect();
+   const direct=[...document.querySelectorAll('#tn-mobilebar .tn-mobile-item[data-route]')].map(b=>b.dataset.route);
+   const rest=[...document.querySelectorAll('#tn-panel-mobile-more .tn-item[data-route]')].map(b=>b.dataset.route);
+   const {NAV_ROUTES,NAV_MOBILE_PRIMARY}=await import('./js/ui/nav-model.js');
+   return {display:nav?getComputedStyle(nav).display:'missing',height:rect?.height||0,bottom:rect?.bottom||0,direct,rest,routeCount:NAV_ROUTES.length,primary:NAV_MOBILE_PRIMARY};
+  });
+  assert.equal(state.display,'block','bottom navigation is rendered on a compact phone');
+  assert.ok(state.height>=64&&Math.abs(state.bottom-915)<2,`bar geometry: ${JSON.stringify({height:state.height,bottom:state.bottom})}`);
+  assert.deepEqual(state.direct,state.primary,'five shared primary destinations appear directly');
+  assert.equal(state.rest.length,state.routeCount-state.direct.length,'More contains every other configured route once');
+  assert.ok(state.rest.includes('feePayments')&&state.rest.includes('sync'),'fee payments and sync remain discoverable');
+  assert.equal(new Set([...state.direct,...state.rest]).size,state.routeCount,'no route is dropped or duplicated between mobile destinations');
+  const keyboard=await page.evaluate(()=>{
+   const nav=document.querySelector('#tn-mobilebar'),buttons=[...nav.querySelectorAll('.tn-mobile-item')];
+   const more=nav.querySelector('#tn-mobile-more'),first=buttons[0];
+   first.focus({preventScroll:true});
+   first.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));
+   const end=document.activeElement===more;
+   more.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true,cancelable:true}));
+   const rtlNext=document.activeElement?.dataset.route||'';
+   more.click();
+   const panel=document.querySelector('#tn-panel-mobile-more'),firstItem=panel.querySelector('.tn-item');
+   const entered=document.activeElement===firstItem;
+   firstItem.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+   return {end,rtlNext,entered,closed:panel.hidden,focusRestored:document.activeElement===more,expanded:more.getAttribute('aria-expanded')};
+  });
+  assert.deepEqual(keyboard,{end:true,rtlNext:'dashboard',entered:true,closed:true,focusRestored:true,expanded:'false'},`keyboard navigation: ${JSON.stringify(keyboard)}`);
+  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.routeHistory?.pendingMode===null,null,{timeout:5000});
+  await page.evaluate(()=>{
+   const app=window.__LAW_OFFICE_APP__;
+   if(app.__w1NavProbe)return;
+   const go=app.go.bind(app);app.__w1NavProbe={started:0,completed:0,route:''};
+   app.go=async(...args)=>{const id=++app.__w1NavProbe.started;const result=await go(...args);app.__w1NavProbe.completed=id;app.__w1NavProbe.route=app.route;return result};
+  });
+  const beforeDirectGo=await page.evaluate(()=>window.__LAW_OFFICE_APP__.__w1NavProbe.started);
+  await page.locator('#tn-mobilebar [data-route="files"]').click();
+  await page.waitForFunction(before=>{const app=window.__LAW_OFFICE_APP__,probe=app?.__w1NavProbe;return probe&&probe.started>before&&probe.completed===probe.started&&app.route==='files'},beforeDirectGo,{timeout:30000});
+  assert.equal(await page.evaluate(()=>location.hash),'#/files','direct route keeps the existing hash URL');
+  assert.equal(await page.locator('#tn-mobilebar [data-route="files"]').getAttribute('aria-current'),'page','current destination is announced');
+  const beforeBack=await page.evaluate(()=>window.__LAW_OFFICE_APP__.__w1NavProbe.started);
+  await page.goBack();
+  await page.waitForFunction(before=>{const app=window.__LAW_OFFICE_APP__,probe=app?.__w1NavProbe;return probe&&probe.started>before&&probe.completed===probe.started&&app.route==='dashboard'},beforeBack,{timeout:30000});
+  await page.locator('#tn-mobile-more').click();
+  await page.waitForFunction(()=>!document.querySelector('#tn-panel-mobile-more')?.hidden,null,{timeout:5000});
+  const sheet=await page.evaluate(()=>({
+   expanded:document.querySelector('#tn-mobile-more')?.getAttribute('aria-expanded'),
+   top:document.querySelector('#tn-panel-mobile-more')?.getBoundingClientRect().top,
+   bottom:document.querySelector('#tn-panel-mobile-more')?.getBoundingClientRect().bottom,
+   navTop:document.querySelector('#tn-mobilebar')?.getBoundingClientRect().top
+  }));
+  assert.equal(sheet.expanded,'true','More exposes its expanded state');
+  assert.ok(sheet.bottom<sheet.navTop,`sheet overlaps bottom navigation: ${JSON.stringify(sheet)}`);
+  await page.goBack();
+  await page.waitForFunction(()=>document.querySelector('#tn-panel-mobile-more')?.hidden,null,{timeout:5000});
+  assert.equal(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route),'dashboard','back closes More without changing the current route');
+  await page.locator('#tn-mobile-more').click();
+  const beforeGo=await page.evaluate(()=>window.__LAW_OFFICE_APP__.__w1NavProbe.started);
+  await page.locator('#tn-panel-mobile-more [data-route="executionCenter"]').click();
+  await page.waitForFunction(before=>{const app=window.__LAW_OFFICE_APP__,probe=app?.__w1NavProbe;return probe&&probe.started>before&&probe.completed===probe.started&&app.route==='executionCenter'},beforeGo,{timeout:30000});
+  assert.equal(await page.evaluate(()=>location.hash),'#/executionCenter','a More destination still uses the existing router and URL');
+ });
+
  await verify('Mobile navigation panel: Android back closes the phone nav drawer too',async()=>{
+  const routeBefore=await page.evaluate(()=>window.__LAW_OFFICE_APP__.route);
   await page.evaluate(()=>document.querySelector('#mobile-menu')?.click());
   await page.waitForTimeout(600);
   const opened=await page.evaluate(()=>Boolean(document.querySelector('#sidebar .tn-panel:not([hidden])')));
@@ -191,7 +320,7 @@ const counts=page=>page.evaluate(async()=>{
   await page.waitForTimeout(700);
   const closed=await page.evaluate(()=>({panel:Boolean(document.querySelector('#sidebar .tn-panel:not([hidden])')),route:window.__LAW_OFFICE_APP__.route}));
   assert.equal(closed.panel,false,'back closes the navigation panel');
-  assert.equal(closed.route,'dashboard','back does not leave the current screen');
+  assert.equal(closed.route,routeBefore,'back does not leave the current screen');
  });
 
  await verify('Android back button: closes overlay, returns between screens, then leaves the app',async()=>{
@@ -253,12 +382,15 @@ const counts=page=>page.evaluate(async()=>{
 
  await verify('Storage pressure: a QuotaExceededError surfaces as Arabic guidance, never as a raw browser error',async()=>{
   const before=await page.evaluate(()=>document.querySelectorAll('#toast-stack .toast').length);
-  await page.evaluate(()=>{
-   // حدث تخزين حقيقي الشكل بلا رفض فعلي: لا نلوّث سلة الأخطاء في التشخيص.
-   const error=new DOMException('quota','QuotaExceededError');
-   window.dispatchEvent(new PromiseRejectionEvent('unhandledrejection',{promise:Promise.resolve(),reason:error}));
-  });
-  await page.waitForTimeout(900);
+  intentionalQuotaProbePage=page;
+  try{
+   await page.evaluate(()=>{
+    // حدث تخزين حقيقي الشكل بلا رفض فعلي: لا نلوّث سلة الأخطاء في التشخيص.
+    const error=new DOMException('quota','QuotaExceededError');
+    window.dispatchEvent(new PromiseRejectionEvent('unhandledrejection',{promise:Promise.resolve(),reason:error}));
+   });
+   await page.waitForTimeout(900);
+  }finally{intentionalQuotaProbePage=null}
   const text=await page.evaluate(()=>document.querySelector('#toast-stack')?.textContent||'');
   assert.ok(text.includes('نسخة احتياطية'),`Arabic storage guidance not shown: ${text.slice(0,120)}`);
   assert.equal(text.includes('QuotaExceededError'),false,'no raw technical error text is shown to the user');
@@ -290,8 +422,7 @@ const counts=page=>page.evaluate(async()=>{
  // ---- إعادة تشغيل التطبيق: البيانات تبقى ----
  await page.close();
  await new Promise(resolve=>setTimeout(resolve,500)); // إغلاق اتصال IndexedDB غير متزامن في Chromium
- const page2=await context.newPage();
- page2.on('pageerror',error=>report.errors.push(error.message));
+ const page2=trackConsole(await context.newPage());
  await boot(page2);
  await verify('App restart: IndexedDB and preferences survive a full page/app restart',async()=>{
   const after=await counts(page2);
@@ -303,8 +434,7 @@ const counts=page=>page.evaluate(async()=>{
 
  // ---- إغلاق كامل + إقلاع دون اتصال ----
  await context.setOffline(true);
- const page3=await context.newPage();
- page3.on('pageerror',error=>report.errors.push(error.message));
+ const page3=trackConsole(await context.newPage());
  const offlineStart=Date.now();
  await page3.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
  await page3.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
@@ -338,7 +468,10 @@ const counts=page=>page.evaluate(async()=>{
   // فرصة قصيرة لالتزام المعاملة قبل إعادة التحميل (IndexedDB تُثبّت بعد نجاح الطلب).
   await page3.waitForTimeout(600);
   await page3.reload({waitUntil:'domcontentloaded'});
-  await page3.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
+  try{await page3.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000})}catch(error){
+   const state=await page3.evaluate(async()=>({url:location.href,readyState:document.readyState,online:navigator.onLine,app:window.__LAW_OFFICE_APP__?{booting:window.__LAW_OFFICE_APP__.booting,route:window.__LAW_OFFICE_APP__.route,hasOffice:Boolean(window.__LAW_OFFICE_APP__.office)}:null,errorBox:document.querySelector('.error-box')?.textContent?.slice(0,300)||'',body:document.body.textContent.slice(0,300),controller:navigator.serviceWorker.controller?.scriptURL||null,caches:await caches.keys()})).catch(()=>null);
+   throw new Error(`offline reload did not finish booting: ${JSON.stringify(state)} :: ${error.message}`);
+  }
   const after=await counts(page3);
   assert.equal(after.clients,before.clients+1,`offline write persisted across an offline reload (before=${before.clients}, after=${after.clients})`);
   const row=await page3.evaluate(id=>window.__LAW_OFFICE_APP__.office.r.clients.get(id),key);
@@ -351,7 +484,7 @@ const counts=page=>page.evaluate(async()=>{
 
  // ---- تحديث التطبيق: كاش جديد مع بقاء البيانات ----
  await verify('App update (version A -> B): new release downloads and waits, then activates on request with data intact',async()=>{
-  const page=await context.newPage();
+  const page=trackConsole(await context.newPage());
   const before=await (async()=>{await boot(page);return counts(page)})();
   const previousCache=await page.evaluate(async()=>(await caches.keys())[0]);
   await page.evaluate(async()=>{ // كاش إصدار قديم متروك من نسخة سابقة + كاش غير تابع للتطبيق
@@ -426,7 +559,7 @@ const counts=page=>page.evaluate(async()=>{
  });
 
  await verify('Mobile file handling: backup export downloads a real .json file and import uses the Android file picker',async()=>{
-  const page=await context.newPage();
+  const page=trackConsole(await context.newPage());
   await boot(page);
   await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('backup'));
   await page.waitForTimeout(1800);
@@ -450,7 +583,7 @@ const counts=page=>page.evaluate(async()=>{
  });
 
  await verify('Performance and leaks on a phone: no unbounded heap growth, no detached DOM, no duplicate navigation entries',async()=>{
-  const page=await context.newPage();
+  const page=trackConsole(await context.newPage());
   await boot(page);
   const client=await context.newCDPSession(page);
   const heap=async()=>{await client.send('HeapProfiler.collectGarbage');return page.evaluate(()=>({used:performance.memory?.usedJSHeapSize||0,nodes:document.querySelectorAll('*').length,bodyChildren:document.body.children.length,historyDepth:history.length}))};
@@ -474,8 +607,7 @@ const counts=page=>page.evaluate(async()=>{
  });
 
  // الصفحة السابقة أُغلقت في فحص الأداء، وهذه الفحوص تحتاج جلسة هاتف جديدة
- const p=await context.newPage();
- p.on('pageerror',error=>report.errors.push(error.message));
+ const p=trackConsole(await context.newPage());
  await boot(p);
 
  await verify('Command palette: Android back closes it too, without leaving the screen',async()=>{
@@ -590,7 +722,7 @@ const counts=page=>page.evaluate(async()=>{
  });
 
  await verify('Arabic typography does not depend on any external font or CDN: text stays readable with every third-party request blocked',async()=>{
-  const page2=await context.newPage();
+  const page2=trackConsole(await context.newPage());
   const blocked=[];
   await page2.route('**/*',route=>{const url=route.request().url();if(url.startsWith(base)||url.startsWith('blob:')||url.startsWith('data:'))return route.continue();blocked.push(new URL(url).origin);return route.abort()});
   await boot(page2);
@@ -611,11 +743,6 @@ const counts=page=>page.evaluate(async()=>{
  });
  await p.close();
 
- await verify('No application regression in the console during the whole phone journey',async()=>{
-  assert.deepEqual(report.errors,[],report.errors.join('\n'));
-  report.limitations.push(`Console errors captured: ${consoleErrors.length}`);
-  report.consoleErrors=consoleErrors.slice(0,20);
- });
  await context.close();
 }
 
@@ -624,7 +751,7 @@ const counts=page=>page.evaluate(async()=>{
 // =====================================================================
 {
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
- const page=await context.newPage();
+ const page=trackConsole(await context.newPage());
  await boot(page);
  await verify('Desktop (mouse/keyboard) is unaffected: no touch-only changes and back still exits from home',async()=>{
   const coarse=await page.evaluate(()=>matchMedia('(pointer:coarse)').matches);
@@ -650,8 +777,7 @@ const counts=page=>page.evaluate(async()=>{
  const profileDir=path.join(process.env.TMPDIR||'/tmp',`akl-restart-${Date.now()}`);
  const launchOptions={executablePath:await slim.executablePath(),headless:true,args:['--no-sandbox','--disable-dev-shm-usage'],...phone,locale:'ar'};
  const firstContext=await chromium.launchPersistentContext(profileDir,launchOptions);
- const firstPage=firstContext.pages()[0]||await firstContext.newPage();
- firstPage.on('pageerror',error=>report.errors.push(error.message));
+ const firstPage=trackConsole(firstContext.pages()[0]||await firstContext.newPage());
  await firstPage.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
  await firstPage.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
  await firstPage.waitForTimeout(2500);
@@ -666,8 +792,7 @@ const counts=page=>page.evaluate(async()=>{
  await firstContext.close(); // إغلاق المتصفح بالكامل (ليس مجرد تاب)
 
  const secondContext=await chromium.launchPersistentContext(profileDir,launchOptions);
- const secondPage=secondContext.pages()[0]||await secondContext.newPage();
- secondPage.on('pageerror',error=>report.errors.push(error.message));
+ const secondPage=trackConsole(secondContext.pages()[0]||await secondContext.newPage());
  await verify('Full browser/device restart (persistent profile): IndexedDB, preferences and the app cache all survive',async()=>{
   await secondPage.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
   await secondPage.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
@@ -687,9 +812,8 @@ const counts=page=>page.evaluate(async()=>{
 
  await verify('Offline right after a full restart: the app still boots with no network and keeps every record',async()=>{
   await secondContext.setOffline(true);
-  const offlinePage=await secondContext.newPage();
-  offlinePage.on('pageerror',error=>report.errors.push(error.message));
-  const started=Date.now();
+  const offlinePage=trackConsole(await secondContext.newPage());
+   const started=Date.now();
   await offlinePage.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
   await offlinePage.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:90000});
   const ms=Date.now()-started;
@@ -704,6 +828,18 @@ const counts=page=>page.evaluate(async()=>{
  await secondContext.close();
  await fs.rm(profileDir,{recursive:true,force:true}).catch(()=>{});
 }
+
+await verify('No uncaught exceptions or unexpected console errors across every Android/PWA browser page',async()=>{
+ assert.ok(consoleTrackedPages>0,'console monitoring must be attached to browser pages');
+ assert.equal(expectedConsoleEvents.filter(event=>event.kind==='intentional-quota-probe').length,1,'the synthetic quota console event is expected only during its dedicated probe');
+ assert.deepEqual(report.errors,[],`Uncaught page errors:\n${report.errors.join('\n')}`);
+ assert.deepEqual(unexpectedConsoleErrors,[],`Unexpected console errors:\n${JSON.stringify(unexpectedConsoleErrors,null,2)}`);
+ const expectedCounts=expectedConsoleEvents.reduce((counts,event)=>{counts[event.kind]=(counts[event.kind]||0)+1;return counts},{ });
+ report.consoleErrors=unexpectedConsoleErrors.map(event=>event.message).slice(0,50);
+ report.expectedConsoleEvents=expectedConsoleEvents;
+ report.consoleDiagnostics={trackedPages:consoleTrackedPages,uncaughtPageErrors:report.errors.length,unexpectedConsoleErrors:unexpectedConsoleErrors.length,expectedEventCounts:expectedCounts};
+ report.limitations.push('Console and uncaught-page-error listeners covered every Android/PWA test page. Only the exact synthetic QuotaExceededError probe and known network failures for optional Google Fonts resources are classified as expected; all other console errors fail the check.');
+});
 
 await browser.close();
 await fs.writeFile(path.join(artifactDir,'report.json'),JSON.stringify(report,null,2));

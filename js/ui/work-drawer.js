@@ -10,7 +10,7 @@ import {toast} from './toast.js';
 import {enhanceCollapsiblePanels} from './collapsible.js';
 import {formatDate, formatDateTime} from '../core/format.js';
 import {Clock} from '../core/clock.js';
-import {ENTITIES, displayValue} from '../domain/entities.js';
+import {ENTITIES, displayValue, entityRoute} from '../domain/entities.js';
 import {COMMENT_TYPES, SOURCE_LABELS, statusInfo, priorityInfo} from '../domain/work-items.js';
 import {getWorkConfig} from '../services/work-config.js';
 import {getWorkItem, queryWorkItems} from '../services/work-query.js';
@@ -27,8 +27,14 @@ const section = (key, title, body, {open = false, badge = ''} = {}) =>
   `<section class="panel wc-dsec" data-collapse-key="wc:drawer:${key}" data-collapse-default="${open ? 'open' : 'collapsed'}" data-section="${key}"><div class="panel-head"><h3>${esc(title)}</h3>${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>${body}</section>`;
 const dl = rows => `<dl class="wc-dl">${rows.filter(Boolean).map(([k, v]) => `<div><dt data-uxc-role="fieldLabel">${esc(k)}</dt><dd data-uxc-role="primaryValue">${v}</dd></div>`).join('')}</dl>`;
 
-function smartLinks(item, relations) {
-  const links = [];
+function relatedTitle(store,row){
+  const entity=ENTITIES[store];
+  let title='';
+  try{title=entity?.title?.(row)||''}catch{}
+  return String(title||row?.title||row?.name||entity?.label||'السجل المرتبط');
+}
+function smartLinks(item, relations, relatedRecord = null) {
+  const links = [], unavailable = [];
   const add = (label, route, text) => { if (route && text) links.push(`<button type="button" class="ghost wc-nav" data-wc-nav="${esc(route)}"><small>${esc(label)}</small><b>${esc(text)}</b></button>`); };
   const files = relations.items(item, 'legalFile'), clients = relations.items(item, 'client'), opponents = relations.items(item, 'opponent');
   for (const f of files.slice(0, 3)) add('الملف', `file:${f.id}`, f.text);
@@ -38,11 +44,21 @@ function smartLinks(item, relations) {
   for (const o of opponents.slice(0, 5)) add('الخصم', `opponent:${o.id}`, o.text);
   if (item.route) add(`السجل الأصلي — ${item.sourceLabel}`, item.route, 'فتح السجل');
   if (item.kind === 'native' && item.relatedType && item.relatedId) {
-    const route = item.relatedType === 'files' ? `file:${item.relatedId}` : `rec:${item.relatedType}:${item.relatedId}`;
-    add(`مرتبط بـ ${ENTITIES[item.relatedType]?.label || SOURCE_LABELS[item.relatedType] || ''}`, route, 'فتح السجل المرتبط');
+    const store = item.relatedType, route = entityRoute(store,item.relatedId);
+    const label = ENTITIES[store]?.label || SOURCE_LABELS[store] || 'السجل';
+    if (relatedRecord && route) add(`مرتبط بـ ${label}`, route, relatedTitle(store,relatedRecord));
+    else unavailable.push(route ? `السجل المرتبط (${label}) غير متاح حاليًا.` : `لا توجد وجهة مسجلة لفتح السجل المرتبط (${label}).`);
   }
   if (item.sourceType === 'hearings' && item.raw?.previousHearingId) add('الجلسة السابقة', `rec:hearings:${item.raw.previousHearingId}`, 'جلسة سابقة في السلسلة');
-  return links.length ? `<div class="wc-links">${links.join('')}</div>` : '<p class="muted">لا روابط متاحة لهذا العنصر.</p>';
+  const states = unavailable.map(text=>`<p class="muted" role="status">${esc(text)}</p>`).join('');
+  return links.length||states ? `<div class="wc-links">${links.join('')}${states}</div>` : '<p class="muted">لا روابط متاحة لهذا العنصر.</p>';
+}
+
+async function nativeRelatedRecord(office,item){
+  if(item?.kind!=='native'||!item.relatedType||!item.relatedId||!entityRoute(item.relatedType,item.relatedId))return null;
+  const repo=office.r[item.relatedType];
+  if(!repo?.get)return null;
+  try{const row=await repo.get(item.relatedId);return row&&!row.isDeleted?row:null}catch{return null}
 }
 
 async function sourceData(office, item) {
@@ -120,11 +136,12 @@ export async function openWorkDrawer(wc, id) {
     return false;
   }
   await wc.relations.hydrate([item]);
-  const [comments, history, linked, source] = await Promise.all([
+  const [comments, history, linked, source, relatedRecord] = await Promise.all([
     C.listComments(office, item.id, {limit: 50}).catch(() => []),
     C.itemHistory(office, item, {limit: 40}).catch(() => []),
     queryWorkItems(office, {range: 'all', kinds: ['open', 'done', 'cancelled'], relatedId: item.kind === 'native' ? '' : item.sourceId}, {limit: 30}).then(r => r.items.filter(i => i.kind === 'native' && i.id !== item.id)).catch(() => []),
-    sourceData(office, item)
+    sourceData(office, item),
+    nativeRelatedRecord(office,item)
   ]);
   if (linked.length) await wc.relations.hydrate(linked);
   const primary = [];
@@ -148,7 +165,7 @@ export async function openWorkDrawer(wc, id) {
       item.completedAt ? ['اكتمل في', esc(formatDateTime(item.completedAt))] : null,
       item.isVirtual ? ['التكرار', 'عنصر متكرر لم يُنشأ بعد؛ يُنشأ عند أول تفاعل'] : null
     ]) + description, {open: true})}
-    ${section('links', 'الروابط الذكية', smartLinks(item, wc.relations), {open: true})}
+    ${section('links', 'الروابط الذكية', smartLinks(item, wc.relations, relatedRecord), {open: true})}
     ${source ? section('source', 'بيانات السجل الأصلي (قراءة فقط)', source + '<p class="muted small">تُقرأ حيًّا من السجل الأصلي؛ لتعديلها افتح السجل.</p>') : ''}
     ${section('comments', 'التعليقات والملاحظات', `<div id="wc-comments">${commentsHtml(comments)}</div>
       <form class="wc-comment-form" data-wc-comment-form><label><span class="sr-only">نوع التعليق</span><select name="type" aria-label="نوع التعليق">${COMMENT_TYPES.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label><label><span class="sr-only">نص التعليق</span><textarea name="body" rows="2" maxlength="5000" required placeholder="اكتب ملاحظة أو تحديثًا…"></textarea></label><button class="primary small" type="submit">إضافة</button></form>`, {open: true, badge: String(comments.length)})}
@@ -166,7 +183,10 @@ export async function openWorkDrawer(wc, id) {
     if (b.dataset.dact === 'more') return openActionSheet(sub, item);
     return runAction(sub, item, b.dataset.dact);
   });
-  panel.querySelectorAll('[data-wc-nav]').forEach(b => b.onclick = () => { closeWorkDrawer(host); wc.app.go(b.dataset.wcNav); });
+  panel.querySelectorAll('[data-wc-nav]').forEach(b => b.onclick = event => {
+    event.preventDefault();event.stopPropagation();
+    closeWorkDrawer(host);wc.app.go(b.dataset.wcNav);
+  });
   panel.querySelector('[data-wc-comment-form]')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = e.currentTarget, body = form.body.value.trim();
@@ -187,7 +207,7 @@ export async function openWorkDrawer(wc, id) {
   panel.querySelector('.wc-linked')?.addEventListener('click', e => {
     const card = e.target.closest('[data-wc-id]');
     const nav = e.target.closest('[data-wc-nav]');
-    if (nav) { closeWorkDrawer(host); wc.app.go(nav.dataset.wcNav); return; }
+    if (nav) { e.preventDefault();e.stopPropagation();closeWorkDrawer(host);wc.app.go(nav.dataset.wcNav);return; }
     if (card && e.target.closest('[data-wc-act="open"]')) openWorkDrawer(wc, card.dataset.wcId);
   });
   return true;
