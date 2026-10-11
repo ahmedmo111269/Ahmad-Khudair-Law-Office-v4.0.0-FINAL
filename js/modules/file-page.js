@@ -39,11 +39,25 @@ import {openQuickAdd} from './quick-add.js';
 import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.js';
 import {prefs} from '../core/preferences.js';
 
-// شريط تبويبات واحد مسطّح (Data-First): نظرة عامة ← الجلسات ← الأعمال الإدارية ثم بقية
-// الأقسام بترتيب أهمية الاستخدام اليومي. المعرّفات (ids) ثابتة تمامًا كما كانت حتى تبقى
-// تفضيلات الترتيب/الإظهار وحالة الطي والكاش صالحة؛ تغيّر الترتيب الافتراضي والتسميات فقط.
-const TABS=[['summary','نظرة عامة','◈'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷'],['parties','الأطراف','⚖'],['judicial','المراحل والأرقام القضائية','▣'],['judgments','الأحكام','⚖'],['serviceRecords','المحضرين والإعلانات','📬'],['money','الأتعاب والمستندات','＄'],['relations','العلاقات والملفات المرتبطة','↔'],['typeData','بيانات نوع العمل','▧'],['assets','العقارات والمركبات','⌂'],['timeline','الخط الزمني','⏳'],['notes','الملاحظات','▤'],['extra','بيانات إضافية (قديمة)','▤'],['activity','سجل النشاط','≋']];
+// شريط تبويبات واحد (Data-First Legal Workspace): أربعة تبويبات أساسية ظاهرة دائمًا
+// (نظرة عامة ← الجلسات ← الأعمال الإدارية ← المراحل والإجراءات القضائية) ثم بقية الأقسام
+// داخل قوائم منسدلة بحسب وظيفتها. المعرّفات (ids) ثابتة تمامًا كما كانت حتى تبقى تفضيلات
+// الترتيب/الإظهار وحالة الطي والكاش وأول تبويب لكل ملف صالحة؛ تغيّر التوزيع والتسميات فقط.
+// [المعرّف، التسمية الكاملة، الأيقونة، التسمية القصيرة للشاشات الضيقة] — نفس الأقسام والمعرّفات.
+const TABS=[['summary','نظرة عامة','◈'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷','الأعمال'],['judicial','المراحل والإجراءات القضائية','▣','المراحل'],['parties','الأطراف والصفات','⚖','الأطراف'],['judgments','الأحكام','⌘'],['serviceRecords','المحضرين والإعلانات','📬','المحضرين'],['money','الأتعاب والمستندات','＄','الأتعاب'],['relations','العلاقات والملفات المرتبطة','↔','الارتباطات'],['typeData','بيانات نوع العمل','▧','نوع العمل'],['assets','العقارات والمركبات','⌂','الأصول'],['timeline','الخط الزمني','⏳'],['notes','الملاحظات','▤'],['extra','بيانات إضافية (قديمة)','▤','بيانات قديمة'],['activity','سجل النشاط','≋']];
 const TAB_META=new Map(TABS);
+// التبويبات الأساسية الظاهرة في الشريط — الأكثر استخدامًا يوميًا. لا تُنقل إلى قوائم أبدًا.
+const PRIMARY_TABS=['summary','hearings','procedures','judicial'];
+// تصنيف بقية الأقسام داخل قوائم منسدلة بحسب الوظيفة (تنظيم واجهة فقط: لا يغيّر أي بيانات).
+// أي قسم لا يظهر في هذه القوائم (أو يُضاف مستقبلًا) يسقط تلقائيًا في «المزيد» بلا كود إضافي.
+const TAB_GROUPS=[
+ {id:'gParties',label:'أطراف الملف',short:'الأطراف',icon:'⚖',tabs:['parties','assets']},
+ {id:'gJudgments',label:'الأحكام والإعلانات',short:'الأحكام',icon:'⌘',tabs:['judgments','serviceRecords']},
+ {id:'gRecords',label:'البيانات والمراجع',short:'البيانات',icon:'▤',tabs:['money','notes','typeData','extra']},
+ {id:'gFollow',label:'الارتباطات والمتابعة',short:'المتابعة',icon:'↔',tabs:['relations','timeline','activity']},
+];
+const MORE_GROUP={id:'gMore',label:'المزيد',short:'المزيد',icon:'⋯'};
+const GROUP_OF_TAB=new Map(TAB_GROUPS.flatMap(g=>g.tabs.map(t=>[t,g.id])));
 // آخر تبويب لكل ملف على حدة (تفضيل إضافي): «نظرة عامة» هو الافتراضي دائمًا عند فتح ملف
 // لا تفضيل صالحًا له — لا تفضيل عام مشترك بين كل الملفات يربك المحامي عند فتح ملف جديد.
 const LAST_TAB_KEY='ui:file-last-tab';
@@ -76,6 +90,28 @@ function orderedFileTabs(){
  const rank=new Map(resolveSectionOrder('file-details').map((k,i)=>[k,i]));
  return [...TABS].sort((a,b)=>(rank.get(a[0])??0)-(rank.get(b[0])??0));
 }
+/**
+ * توزيع الأقسام على الشريط: الأساسية كما هي بترتيب المستخدم المحفوظ، وبقية الأقسام داخل
+ * قوائمها الوظيفية (وبترتيب المستخدم داخل كل قائمة). الأقسام المخفية من «تخصيص الصفحة»
+ * تُستبعد من الشريط والقوائم، لكنها تبقى ظاهرة في قائمة «كل الأقسام» (⋯) بعلامة «مخفي»
+ * حتى لا تصبح أي وظيفة غير قابلة للوصول.
+ * @returns {{primary:Array,groups:Array<hidden:Set}
+ */
+function tabLayout(){
+ const order=orderedFileTabs();
+ const hidden=hiddenSectionIds('file-details');
+ const primary=order.filter(([id])=>PRIMARY_TABS.includes(id)&&!hidden.has(id));
+ const groups=TAB_GROUPS.map(g=>{
+  const tabs=order.filter(([id])=>g.tabs.includes(id)&&!hidden.has(id));
+  return {...g,tabs};
+ }).filter(g=>g.tabs.length);
+ const grouped=new Set(TAB_GROUPS.flatMap(g=>g.tabs));
+ const rest=order.filter(([id])=>!PRIMARY_TABS.includes(id)&&!grouped.has(id)&&!hidden.has(id));
+ if(rest.length)groups.push({...MORE_GROUP,tabs:rest});
+ return {primary,groups,hidden};
+}
+/** المجموعة التي ينتمي إليها تبويب نشط (أو null للأساسية). */
+const groupIdOfTab=tab=>GROUP_OF_TAB.get(tab)||null;
 // عدد الأطراف المعروضة في رأس الملف قبل الاختصار بزر «عرض كل الأطراف» — الأطراف كلها
 // متاحة دائمًا في تبويب الأطراف، والرأس يعرض ما يكفي للهوية دون إطالة غير منضبطة.
 const HEAD_PARTIES_MAX=12;
@@ -154,7 +190,6 @@ export async function filePage(app,id){
     <div class="head-actions fid-actions">
      <button class="primary" data-file-quick>+ إضافة</button>
      <button class="ghost" data-file-edit>✎ تعديل</button>
-     <button class="ghost" data-file-focus aria-pressed="${focusOn}" title="وضع التركيز: إخفاء العناصر الثانوية مع بقاء التنبيهات والإجراءات">${focusOn?'الخروج من التركيز':'تركيز'}</button>
      <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-card-menu aria-haspopup="menu" aria-label="إجراءات الملف">⋯</button>
       <div class="ux-menu" role="menu" hidden>
        <button type="button" role="menuitem" class="ux-menu-item" data-file-task>＋ مهمة مرتبطة</button>
@@ -176,16 +211,67 @@ export async function filePage(app,id){
   <div class="fid-tools">${listNavHtml(app,'files',id)}</div>
  </header>
  ${gaps.length?fileGapsHtml(gaps):''}
- <nav class="file-tabs-bar" aria-label="أقسام الملف">
-  <div class="file-subtabs" role="tablist" aria-label="تبويبات الملف">${orderedFileTabs().map(([k,l,icon])=>{const count=tabCount(k);return `<button type="button" role="tab" data-tab="${k}" data-section-id="${k}" aria-controls="file-tab" title="${esc(l)}" aria-label="${esc(l)}${count?` — ${count}`:''}" aria-selected="${app.__fileTab.tab===k}" class="subtab-btn${app.__fileTab.tab===k?' active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(l)}</span>${count?` <small>${count}</small>`:''}</button>`}).join('')}</div>
+ <nav class="file-tabs-bar" id="file-tabs-nav" aria-label="أقسام الملف">
+  <div class="file-subtabs" role="tablist" aria-label="تبويبات الملف">${tabLayout().primary.map(([k,l,icon,short])=>tabBtnHtml(app,k,l,icon,tabCount(k),short)).join('')}</div>
+  <div class="ftb-groups" role="group" aria-label="أقسام إضافية">${tabGroupsHtml(app,tabCount)}</div>
   <div class="ftb-tools">
    <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-tabs-menu aria-haspopup="menu" aria-label="كل الأقسام — قائمة التبويبات" title="كل الأقسام">⋯</button>
-    <div class="ux-menu ftb-menu" role="menu" hidden>${orderedFileTabs().map(([k,l,icon])=>`<button type="button" role="menuitem" class="ux-menu-item" data-menu-tab="${k}"><span aria-hidden="true">${icon}</span> ${esc(l)}</button>`).join('')}</div></div>
+    <div class="ux-menu ftb-menu ftb-menu-all" role="menu" aria-label="كل أقسام الملف" hidden>${orderedFileTabs().map(([k,l,icon])=>{const count=tabCount(k);return `<button type="button" role="menuitemradio" aria-checked="${app.__fileTab.tab===k}" class="ux-menu-item ftb-item${hiddenSectionIds('file-details').has(k)?' is-hidden-section':''}" data-menu-tab="${k}"><span aria-hidden="true">${icon}</span> ${esc(l)}${count?` <small class="ftb-n">${count}</small>`:''}${hiddenSectionIds('file-details').has(k)?'<small class="ftb-hid">مخفي</small>':''}</button>`}).join('')}</div></div>
+   <button type="button" class="ghost icon-only" data-file-focus aria-pressed="${focusOn}" title="وضع التركيز: إخفاء العناصر الثانوية مع بقاء التنبيهات والإجراءات" aria-label="${focusOn?'الخروج من وضع التركيز':'وضع التركيز'}">${focusOn?'◉':'◎'}</button>
    <button type="button" class="ghost icon-only" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض" aria-label="تخصيص الصفحة">⚙</button>
   </div>
  </nav>
  <section class="panel file-tab-shell" data-collapse-id="file-tab-body" data-collapse-key="file-details:tab-body" data-collapse-default="open"><div class="panel-head"><h3 data-tab-shell-title>${esc(TAB_META.get(app.__fileTab.tab)||'المحتوى')}</h3><span class="collapse-summary" data-collapse-summary></span></div>
- <div id="file-tab" role="tabpanel"></div></section>`;
+ <div id="file-tab" role="tabpanel" aria-labelledby="file-tabs-nav"></div></section>`;
+}
+
+/** زر تبويب أساسي ظاهر في الشريط (role=tab) — العدّاد من البيانات الحقيقية للتبويب. */
+function tabBtnHtml(app,k,label,icon,count,short){
+ const on=app.__fileTab.tab===k;
+ const shortLabel=short||label;
+ // التسمية القصيرة تُعرض على الشاشات الضيقة فقط (aria-hidden) — الاسم الكامل يبقى في aria-label/title
+ return `<button type="button" role="tab" id="ftb-${esc(k)}" data-tab="${esc(k)}" data-section-id="${esc(k)}" aria-controls="file-tab" title="${esc(label)}" aria-label="${esc(label)}${count?` — ${count}`:''}" aria-selected="${on}" class="subtab-btn${on?' active':''}${count?' has-data':''}"><span class="tab-icon" aria-hidden="true">${icon}</span><span class="tab-label">${esc(label)}</span>${shortLabel!==label?`<span class="tab-label-short" aria-hidden="true">${esc(shortLabel)}</span>`:''}${count?` <small>${count}</small>`:''}</button>`;
+}
+
+/**
+ * قوائم الأقسام المنسدلة: كل قائمة تجمع الأقسام المتقاربة وظيفيًا، وعناصر القائمة نفسها هي
+ * أزرار التبويبات الحقيقية (data-tab) — لا نسخ ولا أزرار شكلية. المجموعة النشطة تُعلَّم
+ * بصريًا (is-active) ويظهر في زرها اسم القسم المفتوح، وعنصرها المختار يُعلَّم بـaria-checked.
+ */
+function tabGroupsHtml(app,tabCount){
+ const {groups}=tabLayout();
+ const active=app.__fileTab.tab;
+ return groups.map(g=>{
+  const on=g.tabs.some(([id])=>id===active);
+  const activeItem=on?g.tabs.find(([id])=>id===active):null;
+  const items=g.tabs.map(([k,l,icon])=>{
+   const count=tabCount(k);const onItem=active===k;
+   return `<button type="button" role="menuitemradio" aria-checked="${onItem}" class="ux-menu-item ftb-item${onItem?' is-on':''}${count?' has-data':''}" data-tab="${esc(k)}" data-menu-tab="${esc(k)}" data-section-id="${esc(k)}" data-group="${esc(g.id)}" title="${esc(l)}"><span class="ftb-item-ic" aria-hidden="true">${icon}</span><span class="ftb-item-label">${esc(l)}</span>${count?`<small class="ftb-n">${count}</small>`:''}${onItem?'<span class="ftb-check" aria-hidden="true">✓</span>':''}</button>`;
+  }).join('');
+  return `<div class="ux-menu-wrap ftb-group${on?' is-active':''}" data-group="${esc(g.id)}">
+   <button type="button" class="subtab-btn ftb-group-btn" data-tab-group="${esc(g.id)}" aria-haspopup="menu" aria-expanded="false" aria-controls="ftb-menu-${esc(g.id)}" aria-current="${on?'true':'false'}" title="${esc(g.label)} — ${g.tabs.map(([,l])=>l).join('، ')}" aria-label="${esc(g.label)}${on&&activeItem?` — المفتوح: ${esc(activeItem[1])}`:''}">
+    <span class="tab-icon" aria-hidden="true">${g.icon}</span><span class="tab-label">${esc(g.label)}</span><span class="tab-label-short" aria-hidden="true">${esc(g.short||g.label)}</span>${on&&activeItem?`<span class="ftb-active-name">${esc(activeItem[1])}</span>`:''}<span class="ftb-caret" aria-hidden="true">▾</span>
+   </button>
+   <div class="ux-menu ftb-menu" id="ftb-menu-${esc(g.id)}" role="menu" aria-label="${esc(g.label)}" hidden>${items}</div>
+  </div>`;
+ }).join('');
+}
+
+/**
+ * بطاقة ملخص تنفيذي واحدة داخل «نظرة عامة».
+ * ملخص للقراءة فقط: العنوان/البيانات تُبنى من السجل الأصلي، وكل إجراء فيها ينقل إلى
+ * السجل نفسه أو إلى تبويبه — لا يوجد هنا أي حقل قابل للتحرير ولا نسخة مستقلة من البيانات.
+ * @param {{eyebrow:string,icon?:string,tone?:string,title?:string,meta?:string[],empty?:string,actions?:Array<{label:string,attr:string,kind?:string}>}} o
+ */
+function execCard({eyebrow,icon='',tone='',title='',meta=[],empty='',actions=[]}){
+ const rows=meta.filter(Boolean);
+ return `<article class="fx-card${tone?` is-${esc(tone)}`:''}">
+  <header class="fx-card-head"><span class="fx-eyebrow">${esc(eyebrow)}</span>${icon?`<span class="fx-ic" aria-hidden="true">${icon}</span>`:''}</header>
+  ${title?`<b class="fx-title">${title}</b>`:''}
+  ${rows.length?`<p class="fx-meta">${rows.map(m=>`<span>${m}</span>`).join('')}</p>`:''}
+  ${empty?`<p class="fx-empty muted small">${esc(empty)}</p>`:''}
+  ${actions.length?`<div class="fx-actions">${actions.map(a=>`<button type="button" class="${a.kind==='primary'?'primary small':'ghost small'}" ${a.attr}>${esc(a.label)}</button>`).join('')}</div>`:''}
+ </article>`;
 }
 
 // ===== نواقص الملف =====
@@ -221,8 +307,9 @@ export async function bindFilePage(app,id){
  // الإجراء الأساسي: إضافة سياقية بالسياق المعروف (fileId يمرر تلقائيًا — لا إعادة اختيار ملف).
  root.querySelectorAll('[data-file-quick]').forEach(b=>b.addEventListener('click',()=>openQuickAdd(app)));
  // وضع التركيز: يختصر العناصر الثانوية دون إخفاء التنبيهات أو تعطيل الإجراءات.
+ // انتقل إلى شريط أدوات التبويبات (أداة عرض ثانوية) بدل ازدحام رأس الملف.
  const focusBtn=root.querySelector('[data-file-focus]');
- const applyFocus=on=>{root.classList.toggle('file-focus-mode',on);if(focusBtn){focusBtn.textContent=on?'الخروج من التركيز':'تركيز';focusBtn.setAttribute('aria-pressed',String(on))}};
+ const applyFocus=on=>{root.classList.toggle('file-focus-mode',on);if(focusBtn){focusBtn.textContent=on?'◉':'◎';focusBtn.setAttribute('aria-pressed',String(on));focusBtn.setAttribute('aria-label',on?'الخروج من وضع التركيز':'وضع التركيز');focusBtn.title=on?'الخروج من وضع التركيز: إظهار العناصر الثانوية':'وضع التركيز: إخفاء العناصر الثانوية مع بقاء التنبيهات والإجراءات'}};
  applyFocus(Boolean(prefs.get(FOCUS_MODE_KEY,false)));
  focusBtn?.addEventListener('click',async()=>{const on=!root.classList.contains('file-focus-mode');applyFocus(on);await prefs.set(FOCUS_MODE_KEY,on)});
  // نسخ ملخص الملف كنص — من قائمة الإجراءات.
@@ -241,7 +328,12 @@ export async function bindFilePage(app,id){
  // الشريط المضغوط عند التمرير: هوية الملف وحالته والخطوة التالية فقط.
  const head=root.querySelector('#file-head'),sticky=root.querySelector('[data-file-sticky]');
  if(head&&sticky&&'IntersectionObserver' in window){
-  const io=new IntersectionObserver(([e])=>{const on=!e.isIntersecting;sticky.classList.toggle('is-on',on);sticky.setAttribute('aria-hidden',String(!on))},{threshold:0});
+  const io=new IntersectionObserver(([e])=>{
+   const on=!e.isIntersecting;
+   sticky.classList.toggle('is-on',on);sticky.setAttribute('aria-hidden',String(!on));
+   // ظهور الشريط المختصر/اختفاؤه يغيّر إزاحة الشريط الملتصق: تُعاد القياس بلا قيم ثابتة
+   requestAnimationFrame(()=>{if(document.querySelector('#file-tabs-nav'))syncStickyTop(root)});
+  },{threshold:0});
   io.observe(head);
   app.__fileStickyObserver=io;
  }
@@ -297,16 +389,20 @@ export async function bindFilePage(app,id){
   syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e));
  };
  app.__fileGotoTab=gotoTab;
+ // أزرار التبويبات: الأساسية في الشريط + عناصر القوائم المنسدلة (نفس دالة التنقل الواحدة).
  root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.tab));
- // قائمة «كل الأقسام»: نفس التبويبات في قائمة منسدلة للشاشات الضيقة وللوصول السريع.
- // سمة مستقلة (data-tabs-menu) حتى لا يلتبس زر القائمة هذا مع زر قائمة إجراءات الملف
- // (data-card-menu) في أي محدد عام؛ الإغلاق خارجًا وبـEscape من المعالج العام لـ .ux-menu.
- root.querySelectorAll('[data-tabs-menu]').forEach(btn=>{
-  const menu=btn.nextElementSibling;
-  btn.addEventListener('click',e=>{e.stopPropagation();const open=menu.hidden;root.querySelectorAll('.ux-menu:not([hidden])').forEach(m=>{if(m!==menu)m.hidden=true});menu.hidden=!open;if(open)menu.querySelector('.ux-menu-item')?.focus()});
-  menu.addEventListener('click',()=>{menu.hidden=true});
- });
  root.querySelectorAll('[data-menu-tab]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.menuTab));
+ // القوائم المنسدلة للمجموعات + قائمة «كل الأقسام»: فتح/إغلاق واحد، دعم المؤوس واللمس
+ // ولوحة المفاتيح (Enter/Space/↓ للفتح، ↑↓/Home/End داخل القائمة، Escape يُغلق ويعيد التركيز)،
+ // وضبط الموضع تلقائيًا حتى لا تُقطع القوائم عند حواف الشاشة (RTL).
+ bindTabMenus(root);
+ // إزاحة الالتصاق: تُقاس فعليًا (شريط التنقل + شريط الصفحة) وتُعاد عند تغيّر المقاس/الدوران
+ syncStickyTop(root);
+ let stickyRaf=0;
+ const onViewport=()=>{cancelAnimationFrame(stickyRaf);stickyRaf=requestAnimationFrame(()=>{if(document.querySelector('#file-tabs-nav'))syncStickyTop(root)})};
+ window.addEventListener('resize',onViewport);
+ window.addEventListener('orientationchange',onViewport);
+ requestAnimationFrame(()=>syncStickyTop(root));
  // قفزات المؤشرات والرأس إلى التبويب المعني (الجلسات/الأعمال/الأطراف…).
  root.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.tabJump));
  // أطراف الرأس: نفس نافذة إجراءات الطرف الموجودة (فتح السجل/تعديل/إزالة).
@@ -317,6 +413,91 @@ export async function bindFilePage(app,id){
  syncTabBarDom(app);
  root.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
  await renderTab(app);
+}
+
+// ===== قوائم الأقسام المنسدلة =====
+// سلوك واحد لكل القوائم (مجموعات التبويبات + قائمة «كل الأقسام» + ⋯ إجراءات الملف):
+// فتح واحد في اللحظة نفسها، إغلاق بالنقر خارجها أو Escape أو بعد الاختيار، تنقل بالأسهم،
+// وضبط موضع أفقي (clamp) حتى لا تُقطع القائمة عند حافة الشاشة في RTL.
+/** ضبط موضع القائمة داخل إطار العرض: إزاحة أفقية عند الحاجة + حد ارتفاع رأسي. */
+function placeTabMenu(menu,trigger){
+ menu.style.transform='';
+ menu.style.maxHeight='';
+ const rect=menu.getBoundingClientRect();
+ if(!rect.width)return;
+ const pad=8,shot=window.innerWidth;
+ let dx=0;
+ if(rect.left<pad)dx=pad-rect.left;
+ else if(rect.right>shot-pad)dx=(shot-pad)-rect.right;
+ if(dx)menu.style.transform=`translateX(${Math.round(dx)}px)`;
+ // القائمة الطويلة تُمرَّر داخل حدود الشاشة بدل أن تُقطع أسفلها
+ const avail=window.innerHeight-rect.top-pad;
+ if(avail>120&&rect.height>avail)menu.style.maxHeight=`${Math.round(avail)}px`;
+}
+function bindTabMenus(root){
+ const menus=[...root.querySelectorAll('.ftb-menu')];
+ const closeAll=(except=null)=>menus.forEach(m=>{if(m!==except){m.hidden=true;m.style.transform='';m.style.maxHeight='';m.parentElement?.querySelector('[aria-haspopup="menu"]')?.setAttribute('aria-expanded','false')}});
+ const triggers=[...root.querySelectorAll('[data-tab-group],[data-tabs-menu]')];
+ triggers.forEach(btn=>{
+  if(btn.dataset.tabMenuBound)return;btn.dataset.tabMenuBound='1';
+  const menu=(btn.dataset.tabGroup?root.querySelector(`#ftb-menu-${CSS.escape(btn.dataset.tabGroup)}`):btn.nextElementSibling);
+  if(!menu)return;
+  const close=()=>{menu.hidden=true;menu.style.transform='';menu.style.maxHeight='';btn.setAttribute('aria-expanded','false')};
+  const open=()=>{
+   closeAll(menu);
+   menu.hidden=false;btn.setAttribute('aria-expanded','true');
+   placeTabMenu(menu,btn);
+   const first=menu.querySelector('.ftb-item:not([disabled]),.ux-menu-item:not([disabled])');
+   first?.focus({preventScroll:true});
+  };
+  btn.addEventListener('click',e=>{e.stopPropagation();menu.hidden?open():close()});
+  btn.addEventListener('keydown',e=>{
+   if(['ArrowDown','Down','ArrowUp','Up'].includes(e.key)){e.preventDefault();menu.hidden?open():menu.querySelector('.ftb-item')?.focus({preventScroll:true})}
+   else if(e.key==='Escape')close();
+  });
+  menu.addEventListener('click',()=>close());
+  menu.addEventListener('keydown',e=>{
+   const items=[...menu.querySelectorAll('.ftb-item,.ux-menu-item')].filter(x=>!x.hidden&&!x.disabled);
+   const i=items.indexOf(document.activeElement);
+   if(e.key==='ArrowDown'||e.key==='Down'){e.preventDefault();items[Math.min(items.length-1,i+1)]?.focus({preventScroll:true})}
+   else if(e.key==='ArrowUp'||e.key==='Up'){e.preventDefault();items[Math.max(0,i-1)]?.focus({preventScroll:true})}
+   else if(e.key==='Home'){e.preventDefault();items[0]?.focus({preventScroll:true})}
+   else if(e.key==='End'){e.preventDefault();items[items.length-1]?.focus({preventScroll:true})}
+   else if(e.key==='Escape'){e.preventDefault();close();btn.focus({preventScroll:true})}
+   else if(e.key==='Tab')close();
+  });
+ });
+  // إغلاق القوائم عند تغيير حجم النافذة (الموضع المُحسوب يصبح غير صالح) — بلا تغيير أي تفضيل.
+ window.addEventListener('resize',()=>closeAll());
+}
+
+/**
+ * إزاحة الالتصاق لشريط التبويبات (والشريط المختصر للهوية) أسفل الشرائط الملتصقة
+ * الموجودة فعلًا (شريط التنقل + شريط الصفحة العلوي عند وجوده) — بقياس حقيقي لأن
+ * ارتفاعاتها تتغير بالشاشة والالتفاف، فلا نثبّت رقمًا. الشريط الملتصق يبقى واضحًا
+ * أثناء التمرير دون أن يحجب رأس الملف أو يختفي خلف شريط آخر.
+ */
+function syncStickyTop(root){
+ const bar=root.querySelector('.file-tabs-bar');
+ if(!bar)return;
+ let chrome=0,topbar=0;
+ for(const [sel,slot] of [['#sidebar.tn-bar','chrome'],['.topbar','topbar']]){
+  const el=document.querySelector(sel);
+  if(!el)continue;
+  const st=getComputedStyle(el);
+  if(st.display==='none'||st.position!=='sticky')continue;
+  const h=el.getBoundingClientRect().height;
+  if(slot==='chrome')chrome+=h;else topbar+=h;
+ }
+ // الترتيب الرأسي عند التمرير: شريط التنقل ← شريط الصفحة ← الشريط المختصر للهوية ← التبويبات
+ let offset=chrome+topbar;
+ const compact=root.querySelector('[data-file-sticky]');
+ if(compact)compact.style.top=`${Math.round(offset)}px`;
+ if(compact&&compact.classList.contains('is-on')){
+  const h=compact.getBoundingClientRect().height;
+  if(h)offset+=h; // الشريط المختصر للهوية يظهر بين شريط الصفحة والتبويبات — بلا تراكب
+ }
+ bar.style.top=`${Math.round(offset)}px`;
 }
 
 // إعادة التحميل بعد حفظ/تعديل/حذف: يُصفَّر كاش التبويبات أولًا حتى يُعاد جلب البيانات
@@ -390,14 +571,40 @@ function partyGroupsHtml(parties){
  }).join('')||'<div class="empty"><h3>لا توجد أطراف مسجلة لهذا الملف.</h3><p>أضف موكلًا مسجلًا أو طرفًا خارجيًا، ثم حدّد صفته ومجموعة عرضه.</p></div>';
 }
 
-/** مزامنة شريط التبويبات مع التبويب النشط (بدون إعادة رسم المحتوى) + إبقاء النشط مرئيًا. */
+/** مزامنة شريط التبويبات مع التبويب النشط (بدون إعادة رسم المحتوى) + إبقاء النشط مرئيًا.
+ *  تشمل: التبويبات الأساسية، عناصر القوائم المنسدلة، والمجموعة النشطة (اسم القسم المفتوح
+ *  يظهر في زر قائمتها) حتى يعرف المحامي أين هو دون فتح القوائم. */
 function syncTabBarDom(app){
  const root=document.querySelector('#main-content');if(!root)return;
+ const tab=app.__fileTab.tab;
  const row=root.querySelector('.file-subtabs');
  root.querySelectorAll('.file-subtabs [data-tab]').forEach(x=>{
-  const on=x.dataset.tab===app.__fileTab.tab;
+  const on=x.dataset.tab===tab;
   x.classList.toggle('active',on);x.setAttribute('aria-selected',String(on));
   if(on&&row&&x.scrollIntoView)x.scrollIntoView({block:'nearest',inline:'nearest'});
+ });
+ const activeGroup=groupIdOfTab(tab);
+ root.querySelectorAll('.ftb-item[data-tab]').forEach(x=>{
+  const on=x.dataset.tab===tab;
+  x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));
+  if(on&&!x.querySelector('.ftb-check')){const c=document.createElement('span');c.className='ftb-check';c.setAttribute('aria-hidden','true');c.textContent='✓';x.append(c)}
+  else if(!on)x.querySelector('.ftb-check')?.remove();
+ });
+ root.querySelectorAll('.ftb-menu-all .ftb-item[data-menu-tab]').forEach(x=>{
+  const on=x.dataset.menuTab===tab;
+  x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));
+ });
+ root.querySelectorAll('.ftb-group').forEach(g=>{
+  const on=g.dataset.group===activeGroup;
+  g.classList.toggle('is-active',on);
+  const btn=g.querySelector('.ftb-group-btn');if(!btn)return;
+  btn.setAttribute('aria-current',on?'true':'false');
+  const label=on?TAB_META.get(tab):'';
+  let chip=btn.querySelector('.ftb-active-name');
+  if(on&&label){
+   if(!chip){chip=document.createElement('span');chip.className='ftb-active-name';btn.insertBefore(chip,btn.querySelector('.ftb-caret'))}
+   chip.textContent=label;
+  }else chip?.remove();
  });
 }
 /** رأس لوحة المحتوى + الملخص الحي في الحالة المطوية — مرتبط بالتبويب النشط. */
@@ -448,8 +655,11 @@ async function renderTabContent(app){
  el.innerHTML='<div class="skel-page" role="status" aria-label="جارٍ التحميل"><div class="skel skel-row"><div class="skel-card skel"></div><div class="skel-card skel"></div><div class="skel-card skel"></div><div class="skel-card skel"></div></div><div class="skel skel-block"></div></div>';
  const needStage=what=>`<div class="notice">لإضافة ${what} يجب أولًا إضافة رقم قضائي / مرحلة في تبويب «البيانات القضائية». الملف نفسه لا يحتاج قضية.</div>`;
  if(tab==='summary'){
-  // «نظرة عامة» — مركز المعلومات القانونية: البيانات أولًا ثم الملخص العملي.
+  // «نظرة عامة» — لوحة متابعة الملف لا نسخة مكررة منه. كل عنصر هنا ملخص مقروء من مصدره
+  // الأصلي (الجلسات/الأعمال/المراحل/سجل النشاط) وكل زر يفتح السجل نفسه أو تبويبه، ولا
+  // يُنشئ أي سجل أو نسخة قابلة للتحرير، ولا يُخترع رقم أو تاريخ أو حالة غير مسجلة.
   const today=localDate();
+  const dayOf=v=>String(v||'').slice(0,10);
   const [hearingResult,procedures,judgmentsRes,relRows]=await Promise.all([
    fileChildren(office,id,'hearings'),
    office.r.procedures.byIndex('fileId',id,2000),
@@ -457,19 +667,88 @@ async function renderTabContent(app){
    fileRelations(office,id).catch(()=>[])
   ]);
   const hearings=hearingResult.rows;
-  const upcomingAll=hearings.filter(h=>h.hearingDate>=today).sort((a,b)=>String(a.hearingDate||'').localeCompare(String(b.hearingDate||''))||String(a.hearingTime||'').localeCompare(String(b.hearingTime||'')));
-  const upcoming=upcomingAll.slice(0,2);
-  const last=hearings.filter(h=>h.hearingDate<today).sort((a,b)=>String(b.hearingDate||'').localeCompare(String(a.hearingDate||'')))[0];
+  const upcomingAll=hearings.filter(h=>dayOf(h.hearingDate)>=today).sort((a,b)=>(dayOf(a.hearingDate)+(a.hearingTime||'99')).localeCompare(dayOf(b.hearingDate)+(b.hearingTime||'99')));
+  const previousAll=hearings.filter(h=>dayOf(h.hearingDate)<today).sort((a,b)=>(dayOf(b.hearingDate)+(b.hearingTime||'')).localeCompare(dayOf(a.hearingDate)+(a.hearingTime||'')));
+  const nextH=upcomingAll[0],lastH=previousAll[0];
   const openProc=procedures.filter(p=>!p.status||['open','pending'].includes(p.status));
-  const openUnfinished=openProc.filter(p=>String(p.internalDueDate||'').slice(0,10)<today||!p.result);
-  const refs=new Map();
+  const openUnfinished=openProc.filter(p=>dayOf(p.internalDueDate)<today||!p.result);
+  // «آخر عمل إداري مسجل» = أحدث سجل فعلي في مخزن الأعمال (نفس مفتاح الترتيب المستخدم في تبويبه).
+  const procSorted=[...procedures].sort((a,b)=>String(b.actionDate||b.internalDueDate||b.createdAt||'').localeCompare(String(a.actionDate||a.internalDueDate||a.createdAt||'')));
+  const latestProc=procSorted[0];
   const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
-  const nextH=upcomingAll[0];
-  const sig=nextH?dateSignal(nextH.hearingDate):null;
-  const fsig=fileSignal(f);
   const clientParty=parties.find(p=>p.clientId);
-  const lastActivity=f.lastActivityAt?fmtDate(String(f.lastActivityAt).slice(0,10)):'';
-  // (3) البيانات العامة والتفاصيل القانونية — شريط قابل للطي مفتوح افتراضيًا
+  const lastActivity=f.lastActivityAt?fmtDate(dayOf(f.lastActivityAt)):'';
+  const sig=nextH?dateSignal(dayOf(nextH.hearingDate)):null;
+  // (أ) الملخص التنفيذي: أربع بطاقات ملخص فقط، كل واحدة مرتبطة بمصدرها الأصلي
+  const nextCard=nextH?execCard({
+   eyebrow:'أقرب جلسة قادمة',icon:'◷',tone:sig?.tone||'',
+   title:`${esc(fmtDate(nextH.hearingDate))}${nextH.hearingTime?` <span class="fx-sub">· ${esc(String(nextH.hearingTime).slice(0,5))}</span>`:''}${sig?` <span class="ux-badge ux-badge--${esc(sig.tone)}">${esc(sig.text)}</span>`:''}`,
+   meta:[nextH.type,nextH.court,nextH.chamber,nextH.reason?`المطلوب: ${nextH.reason}`:''].filter(Boolean).map(esc),
+   actions:[
+    {label:'عرض الجلسة',kind:'primary',attr:`data-open="hearings:${esc(nextH.id)}"`},
+    {label:`كل الجلسات (${hearings.length})`,attr:'data-tab-jump="hearings"'},
+    {label:'دورة الجلسات',attr:`data-hearing-cycle="${esc(nextH.id)}"`}
+   ]
+  }):execCard({
+   eyebrow:'أقرب جلسة قادمة',icon:'◷',
+   empty:hearings.length?'لا توجد جلسة قادمة مسجلة؛ كل الجلسات المسجلة سابقة.':'لا توجد جلسات مسجلة لهذا الملف بعد.',
+   actions:[{label:'فتح تبويب الجلسات',kind:'primary',attr:'data-tab-jump="hearings"'}]
+  });
+  const procCard=latestProc?execCard({
+   eyebrow:'آخر عمل إداري مسجل',icon:'☷',tone:openUnfinished.length?'warn':'',
+   title:esc(latestProc.type||latestProc.description||'عمل إداري'),
+   meta:[
+    latestProc.description?esc(latestProc.description):'',
+    latestProc.actionDate?`تاريخ العمل ${esc(fmtDate(latestProc.actionDate))}`:'',
+    latestProc.internalDueDate?`موعد المتابعة ${esc(fmtDate(latestProc.internalDueDate))}`:'',
+    latestProc.status?`الحالة: ${esc(label(latestProc.status))}`:'',
+    openProc.length?`مفتوحة في الملف: ${openProc.length}`:'',
+    openUnfinished.length?`غير مكتملة: ${openUnfinished.length}`:''
+   ].filter(Boolean),
+   actions:[
+    {label:'عرض العمل',kind:'primary',attr:`data-open="procedures:${esc(latestProc.id)}"`},
+    {label:`الأعمال (${procedures.length})`,attr:'data-tab-jump="procedures"'}
+   ]
+  }):execCard({
+   eyebrow:'آخر عمل إداري مسجل',icon:'☷',
+   empty:'لا توجد أعمال إدارية مسجلة لهذا الملف.',
+   actions:[{label:'فتح تبويب الأعمال الإدارية',kind:'primary',attr:'data-tab-jump="procedures"'}]
+  });
+  const stageCard=cur?execCard({
+   eyebrow:'المرحلة الحالية',icon:'▣',
+   title:esc(refLabel('cases',cur)),
+   meta:[cur.courtId,cur.chamber,cur.degree,cur.filingDate?`تاريخ القيد ${fmtDate(cur.filingDate)}`:'',stages.length>1?`إجمالي المراحل في الملف: ${stages.length}`:''].filter(Boolean).map(esc),
+   actions:[
+    {label:'فتح بيانات المرحلة',kind:'primary',attr:`data-open-case="${esc(cur.id)}"`},
+    {label:`المراحل (${stages.length})`,attr:'data-tab-jump="judicial"'}
+   ]
+  }):execCard({
+   eyebrow:'المرحلة الحالية',icon:'▣',
+   empty:'لا توجد مرحلة أو رقم قضائي مسجل (ملف بلا قضية).',
+   actions:[{label:'فتح المراحل والأرقام القضائية',kind:'primary',attr:'data-tab-jump="judicial"'}]
+  });
+  const lastCard=lastH?execCard({
+   eyebrow:'الجلسة السابقة',icon:'⌛',
+   title:`${esc(fmtDate(lastH.hearingDate))}${lastH.hearingTime?` <span class="fx-sub">· ${esc(String(lastH.hearingTime).slice(0,5))}</span>`:''}`,
+   meta:[lastH.type,lastH.result?`القرار: ${lastH.result}`:'لم يُسجل القرار',lastH.adjournedTo?`التأجيل إلى ${fmtDate(lastH.adjournedTo)}`:''].filter(Boolean).map(esc),
+   actions:[
+    {label:'عرض الجلسة',kind:'primary',attr:`data-open="hearings:${esc(lastH.id)}"`},
+    {label:'كل الجلسات',attr:'data-tab-jump="hearings"'}
+   ]
+  }):execCard({eyebrow:'الجلسة السابقة',icon:'⌛',empty:'لا توجد جلسات سابقة مسجلة.'});
+  const execPanel=`<section class="panel fp-exec" data-collapse-id="file-exec" data-collapse-key="file-details:exec" data-collapse-default="open">
+   <div class="panel-head"><h3>الملخص التنفيذي</h3><span class="collapse-summary" data-collapse-summary></span></div>
+   <div class="fx-grid">${nextCard}${procCard}${stageCard}${lastCard}</div>
+   ${fileCockpitHtml({hearings,procedures,stages,parties,today,currentStage:cur?refLabel('cases',cur):''})}
+   <p class="fx-foot muted small">
+    <span>${lastActivity?`آخر نشاط مسجل: <b>${esc(lastActivity)}</b>`:'لا يوجد نشاط مسجل بعد'}</span>
+    ${openUnfinished.length?`<span>متابعات غير مكتملة: <button type="button" class="link" data-tab-jump="procedures">${openUnfinished.length}</button></span>`:''}
+    ${clientParty?.clientId?`<span>الموكل المسجل: <button type="button" class="link" data-route="client:${esc(clientParty.clientId)}">${esc(clientParty.name||clientParty.partyName||'')}</button>${clientParty.role?` — ${esc(clientParty.role)}`:''}</span>`:''}
+   </p>
+   ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
+  </section>`;
+  // (ب) البيانات التفصيلية: كل حقل من مصدره (سجل الملف/المرحلة/حقول نوع العمل) — بلا تكرار بين الأقسام
+  const refs=new Map();
   const tax=app.__file.tax;const ftype=tax.byId.get(f.fileTypeId);
   const typeFields=(ftype?.fields||[]).filter(x=>f['x_'+x.k]!=null&&String(f['x_'+x.k]).trim()!=='');
   const caseFields=cur?ENTITIES.cases.fields.filter(x=>x.k!=='fileId'):[];
@@ -480,34 +759,16 @@ async function renderTabContent(app){
     <h4 class="fp-kv-h">بيانات الملف</h4>
     ${kvHtml(ENTITIES.files.fields,f,refs)}
     ${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}
-    ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — '+esc(f.reopenReason):''}</p>`:''}
-    ${cur?`<h4 class="fp-kv-h">بيانات المرحلة الحالية — ${esc(refLabel('cases',cur))}</h4>${kvHtml(caseFields,cur,new Map())}`:'<p class="muted fp-kv-note">لا توجد مرحلة أو رقم قضائي مسجل لهذا الملف؛ تُضاف من تبويب «المراحل والأرقام القضائية» عند الحاجة فقط.</p>'}
+    ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — السبب: '+esc(f.reopenReason):''}</p>`:''}
+    ${cur?`<h4 class="fp-kv-h">بيانات المرحلة الحالية — ${esc(refLabel('cases',cur))}</h4>${kvHtml(caseFields,cur,new Map())}`:'<p class="muted fp-kv-note">لا توجد مرحلة أو رقم قضائي مسجل لهذا الملف؛ تُضاف من تبويب «المراحل والإجراءات القضائية» عند الحاجة فقط.</p>'}
     ${typeFields.length?`<h4 class="fp-kv-h">بيانات ${esc(ftype.name)}</h4><dl class="kv">${typeFields.map(x=>`<div class="kv-item${x.t==='textarea'?' wide':''}"><dt>${esc(x.l)}</dt><dd>${esc(String(f['x_'+x.k]))}</dd></div>`).join('')}</dl>`:''}
    </div></section>`;
-  // (4) المرحلة الحالية والتسلسل القضائي — شريط مستقل قابل للطي
+  // (ج) المسار القضائي: المراحل والعلاقات المسجلة فعلًا، وكل عنصر يفتح سجله الأصلي
   const stagePanel=await stageSequenceHtml(app,{id,f,stages,cur,hearings,procedures,judgments:judgmentsRes.rows,relRows});
-  // (5) الملخص العملي: مؤشرات محسوبة من البيانات المسجلة فقط، وكل مؤشر يفتح تبويبه
-  const metrics=[
-   nextH?{k:'أقرب جلسة قادمة',v:`${fmtDate(nextH.hearingDate)}${nextH.hearingTime?' · '+String(nextH.hearingTime).slice(0,5):''}`,sub:sig?.text||'',tab:'hearings',tone:sig?.tone||''}:{k:'أقرب جلسة قادمة',v:'لا توجد جلسة قادمة',tab:hearings.length?'hearings':''},
-   {k:'الجلسات المرتبطة',v:`${hearings.length}${hearingResult.more?'+':''}`,tab:hearings.length?'hearings':''},
-   {k:'أعمال إدارية مفتوحة',v:String(openProc.length),tab:openProc.length?'procedures':''},
-   {k:'متابعات غير مكتملة',v:String(openUnfinished.length),sub:openUnfinished.length?'مفتوحة أو بانتظار موعد':'',tab:openUnfinished.length?'procedures':'',tone:openUnfinished.length?'warn':''},
-   {k:'آخر نشاط مسجل',v:lastActivity||'—',tab:'activity'}
-  ];
-  const metricsHtml=`<div class="fp-metrics" role="list" aria-label="ملخص عملي للملف">${metrics.map(m=>m.tab
-   ?`<button type="button" role="listitem" class="fp-metric${m.tone?' is-'+esc(m.tone):''}" data-tab-jump="${esc(m.tab)}" title="فتح تبويب ${esc(TAB_META.get(m.tab)||'')}"><span class="fp-metric-k">${esc(m.k)}</span><b class="fp-metric-v">${esc(m.v)}</b>${m.sub?`<small>${esc(m.sub)}</small>`:''}</button>`
-   :`<span role="listitem" class="fp-metric is-static"><span class="fp-metric-k">${esc(m.k)}</span><b class="fp-metric-v">${esc(m.v)}</b>${m.sub?`<small>${esc(m.sub)}</small>`:''}</span>`).join('')}</div>`;
-  el.innerHTML=`${dataPanel}${stagePanel}
-   <section class="panel fp-data fp-practical" data-collapse-id="file-practical" data-collapse-key="file-details:practical" data-collapse-default="open"><div class="panel-head"><h3>ملخص عملي للملف</h3><span class="collapse-summary" data-collapse-summary></span></div>
-   ${metricsHtml}
-   ${fileCockpitHtml({hearings,procedures,stages,parties,today,currentStage:cur?refLabel('cases',cur):''})}
-   ${clientParty?.clientId?`<p class="fp-client-line muted small">الموكل المسجل: <button type="button" class="link" data-route="client:${esc(clientParty.clientId)}">${esc(clientParty.name||clientParty.partyName||'')}</button>${clientParty.role?` — ${esc(clientParty.role)}`:''}</p>`:''}
-   ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
-   <div class="grid2 file-hearing-cards"><section class="panel" data-collapse-summary="${upcoming.length?`القادمة ${fmtDate(upcoming[0].hearingDate)}`:'لا قادمة'}"><div class="panel-head"><h3>الجلسات القادمة</h3><span class="badge">${upcoming.length} / 2</span></div>${upcoming.map((h,i)=>{const hs=dateSignal(h.hearingDate);return `<button class="hearing-preview" data-open="hearings:${esc(h.id)}"><span class="hearing-order">${i+1}</span><span><b>${fmtDate(h.hearingDate)}</b> ${esc(h.hearingTime||'')}${hs?` <span class="ux-badge ux-badge--${hs.tone}">${hs.text==='اليوم'?'جلسة اليوم':hs.text==='غدًا'?'جلسة غدًا':'جلسة '+esc(hs.text)}</span>`:''}<small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.reason?' — '+esc(h.reason):''}</small></span><span aria-hidden="true">↗</span></button>`}).join('')||'<p class="muted empty-inline">لا توجد جلسات قادمة مسجلة.</p>'}</section>
-   <section class="panel"><div class="panel-head"><h3>الجلسة السابقة</h3></div>${last?`<button class="hearing-preview" data-open="hearings:${esc(last.id)}"><span class="hearing-order">‹</span><span><b>${fmtDate(last.hearingDate)}</b><small>${esc(last.result||'لم يُسجل القرار')}${last.adjournedTo?' — التأجيل إلى '+fmtDate(last.adjournedTo):''}</small></span><span aria-hidden="true">↗</span></button>`:'<p class="muted empty-inline">لا توجد جلسات سابقة مسجلة.</p>'}<button class="ghost small" data-show-hearing-cycle>عرض دورة الجلسات</button></section></div>
-   ${executionStripHtml({summary:executionContextSummary(app.__file.executions||[]),scope:'file',route:`executionCenter?fileId=${encodeURIComponent(id)}`})}
-   </section>`;
-  el.querySelector('[data-file-edit2]').onclick=()=>openEntityForm(app,'files',{id});
+  el.innerHTML=`${execPanel}${dataPanel}${stagePanel}
+   ${executionStripHtml({summary:executionContextSummary(app.__file.executions||[]),scope:'file',route:`executionCenter?fileId=${encodeURIComponent(id)}`})}`;
+  // (د) كل إجراءات «نظرة عامة» تنقل إلى المصدر الأصلي أو إلى تبويبه — بلا كتابة من هنا
+  el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>openEntityForm(app,'files',{id}));
   el.querySelector('[data-case-edit]')?.addEventListener('click',e=>openEntityForm(app,'cases',{id:e.currentTarget.dataset.caseEdit}));
   el.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
   el.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>{
@@ -517,7 +778,7 @@ async function renderTabContent(app){
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
   el.querySelectorAll('[data-open-case]').forEach(b=>b.onclick=()=>app.go('case:'+b.dataset.openCase));
   el.querySelectorAll('[data-open-file]').forEach(b=>b.onclick=()=>app.go('file:'+b.dataset.openFile));
-  el.querySelector('[data-show-hearing-cycle]')?.addEventListener('click',()=>showHearingCycle(app,upcomingAll[0]?.id||last?.id||''));
+  el.querySelectorAll('[data-hearing-cycle]').forEach(b=>b.onclick=()=>showHearingCycle(app,b.dataset.hearingCycle||nextH?.id||lastH?.id||''));
   el.querySelectorAll('.cp-fc [data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
   el.querySelector('[data-cp-task]')?.addEventListener('click',()=>document.querySelector('#main-content [data-file-task]')?.click());
   return;

@@ -70,17 +70,17 @@ try{
  });
 
  // ---- 3) tab switch after first load (cached) ----
- await page.waitForSelector('.file-subtabs [data-tab="hearings"]');
+ await page.waitForSelector('.file-tabs-bar [data-tab="hearings"]');
  out.tabSwitchFirstMs=await page.evaluate(async()=>{
   const app=window.__LAW_OFFICE_APP__;const t0=performance.now();
-  document.querySelector('.file-subtabs [data-tab="hearings"]').click();
+  document.querySelector('.file-tabs-bar [data-tab="hearings"]').click();
   await new Promise(r=>setTimeout(r,0));
   return Math.round(performance.now()-t0);
  });
  await page.waitForSelector('#file-tab .dg tbody tr[data-i]',{timeout:60000});
  out.tabSwitchBackCachedMs=await page.evaluate(async()=>{
   const app=window.__LAW_OFFICE_APP__;const t0=performance.now();
-  document.querySelector('.file-subtabs [data-tab="summary"]').click();
+  document.querySelector('.file-tabs-bar [data-tab="summary"]').click();
   await new Promise(r=>setTimeout(r,0));
   await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
   return Math.round(performance.now()-t0);

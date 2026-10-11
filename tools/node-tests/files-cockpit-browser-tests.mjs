@@ -104,13 +104,14 @@ try{
   await page.waitForTimeout(1500);
   assert.equal(await page.locator('.file-head').count(),1,'رأس الملف');
   assert.equal(await page.locator('.cp-fc').count(),1,'بطاقة «التالي في هذا الملف»');
-  const barTabs=await page.locator('.file-tabs-bar .file-subtabs [data-tab]').allTextContents();
-  assert.ok(barTabs.length>=10,`شريط تبويبات واحد لكل الأقسام: ${barTabs.length}`);
+  // الشريط الجديد: الأساسية ظاهرة + بقية الأقسام داخل قوائم منسدلة — كل الأقسام في شريط واحد
+  const barTabs=await page.evaluate(()=>[...document.querySelectorAll('.file-tabs-bar [data-tab]')].map(b=>b.dataset.tab));
+  assert.ok(barTabs.length>=15,`شريط تبويبات واحد لكل الأقسام: ${barTabs.length}`);
   assert.equal(await page.locator('.file-areas-bar [data-area]').count(),0,'لا شريط مناطق منفصل — التبويبات مسطّحة');
-  const order=await page.locator('.file-subtabs [data-tab]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  const order=await page.locator('.file-subtabs [role="tab"]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
   assert.deepEqual(order.slice(0,3),['summary','hearings','procedures'],'الترتيب: نظرة عامة ← الجلسات ← الأعمال الإدارية');
   assert.equal(await page.locator('.file-subtabs [data-tab="summary"]').getAttribute('aria-selected'),'true','نظرة عامة هو الافتراضي عند فتح الملف');
-  assert.ok(await page.locator('.file-subtabs [data-tab]').count()>=2,'تبويبات الشريط');
+  assert.ok(await page.locator('.file-subtabs [role="tab"]').count()>=3,'تبويبات الشريط الأساسية');
   assert.equal(await page.locator('[data-file-quick]').count()>=1,true,'زر إضافة أساسي');
   assert.equal(await page.locator('.head-actions [data-card-menu]').count(),1,'قائمة ⋯');
   assert.ok((await page.locator('.file-head [data-gaps-jump]').count())>=0);
@@ -267,7 +268,9 @@ try{
  await verify('إعادة التحميل: حالة الطي محفوظة + آخر تبويب مستعاد',async()=>{
   await page.evaluate(id=>window.__LAW_OFFICE_APP__.go(`file:${id}`),fixture.file.id);
   await page.waitForTimeout(1200);
-  await page.locator('.file-subtabs [data-tab="notes"]').click();
+  await page.locator('.ftb-group[data-group="gRecords"] .ftb-group-btn').click();
+  await page.waitForTimeout(250);
+  await page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]').click();
   await page.waitForTimeout(400);
   const shell=page.locator('.file-tab-shell');
   // اثبت حالة طي معروفة قبل إعادة التحميل (قد تكون مفتوحة من اختبار سابق)
@@ -282,7 +285,7 @@ try{
   // we are still on file page after reload? route restored via hash
   const route=await page.evaluate(()=>window.__LAW_OFFICE_APP__.route);
   assert.ok(String(route).startsWith('file:'),`المسار بعد إعادة التحميل: ${route}`);
-  assert.equal(await page.locator('.file-subtabs [data-tab="notes"]').getAttribute('aria-selected'),'true','آخر تبويب مستعاد');
+  assert.equal(await page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]').getAttribute('aria-checked'),'true','آخر تبويب مستعاد');
   assert.equal(await page.locator('.file-tab-shell').evaluate(el=>el.dataset.collapseCollapsed),'true','حالة الطي محفوظة');
  });
 

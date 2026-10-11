@@ -174,8 +174,10 @@ try {
     fileId = await page.evaluate(async () => (await window.__LAW_OFFICE_APP__.office.r.files.page({index: 'createdAt', direction: 'next', limit: 1})).items[0]?.id || '');
     assert(fileId, 'لم يوجد ملف زرعته بيانات الاختبار');
     await go(`file:${fileId}`);
-    await page.waitForSelector('[data-tab="notes"]');
-    await page.click('[data-tab="notes"]');
+    await page.waitForSelector('.ftb-group[data-group="gRecords"] .ftb-group-btn');
+    await page.click('.ftb-group[data-group="gRecords"] .ftb-group-btn');
+    await page.waitForSelector('.ftb-group[data-group="gRecords"] [data-tab="notes"]:visible');
+    await page.click('.ftb-group[data-group="gRecords"] [data-tab="notes"]');
     await page.waitForSelector('[data-quick-file-add]');
     await page.click('[data-quick-file-add]');
     await page.waitForSelector('.modal-card [data-qn-form]');

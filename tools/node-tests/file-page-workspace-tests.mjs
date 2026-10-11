@@ -33,6 +33,13 @@ const verify=async(name,fn)=>{await fn();report.checks.push(name);console.log(`V
 const go=async route=>{await page.evaluate(r=>window.__LAW_OFFICE_APP__.go(r),route);await page.waitForTimeout(1400)};
 const tabText=()=>page.evaluate(()=>(document.querySelector('#file-tab')?.textContent||'').replace(/\s+/g,' ').trim());
 const headText=()=>page.evaluate(()=>(document.querySelector('#file-head')?.textContent||'').replace(/\s+/g,' ').trim());
+// التبويبات الأساسية تحمل aria-selected، وعناصر القوائم المنسدلة تحمل aria-checked — كلاهما «نشط».
+const activeTabCheck=(k,expected=true)=>page.evaluate(({k,expected})=>{
+ const el=document.querySelector(`.file-tabs-bar [data-tab="${k}"]`);
+ if(!el)return false;
+ const on=el.getAttribute('aria-selected')==='true'||el.getAttribute('aria-checked')==='true';
+ return on===expected;
+},{k,expected});
 const openGridTools=async()=>{
  const shell=page.locator('#file-tab .dg').first();
  if(await shell.locator(':scope > .dg-shell-head + .dg-body > .dg-tools-summary [aria-expanded="false"], :scope .dg-tools-summary-toggle[aria-expanded="false"]').first().count())
@@ -88,10 +95,10 @@ try{
  await verify('1) فتح الملف يفتح «نظرة عامة» افتراضيًا',async()=>{
   await go('files');
   await go(`file:${fx.file.id}`);
-  assert.equal(await page.locator('.file-subtabs [data-tab="summary"]').getAttribute('aria-selected'),'true');
-  const order=await page.locator('.file-subtabs [data-tab]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
-  assert.deepEqual(order.slice(0,3),['summary','hearings','procedures']);
-  assert.ok((await tabText()).startsWith('بيانات الدعوى والملف'),'محتوى نظرة عامة أولًا');
+  assert.ok(await activeTabCheck('summary'),'نظرة عامة هي التبويب النشط');
+  const order=await page.locator('.file-tabs-bar .file-subtabs [role="tab"]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  assert.deepEqual(order,['summary','hearings','procedures','judicial'],'التبويبات الأساسية الأربعة بترتيبها');
+  assert.ok((await tabText()).startsWith('الملخص التنفيذي'),'الملخص التنفيذي أول ما يراه المحامي في نظرة عامة');
  });
 
  // (2) الهوية من البيانات الحقيقية
@@ -166,7 +173,7 @@ try{
 
  // (6) تبويب الجلسات
  await verify('6) تبويب الجلسات: جدول كامل + إضافة + بحث وفرز',async()=>{
-  await page.locator('.file-subtabs [data-tab="hearings"]').click();await page.waitForTimeout(1200);
+  await page.locator('.file-tabs-bar [data-tab="hearings"]').click();await page.waitForTimeout(1200);
   const rows=await page.locator('#file-tab .dg tbody tr[data-i]').count();
   // جلستان مسجلتان + جلسة ثالثة أنشأها النظام تلقائيًا من «التأجيل إلى» (سلوك قائم في operations)
   assert.equal(rows,3,'جلسات الملف (المسجلة + المنشأة من التأجيل)');
@@ -183,12 +190,12 @@ try{
   await page.locator('#file-tab .dg tbody tr[data-i]').first().click();await page.waitForTimeout(1200);
   assert.ok(String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route)).startsWith('rec:hearings:'),'فتح سجل الجلسة');
   await go(`file:${fx.file.id}`);
-  await page.locator('.file-subtabs [data-tab="hearings"]').click();await page.waitForTimeout(900);
+  await page.locator('.file-tabs-bar [data-tab="hearings"]').click();await page.waitForTimeout(900);
  });
 
  // (7) تبويب الأعمال الإدارية
  await verify('7) تبويب الأعمال الإدارية: خط زمني + جدول + حالات الإنجاز',async()=>{
-  await page.locator('.file-subtabs [data-tab="procedures"]').click();await page.waitForTimeout(1200);
+  await page.locator('.file-tabs-bar [data-tab="procedures"]').click();await page.waitForTimeout(1200);
   const txt=await tabText();
   assert.ok(txt.includes('إعلان صحيفة الاستئناف')&&txt.includes('متابعة تقرير الخبير'),'الأعمال ظاهرة');
   assert.ok(txt.includes('مفتوح')&&txt.includes('قيد الانتظار')&&txt.includes('تم'),'حالات الإنجاز بارزة');
@@ -199,19 +206,19 @@ try{
 
  // (8) بقية التبويبات
  await verify('8) كل تبويب آخر يُفتح وبه محتواه وأدواته',async()=>{
-  const tabs=await page.locator('.file-subtabs [data-tab]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  const tabs=await page.locator('.file-tabs-bar [data-tab]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
   for(const t of tabs){
-   await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),t);
+   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),t);
    await page.waitForTimeout(800);
    const len=(await tabText()).length;
    assert.ok(len>40,`تبويب ${t} له محتوى (${len})`);
-   assert.equal(await page.locator('.file-subtabs [data-tab="'+t+'"]').getAttribute('aria-selected'),'true',`تبويب ${t} نشط`);
+   assert.ok(await activeTabCheck(t),`تبويب ${t} نشط`);
   }
  });
 
  // (9) إضافة وتعديل وحفظ ثم تحقق بعد إعادة الفتح
  await verify('9) إضافة عمل إداري من التبويب وحفظه ثم التحقق بعد إعادة الفتح',async()=>{
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'procedures');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'procedures');
   await page.waitForTimeout(900);
   await page.locator('#file-tab [data-add]').first().click();await page.waitForTimeout(900);
   const form=page.locator('.entity-form[data-store="procedures"]');
@@ -223,14 +230,14 @@ try{
   assert.ok((await tabText()).includes('عمل اختبار محفوظ '+fx.suffix),'العمل المحفوظ ظاهر بعد الحفظ');
   await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('dashboard'));await page.waitForTimeout(900);
   await go(`file:${fx.file.id}`);
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'procedures');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'procedures');
   await page.waitForTimeout(1000);
   assert.ok((await tabText()).includes('عمل اختبار محفوظ '+fx.suffix),'العمل محفوظ بعد مغادرة الصفحة والعودة');
  });
 
  // (10) النماذج غير المحفوظة عند تبديل التبويب
  await verify('10) بيانات نموذج غير محفوظة لا تُفقد عند تبديل التبويبات',async()=>{
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'typeData');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'typeData');
   await page.waitForTimeout(900);
   // لوحة نموذج نوع العمل قابلة للطي — تُفتح أولًا
   if(await page.locator('#file-tab .panel').first().evaluate(el=>el.dataset.collapseCollapsed)==='true')
@@ -238,9 +245,9 @@ try{
   await page.waitForTimeout(400);
   const input=page.locator('#file-tab [data-meta]').first();
   await input.fill('مسودة غير محفوظة '+fx.suffix);
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'hearings');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'hearings');
   await page.waitForTimeout(800);
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'typeData');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'typeData');
   await page.waitForTimeout(800);
   assert.equal(await page.locator('#file-tab [data-meta]').first().inputValue(),'مسودة غير محفوظة '+fx.suffix,'الكاش يحتفظ بقيم النموذج');
  });
@@ -254,14 +261,14 @@ try{
   await go(`file:${fx.file.id}`);
   head=await headText();
   assert.ok(head.includes(fx.fileNo)&&!head.includes(fx.plainNo),'رأس الملف الأول فقط');
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'parties');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'parties');
   await page.waitForTimeout(800);
   assert.ok(!(await tabText()).includes('هدى إبراهيم منصور'),'أطراف التبويب معزولة');
  });
 
  // (12) البحث/الفرز/التصدير في قسم يدعمها
  await verify('12) البحث والفرز والتصدير في جدول الجلسات',async()=>{
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'hearings');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'hearings');
   await page.waitForTimeout(900);
   await openGridTools();
   // فرز بزر الفرز في ترويسة عمود التاريخ (تصاعدي ثم تنازلي)
@@ -294,7 +301,7 @@ try{
    assert.equal(overflow,false,`لا تمرير أفقي عند ${label}`);
    assert.equal(await page.evaluate(()=>document.documentElement.dir),'rtl');
    assert.ok(await page.locator('.file-head [data-file-quick]').isVisible(),'زر الإضافة ظاهر');
-   assert.ok(await page.locator('.file-subtabs [data-tab="summary"]').isVisible(),'التبويب الافتراضي ظاهر');
+   assert.ok(await page.locator('.file-tabs-bar [data-tab="summary"]').isVisible(),'التبويب الافتراضي ظاهر');
   }
   await page.setViewportSize({width:1440,height:950});
   for(const theme of ['elegantLight','luxuryGold']){
@@ -311,11 +318,11 @@ try{
  await verify('14) تنقل متكرر بلا تكرار مكونات ولا أخطاء JavaScript',async()=>{
   const before=report.errors.length;
   for(let i=0;i<3;i++){
-   await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'summary');await page.waitForTimeout(500);
-   await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'hearings');await page.waitForTimeout(500);
+   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'summary');await page.waitForTimeout(500);
+   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'hearings');await page.waitForTimeout(500);
   }
   assert.equal(await page.locator('#file-tab .dg').count(),1,'جدول واحد فقط بعد تنقل متكرر');
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'summary');await page.waitForTimeout(700);
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'summary');await page.waitForTimeout(700);
   assert.equal(await page.locator('#file-tab .cp-fc').count(),1,'قمرة واحدة فقط');
   assert.equal(await page.locator('#file-tab .fp-case-data').count(),1,'شريط بيانات واحد');
   assert.equal(await page.locator('#file-tab .stage-path').count(),1,'شريط إدارة مراحل واحد');
@@ -325,20 +332,20 @@ try{
  // (15) آخر تبويب لكل ملف + الافتراض لملف جديد
  await verify('15) التفضيل لكل ملف: نفس الملف يستعيد تبويبه وملف جديد يفتح نظرة عامة',async()=>{
   await go(`file:${fx.file.id}`);
-  await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'judgments');
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'judgments');
   await page.waitForTimeout(700);
   await page.reload({waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:120000});
   await page.waitForTimeout(1600);
-  assert.equal(await page.locator('.file-subtabs [data-tab="judgments"]').getAttribute('aria-selected'),'true','نفس الملف يستعيد آخر تبويب له');
+  assert.ok(await activeTabCheck('judgments'),'نفس الملف يستعيد آخر تبويب له');
   await go(`file:${fx.plain.id}`);
-  assert.equal(await page.locator('.file-subtabs [data-tab="summary"]').getAttribute('aria-selected'),'true','ملف آخر يفتح نظرة عامة لا تبويب الملف السابق');
+  assert.ok(await activeTabCheck('summary'),'ملف آخر يفتح نظرة عامة لا تبويب الملف السابق');
  });
 
  // (16) سلوكان قائمان لم يتأثرا: الشريط الثابت عند التمرير + وضع التركيز
  await verify('16) الشريط الثابت عند التمرير ووضع التركيز يعملان كما كانا',async()=>{
   await go(`file:${fx.file.id}`);
-  await page.evaluate(()=>document.querySelector('.file-subtabs [data-tab="summary"]').click());
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]').click());
   await page.waitForTimeout(900);
   assert.equal(await page.locator('[data-file-sticky]').isVisible(),false,'الشريط مخفي في أعلى الصفحة');
   await page.evaluate(()=>window.scrollTo(0,1200));await page.waitForTimeout(1000);
@@ -353,30 +360,225 @@ try{
   assert.equal(await page.evaluate(()=>document.querySelector('#main-content').classList.contains('file-focus-mode')),false);
  });
 
- // (17) قائمة «كل الأقسام»: فتح/إغلاق/Escape/نقر خارجي/تنقل فعلي
+ // (17) قائمة «كل الأقسام» (⋯) في شريط الأدوات: فتح/إغلاق/Escape/نقر خارجي/تنقل فعلي
  await verify('17) قائمة «كل الأقسام» تعمل وتُغلق بـEscape والنقر خارجها وتنقل فعليًا',async()=>{
   await go(`file:${fx.file.id}`);
   const btn=page.locator('[data-tabs-menu]');
-  assert.equal(await btn.count(),1,'زر قائمة التبويبات واحد且不 يلتبس مع قائمة الملف');
+  assert.equal(await btn.count(),1,'زر قائمة «كل الأقسام» واحد فقط');
   await btn.click();await page.waitForTimeout(300);
-  const menu=page.locator('.ftb-menu');
+  const menu=page.locator('.ftb-menu-all');
   assert.equal(await menu.isVisible(),true,'القائمة تفتح');
-  assert.equal(await menu.locator('[data-menu-tab]').count(),15,'كل التبويبات داخل القائمة');
+  assert.equal(await menu.locator('[data-menu-tab]').count(),15,'كل الأقسام داخل القائمة');
   await page.keyboard.press('Escape');await page.waitForTimeout(300);
   assert.equal(await menu.isVisible(),false,'Escape يغلق القائمة');
   await btn.click();await page.waitForTimeout(300);
-  await page.mouse.click(700,500);await page.waitForTimeout(300);
+  await page.mouse.click(700,600);await page.waitForTimeout(300);
   assert.equal(await menu.isVisible(),false,'النقر خارجها يغلقها');
   await btn.click();await page.waitForTimeout(300);
   await menu.locator('[data-menu-tab="judgments"]').click();await page.waitForTimeout(900);
-  assert.equal(await page.locator('.file-subtabs [data-tab="judgments"]').getAttribute('aria-selected'),'true','عنصر القائمة ينقل فعليًا إلى التبويب');
+  assert.ok(await activeTabCheck('judgments'),'عنصر القائمة ينقل فعليًا إلى التبويب');
   assert.equal(await menu.isVisible(),false,'القائمة تُغلق بعد الاختيار');
+ });
+
+ // (18) شريط التبويبات: التبويبات الأساسية ظاهرة والأقسام الأخرى داخل قوائم منسدلة
+ await verify('18) التبويبات الأساسية ظاهرة (4) وبقية الأقسام داخل قوائم منسدلة بلا تكرار',async()=>{
+  await go(`file:${fx.file.id}`);
+  const primary=await page.locator('.file-tabs-bar .file-subtabs [role="tab"]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  assert.deepEqual(primary,['summary','hearings','procedures','judicial'],'الأساسية الظاهرة: نظرة عامة، الجلسات، الأعمال الإدارية، المراحل والإجراءات');
+  const groups=await page.locator('.ftb-group').evaluateAll(ns=>ns.map(g=>({id:g.dataset.group,label:g.querySelector('.ftb-group-btn .tab-label')?.textContent?.trim(),items:[...g.querySelectorAll('.ftb-item')].map(i=>i.dataset.tab)})));
+  assert.ok(groups.length>=4,`عدد القوائم المنسدلة: ${groups.length}`);
+  const grouped=groups.flatMap(g=>g.items);
+  const allIds=await page.locator('.file-tabs-bar [data-tab]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  assert.equal(new Set(allIds).size,allIds.length,'كل قسم يظهر مرة واحدة فقط في الشريط — لا تكرار');
+  assert.equal(allIds.length,15,`كل الأقسام متاحة من الشريط (${allIds.length})`);
+  assert.equal([...primary,...grouped].length,15,'الأساسية + القوائم = كل الأقسام');
+  // كل قسم محفوظ في النظام يملك تبويبًا فعليًا
+  const macro=await page.evaluate(async()=>{
+   const {getPageLayout}=await import('/js/ui/page-layout.js');
+   return getPageLayout('file-details').sections.map(s=>s.id);
+  });
+  assert.deepEqual([...macro].sort(),[...allIds].sort(),'قائمة التخصيص المركزي تطابق أقسام الشريط');
+  // المخفي من «تخصيص الصفحة» يخرج من الشريط والقوائم ويبقى في «كل الأقسام» مُعلَّمًا
+  await page.evaluate(async()=>{const {saveSectionLayout}=await import('/js/core/display-prefs.js');saveSectionLayout('file-details',{hidden:['notes']})});
+  await go(`file:${fx.file.id}`);
+  const notesInBar=await page.locator('.file-tabs-bar [data-tab="notes"]').count();
+  assert.equal(notesInBar,0,'القسم المخفي يخرج من الشريط والقوائم');
+  await page.locator('[data-tabs-menu]').click();await page.waitForTimeout(300);
+  const hiddenItem=page.locator('.ftb-menu-all [data-menu-tab="notes"]');
+  assert.equal(await hiddenItem.count(),1,'يبقى متاحًا في قائمة «كل الأقسام» — لا وظيفة تصبح غير قابلة للوصول');
+  assert.ok((await hiddenItem.textContent()).includes('مخفي'),'مُعلَّم بكلمة «مخفي»');
+  await hiddenItem.click();await page.waitForTimeout(900);
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الملاحظات','ويمكن فتحه عند الحاجة من القائمة');
+  assert.equal(await page.locator('.ftb-menu-all [data-menu-tab="notes"]').getAttribute('aria-checked'),'true','عنصر القسم المخفي مُعلَّم كنشط داخل القائمة');
+  await page.evaluate(async()=>{const {saveSectionLayout}=await import('/js/core/display-prefs.js');saveSectionLayout('file-details',{hidden:[]})});
+  await go(`file:${fx.file.id}`);
+ });
+
+ // (19) القوائم المنسدلة: الاختيار يفتح القسم الصحيح ويُميّز الحالي + سلوك لوحة المفاتيح
+ await verify('19) القوائم المنسدلة: تحديد القسم النشط بصريًا وفتح القسم الصحيح + لوحة المفاتيح',async()=>{
+  await go(`file:${fx.file.id}`);
+  const group=page.locator('.ftb-group[data-group="gJudgments"]');
+  const trigger=group.locator('.ftb-group-btn');
+  assert.equal(await trigger.getAttribute('aria-expanded'),'false','القائمة مغلقة ابتداءً');
+  await trigger.click();await page.waitForTimeout(300);
+  assert.equal(await trigger.getAttribute('aria-expanded'),'true','الزر يفتح القائمة');
+  const menu=group.locator('.ftb-menu');
+  assert.equal(await menu.isVisible(),true,'القائمة ظاهرة');
+  const labels=await menu.locator('.ftb-item .ftb-item-label').allTextContents();
+  assert.deepEqual(labels,['الأحكام','المحضرين والإعلانات'],'عناصر القائمة هي أقسام المجموعة الفعلية');
+  // تنقل بالأسهم داخل القائمة (الفتح يضع التركيز على العنصر الأول)
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.tab||''),'judgments','الفتح يضع التركيز على العنصر الأول');
+  await page.keyboard.press('ArrowDown');await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.tab||''),'serviceRecords','↓ ينتقل إلى العنصر التالي');
+  await page.keyboard.press('ArrowUp');await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.tab||''),'judgments','↑ يعود إلى العنصر السابق');
+  await page.keyboard.press('Escape');await page.waitForTimeout(250);
+  assert.equal(await menu.isVisible(),false,'Escape يغلق القائمة');
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.tabGroup||''),'gJudgments','التركيز يعود إلى زر المجموعة');
+  // اختيار عنصر من القائمة
+  await trigger.click();await page.waitForTimeout(250);
+  await menu.locator('[data-tab="judgments"]').click();await page.waitForTimeout(900);
+  assert.ok(await activeTabCheck('judgments'),'القسم المختار فُتح فعلًا');
+  assert.equal(await menu.isVisible(),false,'القائمة أُغلقت بعد الاختيار');
+  assert.equal(await group.getAttribute('class').then(c=>c.includes('is-active')),true,'المجموعة النشطة مميزة بصريًا');
+  assert.equal((await trigger.locator('.ftb-active-name').textContent()).trim(),'الأحكام','اسم القسم المفتوح ظاهر في زر المجموعة');
+  const item=menu.locator('[data-tab="judgments"]');
+  assert.equal(await item.getAttribute('aria-checked'),'true','العنصر النشط مُعلَّم بـaria-checked');
+  assert.equal(await item.getAttribute('class').then(c=>c.includes('is-on')),true,'العنصر النشط مميز بصريًا');
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الأحكام','عنوان لوحة المحتوى يطابق القسم');
+  // مجموعة أخرى لا تحتفظ بحالة نشطة كاذبة
+  assert.equal(await page.locator('.ftb-group[data-group="gParties"]').getAttribute('class').then(c=>c.includes('is-active')),false,'بقية المجموعات غير نشطة');
+ });
+
+ // (20) القوائم لا تُقطع عند حواف الشاشة (RTL) على سطح المكتب والهاتف
+ await verify('20) القوائم المنسدلة لا تُقطع عند حواف الشاشة في RTL (مكتب/هاتف)',async()=>{
+  for(const [w,h] of [[1440,950],[768,1024],[360,740]]){
+   await page.setViewportSize({width:w,height:h});
+   await go(`file:${fx.file.id}`);
+   // نقيس تخطيط شريط التبويبات نفسه: نعود إلى «نظرة عامة» (بلا جدول عريض) ثم نقيس
+   await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+   await page.waitForTimeout(700);
+   const ids=await page.locator('.ftb-group').evaluateAll(ns=>ns.map(g=>g.dataset.group));
+   for(const id of ids){
+    await page.evaluate(g=>document.querySelector(`.ftb-group[data-group="${g}"] .ftb-group-btn`).click(),id);
+    await page.waitForTimeout(220);
+    const box=await page.evaluate(g=>{const m=document.querySelector(`.ftb-group[data-group="${g}"] .ftb-menu`);const r=m.getBoundingClientRect();return {open:!m.hidden,left:r.left,right:r.right,top:r.top,width:r.width,vw:window.innerWidth}},id);
+    assert.equal(box.open,true,`القائمة ${id} تُفتح عند ${w}px`);
+    assert.ok(box.left>=-1&&box.right<=box.vw+1,`القائمة ${id} داخل الشاشة عند ${w}px (${Math.round(box.left)}..${Math.round(box.right)} / ${box.vw})`);
+    await page.keyboard.press('Escape');await page.waitForTimeout(150);
+   }
+   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth+2);
+   assert.equal(overflow,false,`لا تمرير أفقي للصفحة عند ${w}px`);
+   const primaryVisible=await page.locator('.file-tabs-bar .file-subtabs [role="tab"]:visible').count();
+   assert.equal(primaryVisible>=4,true,`التبويبات الأساسية ظاهرة كلها عند ${w}px`);
+  }
+  await page.setViewportSize({width:1440,height:950});
+ });
+
+ // (23) الشريط الملتصق: التنقل يبقى ظاهرًا أثناء التمرير دون حجب المحتوى
+ await verify('23) شريط التبويبات ملتصق أثناء التمرير بلا تراكب مع الشرائط الأخرى (مكتب/هاتف)',async()=>{
+  // تحقق إضافي: لا تراكم طبقات مربك — ترتيب z: التنقل > شريط الصفحة > التبويبات > الشريط المختصر
+  for(const [w,h] of [[1440,900],[834,1024],[390,780]]){
+   await page.setViewportSize({width:w,height:h});
+   await go(`file:${fx.file.id}`);
+   await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+   await page.waitForTimeout(700);
+   await page.evaluate(()=>window.scrollTo(0,1400));
+   await page.waitForTimeout(800);
+   const geo=await page.evaluate(()=>{
+    const r=s=>{const el=document.querySelector(s);if(!el)return null;const b=el.getBoundingClientRect();return {top:Math.round(b.top),bottom:Math.round(b.bottom),h:Math.round(b.height),visible:b.height>0&&b.top<window.innerHeight&&b.bottom>0}};
+    const z=s=>{const el=document.querySelector(s);return el?Number(getComputedStyle(el).zIndex)||0:0};
+    return {tn:r('#sidebar.tn-bar'),topbar:r('.topbar'),tabs:r('.file-tabs-bar'),sticky:r('[data-file-sticky].is-on'),
+     z:{tn:z('#sidebar.tn-bar'),topbar:z('.topbar'),tabs:z('.file-tabs-bar'),sticky:z('[data-file-sticky]')}};
+   });
+   assert.ok(geo.tabs&&geo.tabs.visible,`شريط التبويبات ظاهر أثناء التمرير عند ${w}px`);
+   assert.ok(geo.tabs.top>=0,`الشريط غير مقصوص أعلى الشاشة عند ${w}px (top=${geo.tabs.top})`);
+   if(geo.tn)assert.ok(geo.tabs.top>=geo.tn.bottom-1,`الشريط أسفل شريط التنقل عند ${w}px`);
+   if(geo.topbar&&geo.topbar.h&&geo.tabs.top>60)assert.ok(geo.tabs.top>=geo.topbar.bottom-1,`الشريط لا يغطي شريط الصفحة عند ${w}px`);
+   if(geo.sticky&&geo.sticky.visible)assert.ok(geo.tabs.top>=geo.sticky.bottom-1,`الشريط لا يغطي الشريط المختصر عند ${w}px`);
+   assert.ok(geo.z.tn>geo.z.tabs&&geo.z.topbar>geo.z.tabs,`ترتيب الطبقات صحيح عند ${w}px (${JSON.stringify(geo.z)})`);
+   // التنقل يبقى فعالًا أثناء الالتصاق
+   await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="hearings"]')?.click());
+   await page.waitForTimeout(900);
+   assert.ok(await activeTabCheck('hearings'),`التبويب يعمل أثناء التمرير عند ${w}px`);
+   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth+2);
+   assert.equal(overflow,false,`لا تمرير أفقي عند ${w}px`);
+  }
+  await page.setViewportSize({width:1440,height:950});
+ });
+
+ // (21) الملخص التنفيذي: كل عنصر ملخص مرتبط بمصدره الأصلي وبلا بيانات مُختلقة
+ await verify('21) الملخص التنفيذي: روابط إلى السجلات الأصلية وحالات فارغة صادقة',async()=>{
+  await go(`file:${fx.file.id}`);
+  // نظرة عامة افتراضيًا للقياس (لا يهم تبويب الجلسة السابقة)
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  const fc=page.locator('.fx-grid .fx-card');
+  assert.equal(await fc.count(),4,'أربع بطاقات ملخص (جلسة قادمة/آخر عمل/المرحلة الحالية/الجلسة السابقة)');
+  assert.ok((await fc.nth(0).textContent()).includes('أقرب جلسة قادمة'));
+  assert.ok((await fc.nth(1).textContent()).includes('آخر عمل إداري مسجل'));
+  assert.ok((await fc.nth(2).textContent()).includes('المرحلة الحالية'));
+  assert.ok((await fc.nth(3).textContent()).includes('الجلسة السابقة'));
+  // «عرض الجلسة» يفتح سجل الجلسة الأصلي نفسه
+  await fc.nth(0).locator('[data-open]').click();await page.waitForTimeout(1200);
+  const hearingRoute=String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route));
+  assert.ok(hearingRoute.startsWith('rec:hearings:'),`«عرض الجلسة» يفتح سجل الجلسة: ${hearingRoute}`);
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  // «عرض العمل» يفتح سجل العمل الإداري الأصلي
+  await page.locator('.fx-grid .fx-card').nth(1).locator('[data-open]').click();await page.waitForTimeout(1200);
+  const procRoute=String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route));
+  assert.ok(procRoute.startsWith('rec:procedures:'),`«عرض العمل» يفتح سجل العمل: ${procRoute}`);
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  // «فتح بيانات المرحلة» يفتح سجل المرحلة الأصلي
+  await page.locator('.fx-grid .fx-card').nth(2).locator('[data-open-case]').click();await page.waitForTimeout(1200);
+  assert.ok(String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route)).startsWith(`case:${fx.stages.s2.id}`),'«فتح بيانات المرحلة» يفتح المرحلة الحالية');
+  await go(`file:${fx.file.id}`);
+  // روابط التبويبات تنقل فعلًا للقسم المعني
+  await page.locator('.fx-grid .fx-card').nth(1).locator('[data-tab-jump="procedures"]').click();await page.waitForTimeout(900);
+  assert.ok(await activeTabCheck('procedures'),'«الأعمال» تنقل إلى تبويب الأعمال الإدارية');
+  await go(`file:${fx.file.id}`);
+  // الملف بلا بيانات: حالات فارغة صادقة بلا تواريخ أو أرقام مُختلقة
+  await go(`file:${fx.plain.id}`);
+  const emptyCards=await page.locator('.fx-grid .fx-card').allTextContents();
+  assert.ok(emptyCards[0].includes('لا توجد جلسات مسجلة'),'حالة فارغة للجلسات');
+  assert.ok(emptyCards[1].includes('لا توجد أعمال إدارية مسجلة'),'حالة فارغة للأعمال');
+  assert.ok(emptyCards[2].includes('لا توجد مرحلة أو رقم قضائي مسجل'),'حالة فارغة للمراحل');
+  assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(emptyCards.slice(0,3).join(' ')),'لا تواريخ مُختلقة في الحالات الفارغة');
+  await go(`file:${fx.file.id}`);
+ });
+
+ // (22) منع تكرار البيانات: لا نسخة ثانية من الجلسات/الأعمال داخل «نظرة عامة»
+ await verify('22) «نظرة عامة» لوحة متابعة: مؤشرات مكررة القديمة أُزيلت والملخصات مرتبطة بالمصادر',async()=>{
+  // نظرة عامة افتراضيًا (بلا تفضيل تبويب سابق يحجب القياس)
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  const tab=page.locator('#file-tab');
+  assert.equal(await tab.locator('.fp-metrics').count(),0,'لا شريط مؤشرات مكرر فوق بطاقات الملخص');
+  assert.equal(await tab.locator('.file-hearing-cards').count(),0,'لا قائمة جلسات ثانية داخل الملخص (الجلسات في تبويبها)');
+  assert.equal(await tab.locator('#file-tab .dg').count(),0,'لا جداول كاملة مكررة داخل نظرة عامة');
+  assert.equal(await tab.locator('.cp-fc').count(),1,'قمرة واحدة للخطوة التالية');
+  // بيانات الجلسة تُقرأ من سجلها: لا نماذج تحرير داخل الملخص التنفيذي
+  assert.equal(await tab.locator('.fx-grid input,.fx-grid select,.fx-grid textarea').count(),0,'بطاقات الملخص للقراءة والتنقل فقط — بلا حقول تحرير');
+  //كل قيمة معروضة في الملخص التنفيذي موجودة فعلًا في السجل الأصلي للجلسة
+  const hearingDate=(await page.locator('.fx-grid .fx-card').nth(0).locator('.fx-title').textContent()).trim().split(' ')[0];
+  const matches=await page.evaluate(async({fileId,date})=>{
+   const app=window.__LAW_OFFICE_APP__;
+   const res=await app.office.r.hearings.byIndex('fileId',fileId,200);
+   const fmt=v=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||'').slice(0,10));return m?`${m[3]}/${m[2]}/${m[1]}`:''};
+   return (res||[]).filter(h=>fmt(h.hearingDate)===date).length;
+  },{fileId:fx.file.id,date:hearingDate});
+  assert.ok(matches>=1,`تاريخ الجلسة المعروض (${hearingDate}) موجود في سجل الجلسات الأصلي`);
  });
 
  // لقطات مرجعية
  await go(`file:${fx.file.id}`);
  await page.screenshot({path:path.join(artifactDir,'overview.png'),fullPage:true});
- await page.evaluate(k=>document.querySelector(`.file-subtabs [data-tab="${k}"]`).click(),'hearings');await page.waitForTimeout(900);
+ await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'hearings');await page.waitForTimeout(900);
  await page.screenshot({path:path.join(artifactDir,'hearings.png'),fullPage:true});
 
  report.status='PASS';
