@@ -76,16 +76,18 @@ const dump=async(name,route)=>{
  await page.screenshot({path:path.join(outDir,`${name}-top.png`)});
  const info=await page.evaluate(()=>{
   const t=s=>(document.querySelector(s)?.textContent||'').replace(/\s+/g,' ').trim();
-  const tabs=[...document.querySelectorAll('.file-subtabs [data-tab]')].map(b=>({tab:b.dataset.tab,label:t(`[data-tab="${b.dataset.tab}"]`)||b.textContent.trim(),sel:b.getAttribute('aria-selected'),hidden:b.hidden}));
+  const tabs=[...document.querySelectorAll('.file-tabs-bar [data-tab]')].map(b=>({tab:b.dataset.tab,label:b.textContent.trim(),sel:b.getAttribute('aria-selected')||b.getAttribute('aria-checked'),inMenu:Boolean(b.closest('.ftb-menu')),hidden:b.hidden}));
+  const groups=[...document.querySelectorAll('.ftb-group')].map(g=>({group:g.dataset.group,label:g.querySelector('.ftb-group-btn .tab-label')?.textContent?.trim(),active:g.classList.contains('is-active'),items:[...g.querySelectorAll('.ftb-item')].map(i=>i.dataset.tab)}));
   const areas=[...document.querySelectorAll('[data-area]')].map(b=>({area:b.dataset.area,label:b.textContent.trim(),sel:b.getAttribute('aria-selected')}));
   const panels=[...document.querySelectorAll('#main-content section.panel,#main-content .stage-path,#main-content .cp-fc,#main-content .cp-exec')].map(p=>({cls:p.className,collapse:p.dataset?.collapseId||'',collapsed:p.dataset?.collapseCollapsed||'',title:t('h3',p)?'':''}));
   const heads=[...document.querySelectorAll('#main-content h2,#main-content h3')].map(h=>h.textContent.replace(/\s+/g,' ').trim());
-  return {route:window.__LAW_OFFICE_APP__.route,title:document.querySelector('#page-title')?.textContent,tabs,areas,heads,panelsCount:panels.length,headText:t('.file-head'),tabText:t('#file-tab').slice(0,900)};
+  return {route:window.__LAW_OFFICE_APP__.route,title:document.querySelector('#page-title')?.textContent,tabs,groups,areas,heads,panelsCount:panels.length,headText:t('.file-head'),tabText:t('#file-tab').slice(0,900)};
  });
  await fs.writeFile(path.join(outDir,`${name}.json`),JSON.stringify(info,null,1));
  console.log(`\n===== ${name} (${route}) =====`);
  console.log('HEAD:',info.headText.slice(0,600));
- console.log('TABS:',info.tabs.map(x=>`${x.tab}${x.sel==='true'?'*':''}${x.hidden?'(h)':''}`).join(' | '));
+ console.log('TABS:',info.tabs.map(x=>`${x.tab}${x.sel==='true'?'*':''}${x.inMenu?'(قائمة)':''}`).join(' | '));
+ console.log('GROUPS:',info.groups.map(g=>`${g.group}${g.active?'*':''}[${g.items.join(',')}]`).join(' | '));
  console.log('AREAS:',info.areas.map(x=>`${x.area}${x.sel==='true'?'*':''}`).join(' | '));
  console.log('H3s:',info.heads.join(' / '));
  console.log('TABTEXT:',info.tabText.slice(0,700));
@@ -94,7 +96,7 @@ const dump=async(name,route)=>{
 await dump('01-case-file',`file:${fixture.file.id}`);
 await dump('02-plain-file',`file:${plain.file.id}`);
 await dump('03-hearings',`file:${fixture.file.id}`);
-await page.locator('.file-subtabs [data-tab="hearings"], [data-tab="hearings"]').first().click().catch(()=>{});
+await page.locator('.file-tabs-bar [data-tab="hearings"]').first().click().catch(()=>{});
 await page.waitForTimeout(1200);
 await page.screenshot({path:path.join(outDir,'04-hearings-tab.png'),fullPage:true});
 console.log('HEARINGS TAB TEXT:',(await page.evaluate(()=>document.querySelector('#file-tab')?.textContent.replace(/\s+/g,' ').trim().slice(0,500))));
@@ -103,10 +105,10 @@ await page.waitForTimeout(1200);
 await page.screenshot({path:path.join(outDir,'05-procedures-tab.png'),fullPage:true});
 console.log('PROCEDURES TAB TEXT:',(await page.evaluate(()=>document.querySelector('#file-tab')?.textContent.replace(/\s+/g,' ').trim().slice(0,500))));
 // بقية التبويبات: تفريغ سريع لكل تبويب للتأكد من وجود المحتوى
-const allTabs=await page.evaluate(()=>[...document.querySelectorAll('.file-subtabs [data-tab]')].map(b=>b.dataset.tab));
+const allTabs=await page.evaluate(()=>[...document.querySelectorAll('.file-tabs-bar [data-tab]')].map(b=>b.dataset.tab));
 const perTab={};
 for(const tab of allTabs){
- await page.evaluate(t=>{const b=document.querySelector(`.file-subtabs [data-tab="${t}"]`);b&&b.click()},tab);
+ await page.evaluate(t=>{const b=document.querySelector(`.file-tabs-bar [data-tab="${t}"]`);b&&b.click()},tab);
  await page.waitForTimeout(900);
  perTab[tab]=await page.evaluate(()=>{const el=document.querySelector('#file-tab');return {len:(el?.textContent||'').trim().length,first:(el?.textContent||'').replace(/\s+/g,' ').trim().slice(0,220),grids:el?.querySelectorAll('.dg').length||0,panels:el?.querySelectorAll('section.panel').length||0}});
 }
