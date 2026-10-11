@@ -37,6 +37,7 @@ import {bindCards} from './ui/card.js';
 import {applyPageDisplay,applyPageLayout} from './ui/page-layout.js';
 import {applyUniversalStyles} from './ui/component-customizer.js';
 import {Clock} from './core/clock.js';
+import {clearUndo} from './core/undo-stack.js';
 import {RouteHistory,routeFromHash} from './core/history-nav.js';
 import {bindOverlayStack,isOpen as overlayIsOpen,closeTop as closeTopOverlay,size as overlaySize} from './ui/overlay-stack.js';
 import {ensurePersistentStorage,watchStorage,storageErrorHint} from './core/storage-persistence.js';
@@ -370,7 +371,7 @@ class App{
   this.searchIndexTask=null;
   this.maintenance=runMaintenance(office,{searchIndex:false}).catch(e=>console.error('maintenance',e));
  }
- resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__fileTabCache','__listNav','__filesChipIndex','__report','__agendaDay','__wc'])delete this[k]}
+ resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__fileTabCache','__listNav','__filesChipIndex','__report','__agendaDay','__wc'])delete this[k];/* سجل «العودة» مرتبط بجلسة قاعدة البيانات: عملياته (استعادة/إعادة فتح…) تخصّ سجلاتها، فيُفرَّغ عند أي تبديل قاعدة بدل تنفيذ عكس على قاعدة أخرى. */clearUndo()}
  back(){
   // زر «رجوع» داخل البرنامج: يستخدم تاريخ المتصفح نفسه فيُبقي مدخلات Android متوازنة.
   if(this.routeHistory?.canGoBack?.())return (this.routeHistory.back(),null);
