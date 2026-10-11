@@ -180,6 +180,8 @@ select option{background:var(--surface);color:var(--text)}
 .fid-court{font-size:15px;color:var(--text);margin:0 0 6px;font-weight:600}
 .fid-sub{font-size:13.5px;color:var(--text-muted);margin:0 0 6px}
 .fid-badges{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+/* شارة المرحلة الحالية: من السجل المسجّل فقط (لا تظهر إذا لا توجد مرحلة) */
+.fid-badges .badge.stage{border-color:var(--primary);color:var(--primary);font-weight:700}
 .fid-meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px;text-align:end}
 .fid-fno{display:inline-flex;align-items:baseline;gap:8px;border:1px solid var(--border);background:var(--surface2);border-radius:var(--radius-sm);padding:8px 14px}
 .fid-fno-kind{font-size:12.5px;color:var(--text-muted);font-weight:600}

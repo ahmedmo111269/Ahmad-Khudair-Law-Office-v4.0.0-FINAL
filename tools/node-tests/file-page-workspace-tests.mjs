@@ -507,6 +507,155 @@ try{
   await page.setViewportSize({width:1440,height:950});
  });
 
+ // (24) بنية دلالية ووصول كامل بلوحة المفاتيح إلى كل الأقسام الخمسة عشر
+ await verify('24) البنية الدلالية (a11y) ووصول لوحة المفاتيح إلى كل الأقسام بلا استثناء',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(800);
+  const a11y=await page.evaluate(()=>{
+   const bar=document.querySelector('.file-tabs-bar');
+   const row=bar.querySelector('.file-subtabs');
+   const tabs=[...row.querySelectorAll('[role="tab"]')];
+   return {
+    tablist:row.getAttribute('role'),
+    tabs:tabs.map(t=>({tab:t.dataset.tab,sel:t.getAttribute('aria-selected'),controls:t.getAttribute('aria-controls'),label:t.getAttribute('aria-label')||''})),
+    panel:{role:document.querySelector('#file-tab')?.getAttribute('role'),labelledby:document.querySelector('#file-tab')?.getAttribute('aria-labelledby')},
+    groups:[...bar.querySelectorAll('.ftb-group')].map(g=>{
+     const btn=g.querySelector('.ftb-group-btn'),menu=g.querySelector('.ftb-menu');
+     return {id:g.dataset.group,haspopup:btn.getAttribute('aria-haspopup'),expanded:btn.getAttribute('aria-expanded'),controls:btn.getAttribute('aria-controls'),
+      menuId:menu.id,menuRole:menu.getAttribute('role'),
+      items:[...menu.querySelectorAll('[role="menuitemradio"]')].map(i=>({tab:i.dataset.tab,checked:i.getAttribute('aria-checked'),controls:i.getAttribute('aria-controls')}))};
+    }),
+    tools:{focus:Boolean(bar.querySelector('[data-file-focus]')),customize:Boolean(bar.querySelector('[data-order-file-tabs]')),all:Boolean(bar.querySelector('[data-tabs-menu]'))}
+   };
+  });
+  assert.equal(a11y.tablist,'tablist','صف التبويبات tablist');
+  assert.equal(a11y.tabs.length,4,'4 تبويبات أساسية بدور tab');
+  for(const t of a11y.tabs){
+   assert.equal(t.controls,'file-tab',`${t.tab} مرتبط بلوحة المحتوى`);
+   assert.ok(t.label.length>1,`${t.tab} له اسم مقروء`);
+  }
+  assert.equal(a11y.panel.role,'tabpanel','لوحة المحتوى tabpanel');
+  assert.equal(a11y.panel.labelledby,'file-tabs-nav','اللوحة مرتبطة بشريط التبويبات');
+  assert.equal(a11y.groups.length,4,'4 مجموعات منسدلة');
+  const allItems=[];
+  for(const g of a11y.groups){
+   assert.equal(g.haspopup,'menu',`${g.id} يعلن أنه قائمة`);
+   assert.equal(g.expanded,'false','مغلقة ابتداءً');
+   assert.ok(g.menuId&&g.menuId===g.controls,`${g.id} مرتبط بقائمته`);
+   assert.equal(g.menuRole,'menu',`${g.id} قائمة بدور menu`);
+   assert.ok(g.items.length>=2,`${g.id} يحتوي أقسامه`);
+   for(const i of g.items){assert.equal(i.controls,'file-tab',`${i.tab} مرتبط بلوحة المحتوى`);allItems.push(i.tab)}
+  }
+  assert.equal(new Set(allItems).size,11,'11 قسمًا داخل القوائم (15 - 4 أساسية)');
+  assert.equal(a11y.groups.flatMap(g=>g.items).filter(i=>i.checked==='true').length,0,'لا عنصر مُعلَّم كنشط والقسم الأساسي هو المفتوح');
+  assert.ok(a11y.tools.focus&&a11y.tools.customize&&a11y.tools.all,'أدوات العرض الثلاثة في الشريط');
+  // لوحة المفاتيح: Tab يصل إلى كل التبويبات الأساسية وأزرار المجموعات، وEnter يفتح القائمة
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.focus());
+  const reached=[];
+  for(let i=0;i<10;i++){
+   await page.keyboard.press('Tab');
+   const info=await page.evaluate(()=>{const a=document.activeElement;return {tab:a?.dataset?.tab||'',group:a?.dataset?.tabGroup||'',tool:a?.dataset?.tabsMenu!==undefined||a?.dataset?.orderFileTabs!==undefined||a?.dataset?.fileFocus!==undefined}});
+   if(info.tab)reached.push(info.tab);
+   if(info.tool)reached.push('tool');
+  }
+  for(const t of ['hearings','procedures','judicial'])assert.ok(reached.includes(t),`لوحة المفاتيح تصل إلى تبويب ${t}`);
+  assert.ok(reached.includes('tool'),'لوحة المفاتيح تصل إلى أدوات العرض');
+  const groupBtn=page.locator('.ftb-group[data-group="gFollow"] .ftb-group-btn');
+  await groupBtn.focus();
+  await page.keyboard.press('Enter');await page.waitForTimeout(300);
+  assert.equal(await page.locator('.ftb-group[data-group="gFollow"] .ftb-menu').isVisible(),true,'Enter يفتح قائمة المجموعة');
+  // كل أقسام القائمة قابلة للوصول بالأسهم وتُفتح بـEnter
+  const menuItems=await page.locator('.ftb-group[data-group="gFollow"] .ftb-menu [role="menuitemradio"]').evaluateAll(ns=>ns.map(n=>n.dataset.tab));
+  assert.deepEqual(menuItems,['relations','timeline','activity'],'أقسام قائمة الارتباطات والمتابعة');
+  let idx=0;
+  for(const t of menuItems){
+   await page.evaluate(i=>{const items=[...document.querySelectorAll('.ftb-group[data-group="gFollow"] .ftb-menu [role="menuitemradio"]')];items[i]?.focus()},idx);
+   await page.keyboard.press('Enter');await page.waitForTimeout(700);
+   assert.ok(await activeTabCheck(t),`Enter يفتح القسم ${t} من القائمة`);
+   await groupBtn.focus();
+   await page.keyboard.press('Enter');await page.waitForTimeout(250);
+   idx+=1;
+  }
+  await page.keyboard.press('Escape');await page.waitForTimeout(200);
+ });
+
+ // (25) الروابط المباشرة: ?tab= لقسم أساسي ولقسم داخل قائمة منسدلة
+ await verify('25) رابط مباشر ?tab= يفتح القسم الصحيح حتى داخل قائمة منسدلة ويُعلّم مجموعته',async()=>{
+  // قسم أساسي
+  await go(`file:${fx.file.id}?tab=procedures`);
+  await page.waitForTimeout(1200);
+  assert.ok(await activeTabCheck('procedures'),'?tab=procedures يفتح تبويب الأعمال الإدارية');
+  // قسم داخل قائمة «البيانات والمراجع»
+  await go(`file:${fx.file.id}?tab=notes`);
+  await page.waitForTimeout(1200);
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الملاحظات','?tab=notes يفتح قسم الملاحظات');
+  assert.equal(await page.locator('.ftb-group[data-group="gRecords"]').getAttribute('class').then(c=>c.includes('is-active')),true,'مجموعة القسم المفتوح مميزة');
+  assert.equal((await page.locator('.ftb-group[data-group="gRecords"] .ftb-active-name').textContent()).trim(),'الملاحظات','اسم القسم المفتوح ظاهر في الزر');
+  const item=page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]');
+  assert.equal(await item.getAttribute('aria-checked'),'true','العنصر داخل القائمة مُعلَّم كنشط');
+  // قسم من قائمة أخرى (للتحقق أن التعليم ينتقل بين المجموعات)
+  await go(`file:${fx.file.id}?tab=relations`);
+  await page.waitForTimeout(1200);
+  assert.equal(await page.locator('.ftb-group[data-group="gFollow"]').getAttribute('class').then(c=>c.includes('is-active')),true,'مجموعة الارتباطات نشطة');
+  assert.equal(await page.locator('.ftb-group[data-group="gRecords"]').getAttribute('class').then(c=>c.includes('is-active')),false,'المجموعة السابقة فقدت التعليل');
+  assert.equal(await page.locator('.ftb-group[data-group="gFollow"] [data-tab="relations"]').getAttribute('aria-checked'),'true');
+ });
+
+ // (26) الطباعة: الشريط غير ملتصق والمحتوى كامل بلا قوائم مفتوحة عابرة
+ await verify('26) وضع الطباعة: الشريط يتحول إلى static ولا تظهر قائمة مفتوحة',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(800);
+  await page.emulateMedia({media:'print'});
+  await page.waitForTimeout(400);
+  const printState=await page.evaluate(()=>{
+   const bar=document.querySelector('.file-tabs-bar');
+   const id=document.querySelector('.file-id');
+   return {pos:getComputedStyle(bar).position,visible:Boolean(id&&id.getBoundingClientRect().height),
+    shellTitle:(document.querySelector('[data-tab-shell-title]')?.textContent||'').trim(),
+    tables:[...document.querySelectorAll('#file-tab table')].length};
+  });
+  assert.equal(printState.pos,'static','الشريط لا يلتصق في الطباعة');
+  assert.equal(printState.visible,true,'رأس الهوية يُطبع');
+  assert.equal(printState.shellTitle,'نظرة عامة','عنوان القسم المطبوع');
+  await page.emulateMedia({media:'screen'});
+  await page.waitForTimeout(300);
+  const back=await page.evaluate(()=>getComputedStyle(document.querySelector('.file-tabs-bar')).position);
+  assert.equal(back,'sticky','يعود الالتصاق بعد الطباعة');
+ });
+
+ // (27) «⚙ تخصيص الصفحة» من الشريط + عدم تكرار المستمعات بعد تنقل متكرر
+ await verify('27) تخصيص الصفحة من الشريط يعمل، والقوائم لا تتكرر مستمعاتها بعد التنقل المتكرر',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.locator('[data-order-file-tabs]').click();
+  await page.waitForTimeout(600);
+  const rows=page.locator('#modal-root .pl-row');
+  await rows.first().waitFor({state:'visible',timeout:8000});
+  assert.equal(await rows.count(),15,'كل الأقسام داخل نافذة التخصيص');
+  // الأسماء تحمل أيقونة القسم في بدايتها — نقارن النص بلا أيقونة
+  const names=(await rows.locator('.pl-name').allTextContents()).map(x=>x.replace(/^[^\p{L}]+/u,'').trim());
+  assert.deepEqual(names.slice(0,4),['نظرة عامة','الجلسات','الأعمال الإدارية','المراحل والإجراءات القضائية'],'ترتيب الأقسام الافتراضي');
+  await page.locator('#modal-root [data-pl-done]').click();
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('#modal-root .pl-row').count(),0,'النافذة أُغلقت');
+  // تنقل متكرر: قائمة واحدة لكل مجموعة ولا فتح مزدوج
+  for(let i=0;i<3;i++){
+   await page.evaluate(()=>document.querySelector('.ftb-group[data-group="gParties"] .ftb-group-btn').click());
+   await page.waitForTimeout(120);
+   await page.keyboard.press('Escape');
+   await page.waitForTimeout(120);
+  }
+  await page.locator('.ftb-group[data-group="gParties"] .ftb-group-btn').click();
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.ftb-menu:visible').count(),1,'قائمة واحدة مفتوحة فقط');
+  assert.equal(await page.locator('.ftb-menu').count(),5,'5 قوائم: 4 مجموعات + كل الأقسام — بلا تكرار للعناصر');
+  await page.locator('.ftb-group[data-group="gParties"] [data-tab="parties"]').click();
+  await page.waitForTimeout(800);
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الأطراف والصفات','الاختيار يفتح القسم مرة واحدة');
+  assert.equal(await page.locator('#file-tab .party-toolbar').count(),1,'محتوى القسم مرة واحدة بلا تكرار');
+ });
+
  // (21) الملخص التنفيذي: كل عنصر ملخص مرتبط بمصدره الأصلي وبلا بيانات مُختلقة
  await verify('21) الملخص التنفيذي: روابط إلى السجلات الأصلية وحالات فارغة صادقة',async()=>{
   await go(`file:${fx.file.id}`);

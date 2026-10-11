@@ -154,8 +154,11 @@ export async function filePage(app,id){
  // التبويب الافتراضي «نظرة عامة» دائمًا، إلا لحالة تنقل مقصودة: رابط صريح (?tab=…) أو
  // آخر تبويب محفوظ لنفس هذا الملف تحديدًا — لا تفضيل عام مشترك يفرض تبويبًا على ملف آخر.
  const explicitTab=routeTab(app);
- const remembered=app.__fileTab&&app.__fileTab.id===id?app.__fileTab.tab:readLastTab(id);
- app.__fileTab=app.__fileTab&&app.__fileTab.id===id?app.__fileTab:{id,tab:explicitTab||(TAB_META.has(remembered)?remembered:'summary')};
+ const sameFileOpen=app.__fileTab&&app.__fileTab.id===id;
+ const remembered=sameFileOpen?app.__fileTab.tab:readLastTab(id);
+ // الأولوية: تبويب مقصود من الرابط (?tab=) ← آخر تبويب محفوظ لنفس الملف ← «نظرة عامة».
+ // كان الرابط الصريح يُتجاهل إذا كان الملف نفسه مفتوحًا؛ الآن يُطبَّق دائمًا (حالة تنقل مقصودة).
+ app.__fileTab=(sameFileOpen&&!explicitTab)?app.__fileTab:{id,tab:explicitTab||(TAB_META.has(remembered)?remembered:'summary')};
  // إذا أخفى المستخدم التبويب النشط من «تخصيص الصفحة»، نعود إلى نظرة عامة (لا بيانات تُفقَد).
  if(hiddenSectionIds('file-details').has(app.__fileTab.tab))app.__fileTab.tab='summary';
  const isClientParty=p=>(p.isClient??p.partyKind==='client');
@@ -182,7 +185,7 @@ export async function filePage(app,id){
     ${head.court?`<p class="fid-court">${esc(head.court)}</p>`:''}
     ${head.sub?`<p class="fid-sub">عنوان الملف: ${esc(head.sub)}</p>`:''}
     ${!head.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
-    <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
+    <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${cur?`<span class="badge stage" title="المرحلة الحالية المسجلة في الملف">المرحلة: ${esc(cur.stageType||cur.numberType||'—')}</span>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
    </div>
    <div class="fid-meta">
     <div class="fid-fno"><span class="fid-fno-kind">ملف فرعي:</span> <b dir="ltr">${esc(formatFileNumber(f)||'—')}</b></div>
@@ -216,7 +219,7 @@ export async function filePage(app,id){
   <div class="ftb-groups" role="group" aria-label="أقسام إضافية">${tabGroupsHtml(app,tabCount)}</div>
   <div class="ftb-tools">
    <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-tabs-menu aria-haspopup="menu" aria-label="كل الأقسام — قائمة التبويبات" title="كل الأقسام">⋯</button>
-    <div class="ux-menu ftb-menu ftb-menu-all" role="menu" aria-label="كل أقسام الملف" hidden>${orderedFileTabs().map(([k,l,icon])=>{const count=tabCount(k);return `<button type="button" role="menuitemradio" aria-checked="${app.__fileTab.tab===k}" class="ux-menu-item ftb-item${hiddenSectionIds('file-details').has(k)?' is-hidden-section':''}" data-menu-tab="${k}"><span aria-hidden="true">${icon}</span> ${esc(l)}${count?` <small class="ftb-n">${count}</small>`:''}${hiddenSectionIds('file-details').has(k)?'<small class="ftb-hid">مخفي</small>':''}</button>`}).join('')}</div></div>
+    <div class="ux-menu ftb-menu ftb-menu-all" role="menu" aria-label="كل أقسام الملف" hidden>${orderedFileTabs().map(([k,l,icon])=>{const count=tabCount(k);return `<button type="button" role="menuitemradio" aria-checked="${app.__fileTab.tab===k}" class="ux-menu-item ftb-item${hiddenSectionIds('file-details').has(k)?' is-hidden-section':''}" data-menu-tab="${k}" aria-controls="file-tab"><span aria-hidden="true">${icon}</span> ${esc(l)}${count?` <small class="ftb-n">${count}</small>`:''}${hiddenSectionIds('file-details').has(k)?'<small class="ftb-hid">مخفي</small>':''}</button>`}).join('')}</div></div>
    <button type="button" class="ghost icon-only" data-file-focus aria-pressed="${focusOn}" title="وضع التركيز: إخفاء العناصر الثانوية مع بقاء التنبيهات والإجراءات" aria-label="${focusOn?'الخروج من وضع التركيز':'وضع التركيز'}">${focusOn?'◉':'◎'}</button>
    <button type="button" class="ghost icon-only" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض" aria-label="تخصيص الصفحة">⚙</button>
   </div>
@@ -246,7 +249,7 @@ function tabGroupsHtml(app,tabCount){
   const activeItem=on?g.tabs.find(([id])=>id===active):null;
   const items=g.tabs.map(([k,l,icon])=>{
    const count=tabCount(k);const onItem=active===k;
-   return `<button type="button" role="menuitemradio" aria-checked="${onItem}" class="ux-menu-item ftb-item${onItem?' is-on':''}${count?' has-data':''}" data-tab="${esc(k)}" data-menu-tab="${esc(k)}" data-section-id="${esc(k)}" data-group="${esc(g.id)}" title="${esc(l)}"><span class="ftb-item-ic" aria-hidden="true">${icon}</span><span class="ftb-item-label">${esc(l)}</span>${count?`<small class="ftb-n">${count}</small>`:''}${onItem?'<span class="ftb-check" aria-hidden="true">✓</span>':''}</button>`;
+   return `<button type="button" role="menuitemradio" aria-checked="${onItem}" class="ux-menu-item ftb-item${onItem?' is-on':''}${count?' has-data':''}" data-tab="${esc(k)}" data-menu-tab="${esc(k)}" data-section-id="${esc(k)}" data-group="${esc(g.id)}" aria-controls="file-tab" title="${esc(l)}"><span class="ftb-item-ic" aria-hidden="true">${icon}</span><span class="ftb-item-label">${esc(l)}</span>${count?`<small class="ftb-n">${count}</small>`:''}${onItem?'<span class="ftb-check" aria-hidden="true">✓</span>':''}</button>`;
   }).join('');
   return `<div class="ux-menu-wrap ftb-group${on?' is-active':''}" data-group="${esc(g.id)}">
    <button type="button" class="subtab-btn ftb-group-btn" data-tab-group="${esc(g.id)}" aria-haspopup="menu" aria-expanded="false" aria-controls="ftb-menu-${esc(g.id)}" aria-current="${on?'true':'false'}" title="${esc(g.label)} — ${g.tabs.map(([,l])=>l).join('، ')}" aria-label="${esc(g.label)}${on&&activeItem?` — المفتوح: ${esc(activeItem[1])}`:''}">
