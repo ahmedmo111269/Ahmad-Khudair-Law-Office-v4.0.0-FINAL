@@ -1,7 +1,7 @@
 // اختبارات مركز العمل في متصفح Chromium حقيقي (DOM + IndexedDB حقيقيان).
 //   WC_BROWSER_SCENARIO = functional | mobile | perf | offline | all (الافتراضي)
 //   WC_BASE_URL (الافتراضي http://127.0.0.1:8000) · WC_BROWSER_EXECUTABLE لاستخدام متصفح مثبّت.
-//   WC_PERF_SCALE (الافتراضي 1 ≈ 305 ألف سجل) يضرب أحجام بذرة الأداء؛ WC_REPORT_FILE اسم ملف التقرير (الافتراضي report.json).
+//   WC_PERF_SCALE (الافتراضي 1 ≈ 305 ألف سجل) يضرب أحجام بذرة الأداء؛ WC_PERF_RECORDS يطلب حجمًا كليًا دقيقًا (يشمل علاقات الملف) لقياسات التكافؤ؛ WC_PERF_MOBILE=1 يشغّل بنفس الحجم ضمن محاكاة عرض Android 412×915 (DPR 2.625؛ بلا CPU/network throttling)؛ WC_REPORT_FILE اسم ملف التقرير (الافتراضي report.json).
 // لا يختبر: الطباعة الفعلية، أجهزة اللمس الحقيقية (يُحاكى اللمس فقط)، ولا اتصال الإنترنت (الخطوط الخارجية تفشل في العزلة وتُهمَل).
 // كل سطر VERIFIED يعني أن التحقق نُفِّذ فعلًا وانتهى بنجاح؛ أي فشل يُوقف الاختبار ويُسجَّل.
 import {chromium} from 'playwright';
@@ -14,7 +14,9 @@ import assert from 'node:assert/strict';
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const base = (process.env.WC_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const scenario = process.env.WC_BROWSER_SCENARIO || 'all';
-const perfScale = Math.max(0.1, Number(process.env.WC_PERF_SCALE || 1));
+const requestedPerfRecords = Number(process.env.WC_PERF_RECORDS || 0);
+if (requestedPerfRecords && (!Number.isSafeInteger(requestedPerfRecords) || requestedPerfRecords < 1000)) throw new Error('WC_PERF_RECORDS must be a safe integer of at least 1000.');
+const perfScale = requestedPerfRecords ? requestedPerfRecords / 305000 : Math.max(0.1, Number(process.env.WC_PERF_SCALE || 1));
 const reportFile = process.env.WC_REPORT_FILE || 'report.json';
 const outDir = path.join(repository, '.cache', 'work-center-browser');
 await fs.mkdir(outDir, {recursive: true});
@@ -832,6 +834,46 @@ async function functional() {
     await goWC(page);
   });
 
+  await verify('سياق المتابعة المرتبطة بالتنفيذ: تفتح بطاقة exc المسجلة؛ وعند حذف المصدر تبقى العلاقة معلنة بلا رابط مكسور', async () => {
+    const context=await page.evaluate(async ([clientId,fileId,day])=>{
+      const office=window.__LAW_OFFICE_APP__.office;
+      const {createSimpleExecution}=await import('/js/services/execution-simple.js');
+      const {saveWorkItem}=await import('/js/services/work-items.js');
+      const created=await createSimpleExecution(office,{clientId,fileId,executionType:'civil',valueType:'fixed',amount:1500,judgmentDate:day,entitlementThroughDate:day,officialNumber:'WCTEST-CONTEXT'});
+      const task=await saveWorkItem(office,{title:'WCTEST متابعة تنفيذ مرتبطة',dueDate:day,type:'متابعة',relatedType:'execution',relatedId:created.execution.id});
+      return {executionId:created.execution.id,taskId:task.id};
+    },[fx.clientId,fx.fileId,today()]);
+    await useTask(page,'WCTEST متابعة تنفيذ مرتبطة');
+    await page.locator(`.wc-card[data-wc-id="${context.taskId}"] .wc-title`).click();
+    await page.waitForSelector('.wc-drawer .wc-links');
+    const executionLink=page.locator(`.wc-drawer [data-wc-nav="exc:${context.executionId}"]`);
+    assert.equal(await executionLink.count(),1,'رابط التنفيذ يجب أن يستخدم exc:<id> لا rec:execution:<id>');
+    await executionLink.click();
+    await page.waitForFunction(id=>window.__LAW_OFFICE_APP__.route===`exc:${id}`,context.executionId,{timeout:15000});
+    await page.waitForSelector('.exec-head');
+    await page.waitForFunction(()=>{const app=window.__LAW_OFFICE_APP__;return !app.routeHistory?.pendingMode&&app.routeHistory?.currentRoute===app.route;},null,{timeout:15000});
+    await page.evaluate(()=>window.__LAW_OFFICE_APP__.back());
+    try{await page.waitForFunction(()=>String(window.__LAW_OFFICE_APP__.route||'').split('?')[0]==='actionCenter',null,{timeout:15000})}
+    catch{const state=await page.evaluate(()=>({route:window.__LAW_OFFICE_APP__.route,historyRoute:window.__LAW_OFFICE_APP__.routeHistory?.currentRoute,depth:window.__LAW_OFFICE_APP__.routeHistory?.depth,hash:location.hash}));throw new Error(`الرجوع من بطاقة التنفيذ لم يعد إلى مركز العمل: ${JSON.stringify(state)}`)}
+    await ready(page);
+    await useTask(page,'WCTEST متابعة تنفيذ مرتبطة');
+    await page.locator(`.wc-card[data-wc-id="${context.taskId}"] .wc-title`).click();
+    await page.waitForSelector('.wc-drawer .wc-links');
+    await page.evaluate(id=>window.__LAW_OFFICE_APP__.office.softDelete('execution',id),context.executionId);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wc-drawer',{state:'detached'});
+    await page.waitForTimeout(250);
+    await useTask(page,'WCTEST متابعة تنفيذ مرتبطة');
+    await page.locator(`.wc-card[data-wc-id="${context.taskId}"] .wc-title`).click();
+    await page.waitForSelector('.wc-drawer .wc-links');
+    assert.equal(await page.locator(`.wc-drawer [data-wc-nav="exc:${context.executionId}"]`).count(),0,'لا رابط لبطاقة محذوفة');
+    assert.ok((await page.locator('.wc-drawer .wc-links').textContent()).includes('السجل المرتبط (تنفيذ) غير متاح حاليًا'));
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wc-drawer',{state:'detached'});
+    await page.click('[data-wc-range="today"]');await ready(page);
+    await page.fill('#wc-q','');await page.waitForTimeout(450);await ready(page);
+  });
+
   await verify('السيناريو الكامل (3): «تسجيل النتيجة/التأجيل» يكتب في سجل الجلسة نفسه ثم يُعرض «إنشاء مهمة متابعة» ويُنشأ فقط عند الضغط', async () => {
     const adjourn = addDays(today(), 10);
     await page.click('[data-wc-range="today"]'); await ready(page);
@@ -1272,12 +1314,23 @@ async function mobile() {
 async function perf() {
   // سياق دائم بملف مؤقت: سياقات newContext() العابرة لها حصة تخزين صغيرة (QuotaExceededError) لا تناسب بيانات بحجم مئات الآلاف من السجلات.
   const profileDir = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'wc-perf-profile-'));
-  const context = await chromium.launchPersistentContext(profileDir, {executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'], viewport: {width: 1280, height: 900}, serviceWorkers: 'block', locale: 'ar-EG'});
+  const mobilePerf = process.env.WC_PERF_MOBILE === '1';
+  const perfViewport = mobilePerf ? {width: 412, height: 915} : {width: 1280, height: 900};
+  const context = await chromium.launchPersistentContext(profileDir, {executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'], viewport: perfViewport, deviceScaleFactor: mobilePerf ? 2.625 : 1, isMobile: mobilePerf, hasTouch: mobilePerf, serviceWorkers: 'block', locale: 'ar-EG'});
   report.perfProfileDir = profileDir;
+  report.metrics.environment = {viewport: perfViewport, deviceScaleFactor: mobilePerf ? 2.625 : 1, mobileEmulation: mobilePerf, cpuThrottling: false, networkThrottling: false};
+  if (mobilePerf) console.log('   محاكاة الأداء: Android viewport 412×915 CSS px، DPR 2.625، بلا خنق للمعالج/الشبكة (ليست جهازًا فعليًا)');
   const stats = () => { window.__idb = {cursorSteps: 0, getAllRows: 0, cursors: 0}; const proto = IDBCursor.prototype, origC = proto.continue, origA = proto.advance; proto.continue = function (...a) { window.__idb.cursorSteps++; return origC.apply(this, a); }; proto.advance = function (...a) { window.__idb.cursorSteps += a[0] || 1; return origA.apply(this, a); }; for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) { const oc = P.openCursor; P.openCursor = function (...a) { window.__idb.cursors++; return oc.apply(this, a); }; const ga = P.getAll; P.getAll = function (...a) { const r = ga.apply(this, a); r.addEventListener('success', () => { window.__idb.getAllRows += r.result?.length || 0; }); return r; }; } };
   const page = await newPage(context, {init: stats}); currentPage = page;
   await boot(page);
   const target = Object.fromEntries(Object.entries({clients: 5000, files: 20000, hearings: 100000, procedures: 50000, appointments: 20000, communications: 20000, natives: 30000}).map(([k, v]) => [k, Math.round(v * perfScale)]));
+  if (requestedPerfRecords) {
+    // Total seeded records include one file, one case, fileClients and fileParties per target file.
+    // Reconcile the small rounding remainder against hearings so W5 fixtures are exactly repeatable.
+    const generatedTotal = Object.entries(target).reduce((sum, [key, count]) => sum + count + (key === 'files' ? count * 3 : 0), 0);
+    target.hearings += requestedPerfRecords - generatedTotal;
+    if (target.hearings < 1 || target.clients < 8 || target.files < 8 || target.natives < 20) throw new Error('WC_PERF_RECORDS is too small for the Work Center fixture shape.');
+  }
   const t0 = Date.now();
   const seeded = await page.evaluate(async cfg => {
     const app = window.__LAW_OFFICE_APP__, db = app.office.ctx.db;
@@ -1314,7 +1367,8 @@ async function perf() {
     });
     return {total: cfg.clients + cfg.files * 4 + cfg.hearings + cfg.procedures + cfg.appointments + cfg.communications + cfg.natives, sampleClient: clients[7].fullName, sampleFile: files[7].fileNumber};
   }, target);
-  report.metrics.seed = {...target, totalRecords: seeded.total, seconds: Math.round((Date.now() - t0) / 100) / 10};
+  if (requestedPerfRecords && seeded.total !== requestedPerfRecords) throw new Error(`Work Center fixture size mismatch: requested ${requestedPerfRecords}, seeded ${seeded.total}.`);
+  report.metrics.seed = {...target, requestedTotal: requestedPerfRecords || null, totalRecords: seeded.total, seconds: Math.round((Date.now() - t0) / 100) / 10};
   console.log(`   بذرة الأداء: ${seeded.total.toLocaleString('en')} سجلًا في ${report.metrics.seed.seconds}s`);
 
   const measure = async (label, fn, limitMs) => {
@@ -1328,7 +1382,7 @@ async function perf() {
   };
   const total = seeded.total;
   const minDenseResults = Math.min(50, Math.max(5, Math.floor(50 * perfScale)));
-  const cursorBudget = share => Math.max(total * share, 12_000); // حد عملي للسيناريوهات المصغرة؛ المقاييس الكبيرة تحكمها النسبة.
+  const cursorBudget = share => Math.max(total * share, 12_000); // حد تشغيل مشترك؛ سجّل دائمًا نسبة العينة الفعلية ولا تخلط الحد الأدنى بها.
   await verify(`الأداء والدقة: ملخص الرأس على ${Math.round(total / 1000)} ألف سجل بقراءة محدودة، وأرقام اليوم صحيحة ولا يحجبها تراكم المتأخر القديم`, async () => {
     const r = await measure('summary', () => page.evaluate(async () => {
       const m = await import('/js/services/work-query.js'); const office = window.__LAW_OFFICE_APP__.office;
@@ -1338,16 +1392,22 @@ async function perf() {
       return {todayCount: s.todayCount, tomorrow: s.tomorrow, overdue: s.overdue, overdueCapped: s.overdueCapped, forwardCapped: s.forwardCapped, todayExact: todayAll.items.length, tomorrowExact: tomorrowAll.items.length};
     }), 9000);
     const m = report.metrics.summary;
+    m.cursorRatio=Number((r.io.cursorSteps/total).toFixed(4));m.getAllRatio=Number((r.io.getAllRows/total).toFixed(4));
     assert.ok(m.todayExact >= minDenseResults, `بيانات اليوم أقل من كثافة السيناريو: ${m.todayExact} < ${minDenseResults}`);
     if (perfScale >= 1) assert.ok(m.forwardCapped, 'النافذة الأمامية بلغت سقفها (بيانات كثيفة) وتُعلن ذلك');
     assert.equal(m.todayCount, m.todayExact, 'رقم اليوم في الملخص لا يطابق القراءة المباشرة'); assert.equal(m.tomorrow, m.tomorrowExact);
     if (perfScale >= 1) assert.ok(m.overdueCapped && m.overdue === 1000, 'المتأخر الكثير يُعرض مسقوفًا (1000+) ولا يؤثر على أرقام اليوم');
     assert.ok(r.io.cursorSteps < cursorBudget(0.08), `قراءة مفرطة: ${r.io.cursorSteps}`);
   });
-  await verify('الأداء: فتح مركز العمل (اليوم) كاملًا على الشاشة (بطاقات + عدّادات) بقراءة أقل من 8% من السجلات ودون getAll', async () => {
+  await verify('الأداء: فتح مركز العمل (اليوم) كاملًا — قياس زمن القراءة المفهرسة وgetAll على حجم العينة', async () => {
     const r = await measure('open_today', async () => { await page.evaluate(() => window.__LAW_OFFICE_APP__.go('actionCenter')); await page.waitForSelector('#wc-root'); await ready(page); await page.waitForSelector('.wc-stat'); return {cards: await page.locator('.wc-card').count()}; }, 8000);
+    const getAllBudget=Math.max(total*0.01,200); // مقياس 1k يلتقط الحد المطلق الأساسي بدل رفض نسبة صغيرة مضخّمة بالعينة.
+    report.metrics.open_today.getAllBudget=getAllBudget;
+    report.metrics.open_today.cursorBudget=cursorBudget(0.08);
+    report.metrics.open_today.cursorRatio=Number((r.io.cursorSteps/total).toFixed(4));
+    report.metrics.open_today.getAllRatio=Number((r.io.getAllRows/total).toFixed(4));
     assert.ok(r.io.cursorSteps < cursorBudget(0.08), `قراءة مفرطة لفتح اليوم: ${r.io.cursorSteps}`);
-    assert.ok(r.io.getAllRows < total * 0.01, `getAll مفرط: ${r.io.getAllRows}`);
+    assert.ok(r.io.getAllRows <= getAllBudget, `getAll مفرط: ${r.io.getAllRows} > ${getAllBudget}`);
     assert.ok(report.metrics.open_today.cards >= minDenseResults);
     await shot(page, 'perf-today.png');
   });
@@ -1359,17 +1419,17 @@ async function perf() {
       assert.ok((report.metrics[label].items || 0) <= 50);
     }
   });
-  await verify('الأداء: الترقيم بمؤشر عميق (الصفحة 20 من الشهر) بزمن مماثل للأولى ولا إعادة قراءة للكل', async () => {
-    let cursor = null; let t1 = 0, t20 = 0;
+  await verify('الأداء: الترقيم بالمؤشر يقيس العمق المتاح، والصفحة 20 عند وجود 20 صفحة', async () => {
+    let cursor = null; let t1 = 0, t20 = 0, pagesFetched = 0;
     for (let p = 1; p <= 20; p++) {
       const t = Date.now();
       const r = await page.evaluate(async ([c]) => { const m = await import('/js/services/work-query.js'); const x = await m.queryWorkItems(window.__LAW_OFFICE_APP__.office, {range: 'year'}, {limit: 50, cursor: c}); return {next: x.nextCursor, more: x.hasMore, n: x.items.length}; }, [cursor]);
-      const ms = Date.now() - t; if (p === 1) t1 = ms; if (p === 20) t20 = ms;
+      const ms = Date.now() - t; pagesFetched=p; if (p === 1) t1 = ms; if (p === 20) t20 = ms;
       cursor = r.next; if (!r.more) break;
     }
-    report.metrics.pagination = {page1Ms: t1, page20Ms: t20};
-    console.log(`   ترقيم: الصفحة 1 = ${t1}ms، الصفحة 20 = ${t20}ms`);
-    assert.ok(t20 < 3500, `الصفحة 20 بطيئة: ${t20}ms`);
+    report.metrics.pagination = {page1Ms: t1, page20Ms: t20, pagesFetched, deepPageReached: pagesFetched >= 20};
+    console.log(`   ترقيم: الصفحة 1 = ${t1}ms، صفحات متاحة = ${pagesFetched}${pagesFetched>=20?`، الصفحة 20 = ${t20}ms`:'؛ لا توجد 20 صفحة في هذه العينة'}`);
+    if(pagesFetched>=20)assert.ok(t20 < 3500, `الصفحة 20 بطيئة: ${t20}ms`);
   });
   await verify('الأداء: البحث النصي (اسم موكل/رقم ملف) داخل نطاق الشهر والسنة بقراءة محدودة', async () => {
     const byClient = await q('search_client_month', {range: 'month', q: seeded.sampleClient}, {limit: 25}, 6000);

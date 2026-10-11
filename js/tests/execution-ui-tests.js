@@ -85,7 +85,12 @@ function fakeApp(office) {
   const calls = [];
   return {
     office, calls,
-    go(route) { calls.push(['go', route]); return Promise.resolve(); },
+    go(route,opts={}) {
+      calls.push(['go', route]);this.route=route;
+      const base=String(route||'').split('?')[0],tab=new URLSearchParams(String(route||'').split('?')[1]||'').get('tab');
+      if(base===`exc:${this.__executionTabId}`&&this.__executionApplyTab&&this.__executionTabValid?.(tab))return this.__executionApplyTab(tab,{scrollTo:opts.tabScrollTo||''});
+      return Promise.resolve();
+    },
     refresh() { calls.push(['refresh']); return Promise.resolve(); },
     fail(error) { throw error; },
     __execCenter: null, __execSimple: {}
@@ -157,6 +162,28 @@ export async function runExecutionUiTests(test, expect) {
       expect(Boolean(main().querySelector('.advanced-anchor'))).toBe(true);
       click(main().querySelector('[data-tab="account"]'));
       expect(main().querySelectorAll('.account-table tbody tr').length).toBe(12);
+    } finally { cleanup(); closeEnv(e); }
+  });
+
+  test('واجهة — بطاقة التنفيذ: سياق الموكل/الملف/القضية/الخصم روابط فعلية والحذف يظهر كحالة غير متاحة', async () => {
+    const e = await env();
+    try {
+      const stage=await e.office.createCase({fileId:e.execution.fileId,stageType:'استئناف',caseNumber:'EX-42',caseYear:'2026'});
+      const execution=await e.office.r.execution.get(e.execution.id);
+      await e.office.r.execution.put({...execution,caseId:stage.id});
+      const bundle=await S.simpleCardBundle(e.office,e.execution.id);
+      const opponentId=bundle.opponent?.id;
+      expect(Boolean(opponentId)).toBe(true);
+      const app=fakeApp(e.office);
+      const html=await CENTER.executionDetailPage(app,e.execution.id);
+      const contextNav=html.match(/<nav class="parent-links record-context-links"[\s\S]*?<\/nav>/)?.[0]||'';
+      for(const route of [`client:${e.client.id}`,`file:${e.execution.fileId}`,`case:${stage.id}`,`opponent:${opponentId}`])if(!contextNav.includes(`data-route="${route}"`))throw Error(`السياق لم يُنشئ الرابط ${route}`);
+      expect(html.includes('أنت هنا: بطاقة التنفيذ')).toBe(true);
+      await e.office.softDelete('opponents',opponentId);
+      const afterDelete=await CENTER.executionDetailPage(app,e.execution.id);
+      const routeMarker=`data-route="opponent:${opponentId}"`;const routeIndex=afterDelete.indexOf(routeMarker);
+      if(routeIndex>=0)throw Error(`رابط الخصم المحذوف ما زال ظاهرًا: ${afterDelete.slice(Math.max(0,routeIndex-160),routeIndex+220)}`);
+      expect(afterDelete.includes('الخصم: السجل المرتبط غير متاح حاليًا')).toBe(true);
     } finally { cleanup(); closeEnv(e); }
   });
 

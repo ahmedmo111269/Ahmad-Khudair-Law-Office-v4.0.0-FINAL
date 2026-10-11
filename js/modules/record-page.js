@@ -4,7 +4,7 @@ import {esc} from '../ui/dom.js';
 import {toast} from '../ui/toast.js';
 import {confirmBox} from '../ui/modal.js';
 import {openEntityForm} from '../ui/form.js';
-import {ENTITIES,displayValue,label,fmtDate,phonesOf} from '../domain/entities.js';
+import {ENTITIES,displayValue,label,fmtDate,phonesOf,entityRoute} from '../domain/entities.js';
 import {resolveRefs,clientRelated,opponentRelated,refLabel} from '../services/entity-query.js';
 import {deleteEntity,restoreEntity} from '../services/entity-save.js';
 import {sectionGrid,routeFor,listNavHtml,bindListNav} from './list-page.js';
@@ -28,13 +28,36 @@ const taskScope=(store,id)=>store==='cases'?{caseId:id}:{relatedId:id};
 const NOTE_ENTITY_TYPES={clients:'CLIENT',files:'LEGAL_FILE',cases:'CASE',fileParties:'PARTY',hearings:'HEARING',procedures:'PROCEDURE',judgments:'JUDGMENT',execution:'EXECUTION',powersOfAttorney:'POA',serviceRecords:'SERVICE_RECORD',expertReports:'EXPERT_REPORT',appointments:'APPOINTMENT',communications:'COMMUNICATION',fees:'FEE',documentReferences:'DOCUMENT_REFERENCE'};
 
 export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
- const items=fields.map(f=>{const v=displayValue(f,row,refs);if(skipEmpty&&!v)return '';const link=f.ref&&row[f.k]?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}</dd></div>`}).join('');
+ const items=fields.map(f=>{
+  const v=displayValue(f,row,refs);
+  if(skipEmpty&&!v)return '';
+  const hasStoredRef=Boolean(f.ref&&row?.[f.k]);
+  const refsCanVerify=typeof refs?.has==='function';
+  const isLiveRef=hasStoredRef&&refsCanVerify&&refs.has(row[f.k]);
+  const route=isLiveRef?entityRoute(f.ref,row[f.k]):null;
+  const link=route?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';
+  const unavailable=hasStoredRef&&refsCanVerify&&!isLiveRef
+   ?'<small class="record-ref-unavailable muted" role="status">السجل المرتبط غير متاح حاليًا.</small>':'';
+  return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}${unavailable}</dd></div>`;
+ }).join('');
  return items?`<dl class="kv">${items}</dl>`:'<p class="muted">لا توجد بيانات مسجلة بعد. اضغط «تعديل البيانات» لإضافتها.</p>';
 }
 export function section(key,title,count,body,{open=true,add=''}={}){
  return `<details class="rec-section" data-sec="${esc(key)}" data-section-id="${esc(key)}" ${open?'open':''}><summary><span>${esc(title)}</span>${count!==null&&count!==undefined?`<span class="count">${count}</span>`:''}</summary>${add?`<div class="sec-actions">${add}</div>`:''}<div class="sec-body">${body}</div></details>`;
 }
-const refRoute={files:'file',cases:'case',clients:'client',opponents:'opponent'};
+function currentContextNav(label,relations=''){
+ return `<nav class="parent-links record-context-links" aria-label="سياق السجل"><span class="record-context-current" aria-current="page">أنت هنا: ${esc(label)}</span>${relations}</nav>`;
+}
+function recordContextNav(ent,row,refs){
+ const fields=ent.fields.filter(f=>f.ref&&row?.[f.k]);
+ const links=fields.filter(f=>refs?.has?.(row[f.k])&&entityRoute(f.ref,row[f.k])).map(f=>
+  `<button type="button" class="ghost" data-open-ref="${esc(f.ref)}:${esc(row[f.k])}">فتح ${esc(f.l.replace(/\s*\(.*\)/,''))}: ${esc(refs.get(row[f.k])||ent.label)}</button>`
+ ).join('');
+ const unavailable=fields.filter(f=>typeof refs?.has==='function'&&!refs.has(row[f.k])).map(f=>
+  `<span class="record-context-unavailable muted" role="status">${esc(f.l)}: السجل المرتبط غير متاح حاليًا</span>`
+ ).join('');
+ return currentContextNav(ent.label,links+unavailable);
+}
 function relatedCount(r,key,rows){return `${rows.length}${r.more?.[key]?'+':''}`}
 function relatedLimitNotice(r){
  const labels={files:'الملفات',cases:'القضايا',hearings:'الجلسات',powersOfAttorney:'التوكيلات',appointments:'المواعيد',communications:'الاتصالات'};
@@ -52,7 +75,7 @@ function orderedClientSectionKeys(){
  migrateLegacySectionOrder('client-details','client-sections:order');
  return resolveSectionOrder('client-details');
 }
-export function bindRefLinks(app,root){root.querySelectorAll('[data-open-ref]').forEach(el=>el.addEventListener('click',()=>{const [s,id]=el.dataset.openRef.split(':');if(refRoute[s])app.go(`${refRoute[s]}:${id}`);else app.go(`rec:${s}:${id}`)}))}
+export function bindRefLinks(app,root){root.querySelectorAll('[data-open-ref]').forEach(el=>el.addEventListener('click',()=>{const [store,id]=el.dataset.openRef.split(':');const route=entityRoute(store,id);if(route)app.go(route)}))}
 
 async function confirmDelete(app,store,id){
  if(!await confirmBox(`حذف منطقي لهذا السجل (${esc(ENTITIES[store].label)})؟ يبقى محفوظًا في قاعدة البيانات ويمكن مراجعته من مركز الإصلاح، ولا يُحذف نهائيًا.`,{okText:'حذف منطقي'}))return;
@@ -83,7 +106,7 @@ export async function clientPage(app,id){
   appointments:section('appointments','المواعيد',relatedCount(r,'appointments',r.appointments),'<div data-grid="appointments"></div>',{open:false,add:'<button class="ghost" data-add="appointments">+ موعد</button>'}),
   communications:section('communications','الاتصالات',relatedCount(r,'communications',r.communications),'<div data-grid="communications"></div>',{open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
  };
- return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
+ return `<div class="record-head"><div><small class="muted">موكل</small><h2>${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p>${currentContextNav('موكل')}</div>
  <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-wc-client-task>+ مهمة</button><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>${relatedLimitNotice(r)}${clientWorkPanel}${orderedClientSectionKeys().map(key=>parts[key]).join('')}`;
 }
 export async function bindClientPage(app,id){
@@ -115,7 +138,7 @@ export async function opponentPage(app,id){
  app.__rec={store:'opponents',id,related:await opponentRelated(app.office,id)};
  const r=app.__rec.related;
  const refs=await resolveRefs(app.office,[o],ENTITIES.opponents.fields);
- return `<div class="record-head"><div><small class="muted">خصم</small><h2>${esc(o.name)}</h2><p class="badges">${phonesOf(o).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${o.capacity?`<span class="badge">${esc(o.capacity)}</span>`:''}</p></div>
+ return `<div class="record-head"><div><small class="muted">خصم</small><h2>${esc(o.name)}</h2><p class="badges">${phonesOf(o).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${o.capacity?`<span class="badge">${esc(o.capacity)}</span>`:''}</p>${currentContextNav('خصم')}</div>
  <div class="head-actions"><button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:false})}
  ${relatedLimitNotice(r)}${section('files','الملفات',relatedCount(r,'files',r.files),'<div data-grid="files"></div>')}
@@ -172,7 +195,7 @@ export async function recordPage(app,store,id){
  const caseTimeline=store==='cases'?await buildCaseTimeline(app.office,id):null;
  app.__rec={store,id,row,children,activity,hearingSequence,serviceSequence,caseTimeline,quickNotes,noteEntityType};
  trackRecent(`rec:${store}:${id}`,ent.title(row)||ent.label,{icon:{hearings:'calendar',appointments:'clock',communications:'phone',fees:'wallet',judgments:'landmark',procedures:'clipboard',caseNotes:'note',serviceRecords:'file',expertReports:'microscope',execution:'hammer'}[store]||'file',sub:ent.label,scope:app.ctx?.profile?.id||''});
- const parentBtns=ent.fields.filter(f=>f.ref&&row[f.k]).map(f=>`<button class="ghost" data-open-ref="${esc(f.ref)}:${esc(row[f.k])}">فتح ${esc(f.l.replace(/\s*\(.*\)/,''))}: ${esc(refs.get(row[f.k])||'')}</button>`).join('');
+ const contextNav=recordContextNav(ent,row,refs);
  const extraBtns=[
   store==='hearings'?'<button class="ghost" data-show-hearing-cycle>عرض دورة الجلسات</button><button class="ghost" data-next-hearing>+ الجلسة التالية</button><button class="ghost" data-hearing-service>+ إعلان مرتبط بالجلسة</button>':'',
   store==='serviceRecords'? '<button class="ghost" data-show-service-cycle>عرض دورة الإعلان</button><button class="primary" data-service-reannounce>+ إنشاء إعادة إعلان</button>':'',
@@ -182,7 +205,7 @@ export async function recordPage(app,store,id){
   TASK_LINK_STORES.includes(store)?`<button class="ghost" data-wc-linked-task>${store==='hearings'?'+ مهمة متابعة للجلسة':'+ مهمة مرتبطة'}</button>`:''
  ].join('');
  const workPanel=TASK_LINK_STORES.includes(store)?await linkedTasksPanelHtml(app.office,taskScope(store,id),{title:'المهام المرتبطة',collapseId:`rec-work:${store}`,centerRoute:`actionCenter?${store==='cases'?'caseId':'relatedId'}=${encodeURIComponent(id)}`}):'';
- return `<div class="record-head"><div><small class="muted">${esc(ent.label)}</small><h2>${esc(ent.title(row)||ent.label)}</h2><div class="parent-links">${parentBtns}</div></div>
+ return `<div class="record-head"><div><small class="muted">${esc(ent.label)}</small><h2>${esc(ent.title(row)||ent.label)}</h2>${contextNav}</div>
  <div class="head-actions">${listNavHtml(app,store,id)}${extraBtns}<button class="ghost" data-customize-page title="ترتيب الأقسام وإظهارها وحالة الطي وإعدادات العرض">⚙ تخصيص الصفحة</button><button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></div>
  ${section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{open:true})}
  ${recordQuickNotesPanel(quickNotes,store,id)}

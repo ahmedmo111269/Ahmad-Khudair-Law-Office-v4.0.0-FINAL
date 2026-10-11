@@ -96,7 +96,10 @@ export class RouteHistory {
     // إذا اختيرت صفحة في النافذة نفسها، نؤجل push/replace إلى ما بعد popstate
     // حتى لا يستهلك الرجوع البرمجي مدخل الصفحة الجديدة أو يعيد الـhash القديم.
     if (this.pendingMode === 'silent' && Date.now() <= this.pendingUntil) {
-      this.pendingRouteAfterGuard = {route, replace};
+      // Canonicalisation can immediately follow a user push (for example adding
+      // ?tab= to a deep link). Keep the final URL but retain the initial push intent.
+      const prior = this.pendingRouteAfterGuard;
+      this.pendingRouteAfterGuard = {route, replace: prior ? prior.replace && replace : replace};
       return;
     }
     // أول إقلاع: مدخل الإقلاع نفسه يحمل المسار الابتدائي، فلا نضيف مدخلاً مكررًا

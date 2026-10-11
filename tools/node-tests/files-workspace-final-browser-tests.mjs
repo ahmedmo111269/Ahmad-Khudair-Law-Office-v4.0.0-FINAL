@@ -445,7 +445,7 @@ try{
   await page.locator('#list-grid tbody tr[data-i]').first().click();
   await page.waitForTimeout(1200);
   assert.ok((await route()).startsWith('file:'),'لم يفتح صفحة الملف');
-  const fileId=(await route()).slice(5);
+  const fileId=(await route()).split('?')[0].slice(5);
   const before=await page.evaluate(async id=>{const f=await window.__LAW_OFFICE_APP__.office.r.files.get(id);return Boolean(f?.isArchived)},fileId);
   // قائمة إجراءات الملف (⋯) فيها أرشفة
   await page.locator('[data-card-menu]').click();

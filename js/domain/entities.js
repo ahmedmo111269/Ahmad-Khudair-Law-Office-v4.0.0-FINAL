@@ -502,6 +502,12 @@ export const ENTITIES={
 };
 export const ENTITY_LABEL=Object.fromEntries(Object.entries(ENTITIES).map(([k,v])=>[k,v.label]));
 
+/** المسار المسجّل لسجل بعينه؛ التنقل الفعلي يبقى عبر App.go(). */
+export function entityRoute(store,id){
+ const route=ENTITIES[store]?.route;
+ return route&&id?`${route}:${id}`:null;
+}
+
 export {fmtDate,fmtDateTime};
 export const phonesOf=r=>[...(Array.isArray(r?.phones)?r.phones:[]),r?.phone,r?.phone1,r?.phone2].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
 

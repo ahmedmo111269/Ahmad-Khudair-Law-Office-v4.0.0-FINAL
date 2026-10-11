@@ -10,6 +10,7 @@ import {NetworkStatusService, ONLINE, OFFLINE} from '../core/network-status.js';
 import {OnlineCapabilityRegistry} from '../core/online-capabilities.js';
 import {FileExchangeSyncTransportAdapter} from '../services/sync-transport.js';
 import {encryptSyncEnvelope, decryptSyncEnvelope, ENCRYPTED_SYNC_FORMAT} from '../services/sync-crypto.js';
+import * as QuickNotes from '../services/quick-notes.js';
 
 const rejects = async fn => { try { await fn(); } catch (error) { return error; } throw Error('Expected promise to reject'); };
 
@@ -94,6 +95,39 @@ export async function runSyncTests(test, expect) {
       applied: deleteApply.applied,
       remoteTombstone: remoteTombstone?.isDeleted === true
     };
+
+    // Explicit Quick Notes purge removes the local row but records a causal purge
+    // tombstone; peers apply the same hard removal, while an offline concurrent
+    // edit is retained as a conflict rather than recreating the purged note.
+    const purgeSource = await createDevice('PurgeSource');
+    const purgePeer = await createDevice('PurgePeer');
+    const purgeObserver = await createDevice('PurgeObserver');
+    try {
+      await Promise.all([initializeSyncBaseline(purgeSource.ctx), initializeSyncBaseline(purgePeer.ctx), initializeSyncBaseline(purgeObserver.ctx)]);
+      const purgeNote = await QuickNotes.saveQuickNote(purgeSource.office, {title:'ملاحظة مزامنة للحذف النهائي',content:'قيمة أصلية'});
+      const initialNoteBundle = await createSyncBundle(purgeSource.ctx, {peerKnownVector:{}});
+      await applySyncBundle(purgePeer.ctx, initialNoteBundle);
+      await applySyncBundle(purgeObserver.ctx, initialNoteBundle);
+      const peerNote = await QuickNotes.getQuickNote(purgePeer.office, purgeNote.id, {raw:true});
+      await QuickNotes.saveQuickNote(purgePeer.office, {...peerNote,content:'تعديل محفوظ دون اتصال'}, {id:purgeNote.id});
+      await QuickNotes.deleteQuickNote(purgeSource.office, purgeNote.id);
+      await QuickNotes.purgeQuickNote(purgeSource.office, purgeNote.id);
+      const purgeLog = (await changesFor(purgeSource)).filter(change=>change.entity==='caseNotes'&&change.entityId===purgeNote.id).at(-1);
+      const purgeBundle = await createSyncBundle(purgeSource.ctx, {peerKnownVector:initialNoteBundle.knownVector});
+      const purgeApplied = await applySyncBundle(purgeObserver.ctx, purgeBundle);
+      const staleBundle = await createSyncBundle(purgePeer.ctx, {peerKnownVector:initialNoteBundle.knownVector});
+      const staleApplied = await applySyncBundle(purgeObserver.ctx, staleBundle);
+      const purgeConflict = (await listSyncConflicts(purgeObserver.ctx)).find(item=>item.entity==='caseNotes'&&item.entityId===purgeNote.id);
+      out.hardPurge = {
+        sourceRowRemoved:!(await purgeSource.office.r.caseNotes.getManyRaw([purgeNote.id])).length,
+        loggedDelete:purgeLog?.operation==='delete'&&purgeLog?.payload?.isPurged===true,
+        observerRowRemoved:!(await purgeObserver.office.r.caseNotes.getManyRaw([purgeNote.id])).length,
+        purgeApplied:purgeApplied.applied>=2&&purgeApplied.conflicts===0,
+        staleBranchConflicted:staleApplied.conflicts===1&&Boolean(purgeConflict),
+        staleBranchRetained:purgeConflict?.remote?.content==='تعديل محفوظ دون اتصال',
+        noResurrection:!(await purgeObserver.office.r.caseNotes.getManyRaw([purgeNote.id])).length
+      };
+    } finally { purgeSource.close(); purgePeer.close(); purgeObserver.close(); }
 
     // Concurrent edits on two offline replicas produce a conflict retaining both full values.
     let conflictRecord = await a.office.saveClient({fullName: 'قيمة أصلية قبل التعارض'});
@@ -266,6 +300,15 @@ export async function runSyncTests(test, expect) {
     expect(out.tombstone.remoteChanges).toBe(1);
     expect(out.tombstone.conflicts).toBe(0);
     expect(out.tombstone.remoteTombstone).toBe(true);
+  });
+  test('Quick Notes permanent purge removes rows on peers and never resurrects a stale offline branch', () => {
+    expect(out.hardPurge.sourceRowRemoved).toBe(true);
+    expect(out.hardPurge.loggedDelete).toBe(true);
+    expect(out.hardPurge.observerRowRemoved).toBe(true);
+    expect(out.hardPurge.purgeApplied).toBe(true);
+    expect(out.hardPurge.staleBranchConflicted).toBe(true);
+    expect(out.hardPurge.staleBranchRetained).toBe(true);
+    expect(out.hardPurge.noResurrection).toBe(true);
   });
   test('Concurrent device edits are retained as a conflict; neither value is overwritten', () => {
     expect(out.conflict.expectedConflict).toBe(1);

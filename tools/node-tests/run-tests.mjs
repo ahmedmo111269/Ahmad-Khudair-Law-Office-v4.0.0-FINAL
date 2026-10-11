@@ -33,6 +33,7 @@ const {runExecutionSimpleTests,runExecutionCardTests,runExecutionPrintDocumentTe
 const {runExecutionUiTests}=await import(`${R}/tests/execution-ui-tests.js`);
 const {runSyncTests}=await import(`${R}/tests/sync-tests.js`);
 const {runQuickNotesTests}=await import(`${R}/tests/quick-notes-tests.js`);
+const {runRecordContextTests}=await import(`${R}/tests/record-context-tests.js`);
 const {runProceduresExtrasTests}=await import(`${R}/tests/procedures-extras-tests.js`);
 const {runPwaTests}=await import(`${R}/tests/pwa-tests.js`);
 const {runSearchCancelTests}=await import(`${R}/tests/search-cancel-tests.js`);
@@ -100,6 +101,7 @@ await runExecutionSupersedeTests(test,expect);
 await runExecutionUiTests(test,expect);
 await runSyncTests(test,expect);
 await runQuickNotesTests(test,expect);
+runRecordContextTests(test,expect);
 await runProceduresExtrasTests(test,expect);
 await runSearchCancelTests(test,expect);
 await runSearchCacheTests(test,expect);

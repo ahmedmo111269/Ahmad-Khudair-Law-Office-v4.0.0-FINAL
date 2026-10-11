@@ -8,6 +8,7 @@ import {toast} from '../ui/toast.js';
 import {confirmBox} from '../ui/modal.js';
 import {localDate, addDays} from '../core/clock.js';
 import {parseFileNumber, formatFileNumber} from '../core/file-number.js';
+import {ENTITIES, entityRoute} from '../domain/entities.js';
 import {normalizeError} from '../core/errors.js';
 import {
   NOTE_PRIORITIES, NOTE_COLORS, effectiveNoteState, pageQuickNotes,
@@ -26,11 +27,13 @@ const STATE_LABEL = Object.freeze({ACTIVE: 'مفتوحة', DONE: 'منجزة', S
 const PRI_ICON = Object.freeze({LOW: '⬇ ', NORMAL: '• ', HIGH: '⬆ ', URGENT: '🔥 '});
 const NOTE_ACCENT = Object.freeze({YELLOW: '#eab308', BLUE: '#3b82f6', GREEN: '#22c55e', RED: '#ef4444', ORANGE: '#f97316', PURPLE: '#a855f7', GRAY: '#94a3b8'});
 const ENTITY_LABEL = Object.freeze({CLIENT: 'موكل', LEGAL_FILE: 'ملف', CASE: 'قضية', PARTY: 'طرف', HEARING: 'جلسة', PROCEDURE: 'عمل إداري', JUDGMENT: 'حكم', EXECUTION: 'تنفيذ', POA: 'توكيل', SERVICE_RECORD: 'إعلان / محضر', EXPERT_REPORT: 'تقرير خبير', APPOINTMENT: 'موعد', COMMUNICATION: 'اتصال', FEE: 'أتعاب', DOCUMENT_REFERENCE: 'مستند', WORK_ITEM: 'متابعة', QUICK_NOTE: 'ملاحظة'});
+const NOTE_ENTITY_STORES = Object.freeze({CLIENT:'clients',LEGAL_FILE:'files',CASE:'cases',PARTY:'fileParties',HEARING:'hearings',PROCEDURE:'procedures',JUDGMENT:'judgments',EXECUTION:'execution',POA:'powersOfAttorney',SERVICE_RECORD:'serviceRecords',EXPERT_REPORT:'expertReports',APPOINTMENT:'appointments',COMMUNICATION:'communications',FEE:'fees',DOCUMENT_REFERENCE:'documentReferences',WORK_ITEM:'workItems',QUICK_NOTE:'caseNotes'});
+const MAX_CONTEXT_LINKS = 5;
 
 function contextFromRoute(app) {
   const route = String(app?.route || '').split('?')[0];
-  let match = /^(client|file|case):(.+)$/.exec(route);
-  if (match) return [{entityType: {client: 'CLIENT', file: 'LEGAL_FILE', case: 'CASE'}[match[1]], entityId: match[2], relationType: 'CONTEXT'}];
+  let match = /^(client|cfile|file|case):(.+)$/.exec(route);
+  if (match) return [{entityType: {client: 'CLIENT', cfile: 'CLIENT', file: 'LEGAL_FILE', case: 'CASE'}[match[1]], entityId: match[2], relationType: 'CONTEXT'}];
   match = /^exc:(.+)$/.exec(route);
   if (match) return [{entityType: 'EXECUTION', entityId: match[1], relationType: 'CONTEXT'}];
   match = /^rec:([A-Za-z]+):(.+)$/.exec(route);
@@ -42,6 +45,54 @@ function contextFromRoute(app) {
 function contextFromOptions(app, context) {
   const list = Array.isArray(context) ? context : (context ? [context] : contextFromRoute(app));
   return list.filter(x => x?.entityType && x?.entityId).map(x => ({entityType: String(x.entityType).toUpperCase(), entityId: String(x.entityId), relationType: x.relationType || 'CONTEXT'}));
+}
+
+/** Resolve at most 5 visible links per note and at most 40 notes per page; missing/deleted targets stay non-clickable. */
+export async function resolveQuickNoteContexts(office, notes, {limitPerNote = MAX_CONTEXT_LINKS} = {}) {
+  const cap=Math.min(8,Math.max(1,Number(limitPerNote)||MAX_CONTEXT_LINKS));
+  const noteRows=(Array.isArray(notes)?notes:[]).slice(0,40);
+  const entries=await Promise.all(noteRows.map(async note=>{
+    const stored=await linksForNote(office,note.id,{limit:cap+1}).catch(()=>[]);
+    const candidates=[...stored];
+    const add=(entityType,entityId)=>{
+      const type=String(entityType||'').toUpperCase(),id=String(entityId||'');
+      if(NOTE_ENTITY_STORES[type]&&id)candidates.push({entityType:type,entityId:id});
+    };
+    add(note.sourceType,note.sourceId);
+    add('LEGAL_FILE',note.fileId);add('CASE',note.caseId);add('CLIENT',note.clientId);
+    const unique=[...new Map(candidates.map(link=>{
+      const entityType=String(link.entityType||'').toUpperCase(),entityId=String(link.entityId||'');
+      return [`${entityType}::${entityId}`,{entityType,entityId}];
+    }).filter(([,link])=>NOTE_ENTITY_STORES[link.entityType]&&link.entityId)).values()];
+    return {noteId:note.id,links:unique.slice(0,cap),hasMore:unique.length>cap};
+  }));
+  const idsByStore=new Map();
+  for(const entry of entries)for(const link of entry.links){
+    const store=NOTE_ENTITY_STORES[link.entityType];
+    if(!store||!entityRoute(store,link.entityId)||typeof office.r?.[store]?.getMany!=='function')continue;
+    if(!idsByStore.has(store))idsByStore.set(store,new Set());
+    idsByStore.get(store).add(link.entityId);
+  }
+  const recordsByStore=new Map();
+  await Promise.all([...idsByStore].map(async([store,ids])=>{
+    try{recordsByStore.set(store,new Map((await office.r[store].getMany([...ids])).map(row=>[String(row.id),row])))}
+    catch{recordsByStore.set(store,new Map())}
+  }));
+  const result=new Map();
+  for(const entry of entries){
+    const items=[];let unavailableCount=0;
+    for(const link of entry.links){
+      const store=NOTE_ENTITY_STORES[link.entityType],route=store?entityRoute(store,link.entityId):null;
+      const record=route?recordsByStore.get(store)?.get(link.entityId):null;
+      if(!record||!route){unavailableCount++;continue}
+      let title='';try{title=ENTITIES[store]?.title?.(record)||''}catch{}
+      items.push({entityType:link.entityType,entityId:link.entityId,route,
+        label:ENTITY_LABEL[link.entityType]||ENTITIES[store]?.label||'سجل',
+        title:String(title||record.fullName||record.name||record.title||ENTITY_LABEL[link.entityType]||'سجل')});
+    }
+    result.set(entry.noteId,{items,unavailableCount,hasMore:entry.hasMore});
+  }
+  return result;
 }
 
 function needsActionPredicate(note, state = effectiveNoteState(note)) {
@@ -134,7 +185,8 @@ export async function bindQuickNotes(app, query) {
     try {
       const page = await pageQuickNotes(rt.office, {query: rt.query, status: rt.status, sort: rt.sort, limit: 40, cursor: append ? rt.cursor : null, direction: 'prev', filter: rt.needs ? needsActionPredicate : null});
       rt.cursor = page.nextCursor;
-      for (const note of page.rows) list.append(makeNoteCard(note, rt));
+      const contexts=await resolveQuickNoteContexts(rt.office,page.rows).catch(()=>new Map());
+      for (const note of page.rows) list.append(makeNoteCard(note, rt, contexts.get(note.id)));
       root.querySelector('[data-quick-more]').hidden = !page.hasMore;
       root.querySelector('[data-quick-result]').textContent = `${list.children.length}${page.hasMore ? '+' : ''} نتيجة · ${STATE_LABEL[rt.status] || 'كل الحالات'}`;
       if (!page.rows.length && !append) list.append(emptyNotes(rt.status));
@@ -289,8 +341,10 @@ export async function bindQuickNotes(app, query) {
       await renderPage();
       return;
     }
-    const button = event.target.closest?.('[data-note-action]');
     if (!card) return;
+    const contextLink=event.target.closest?.('[data-qn-open-context]');
+    if(contextLink){event.preventDefault();event.stopPropagation();return app.go(contextLink.dataset.qnOpenContext)}
+    const button = event.target.closest?.('[data-note-action]');
     const id = card.dataset.noteId;
     if (!button || button.dataset.noteAction === 'open') { openQuickNoteEditor(app, id, {onSaved: refresh}); return; }
     const action = button.dataset.noteAction;
@@ -346,7 +400,7 @@ export async function bindQuickNotes(app, query) {
   if (requested) setTimeout(() => openQuickNoteEditor(app, requested, {onSaved: refresh}), 0);
 }
 
-function makeNoteCard(note, rt) {
+function makeNoteCard(note, rt, context = null) {
   const card = document.createElement('article'); card.className = `qn-card qn-${String(note.effectiveState || effectiveNoteState(note)).toLowerCase()}`; card.dataset.noteId = note.id; card.setAttribute('role', 'listitem'); if (rt.sort === 'manual') { card.draggable = true; card.setAttribute('aria-label', 'اسحب لإعادة ترتيب الملاحظة'); }
   // لون الملاحظة المختار يظهر على الحافة دون أن يطغى على ألوان الحالات (منجزة/سلة…).
   const accent = NOTE_ACCENT[note.colorToken];
@@ -361,6 +415,7 @@ function makeNoteCard(note, rt) {
   const meta = document.createElement('span'); meta.className = 'qn-meta'; meta.textContent = `${STATE_LABEL[note.effectiveState] || ''} · ${PRI_ICON[note.priority] || ''}${PRIORITY_LABEL[note.priority] || ''}`; head.append(meta);
   card.append(head);
   const body = document.createElement('p'); body.className = 'qn-body'; appendHighlighted(body, note.content || '—', words); card.append(body);
+  const contextNav=noteContextNav(context);if(contextNav)card.append(contextNav);
   if (Array.isArray(note.checklist) && note.checklist.length) {
     const checklist = document.createElement('div'); checklist.className = 'qn-checklist';
     const completed = note.checklist.filter(item => item.done).length;
@@ -391,6 +446,18 @@ function makeNoteCard(note, rt) {
     actions.append(button('سلة', 'نقل إلى السلة', 'delete', 'danger'));
   }
   card.append(actions); return card;
+}
+
+function noteContextNav(context){
+  if(!context||(!context.items?.length&&!context.unavailableCount&&!context.hasMore))return null;
+  const nav=document.createElement('nav');nav.className='qn-context-links';nav.setAttribute('aria-label','السجلات المرتبطة بالملاحظة');
+  for(const item of context.items||[]){
+    const link=document.createElement('button');link.type='button';link.className='ghost small qn-context-link';link.dataset.qnOpenContext=item.route;
+    link.textContent=`${item.label}: ${item.title}`;link.setAttribute('aria-label',`فتح ${item.label}: ${item.title}`);nav.append(link);
+  }
+  if(context.unavailableCount){const missing=document.createElement('span');missing.className='qn-context-notice muted';missing.setAttribute('role','status');missing.textContent=`${context.unavailableCount===1?'سجل مرتبط غير متاح حاليًا':`${context.unavailableCount} سجلات مرتبطة غير متاحة حاليًا`}`;nav.append(missing)}
+  if(context.hasMore){const more=document.createElement('span');more.className='qn-context-notice muted';more.textContent='روابط إضافية غير معروضة.';nav.append(more)}
+  return nav;
 }
 
 /** كلمات البحث الخام (بلا مفاتيح وسم:) لتسلييط النتائج في العنوان والنص. */
@@ -570,7 +637,7 @@ async function resolveCaptureTarget(office, type, value) {
 
 export async function openQuickNoteEditor(app, id, {onSaved = null} = {}) {
   const note = await getQuickNote(app.office, id, {raw: true});
-  if (!note) return toast('الملاحظة غير موجودة.', 'error');
+  if (!note || note.isPurged) return toast('الملاحظة غير موجودة أو حُذفت نهائيًا.', 'error');
   const [links, noteTypes] = await Promise.all([linksForNote(app.office, id), quickNoteTypes(app.office)]);
   const card = modal(`<h2 class="modal-title">تعديل الملاحظة السريعة</h2><form class="qn-form" data-qn-form><label>العنوان<input name="title" maxlength="500"></label><label>النص<textarea name="content" rows="8" maxlength="50000" required></textarea></label><div class="qn-form-grid"><label>الأولوية<select name="priority">${priorityOptions(note.priority)}</select></label><label>الدورة<select name="lifecycle"><option value="OPEN">مفتوحة</option><option value="DONE">منجزة</option></select></label><label>النوع<select name="noteType">${noteTypeOptions(noteTypes, note.noteType || noteTypes[0] || 'عادية')}</select></label><label>اللون<select name="colorToken">${colorOptions(note.colorToken)}</select></label><label>الاستحقاق<input type="date" name="dueAt"></label><label>التذكير<input type="datetime-local" name="remindAt"></label></div><label>وسوم<input name="tagIds" maxlength="1000"></label><label>قائمة تحقق<textarea name="checklistText" rows="4" placeholder="[ ] بند جديد"></textarea></label><div class="form-actions"><button class="primary" type="submit">حفظ التعديل</button><button class="ghost" type="button" data-qn-cancel>إلغاء</button></div></form>`);
   const form = card.querySelector('[data-qn-form]'); form.elements.title.value = note.title || ''; form.elements.content.value = note.content || ''; form.elements.lifecycle.value = note.lifecycle || 'OPEN'; form.elements.noteType.value = note.noteType || noteTypes[0] || 'عادية'; form.elements.dueAt.value = note.dueAt || ''; form.elements.remindAt.value = dateTimeInputValue(note.remindAt); form.elements.tagIds.value = (note.tagIds || []).join(', '); form.elements.checklistText.value = checklistText(note.checklist);

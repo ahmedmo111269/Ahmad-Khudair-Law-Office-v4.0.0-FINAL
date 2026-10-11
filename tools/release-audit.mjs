@@ -5,7 +5,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 
 const root=process.cwd();
-const failures=[]; const warnings=[];
+const failures=[]; const warnings=[]; const reviews=[];
 const required=['index.html','tests.html','manifest.webmanifest','sw.js','js/app.js','js/core/constants.js','js/db/schema.js','js/db/repository.js','js/db/database-registry.js','js/db/database-manager.js','js/services/backup.js'];
 for(const f of required) if(!fs.existsSync(path.join(root,f))) failures.push(`MISSING ${f}`);
 
@@ -89,19 +89,35 @@ for(const f of files.filter(x=>x.endsWith('.html'))){
 
 // 3) Policy checks.
 const text=files.filter(f=>/\.(js|html)$/.test(f)).map(f=>fs.readFileSync(f,'utf8')).join('\n');
-for(const pat of [/location\.reload\s*\(/,/location\.href\s*=/]) if(pat.test(text)) warnings.push(`REVIEW ${pat}`);
+const reloadPattern=/location\.reload\s*\(/g;
+const reloadCount=[...text.matchAll(reloadPattern)].length;
+if(reloadCount){
+  const appSource=fs.readFileSync(path.join(root,'js/app.js'),'utf8');
+  const updateSource=fs.existsSync(path.join(root,'js/services/pwa-updates.js'))?fs.readFileSync(path.join(root,'js/services/pwa-updates.js'),'utf8'):'';
+  const explicitPwaUpdateReload=reloadCount===1
+    && /reloadForUpdate\s*\(\s*\)\s*\{\s*try\s*\{\s*location\.reload\s*\(\s*\)\s*\}/.test(appSource)
+    && /apply\s*:\s*\(\s*\)\s*=>\s*this\.reloadForUpdate\s*\(\s*\)/.test(appSource)
+    && /action\s*:\s*\(\s*\)\s*=>\s*this\.accept\(\)\s*,\s*actionLabel\s*:\s*'تحديث الآن'/.test(updateSource)
+    && /accept\s*\(\s*\)[\s\S]*?if\s*\(!waiting\)\s*return\s*false[\s\S]*?postMessage\(\{type:\s*'SKIP_WAITING'\}\)[\s\S]*?setTimeout\(reload,\s*350\)/.test(updateSource);
+  if(explicitPwaUpdateReload) reviews.push('REVIEWED location.reload: الوحيد في المصدر، مرتبط بقبول زر تحديث PWA، ولا يعمل بلا عامل ينتظر');
+  else warnings.push('REVIEW location.reload: verify reload is only user-confirmed and data-safe');
+}
+if(/location\.href\s*=/.test(text)) warnings.push('REVIEW location.href assignment');
 const officeListCallsites=files.filter(f=>f.endsWith('.js')&&!f.endsWith(path.join('services','office.js'))).filter(f=>/\boffice\.list\s*\(/.test(fs.readFileSync(f,'utf8')));
 if(officeListCallsites.length) warnings.push(`REVIEW office.list callsites: ${officeListCallsites.map(rel).join(', ')}`);
 
-// 4) Version consistency: constants.js must match the newest CHANGELOG heading.
+// 4) Version consistency: APP_VERSION must have a matching release heading in CHANGELOG.
+// UI milestones and the Service Worker cache have independent version clocks; later
+// changelog headings may leave APP_VERSION unchanged, so comparing only the newest
+// heading produces a false failure.
 const c=fs.readFileSync(path.join(root,'js/core/constants.js'),'utf8');
 const vm=c.match(/APP_VERSION=['"]([^'"]+)/)?.[1];
 const changelog=fs.existsSync(path.join(root,'CHANGELOG.md'))?fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'):'';
-const cv=changelog.match(/^#+\s*v?(\d+\.\d+\.\d+[^\s—]*)/m)?.[1];
+const changelogVersions=[...changelog.matchAll(/^#+\s*v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?=\s|$)/gm)].map(match=>match[1]);
 if(!vm)failures.push('VERSION APP_VERSION not found in js/core/constants.js');
-else if(cv&&cv!==vm)failures.push(`VERSION constants=${vm} changelog=${cv}`);
+else if(!changelogVersions.includes(vm))failures.push(`VERSION APP_VERSION=${vm} has no matching CHANGELOG heading`);
 
-const result={timestamp:new Date().toISOString(),version:vm,files:files.length,javascript:js.length,relativeImportsChecked:importsChecked,failures,warnings,status:failures.length?'FAIL':'PASS'};
+const result={timestamp:new Date().toISOString(),version:vm,files:files.length,javascript:js.length,relativeImportsChecked:importsChecked,failures,warnings,reviews,status:failures.length?'FAIL':'PASS'};
 fs.writeFileSync(path.join(root,'docs/RELEASE-AUDIT.json'),JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify(result,null,2));
 if(failures.length)process.exit(1);

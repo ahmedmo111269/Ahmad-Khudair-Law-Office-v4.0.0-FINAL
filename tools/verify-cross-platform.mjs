@@ -124,9 +124,10 @@ const appVersion = (constants.match(/APP_VERSION\s*=\s*'([^']+)'/) || [])[1] || 
 const cacheName = (sw.match(/const CACHE\s*=\s*'([^']+)'/) || [])[1] || '';
 if (!sw) fail('Offline', 'sw.js موجود');
 else {
+  const cacheRelease = cacheName.match(/(?:^|-)v(\d+\.\d+\.\d+)(?=-|$)/)?.[1] || '';
   if (!cacheName) fail('Offline', 'كاش مُرقَّم في sw.js');
-  else if (cacheName.includes(appVersion)) pass('Offline', `كاش مُرقَّم بإصدار التطبيق (${cacheName})`, 'تحديث الكاش يتم بذرة إصدار لا يدويًا فقط');
-  else fail('Offline', 'رقم الكاش يطابق APP_VERSION', `CACHE=${cacheName} مقابل APP_VERSION=${appVersion} — تحديث قد لا يصل`);
+  else if (cacheRelease) pass('Offline', 'كاش Service Worker له إصدار مستقل صريح', `CACHE=v${cacheRelease}; APP_VERSION=${appVersion} (رقما التطبيق والكاش مستقلان)`);
+  else fail('Offline', 'كاش Service Worker يحمل إصدارًا صريحًا', `CACHE=${cacheName} — المتوقع مقطع v<major>.<minor>.<patch>`);
   const precached = new Set([...sw.matchAll(/"\.\/([^"]+)"/g)].map(m => m[1]));
   const boot = bootModuleGraph(ROOT).filter(file => file !== 'js/app.js');
   const missing = boot.filter(file => !precached.has(file));
@@ -144,9 +145,10 @@ else {
   else pass('Offline', 'مطابقة الكاش لطلبات التنقل تتجاهل الاستعلام');
 }
 
-// ===== 4) لا نداءات خارجية في الكود (شرط أوفلاين حقيقي) =====
+// ===== 4) لا طلبات خارجية تلقائية؛ روابط المستخدم الصريحة لا تعني تحميلًا تلقائيًا =====
 {
   const offenders = [];
+  const userInitiatedContactLinks = [];
   const walk = dir => {
     for (const entry of fs.readdirSync(path.join(ROOT, dir), {withFileTypes: true})) {
       const rel = `${dir}/${entry.name}`;
@@ -161,13 +163,21 @@ else {
         const match = line.match(/(?:fetch|import|new Worker|navigator\.serviceWorker\.register)\s*\(\s*['"`](https?:\/\/[^'"`]+)/);
         if (match) offenders.push(`${rel}:${index + 1} ${match[1]}`);
         const tag = line.match(/(?:src|href)=["']https?:\/\/[^"']+/);
-        if (tag && !rel.endsWith('.html')) offenders.push(`${rel}:${index + 1} ${tag[0]}`);
+        if (tag && !rel.endsWith('.html')) {
+          const explicitWhatsAppAnchor = /<a\b/i.test(line)
+            && /href=["']https:\/\/wa\.me\//i.test(line)
+            && /target=["']_blank["']/i.test(line)
+            && /rel=["']noopener noreferrer["']/i.test(line);
+          if (explicitWhatsAppAnchor) userInitiatedContactLinks.push(`${rel}:${index + 1} ${tag[0]}`);
+          else offenders.push(`${rel}:${index + 1} ${tag[0]}`);
+        }
       }
     }
   };
   walk('js'); walk('css');
-  if (offenders.length) fail('Offline', 'لا نداءات شبكة خارجية من الكود', offenders.slice(0, 8).join(' | '));
-  else pass('Offline', 'لا نداءات شبكة خارجية من JS/CSS (Offline-first حقيقي)');
+  if (offenders.length) fail('Offline', 'لا طلبات خارجية تلقائية من الكود', offenders.slice(0, 8).join(' | '));
+  else pass('Offline', 'لا طلبات خارجية تلقائية من JS/CSS', 'روابط التنقل التي لا تعمل إلا بنقرة مستخدم تُراجع منفصلة');
+  if (userInitiatedContactLinks.length) pass('External navigation', 'رابط WhatsApp لا يحمّل تلقائيًا', `${userInitiatedContactLinks.length} رابطًا؛ target=_blank + rel=noopener noreferrer؛ يتطلب تفاعل المستخدم`);
 }
 
 // ===== 5) IndexedDB وحده بيانات: لا كاش للمتصفح =====

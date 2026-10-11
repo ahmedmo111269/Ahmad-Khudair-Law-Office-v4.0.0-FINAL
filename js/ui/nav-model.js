@@ -47,7 +47,7 @@ export const NAV_GROUPS = [
     {route: 'integrity', label: 'سلامة البيانات', icon: 'shield', keywords: 'فحص تدقيق'},
     {route: 'repair', label: 'الإصلاح والاسترداد', icon: 'wrench', keywords: 'إصلاح'},
     {route: 'databases', label: 'قواعد البيانات', icon: 'database', keywords: 'قواعد تبديل'},
-    {route: 'backup', label: 'النسخ الاحتياطي', icon: 'save', keywords: 'نسخة احتياطية تصدير'},
+    {route: 'backup', label: 'النسخ الاحتياطي', icon: 'save', keywords: 'نسخة احتياطية تصدير إنشاء الآن'},
     {route: 'sync', label: 'المزامنة', icon: 'refreshCw', keywords: 'مزامنة'},
     {route: 'settings', label: 'الإعدادات', icon: 'settings', keywords: 'إعدادات مظهر ثيم'}]}
 ];

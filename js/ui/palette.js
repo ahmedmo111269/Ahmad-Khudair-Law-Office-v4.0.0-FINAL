@@ -91,8 +91,8 @@ export function staticCommands(app){
  }});
  cmds.push({id:'qa:quick-add',label:'قائمة الإضافة السريعة',icon:'plus',group:'إجراءات سريعة',keywords:'إضافة جديد نموذج',run:()=>openQuickAdd(app)});
  for(const [index,action] of contextualQuickActions(app).entries())cmds.push({id:`ctx:${index}:${action.kind}`,label:action.label,icon:action.icon,group:'في السياق الحالي',keywords:`إضافة مرتبطة ${action.label}`,run:()=>runQuickAction(app,action.kind,{context:action.context})});
- cmds.push({id:'qa:search',label:'بحث موحد شامل',icon:'search',group:'إجراءات سريعة',keywords:'بحث',run:()=>app.go('search')});
- cmds.push({id:'qa:backup',label:'إنشاء نسخة احتياطية الآن',icon:'save',group:'إجراءات سريعة',keywords:'نسخة احتياط',run:()=>app.go('backup')});
+ // وجهتا البحث والنسخ الاحتياطي مولدتان من سجل التنقل أعلاه؛ لا نضيف لهما أوامر
+ // «إجراءات سريعة» مكررة. البحث الحي في هذه اللوحة يستعمل searchAll نفسه، لا محركًا موازيًا.
  // تنظيف البيانات التجريبية: نفس المسار المستخدم في الرئيسية والإعدادات (فحص ← تأكيد ← حذف في معاملة واحدة)
  cmds.push({id:'qa:demo-clean',label:'حذف كل البيانات التجريبية (بتأكيد)',icon:'x',group:'إجراءات سريعة',keywords:'تجريبي بيانات تجريبية حذف مسح تنظيف demo seed',kbd:'تأكيد',run:async()=>{
   const {startDemoCleanup}=await import('./demo-cleanup.js');

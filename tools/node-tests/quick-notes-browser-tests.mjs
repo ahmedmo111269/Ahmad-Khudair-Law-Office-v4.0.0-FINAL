@@ -74,10 +74,98 @@ try {
     assert(!state.list && !state.side && !state.toolbar, 'أحد أقسام Quick Notes مخفي افتراضيًا');
   });
 
+  let contextFx = null;
+  await check('سياق الملاحظة: فتح الموكل والملف والقضية والتنفيذ؛ ومن سجل الطرف إلى الخصم، مع إظهار المراجع المحذوفة بلا رابط', async () => {
+    contextFx = await page.evaluate(async () => {
+      const office = window.__LAW_OFFICE_APP__.office;
+      const {createLegalFile, saveParty} = await import('/js/services/legal-files.js');
+      const {saveEntity} = await import('/js/services/entity-save.js');
+      const {createSimpleExecution} = await import('/js/services/execution-simple.js');
+      const {saveQuickNote} = await import('/js/services/quick-notes.js');
+      const client = await office.saveClient({fullName: `موكل سياق الملاحظات ${Date.now()}`});
+      const file = await createLegalFile(office, {clientId: client.id, title: 'ملف سياق الملاحظات', fileType: 'مدني'});
+      const stage = await office.createCase({fileId: file.id, stageType: 'دعوى', caseNumber: 'QN-CONTEXT', caseYear: '2026'});
+      const opponent = await saveEntity(office, 'opponents', {name: `خصم سياق الملاحظات ${Date.now()}`});
+      const party = await saveParty(office, {fileId: file.id, partyKind: 'opponent', opponentId: opponent.id, role: 'مدعى عليه'});
+      const execution = await createSimpleExecution(office, {clientId: client.id, fileId: file.id, executionType: 'civil', valueType: 'fixed', amount: 1500, judgmentDate: '2026-10-11', entitlementThroughDate: '2026-10-11', officialNumber: 'QN-CONTEXT-EXEC'});
+      const note = await saveQuickNote(office, {title: `QN_CONTEXT_${Date.now()}`, content: 'ملاحظة مرتبطة بسجلات فعلية'}, {links: [
+        {entityType: 'CLIENT', entityId: client.id}, {entityType: 'LEGAL_FILE', entityId: file.id},
+        {entityType: 'CASE', entityId: stage.id}, {entityType: 'PARTY', entityId: party.id},
+        {entityType: 'EXECUTION', entityId: execution.execution.id}
+      ]});
+      return {clientId: client.id, fileId: file.id, caseId: stage.id, opponentId: opponent.id, opponentName: opponent.name, partyId: party.id, executionId: execution.execution.id, noteId: note.id, noteTitle: note.title};
+    });
+    const showContextNote = async () => {
+      await go('quickNotes');
+      await page.selectOption('[data-quick-status]', 'ALL');
+      await page.locator('[data-quick-query]').fill(contextFx.noteTitle);
+      await waitQuick();
+      assert(await card(contextFx.noteId).count() === 1, 'بطاقة السياق غير ظاهرة');
+    };
+    const followRouteAndBack = async (route, selector) => {
+      await showContextNote();
+      const button = card(contextFx.noteId).locator(`[data-qn-open-context="${route}"]`);
+      assert(await button.count() === 1, `رابط السياق غير ظاهر: ${route}`);
+      await button.click();
+      await page.waitForFunction(value => String(window.__LAW_OFFICE_APP__.route || '').split('?')[0] === value, route, {timeout: 15000});
+      await page.waitForSelector(selector, {timeout: 15000});
+      if(route===`exc:${contextFx.executionId}`){
+        const contextNav=page.locator('.exec-head .record-context-links');
+        assert(await contextNav.locator(`[data-route="client:${contextFx.clientId}"]`).count()===1,'رابط الموكل من بطاقة التنفيذ غير ظاهر');
+        assert(await contextNav.locator(`[data-route="file:${contextFx.fileId}"]`).count()===1,'رابط الملف من بطاقة التنفيذ غير ظاهر');
+      }
+      await page.evaluate(() => window.__LAW_OFFICE_APP__.back());
+      await page.waitForSelector('#quick-notes-root', {timeout: 15000});
+      await page.waitForFunction(() => String(window.__LAW_OFFICE_APP__.route || '').split('?')[0] === 'quickNotes', null, {timeout: 15000});
+    };
+    await followRouteAndBack(`client:${contextFx.clientId}`, '.record-head h2');
+    await followRouteAndBack(`file:${contextFx.fileId}`, '#file-head');
+    await followRouteAndBack(`case:${contextFx.caseId}`, '.record-head h2');
+    await followRouteAndBack(`exc:${contextFx.executionId}`, '.exec-head');
+
+    await showContextNote();
+    await card(contextFx.noteId).locator(`[data-qn-open-context="rec:fileParties:${contextFx.partyId}"]`).click();
+    await page.waitForFunction(id => window.__LAW_OFFICE_APP__.route === `rec:fileParties:${id}`, contextFx.partyId, {timeout: 15000});
+    await page.waitForSelector('.record-head .record-context-links', {timeout: 15000});
+    const opponentLink = page.locator(`.record-context-links [data-open-ref="opponents:${contextFx.opponentId}"]`);
+    assert(await opponentLink.count() === 1, 'رابط الخصم من سجل الطرف غير ظاهر');
+    await opponentLink.click();
+    await page.waitForFunction(id => window.__LAW_OFFICE_APP__.route === `opponent:${id}`, contextFx.opponentId, {timeout: 15000});
+    assert((await page.locator('.record-head').textContent()).includes(contextFx.opponentName), 'صفحة الخصم لم تعرض اسم السجل المرتبط');
+    await page.evaluate(() => window.__LAW_OFFICE_APP__.back());
+    await page.waitForFunction(id => window.__LAW_OFFICE_APP__.route === `rec:fileParties:${id}`, contextFx.partyId, {timeout: 15000});
+    await page.evaluate(() => window.__LAW_OFFICE_APP__.back());
+    await page.waitForFunction(() => String(window.__LAW_OFFICE_APP__.route || '').split('?')[0] === 'quickNotes', null, {timeout: 15000});
+
+    await page.evaluate(id => window.__LAW_OFFICE_APP__.office.softDelete('opponents', id), contextFx.opponentId);
+    await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`rec:fileParties:${id}`), contextFx.partyId);
+    await page.waitForSelector('.record-head .record-context-links .record-context-unavailable', {timeout: 15000});
+    assert(await page.locator(`.record-context-links [data-open-ref="opponents:${contextFx.opponentId}"]`).count() === 0, 'لم يُخفَ رابط الخصم المحذوف');
+    assert((await page.locator('.record-context-links').textContent()).includes('السجل المرتبط غير متاح حاليًا'), 'لم تظهر حالة الخصم غير المتاح');
+    assert(await page.locator(`.kv [data-open-ref="opponents:${contextFx.opponentId}"]`).count() === 0, 'ظهر رابط الخصم المحذوف داخل تفاصيل الطرف');
+    await page.evaluate(id => window.__LAW_OFFICE_APP__.go(`file:${id}`), contextFx.fileId);
+    await page.waitForSelector('#file-head');
+    const deletedPartyChip=page.locator('#file-head [data-party-open]').filter({hasText:contextFx.opponentName}).first();
+    await deletedPartyChip.click();
+    await page.waitForSelector('#modal-root .modal-card');
+    assert(await page.locator('#modal-root [data-a="open"]').count() === 0, 'لم يُعرض زر لخصم محذوف');
+    assert((await page.locator('#modal-root .modal-card').textContent()).includes('الشخص المرتبط غير متاح حاليًا'), 'لم تظهر حالة الخصم غير المتاح داخل نافذة الأطراف');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#modal-root .modal-card',{state:'detached'});
+    await go('quickNotes');
+  });
+
   const uiTitle = `QN_BROWSER_UI_${Date.now()}`;
   const unsafeText = 'نص <img src=x onerror=alert(1)> محلي';
   let uiId = '';
-  await check('Ctrl+Shift+N opens the capture modal and saves plain text without HTML injection', async () => {
+  await check('Ctrl+Shift+N ignores typing fields, and outside them opens capture and saves plain text safely', async () => {
+    const searchField=page.locator('[data-quick-query]');
+    await searchField.focus();
+    await page.keyboard.press('Control+k');
+    assert(await page.locator('.palette-card').count()===0,'Ctrl+K فتح لوحة الأوامر أثناء الكتابة في حقل البحث');
+    await page.keyboard.press('Control+Shift+N');
+    assert(await page.locator('.modal-card [data-qn-form]').count()===0,'Ctrl+Shift+N فتح الالتقاط بينما التركيز داخل حقل البحث');
+    await searchField.evaluate(input=>input.blur());
     await page.keyboard.press('Control+Shift+N');
     await page.waitForSelector('.modal-card [data-qn-form]');
     const form = page.locator('.modal-card [data-qn-form]');
@@ -155,14 +243,38 @@ try {
     assert((await page.locator('.modal-card').textContent()).includes('لا يمكن استعادتها'), 'تأكيد الحذف النهائي لا يوضح أنه غير قابل للاستعادة');
     await page.locator('.modal-card [data-ok]').click();
     await page.waitForFunction(async id => !(await window.__LAW_OFFICE_APP__.office.r.caseNotes.getManyRaw([id])).length, purgeId, {timeout: 10000});
+    await card(purgeId).waitFor({state: 'detached', timeout: 10000});
     assert(await card(purgeId).count() === 0, 'الملاحظة المحذوفة نهائيًا ما زالت ظاهرة');
+
+    const emptyTitle = `QN_BROWSER_EMPTY_TRASH_${Date.now()}`;
+    const emptyId = await page.evaluate(async title => {
+      const {saveQuickNote, deleteQuickNote} = await import('/js/services/quick-notes.js');
+      const office = window.__LAW_OFFICE_APP__.office;
+      const note = await saveQuickNote(office, {title, content: 'اختبار إفراغ السلة'});
+      await deleteQuickNote(office, note.id);
+      return note.id;
+    }, emptyTitle);
+    await page.locator('[data-quick-query]').fill(emptyTitle);
+    await page.selectOption('[data-quick-status]', 'TRASH');
+    await waitQuick();
+    assert(await card(emptyId).count() === 1, 'الملاحظة المحذوفة لا تظهر قبل إفراغ السلة');
+    await page.locator('[data-quick-empty-trash]').click();
+    await page.waitForSelector('.modal-card [data-ok]');
+    assert((await page.locator('.modal-card').textContent()).includes('بلا إمكانية استعادة'), 'تأكيد إفراغ السلة لا يوضح الأثر النهائي');
+    await page.locator('.modal-card [data-ok]').click();
+    await page.waitForFunction(async id => !(await window.__LAW_OFFICE_APP__.office.r.caseNotes.getManyRaw([id])).length, emptyId, {timeout: 10000});
+    await card(emptyId).waitFor({state: 'detached', timeout: 10000});
   });
 
-  await check('Command Center opens Quick Capture', async () => {
+  await check('Ctrl+K opens the Command Center, stays out of typing fields, and opens Quick Capture', async () => {
     await go('dashboard');
-    await page.click('#command-btn');
-    await page.waitForSelector('.pal-q');
-    await page.locator('.pal-q').fill('ملاحظة سريعة');
+    await page.keyboard.press('Control+k');
+    const paletteQuery=page.locator('.pal-q');
+    await paletteQuery.waitFor({state:'visible'});
+    await paletteQuery.focus();
+    await page.keyboard.press('Control+k');
+    assert(await paletteQuery.isVisible(),'Ctrl+K أغلق لوحة الأوامر أثناء الكتابة في حقل البحث');
+    await paletteQuery.fill('ملاحظة سريعة');
     await page.waitForSelector('.pal-item');
     await page.locator('.pal-item').filter({hasText: 'Ctrl+Shift+N'}).first().click();
     await page.waitForSelector('.modal-card [data-qn-form]');

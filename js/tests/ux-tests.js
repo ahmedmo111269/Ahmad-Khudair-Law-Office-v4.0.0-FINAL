@@ -99,6 +99,23 @@ export function runUxTests(test,expect){
   expect(ids.has('nav:feePayments')).toBe(true);
   expect(ids.has('nav:sync')).toBe(true);
  });
+ test('لوحة الأوامر: وجهات التنفيذ والمزامنة والاسم التوافقي تستخدم App.go مرة واحدة بلا أوامر بحث/نسخ احتياطي مكررة',()=>{
+  const calls=[],commands=staticCommands({go:route=>calls.push(route)});
+  for(const route of ['quickNotes','executionCenter','sync']){
+   const command=commands.find(item=>item.id==='nav:'+route);
+   if(!command)throw Error('وجهة لوحة الأوامر ناقصة: '+route);
+   command.run();
+  }
+  expect(calls.join('|')).toBe('quickNotes|executionCenter|sync');
+  expect(commands.filter(item=>item.id==='nav:search').length).toBe(1);
+  expect(commands.some(item=>item.id==='qa:search')).toBe(false);
+  expect(commands.filter(item=>item.id==='nav:backup').length).toBe(1);
+  expect(commands.some(item=>item.id==='qa:backup')).toBe(false);
+  expect(scoreCommand(commands.find(item=>item.id==='nav:search'),'بحث')>0).toBe(true);
+  expect(scoreCommand(commands.find(item=>item.id==='nav:backup'),'إنشاء الآن')>0).toBe(true);
+  expect(commands.filter(item=>item.id==='qa:quick-add').length).toBe(1);
+  expect(commands.some(item=>item.id==='qa:quick-note'&&item.group==='إجراءات سريعة')).toBe(true);
+ });
  test('التحية حسب الوقت والتاريخ العربي الكامل',()=>{
   expect(greetingKey(7)).toBe('morning');
   expect(greetingKey(13)).toBe('noon');

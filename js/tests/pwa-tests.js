@@ -154,6 +154,29 @@ export async function runPwaTests(test, expect) {
     history.dispose();
   });
 
+  test('PWA: route canonicalisation after overlay close keeps the original push intent', async () => {
+    clearOverlays();
+    const win = fakeWindow();
+    const seen = [];
+    const history = controller(win, seen);
+    history.start('dashboard');
+    overlays.bindOverlayStack(history);
+    const release = overlays.open('nav-panel-tab', () => true);
+    release(); // يبدأ تحرير مدخل الحماية بصورة غير متزامنة
+    history.record('file:case-7'); // اختيار الصفحة: push مؤجل
+    history.record('file:case-7?tab=summary', {replace: true}); // تطبيع URL لنفس الانتقال
+    await tick();
+    expect(win.location.hash).toBe('#/file%3Acase-7%3Ftab%3Dsummary');
+    expect(history.currentRoute).toBe('file:case-7?tab=summary');
+    expect(history.depth).toBe(1); // لا يتحول push المستخدم إلى replace
+    history.back();
+    await tick();
+    expect(seen.join()).toBe('dashboard');
+    expect(win.location.hash).toBe('#/dashboard');
+    overlays.bindOverlayStack(null);
+    history.dispose();
+  });
+
   test('PWA: stacked layers close one at a time and keep the lower layer open', async () => {
     clearOverlays();
     const win = fakeWindow();

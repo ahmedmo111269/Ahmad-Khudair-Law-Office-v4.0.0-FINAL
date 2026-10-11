@@ -9,7 +9,7 @@ import {openEntityForm} from '../ui/form.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {legalFileColumns} from '../ui/grid-columns.js';
 import {createGridRelations} from '../services/grid-relations.js';
-import {ENTITIES,FILE_TYPE_GROUPS,fileTypeGroup,label,fmtDate,isClosedFile,displayValue} from '../domain/entities.js';
+import {ENTITIES,FILE_TYPE_GROUPS,fileTypeGroup,label,fmtDate,isClosedFile,displayValue,entityRoute} from '../domain/entities.js';
 import {resolveRefs,fileStages,fileChildren,refLabel} from '../services/entity-query.js';
 import {fileParties,fileRelations,archiveFile,reopenFile,closeFile,removeParty,moveParty} from '../services/legal-files.js';
 import {deleteEntity} from '../services/entity-save.js';
@@ -150,6 +150,7 @@ export async function filePage(app,id){
  const [parties,stages,serviceCount,hearingsRes,proceduresRes,executions]=await Promise.all([fileParties(app.office,id),fileStages(app.office,id),app.office.r.serviceRecords.countIndex('fileId_recordState',[id,'active']),fileChildren(app.office,id,'hearings'),fileChildren(app.office,id,'procedures'),executionsForFile(app.office,id).catch(()=>[])]);
  const tax=await taxonomy(app.office);const cat=tax.byId.get(f.categoryId),ftype=tax.byId.get(f.fileTypeId);
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
+ const cfClient=cfRow?.clientId?await app.office.r.clients.get(cfRow.clientId).catch(()=>null):null;
  app.__file={id,f,parties,stages,tax,serviceCount,executions};
  // التبويب الافتراضي «نظرة عامة» دائمًا، إلا لحالة تنقل مقصودة: رابط صريح (?tab=…) أو
  // آخر تبويب محفوظ لنفس هذا الملف تحديدًا — لا تفضيل عام مشترك يفرض تبويبًا على ملف آخر.
@@ -161,6 +162,7 @@ export async function filePage(app,id){
  app.__fileTab=(sameFileOpen&&!explicitTab)?app.__fileTab:{id,tab:explicitTab||(TAB_META.has(remembered)?remembered:'summary')};
  // إذا أخفى المستخدم التبويب النشط من «تخصيص الصفحة»، نعود إلى نظرة عامة (لا بيانات تُفقَد).
  if(hiddenSectionIds('file-details').has(app.__fileTab.tab))app.__fileTab.tab='summary';
+ app.__fileTabValid=tab=>TAB_META.has(tab);
  const isClientParty=p=>(p.isClient??p.partyKind==='client');
  const clients=sortParties(parties.filter(isClientParty));
  const opps=sortParties(parties.filter(p=>!isClientParty(p)&&p.partyKind==='opponent'));
@@ -175,7 +177,7 @@ export async function filePage(app,id){
  const focusOn=Boolean(prefs.get(FOCUS_MODE_KEY,false));
  const favOn=isFavorite('file:'+id,app.ctx?.profile?.id||'');
  const tabCount=k=>k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:k==='hearings'?hearingsRes.rows.length:k==='procedures'?proceduresRes.rows.length:0;
- return `${cfRow?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfRow.clientId)}">الموكل</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfRow.clientId)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:''}
+ return `${cfRow?.clientId&&cfClient?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfClient.id)}">${esc(cfClient.fullName||'الموكل')}</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:cfRow?.clientId?`<p class="crumbs muted" role="status">سجل الموكل المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:cfRow?`<p class="crumbs muted" role="status">ملف الموكل موجود لكن لا يوجد موكل مرتبط قابل للتنقل.</p>`:f.clientFileId?`<p class="crumbs muted" role="status">الملف الرئيسي المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:''}
  <div class="file-sticky-bar" data-file-sticky aria-hidden="true"><span>${fileNumberChip(f)}</span><span class="fsb-title">${esc(head.isCase?head.title:(f.title||'ملف'))}</span><span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${nextStep?`<span class="fsb-next">التالي: ${esc(nextStep.eyebrow)} — ${esc(nextStep.title)}</span>`:''}<span class="fsb-actions"><button type="button" class="primary small" data-file-quick>+ إضافة</button></span></div>
  <header class="record-head file-head file-id" id="file-head" style="--cat:${esc(cat?.color||'var(--primary)')}">
   <div class="fid-top">
@@ -185,7 +187,7 @@ export async function filePage(app,id){
     ${head.court?`<p class="fid-court">${esc(head.court)}</p>`:''}
     ${head.sub?`<p class="fid-sub">عنوان الملف: ${esc(head.sub)}</p>`:''}
     ${!head.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
-    <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${cur?`<span class="badge stage" title="المرحلة الحالية المسجلة في الملف">المرحلة: ${esc(cur.stageType||cur.numberType||'—')}</span>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
+    <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${cur?`<button type="button" class="badge stage" data-route="case:${esc(cur.id)}" title="فتح بيانات المرحلة المسجلة في هذا الملف" aria-label="فتح المرحلة: ${esc(refLabel('cases',cur))}">المرحلة: ${esc(cur.stageType||cur.numberType||'—')}</button>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
    </div>
    <div class="fid-meta">
     <div class="fid-fno"><span class="fid-fno-kind">ملف فرعي:</span> <b dir="ltr">${esc(formatFileNumber(f)||'—')}</b></div>
@@ -385,16 +387,26 @@ export async function bindFilePage(app,id){
  root.querySelector('[data-file-delete]')?.addEventListener('click',async()=>{if(!await confirmBox('حذف منطقي للملف؟ لا يُسمح إذا كان للملف قضايا/مراحل غير محذوفة. البيانات لا تُمحى نهائيًا.',{okText:'حذف منطقي'}))return;try{await deleteEntity(app.office,'files',id);toast('تم الحذف المنطقي');app.go('files')}catch(e){toast(userError(e),'error')}});
  // التبديل بين التبويبات: تحديث موضعي مع كاش للتبويبات المحمّلة — بلا إعادة جلب وبلا فقد
  // بيانات النماذج غير المحفوظة (العقد المُخزّن في الكاش يحتفظ بقيم الحقول كما هي).
- const gotoTab=tab=>{
-  if(!TAB_META.has(tab)||tab===app.__fileTab.tab)return;
-  app.__fileTab.tab=tab;
-  writeLastTab(id,tab);
-  syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e));
+ const applyTab=async(tab,{scrollTo=''}={})=>{
+  if(!TAB_META.has(tab))return false;
+  if(tab!==app.__fileTab.tab){
+   app.__fileTab.tab=tab;
+   writeLastTab(id,tab);
+   syncTabBarDom(app);
+   await renderTab(app);
+  }
+  if(scrollTo)document.querySelector('#file-tab')?.querySelector(scrollTo)?.scrollIntoView?.({block:'start'});
+  return true;
  };
- app.__fileGotoTab=gotoTab;
- // أزرار التبويبات: الأساسية في الشريط + عناصر القوائم المنسدلة (نفس دالة التنقل الواحدة).
- root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.tab));
- root.querySelectorAll('[data-menu-tab]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.menuTab));
+ app.__fileApplyTab=applyTab;
+ app.__fileGotoTab=tab=>{
+  if(!TAB_META.has(tab))return false;
+  const base=String(app.route||`file:${id}`).split('?')[0],params=new URLSearchParams(String(app.route||'').split('?')[1]||'');
+  params.set('tab',tab);return app.go(`${base}?${params.toString()}`);
+ };
+ // أزرار التبويبات: الحالة المرئية وعنوان الرجوع يُحدَّثان عبر App.go الحالي.
+ root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tab));
+ root.querySelectorAll('[data-menu-tab]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.menuTab));
  // القوائم المنسدلة للمجموعات + قائمة «كل الأقسام»: فتح/إغلاق واحد، دعم المؤوس واللمس
  // ولوحة المفاتيح (Enter/Space/↓ للفتح، ↑↓/Home/End داخل القائمة، Escape يُغلق ويعيد التركيز)،
  // وضبط الموضع تلقائيًا حتى لا تُقطع القوائم عند حواف الشاشة (RTL).
@@ -407,7 +419,7 @@ export async function bindFilePage(app,id){
  window.addEventListener('orientationchange',onViewport);
  requestAnimationFrame(()=>syncStickyTop(root));
  // قفزات المؤشرات والرأس إلى التبويب المعني (الجلسات/الأعمال/الأطراف…).
- root.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>gotoTab(b.dataset.tabJump));
+ root.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tabJump));
  // أطراف الرأس: نفس نافذة إجراءات الطرف الموجودة (فتح السجل/تعديل/إزالة).
  root.querySelectorAll('[data-party-open]').forEach(b=>b.onclick=()=>{
   const item=app.__file.headParties?.[Number(b.dataset.partyOpen)];
@@ -774,10 +786,7 @@ async function renderTabContent(app){
   el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>openEntityForm(app,'files',{id}));
   el.querySelector('[data-case-edit]')?.addEventListener('click',e=>openEntityForm(app,'cases',{id:e.currentTarget.dataset.caseEdit}));
   el.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
-  el.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>{
-   const t=b.dataset.tabJump;
-   app.__fileTab.tab=t;writeLastTab(id,t);syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e));
-  });
+  el.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tabJump));
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
   el.querySelectorAll('[data-open-case]').forEach(b=>b.onclick=()=>app.go('case:'+b.dataset.openCase));
   el.querySelectorAll('[data-open-file]').forEach(b=>b.onclick=()=>app.go('file:'+b.dataset.openFile));
@@ -910,12 +919,17 @@ async function renderTabContent(app){
  }
 }
 
-function partyActions(app,p){
- const route=p.clientId?'client:'+p.clientId:p.opponentId?'opponent:'+p.opponentId:null;
- const card=modal(`<h2 class="modal-title">${esc(p.name)} <small class="muted">${esc(p.role||'')}</small></h2><div class="action-stack">${route?'<button class="primary" data-a="open">فتح سجل الشخص</button>':''}${p.id?'<button class="ghost" data-a="edit">تعديل الصفة / البيانات</button><button class="ghost danger" data-a="remove">إزالة من الملف</button>':'<p class="muted">رابط قديم من الإصدار السابق؛ سيُرحّل تلقائيًا.</p>'}</div>`);
+async function partyActions(app,p){
+ const store=p.clientId?'clients':p.opponentId?'opponents':'';
+ const id=p.clientId||p.opponentId||'';
+  const linked=store&&id?await app.office.r[store].get(id).catch(()=>null):null;
+  const target=linked&&!linked.isDeleted?linked:null;
+  const route=target?entityRoute(store,id):null;
+ const unavailable=Boolean(store&&id&&!target);
+ const card=modal(`<h2 class="modal-title">${esc(p.name||p.partyName||'طرف')} <small class="muted">${esc(p.role||'')}</small></h2><div class="action-stack">${route?'<button class="primary" data-a="open">فتح سجل الشخص</button>':''}${unavailable?'<p class="muted" role="status">الشخص المرتبط غير متاح حاليًا؛ لم يُفتح سجل بديل.</p>':''}${p.id?'<button class="ghost" data-a="edit">تعديل الصفة / البيانات</button><button class="ghost danger" data-a="remove">إزالة من الملف</button>':'<p class="muted">رابط قديم من الإصدار السابق؛ سيُرحّل تلقائيًا.</p>'}</div>`);
  card.querySelector('[data-a="open"]')?.addEventListener('click',()=>{closeModal();app.go(route)});
  card.querySelector('[data-a="edit"]')?.addEventListener('click',()=>{closeModal();openEntityForm(app,'fileParties',{id:p.id,onSaved:()=>reload(app)})});
- card.querySelector('[data-a="remove"]')?.addEventListener('click',async()=>{closeModal();if(!await confirmBox(`إزالة ${esc(p.name)} من أطراف هذا الملف؟ (سجل الشخص نفسه لا يُحذف)`,{okText:'إزالة'}))return;try{await removeParty(app.office,p.id);toast('تمت الإزالة');reload(app)}catch(e){toast(userError(e),'error')}});
+ card.querySelector('[data-a="remove"]')?.addEventListener('click',async()=>{closeModal();if(!await confirmBox(`إزالة ${esc(p.name||p.partyName||'الطرف')} من أطراف هذا الملف؟ (سجل الشخص نفسه لا يُحذف)`,{okText:'إزالة'}))return;try{await removeParty(app.office,p.id);toast('تمت الإزالة');reload(app)}catch(e){toast(userError(e),'error')}});
 }
 function relationActions(app,r){
  const card=modal(`<h2 class="modal-title">${esc(r.relationType||'علاقة')}</h2><p>${esc(r.otherLabel)}</p><div class="action-stack"><button class="primary" data-a="open">فتح الملف المرتبط</button><button class="ghost" data-a="edit">تعديل</button><button class="ghost danger" data-a="remove">إلغاء الربط</button></div>`);

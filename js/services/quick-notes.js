@@ -176,7 +176,7 @@ export function parseQuickNoteQuery(raw = '') {
 }
 
 export function matchesQuickNoteQuery(note, parsed, at = nowIso(), {includeDeleted = false} = {}) {
-  if (!note || (!includeDeleted && (note.isDeleted || note.deletedAt))) return false;
+  if (!note || note.isPurged || (!includeDeleted && (note.isDeleted || note.deletedAt))) return false;
   const state = effectiveNoteState(note, at);
   const today = localDate(dateNow());
   if (parsed.priority && validPriority(parsed.priority) !== note.priority) return false;
@@ -225,6 +225,7 @@ export async function getQuickNote(office, id, {raw = false} = {}) {
 
 export async function saveQuickNote(office, input = {}, {id = null, expectedVersion = null, links = null, action = null, includeDeleted = false} = {}) {
   const existing = id ? await getQuickNote(office, id, {raw: includeDeleted}) : (input.id ? await getQuickNote(office, input.id, {raw: includeDeleted}) : null);
+  if (existing?.isPurged) throw new AppError(ERR.CONFLICT, 'حُذفت هذه الملاحظة نهائيًا ولا يمكن استعادتها.');
   if (existing?.isDeleted && !includeDeleted) throw new AppError(ERR.CONFLICT, 'الملاحظة في السلة؛ استعدها قبل التعديل.');
   if (id && !existing) throw new AppError(ERR.NOT_FOUND, 'الملاحظة غير موجودة.');
   if (expectedVersion != null && existing && Number(existing.version || 0) !== Number(expectedVersion)) throw new AppError(ERR.CONFLICT, 'تغيرت الملاحظة على جهاز آخر؛ أعد فتحها قبل الحفظ.');
@@ -283,9 +284,10 @@ function sanitizeLinks(noteId, links = []) {
   return [...new Map(out.map(row => [row.id, row])).values()];
 }
 
-export async function linksForNote(office, noteId) {
+export async function linksForNote(office, noteId, {limit = MAX_LINKS} = {}) {
   if (!noteId) return [];
-  return office.r.quickNoteLinks.byIndex('noteId', noteId, MAX_LINKS);
+  const cap=Math.min(MAX_LINKS,Math.max(1,Number(limit)||1));
+  return office.r.quickNoteLinks.byIndex('noteId', noteId, cap);
 }
 
 export async function notesForEntity(office, entityType, entityId, {limit = 100} = {}) {
@@ -340,6 +342,7 @@ export async function unlinkQuickNote(office, noteId, linkId) {
 export async function updateNoteState(office, noteId, patch = {}, action = 'updated') {
   const note = await getQuickNote(office, noteId, {raw: Boolean(patch.deletedAt !== undefined || patch.isDeleted !== undefined || action === 'restored')});
   if (!note) throw new AppError(ERR.NOT_FOUND, 'الملاحظة غير موجودة.');
+  if (note.isPurged) throw new AppError(ERR.CONFLICT, 'حُذفت هذه الملاحظة نهائيًا ولا يمكن تعديلها أو استعادتها.');
   const data = {...note, ...patch};
   if (patch.lifecycle === NOTE_LIFECYCLES.DONE) data.completedAt = patch.completedAt || nowIso();
   if (patch.lifecycle === NOTE_LIFECYCLES.OPEN) data.completedAt = null;
@@ -385,7 +388,7 @@ export async function purgeQuickNote(office, id) {
     const links = await request(tx.objectStore(LINK_STORE).index('noteId').getAll(IDBKeyRange.only(id)));
     for (const link of links) await request(tx.objectStore(LINK_STORE).delete(link.id));
     await request(tx.objectStore(STORE.activityLog).add(activity(office, id, 'purged')));
-  }, {captureChanges: true});
+  }, {hardDelete: true});
   events.emit('entity:changed', {entityType: NOTE_STORE, id});
   return true;
 }
@@ -535,6 +538,7 @@ export async function quickNotesStats(office, {pageLimit = 100, maxRows = 20000}
     const page = await office.r.caseNotes.page({index: 'updatedAt', cursor, limit: Math.min(Math.max(1, Number(pageLimit) || 100), MAX_PAGE), direction: 'prev', includeDeleted: true});
     for (const row of page.items) {
       scanned += 1;
+      if (row.isPurged) continue;
       counts.ALL += 1;
       const state = effectiveNoteState(row);
       if (state === 'TRASH') counts.TRASH += 1;
@@ -562,7 +566,7 @@ export async function emptyQuickNoteTrash(office, {limit = 200} = {}) {
       for (const link of rows) await request(links.delete(link.id));
     }
     await request(tx.objectStore(STORE.activityLog).add(activity(office, 'bulk', 'purged', null)));
-  }, {captureChanges: true});
+  }, {hardDelete: true});
   events.emit('entity:changed', {entityType: NOTE_STORE, id: 'bulk'});
   return {purged: ids.length};
 }
