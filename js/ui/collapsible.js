@@ -97,6 +97,14 @@ function updatePinButton(button,key){
  button.title=pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية';
 }
 export const syncCollapsePin=updatePinButton;
+// زر الدبوس المُنشأ برمجيًا: كان يُبنى بلا اسم وصول حتى أول تغيير حالة، فيصل لقارئ
+// الشاشة كزر صامت. هنا يُبنى عبر الدالة نفسها التي تضبط الاسم وحالة الضغط والتلميح.
+function makePinButton(key,className='collapse-pin'){
+ const button=document.createElement('button');
+ button.type='button';button.className=className;button.innerHTML=icon('pin');
+ updatePinButton(button,key);
+ return button;
+}
 export function collapsePinMarkup(key,pinned=false,className='collapse-pin'){
  return `<button type="button" class="${className}${pinned?' is-pinned':''}" data-collapse-pin="${esc(key)}" aria-label="${pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية'}" aria-pressed="${Boolean(pinned)}" title="${pinned?'إلغاء تثبيت الحالة':'تثبيت الحالة الحالية'}">${icon('pin')}</button>`;
 }
@@ -149,7 +157,7 @@ function addPanelCollapse(panel,scope,index,legacyState){
  panel.append(body);
  const button=document.createElement('button');button.type='button';button.className='ghost small card-collapse-toggle collapse-toggle';
  button.innerHTML=`<span class="collapse-caret" aria-hidden="true">${collapsed?'›':'⌄'}</span>`;
- const pin=document.createElement('button');pin.type='button';pin.className='collapse-pin';pin.innerHTML=icon('pin');
+ const pin=makePinButton(key);
  header.append(pin,button);
  panel.dataset.collapseReady='true';panel.dataset.collapseKey=key;panel.dataset.collapseType='panel';panel.dataset.collapseCollapsed=String(collapsed);
  updatePanel(panel,collapsed,button,heading,body.id);
@@ -199,7 +207,7 @@ function addDetailsCollapse(details,scope,index){
  details.open=!collapsed;
  const body=document.createElement('div');body.className='collapse-region details-collapse-body';body.id=`collapse-region-${token(key)}`;body.setAttribute('role','region');body.setAttribute('aria-label',heading);
  [...details.children].filter(child=>child!==summary).forEach(child=>body.append(child));details.append(body);
- const button=document.createElement('button');button.type='button';button.className='collapse-pin';button.innerHTML=icon('pin');
+ const button=makePinButton(key);
  summary.append(button);
  const sync=()=>{
   const isClosed=!details.open;
@@ -242,7 +250,7 @@ function addSearchGroupCollapse(group,scope,index){
  const body=document.createElement('div');body.className='collapse-region search-group-content';body.id=`collapse-region-${token(key)}`;
  rows.forEach(x=>body.append(x));group.append(body);
  const button=document.createElement('button');button.type='button';button.className='ghost small collapse-toggle';button.innerHTML=`<span class="collapse-caret" aria-hidden="true">${collapsed?'›':'⌄'}</span>`;
- const pin=document.createElement('button');pin.type='button';pin.className='collapse-pin';pin.innerHTML=icon('pin');
+ const pin=makePinButton(key);
  header.append(pin,button);
  group.dataset.collapseReady='true';group.dataset.collapseKey=key;group.dataset.collapseType='group';group.dataset.collapseCollapsed=String(collapsed);
  const apply=next=>{group.dataset.collapseCollapsed=String(next);body.hidden=next;body.setAttribute('aria-hidden',String(next));button.setAttribute('aria-expanded',String(!next));button.setAttribute('aria-controls',body.id);button.setAttribute('aria-label',`${next?'توسيع':'طي'} نتائج ${title}`);button.title=next?'توسيع النتائج':'طي النتائج';button.querySelector('.collapse-caret').textContent=next?'›':'⌄'};

@@ -29,7 +29,9 @@ const context=await browser.newContext({viewport:{width:1440,height:950},locale:
 const page=await context.newPage();
 page.on('pageerror',e=>report.errors.push('pageerror: '+e.message));
 page.on('console',m=>{if(m.type()==='error'&&!/ERR_CONNECTION_CLOSED|service worker/i.test(m.text()))report.errors.push('console: '+m.text())});
-const verify=async(name,fn)=>{await fn();report.checks.push(name);console.log(`VERIFIED — ${name}`)};
+// فلتر تطويري: FPW_ONLY='28)' يشغّل الفحوص المطابقة فقط (بلا تأثير افتراضيًا)
+const only=process.env.FPW_ONLY?new RegExp(process.env.FPW_ONLY):null;
+const verify=async(name,fn)=>{if(only&&!only.test(name))return;await fn();report.checks.push(name);console.log(`VERIFIED — ${name}`)};
 const go=async route=>{await page.evaluate(r=>window.__LAW_OFFICE_APP__.go(r),route);await page.waitForTimeout(1400)};
 const tabText=()=>page.evaluate(()=>(document.querySelector('#file-tab')?.textContent||'').replace(/\s+/g,' ').trim());
 const headText=()=>page.evaluate(()=>(document.querySelector('#file-head')?.textContent||'').replace(/\s+/g,' ').trim());
@@ -654,6 +656,173 @@ try{
   await page.waitForTimeout(800);
   assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الأطراف والصفات','الاختيار يفتح القسم مرة واحدة');
   assert.equal(await page.locator('#file-tab .party-toolbar').count(),1,'محتوى القسم مرة واحدة بلا تكرار');
+ });
+
+ // (28) السحب والإفلات الحقيقي بالماوس داخل «⚙ تخصيص الصفحة»
+ await verify('28) إعادة الترتيب بالسحب بالماوس: يتغير فعلًا، يُحفظ، ويتبعه شريط التبويبات',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.locator('[data-order-file-tabs]').click();
+  await page.waitForTimeout(700);
+  const rows=page.locator('#modal-root .pl-row');
+  await rows.first().waitFor({state:'visible',timeout:8000});
+  const orderOf=()=>page.evaluate(()=>[...document.querySelectorAll('#modal-root .pl-row')].map(r=>r.dataset.pl));
+  const tabsOf=()=>page.evaluate(()=>[...document.querySelectorAll('.file-subtabs [data-tab]')].map(b=>b.dataset.tab));
+  const before=await orderOf();
+  const tabsBefore=await tabsOf();
+  assert.equal(before.length,15,'15 قسمًا قبل السحب');
+  // سحب حقيقي بالماوس (أحداث HTML5 DnD حقيقية عبر Playwright) للصف الأول إلى موضع الرابع
+  await rows.nth(0).dragTo(rows.nth(3));
+  await page.waitForTimeout(800);
+  const after=await orderOf();
+  assert.notDeepEqual(after,before,`السحب بالماوس غيّر الترتيب (${before[0]} تحرك)`);
+  assert.equal(after[3],before[0],'القسم المسحوب استقر في الموضع الهدف');
+  // الحفظ الفعلي + انعكاسه على شريط التبويبات (نظام واحد لا نظامان)
+  await page.locator('#modal-root [data-pl-done]').click();
+  await page.waitForTimeout(600);
+  const tabsAfter=await tabsOf();
+  assert.notDeepEqual(tabsAfter,tabsBefore,'ترتيب شريط التبويبات تابع للترتيب الجديد');
+  assert.equal(tabsAfter[3],before[0],'القسم المسحوب في الموضع الجديد بالشريط');
+  await page.locator('[data-order-file-tabs]').click();
+  await page.waitForTimeout(700);
+  await rows.first().waitFor({state:'visible',timeout:8000});
+  assert.deepEqual(await orderOf(),after,'الترتيب الجديد محفوظ بعد إعادة فتح النافذة');
+  // «استعادة الافتراضي» زر حقيقي يطلب تأكيدًا ثم يُرجع الترتيب الأصلي
+  await page.locator('#modal-root [data-pl-reset]').click();
+  await page.locator('#modal-root [data-ok]').waitFor({state:'visible',timeout:8000});
+  assert.ok((await page.locator('#modal-root').textContent()).includes('استعادة الترتيب'),'التأكيد يشرح أثر الاستعادة');
+  await page.locator('#modal-root [data-ok]').click();
+  await page.waitForTimeout(900);
+  assert.equal(await page.locator('#modal-root .pl-row').count(),0,'نافذة التخصيص أُغلقت بعد الاستعادة');
+  assert.deepEqual(await tabsOf(),tabsBefore,'شريط التبويبات رجع لترتيبه الأصلي');
+  await page.locator('[data-order-file-tabs]').click();
+  await page.waitForTimeout(700);
+  await rows.first().waitFor({state:'visible',timeout:8000});
+  assert.deepEqual(await orderOf(),before,'«استعادة الافتراضي» ترجع ترتيب الأقسام الأصلي');
+  await page.locator('#modal-root [data-pl-done]').click();
+  await page.waitForTimeout(500);
+ });
+
+ // (29) خط الطباعة الحقيقي: PDF فعلي بمحرك Chromium + توافق العرض مع مقاس A4
+ await verify('29) الطباعة الحقيقية: توليد PDF بمحرك المتصفح وتوافق العرض مع A4',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  const pdfPath=path.join(artifactDir,'file-page-print.pdf');
+  await page.pdf({path:pdfPath,format:'A4',printBackground:true,margin:{top:'12mm',bottom:'12mm',left:'10mm',right:'10mm'}});
+  const buf=await fs.readFile(pdfPath);
+  assert.ok(buf.length>20000,`ملف PDF غير فارغ (${buf.length} بايت)`);
+  assert.equal(buf.subarray(0,5).toString('latin1'),'%PDF-','ترويسة PDF سليمة');
+  const tail=buf.subarray(Math.max(0,buf.length-4096)).toString('latin1');
+  assert.ok(tail.includes('%%EOF'),'نهاية ملف PDF سليمة');
+  const raw=buf.toString('latin1');
+  const pages=(raw.match(/\/Type\s*\/Page[^s]/g)||[]).length;
+  assert.ok(pages>=1,`PDF يحتوي صفحات مطبوعة (${pages})`);
+  assert.ok(/\/MediaBox\s*\[\s*0\s+0\s+59[0-9](\.\d+)?\s+84[0-9](\.\d+)?/.test(raw)||/595\.\d+\s+84[12]\.\d+/.test(raw),'مقاس الصفحة A4 (595×842pt)');
+  assert.ok(/\/Font/.test(raw),'خطوط عربية مدمجة في PDF');
+  // محاكاة مقاس A4 (794×1123 بكسل @96dpi) في وضع الطباعة: لا تجاوز أفقي ولا شريط ملتصق
+  await page.setViewportSize({width:794,height:1123});
+  await page.emulateMedia({media:'print'});
+  await page.waitForTimeout(600);
+  const fit=await page.evaluate(()=>({
+   doc:document.documentElement.scrollWidth,win:window.innerWidth,
+   bar:getComputedStyle(document.querySelector('.file-tabs-bar')).position,
+   id:!!(document.querySelector('.file-id')?.getBoundingClientRect().height),
+   cards:document.querySelectorAll('.fx-grid .fx-card').length}));
+  assert.equal(fit.bar,'static','الشريط غير ملتصق في محاكاة الطباعة');
+  assert.ok(fit.doc<=fit.win+2,`لا تجاوز أفقي في عرض A4 (${fit.doc} <= ${fit.win})`);
+  assert.equal(fit.id,true,'هوية الملف مطبوعة');
+  await page.screenshot({path:path.join(artifactDir,'print-a4.png'),fullPage:true});
+  await page.emulateMedia({media:'screen'});
+  await page.setViewportSize({width:1440,height:950});
+  await page.waitForTimeout(500);
+ });
+
+ // (30) شجرة إمكانية الوصول الفعلية — ما يستقبله قارئ الشاشة من المتصفح
+ await verify('30) شجرة a11y من المتصفح: tablist/tab/tabpanel وأسماء وصول لكل عنصر تفاعلي بصفحة الملف',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  const snap=await page.locator('.file-tabs-bar').ariaSnapshot();
+  if(process.env.FPW_DEBUG)console.log('--- aria snapshot ---\n'+snap+'\n--- end ---');
+  assert.ok(/tablist/.test(snap),'الشريط يظهر في شجرة الوصول كـ tablist');
+  for(const label of ['نظرة عامة','الجلسات','الأعمال الإدارية','المراحل والإجراءات القضائية']){
+   assert.ok(new RegExp(`tab "${label}[^"]*"`).test(snap),`تبويب «${label}» له اسم وصول في الشجرة`);
+  }
+  assert.ok(/\[selected\]/.test(snap),'التبويب النشط معلَّم selected في الشجرة');
+  const panelSnap=await page.locator('#file-tab').ariaSnapshot();
+  assert.ok(/tabpanel/.test(panelSnap),'منطقة المحتوى معلنة كـ tabpanel');
+  // كل عنصر تفاعلي داخل صفحة الملف له اسم وصول (لا أزرار صامتة أمام قارئ الشاشة)
+  const cdp=await context.newCDPSession(page);
+  await cdp.send('Accessibility.enable');
+  const axOf=async sel=>{
+   const {result}=await cdp.send('Runtime.evaluate',{expression:`document.querySelector(${JSON.stringify(sel)})`});
+   const {nodes}=await cdp.send('Accessibility.queryAXTree',{objectId:result.objectId});
+   return nodes;
+  };
+  const propsOf=n=>Object.fromEntries((n.properties||[]).map(p=>[p.name,p.value?.value]));
+  const groupLabels=['أطراف الملف','الأحكام والإعلانات','البيانات والمراجع','الارتباطات والمتابعة'];
+  let barNodes=await axOf('.file-tabs-bar');
+  // التبويبات الأساسية الأربعة بأسماء وصول + موضع وحجم مجموعة (يعلنها قارئ الشاشة)
+  const tabs=barNodes.filter(n=>n.role?.value==='tab');
+  assert.equal(tabs.length,4,`أربعة تبويبات في شجرة الوصول (${tabs.length})`);
+  for(const t of tabs){
+   const p=propsOf(t);
+   assert.ok('selected' in p,`«${t.name?.value}» يحمل حالة التحديد في الشجرة`);
+   assert.ok('controls' in p,`«${t.name?.value}» مرتبط بلوحة المحتوى (controls)`);
+  }
+  assert.equal(tabs.filter(t=>propsOf(t).selected===true).length,1,'تبويب واحد فقط معلن محدَّدًا');
+  // أزرار المجموعات معلنة كقوائم منسدلة مغلقة (hasPopup=menu + expanded=false) في شجرة الوصول الحقيقية
+  const groupBtns=barNodes.filter(n=>n.role?.value==='button'&&groupLabels.some(l=>String(n.name?.value||'').includes(l)));
+  assert.equal(groupBtns.length,4,`أزرار المجموعات الأربعة في الشجرة (${groupBtns.length})`);
+  for(const b of groupBtns){
+   const p=propsOf(b);
+   assert.equal(p.hasPopup,'menu',`«${b.name?.value}» معلن كقائمة منسدلة (hasPopup=menu)`);
+   assert.equal(p.expanded,false,`«${b.name?.value}» معلن مغلقًا`);
+  }
+  // فتح القائمة: تُعلن كـ menu بعناصر menuitemradio، ويصبح الزر موسَّعًا
+  await page.locator('.ftb-group[data-group="gParties"] .ftb-group-btn').click();
+  await page.waitForTimeout(350);
+  barNodes=await axOf('.file-tabs-bar');
+  assert.ok(barNodes.some(n=>n.role?.value==='menu'),'القائمة المفتوحة معلنة كـ menu');
+  const items=barNodes.filter(n=>n.role?.value==='menuitemradio');
+  assert.ok(items.length>=3,`عناصر القائمة معلنة كـ menuitemradio (${items.length})`);
+  const openBtn=barNodes.find(n=>n.role?.value==='button'&&String(n.name?.value||'').includes('أطراف الملف'));
+  assert.equal(propsOf(openBtn).expanded,true,'زر المجموعة معلن موسَّعًا بعد الفتح');
+  // اختيار قسم: يصبح العنصر معلنًا «محددًا» (checked) في الشجرة عند إعادة فتح القائمة
+  const partiesLabel=(await page.locator('.ftb-group[data-group="gParties"] [data-tab="parties"] .ftb-item-label').textContent()).trim();
+  await page.locator('.ftb-group[data-group="gParties"] [data-tab="parties"]').click();
+  await page.waitForTimeout(900);
+  await page.locator('.ftb-group[data-group="gParties"] .ftb-group-btn').click();
+  await page.waitForTimeout(350);
+  const reItems=(await axOf('.file-tabs-bar')).filter(n=>n.role?.value==='menuitemradio');
+  const activeItem=reItems.find(n=>String(n.name?.value||'').includes(partiesLabel));
+  assert.ok(activeItem,`عنصر «${partiesLabel}» موجود في الشجرة`);
+  // قيمة checked في شجرة CDP نصية ('true'/'false'/'mixed') بخلاف selected المنطقية
+  assert.equal(String(propsOf(activeItem).checked),'true',`«${partiesLabel}» معلن محدَّدًا (checked=true)`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  // لا عناصر تفاعلية بلا اسم وصول داخل صفحة الملف
+  const interactive=new Set(['button','tab','menuitemradio','menuitem','link','checkbox','combobox','textbox','switch','radio']);
+  // وصف العنصر الصامت من DOM ليكون الفشل قابلًا للتعقب (كلاس + أي aria-label/title موجود)
+  const describeNode=async n=>{
+   try{
+    const {node}=await cdp.send('DOM.describeNode',{backendNodeId:n.backendDOMNodeId,depth:0});
+    const attrs=node.attributes||[];
+    const get=k=>{const i=attrs.indexOf(k);return i>=0?attrs[i+1]:''};
+    const cls=(get('class')||'').split(/\s+/).filter(Boolean).slice(0,3).join('.');
+    const named=get('aria-label')||get('title');
+    return `${node.nodeName.toLowerCase()}${cls?'.'+cls:''}${named?`[${named}]`:'[بلا اسم]'}`;
+   }catch{return `${n.role.value}#${n.backendDOMNodeId}`}
+  };
+  const unnamed=[];
+  for(const sel of ['#file-head','.file-tabs-bar','#file-tab']){
+   for(const n of await axOf(sel)){
+    if(n.ignored||!n.role||!interactive.has(n.role.value))continue;
+    if(!String(n.name?.value??'').trim())unnamed.push(`${sel}:${await describeNode(n)}`);
+   }
+  }
+  await cdp.detach();
+  assert.equal(unnamed.length,0,`لا عناصر تفاعلية بلا اسم وصول — ${unnamed.slice(0,6).join(' · ')||'—'}`);
  });
 
  // (21) الملخص التنفيذي: كل عنصر ملخص مرتبط بمصدره الأصلي وبلا بيانات مُختلقة
