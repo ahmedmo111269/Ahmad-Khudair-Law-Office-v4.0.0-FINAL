@@ -1,129 +1,249 @@
 /* =====================================================================
-   طبقة تجاوب الشريط العلوي (Topbar) — إصلاح تغطية الأزرار لعناصر الواجهة
+   الشريط الفرعي المضغوط (Sub-header) — v6.3 «سطر واحد بارتفاع 46px»
    ---------------------------------------------------------------------
-   المشكلة (مقيسة في متصفح حقيقي — Chromium بمحاكاة الهاتف):
-   • `.topbar` كان بارتفاع ثابت `60px` على الشاشات ≤900px (pro.css) و`72px`
-     على سطح المكتب (layout.css)، بينما محتواه يلتف إلى سطرين على الهاتف
-     (عنوان + شارات ثم صف الأزرار) فيتجاوز ارتفاعه المثبّت ويُرسم فوق ما تحته:
-     عنوان الصفحة «الموكلون» وزر «+ إضافة موكل» وعوامل التصفية.
-   • قاعدتان في هذا الملف نفسه كانت علة إضافية: `.topbar>div` (تُخصّيص 0,1,1)
-     كانت تطابق صف الأزرار `.top-actions` (0,1,0) وتفرض عليه `display:flex`
-     و`flex-grow:1` فتتجاوز قواعده وتكدّس الأزرار عموديًا.
-   • شريط التنقل العلوي `.tn-bar` ارتفاعه متغيّر (`--topnav-h` يُقاس بالجافاسكربت)
-     وشريط الأدوات ملتصق تحته، فأي قياس متأخر/قديم يجعل التداخل يزيد.
+   الطلب المنفَّذ: الشريط الفرعي الظاهر أسفل شريط التنقل العلوي العام
+   (`.topbar`) صار مضغوطًا وأنيقًا وبالحجم والتنسيق نفسه لشريط التنقل تمامًا.
 
-   الإصلاح في هذه الطبقة (قواعد إضافية فقط، بلا !important وبلا حذف قاعدة قائمة):
-   1) ارتفاع الشريط تلقائي دائمًا (`min-height` + `height:auto` + `overflow:hidden`
-      كحزام أمان) ⇒ لا يخرج محتواه عن حدوده أبدًا ولا يغطّي ما تحته.
-   2) التفاف `flex-wrap: wrap`، وعلى الهاتف تُرتَّب الأزرار في صفوف متساوية:
-      ثلاثة أزرار رئيسية في شبكة 3 أعمدة + صف مستقل لأزرار التنقل.
-   3) على الهاتف (≤640px) يصبح الشريط `static` بعد أن صار سطرين/ثلاثة —
-      فلا يلتهم ارتفاع الشاشة ولا يغطّي شيئًا، ويبقى شريط التنقل وحده ملتصقًا.
-   4) رأس الصفحة (`.page-head`) يترتب عموديًا على الهاتف بأزرار متساوية.
-   • يُحمَّل هذا الملف آخر ملفات CSS في index.html. سطح المكتب (≥901px) يبقى
-     بتخطيطه الحالي: كتلة العنوان والأزرار في صف واحد والارتفاع الأساسي 72px.
+   • يمين الشريط: عنوان الصفحة (أو اسم الملف/الشاشة الحالية) ثم شارتَي قاعدة
+     البيانات والشبكة في السطر نفسه — كانت كتلة العنوان تترتب فعليًا في سطرين
+     (`h1` كتلة فوق الشارات) فكان الارتفاع 62-72px رغم أن الشريط سطر واحد.
+   • يسار الشريط (RTL): 🔍 البحث · 🔔 التنبيهات · «+ إضافة» ثم أزرار التنقل
+     و«رجوع» في أقصى اليسار (`index.html`: رجوع آخر عنصر في `.nav-cluster`).
+   • ارتفاع ثابت 46px للشريطين معًا (المدى المطلوب 45-48px):
+     `.topbar` = 46px (بحدوده)، و`.tn-inner` = 45px + حدّ الشريط 1px = 46px
+     ⇒ الشريطان بمقاس واحد بالبكسل لا بالتقريب.
+   • أزرار مضغوطة: ارتفاع 40px (وهو حد اللمس الذي يفحصه
+     `tools/node-tests/android-pwa-browser-tests.mjs`: ≥ 40px) وعرض 40px
+     للأزرار الأيقونية، وأيقونات 18px — بلا أي لون أو خط جديد: كل القيم من
+     توكنز `themes.css` (خط ذهبي `--chrome-border` وخلفية `--chrome` نفسها
+     المستخدمة في شريط التنقل العلوي، فيبدوان وحدة بصرية واحدة).
+   • حماية التخطيط: `flex-wrap:nowrap` + `min-width:0` + `text-overflow:ellipsis`
+     على العنوان، وإخفاء تدريجي للعناصر الثانوية على أضيق الشاشات، و`overflow:hidden`
+     كحزام أمان أخير ⇒ لا عنصر يخرج عن الشريط ولا يغطّي المحتوى. هذا يُغلق القيد
+     12 في `docs/KNOWN-LIMITATIONS.md` (كان صف الإجراءات يلتف خارج صندوق الشريط
+     ويتداخل مع أول 40px من المحتوى على الهاتف).
+
+   ملاحظات تنفيذ:
+   • هذا الملف يُحمَّل آخر ملفات CSS في `index.html`، فقواعده تتجاوز قواعد
+     `layout/pro/ui/mobile-pwa/files-workspace` بالترتيب. لا `!important` إلا
+     حيث يفرض ملفٌ أعلى أولويةً صريحة (`#nav-home` في `pro.css` على الهاتف).
+   • `.topbar` يبقى Sticky وتُقاس إزاحته بالمتغير `--topnav-h` من `js/ui/topnav.js`
+     (الهاتف ≤640px: التنقل في الشريط السفلي والشريط الفرعي `static` كما كان).
+   • الطباعة: الشريط مخفي أصلًا في `base.css`/`components.css`، وهنا يُبطَّل تثبيته فقط.
    ===================================================================== */
 
-/* ---------- 1) الشريط: ارتفاع تلقائي بدل ثابت + منع خروج المحتوى عنه ---------- */
-.topbar{
- height:auto;              /* بدل 72px الثابتة في layout.css */
- min-height:fit-content;   /* الارتفاع = المحتوى، بلا رفع الارتفاع على سطح المكتب */
- overflow:hidden;          /* حزام أمان: لا يرسم أي زر خارج حدود الشريط */
- flex-wrap:wrap;           /* بدل صف واحد صارم يتجاوز الارتفاع المثبّت */
- align-content:center;
- align-items:center;
- row-gap:6px;
- position:sticky;
- top:var(--topnav-h,0px);  /* إزاحة مقيسة (topnav.js → measureHeight) */
- z-index:10;
+/* ---------- 0) توكنات الارتفاع المشتركة بين الشريطين ---------- */
+:root{
+  --subbar-h:46px;    /* ارتفاع الشريطين (45-48px كحد أقصى) */
+  --subbar-btn:40px;  /* ارتفاع أزرار الشريط الفرعي — حد اللمس المفحوص ≥ 40px */
+  --subbar-icon:18px; /* مقاس أيقونات الشريط الفرعي */
 }
-/* كتلة العنوان (أول div في الشريط) — الاستثناء الصريح لصف الأزرار مقصود:
-   `.topbar>div` بلا `:not(.top-actions)` كانت تتجاوزه وتفرض عليه flex. */
-.topbar>div:not(.top-actions){min-width:0}
-/* صف الأزرار: لا يتجاوز العرض، وأزراره لا تتكدّس فوق بعضها */
-.top-actions{flex-wrap:wrap;align-items:center;min-width:0;max-width:100%}
-.top-actions>button,
-.top-actions .nav-cluster>button{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.topnav-collapsed{--subbar-h:42px} /* الوضع المطوي: ينقص الشريطان معًا */
 
-/* ---------- 2) الأجهزة اللوحية (≤900px): سطران مرتبان ورأس صفحة ثابت النص ---------- */
-@media(max-width:900px){
- .topbar{padding:8px 12px;min-height:56px;gap:6px;row-gap:6px;align-items:center;overflow:visible}
- /* كتلة العنوان تتمدّد لتملأ السطر، والعنوان يُقتطع بأمان بدل دفع الأزرار */
- .topbar>div:not(.top-actions){
-  flex:1 1 auto;
-  min-width:120px;
-  display:flex;
-  flex-wrap:wrap;
+/* ---------- 1) الشريط: سطر واحد، ارتفاع ثابت، بلا التفاف ---------- */
+.topbar{
+  height:var(--subbar-h);
+  min-height:var(--subbar-h);
+  max-height:var(--subbar-h);
+  flex-wrap:nowrap;          /* بدل flex-wrap:wrap الذي أخرج الصف عن صندوقه */
   align-items:center;
-  gap:2px 8px;
- }
- .topbar>div:not(.top-actions) h1{
-  flex:1 1 100%;
+  gap:8px;
+  row-gap:0;
+  padding-block:0;
+  overflow:hidden;           /* حزام أمان: لا يُرسم شيء خارج الشريط */
+  position:sticky;
+  top:var(--topnav-h,0px);   /* الإزاحة المقيسة أسفل شريط التنقل */
+  z-index:10;
+  /* نفس تشطيب شريط التنقل العلوي (خلفية الشريط الداكنة + حد ذهبي) — بلا زجاج
+     ثقيل فوق سطح ثابت، فالطلاء أخف على الهاتف. القيم من themes.css وحدها. */
+  background:linear-gradient(180deg,color-mix(in srgb,var(--on-chrome) 4%,var(--chrome)) 0%,var(--chrome) 62%);
+  border-bottom:1px solid var(--chrome-border);
+  box-shadow:none;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+}
+/* حلقة التركيز داخل الأزرار المضغوطة كي لا تُقتطع أطرافها بحزام الأمان */
+.topbar button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px;border-radius:var(--radius-sm)}
+
+/* ---------- 2) كتلة العنوان: في الجهة اليمنى وسطر واحد ---------- */
+.topbar>div:not(.top-actions){
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:1 1 auto;
+  min-width:0;               /* شرط عمل القطع النصي داخل صف Flex */
+  overflow:hidden;
+}
+.topbar>div:not(.top-actions) h1{
+  flex:0 1 auto;
+  min-width:0;
+  margin:0;
+  font-size:16px;
+  line-height:1.2;
+  color:var(--text-strong);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;    /* عنوان طويل/ملف باسم طويل لا يدفع الأزرار */
+}
+.topbar>div:not(.top-actions) #db-badge,
+.topbar>div:not(.top-actions) #network-badge{
+  flex:none;
+  font-size:11px;
+  line-height:1;
+  white-space:nowrap;
+}
+.topbar>div:not(.top-actions) #network-badge{font-size:10.5px}
+
+/* ---------- 3) أزرار الإجراءات السريعة: مضغوطة ومتساوية ---------- */
+.topbar .top-actions{
+  display:flex;
+  flex-wrap:nowrap;
+  align-items:center;
+  gap:6px;
+  flex:0 0 auto;
+  min-width:0;
+  max-width:100%;
+}
+.topbar .top-actions>button,
+.topbar .nav-cluster>button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  height:var(--subbar-btn);
+  min-height:var(--subbar-btn);
+  padding:0 10px;
+  font-size:13px;
+  line-height:1;
+  flex:none;
   min-width:0;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
- }
- .topbar>div:not(.top-actions) #db-badge,
- .topbar>div:not(.top-actions) #network-badge{flex:none}
- .topbar>#mobile-menu{flex:none}
- /* الأزرار في صف واحد ما دامت تتّسع (تُقلَّص بحد أدنى صفر)، وإن ضاقت المساحة
-    ينزل الصف كاملًا إلى سطر ثانٍ — بلا تجاوز ولا تغطية. */
- .top-actions{flex:1 1 auto;min-width:0;gap:6px;justify-content:flex-end}
- .top-actions>button{flex:1 1 auto;min-width:0;justify-content:center}
- /* ارتفاع ثابت لرأس الصفحة (كان 60px في pro.css فيُقتطع نصّها) */
- .topbar{height:auto}
+  border-radius:var(--radius-sm);
 }
-
-/* ---------- 3) الهاتف (≤640px): شريط غير ملتصق + أزرار في صفوف متساوية ---------- */
-@media(max-width:640px){
- /* الشريط يلتف إلى سطرين أو ثلاثة على الهاتف: يبقى في أعلى الصفحة (static)
-    فلا يلتهم ارتفاع الشاشة ولا يغطّي شيئًا، ويبقى شريط التنقل هو الملتصق. */
- .topbar{position:static;min-height:0}
- /* صف الأزرار الرئيسية: ثلاثة أعمدة متساوية، ثم أزرار التنقل في صف مستقل */
- .top-actions{
-  display:grid;
-  flex:1 1 100%;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:6px;
-  width:100%;
-  max-width:100%;
- }
- .top-actions>button,.top-actions>.nav-cluster{width:100%}
- .top-actions>button{justify-content:center;padding-inline:6px;font-size:12.5px}
- .top-actions .nav-cluster{
-  grid-column:1 / -1;
-  display:flex;
-  gap:6px;
-  border:0;
-  margin:0;
+.topbar .top-actions .icon-btn,
+.topbar #mobile-menu{
+  width:var(--subbar-btn);
+  min-width:var(--subbar-btn);
   padding:0;
- }
- .top-actions .nav-cluster>button{flex:1 1 0;min-width:0;justify-content:center}
- /* العنوان: بلا قصّ — اسم البرنامج يلتف على سطرين وشارتا القاعدة والشبكة تحته */
- .topbar>div:not(.top-actions){row-gap:3px}
- .topbar>div:not(.top-actions) h1{
-  flex:1 1 100%;
-  white-space:normal;
-  overflow:visible;
-  text-overflow:clip;
-  font-size:15.5px;
-  line-height:1.3;
- }
- .topbar>div:not(.top-actions) #db-badge,
- .topbar>div:not(.top-actions) #network-badge{flex:0 1 auto;max-width:100%}
- #db-badge,#network-badge{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- #network-badge{font-size:.68rem}
 }
-@media(max-width:400px){
- /* أضيق الشاشات: نفس الصفوف المتساوية بحشو أصغر بدل كسر الترتيب أو قطع النص */
- .top-actions{gap:4px}
- .top-actions>button{padding-inline:4px;font-size:12px}
- .top-actions .nav-cluster{gap:4px}
- .topbar>div:not(.top-actions) h1{font-size:14.5px}
+.topbar .ic,
+.topbar .nav-cluster .ic{
+  width:var(--subbar-icon);
+  height:var(--subbar-icon);
+  flex:none;
+}
+.topbar .top-actions>button>span,
+.topbar .nav-cluster>button>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* «+ إضافة» يبقى الزر الذهبي الوحيد في الشريط (هوية التطبيق) */
+.topbar .top-actions>#quick-add{font-weight:700;padding:0 12px}
+
+/* ---------- 4) مجموعة التنقل: «رجوع» في أقصى اليسار ---------- */
+.topbar .nav-cluster{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  flex:none;
+  min-width:0;
+  border-inline-start:1px solid var(--border);
+  padding-inline-start:6px;
+  margin-inline-start:2px;
+}
+.topbar .nav-cluster>button{padding:0 9px}
+.topbar .nav-cluster>button>span{font-size:13px}
+
+/* ---------- 5) شارة التنبيهات: في زاوية الزر المضغوط بلا تغطية الأيقونة ---------- */
+.topbar .top-actions #reminders-btn{position:relative}
+.topbar .top-actions #reminders-btn .nav-badge{
+  position:absolute;
+  inset-inline-end:1px;
+  top:2px;
+  transform:none;
+  min-width:15px;
+  height:15px;
+  padding:0 3px;
+  border-radius:999px;
+  font-size:9.5px;
+  font-weight:800;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:0 0 0 1px var(--chrome);
 }
 
-/* ---------- 4) رأس الصفحة: ترتيب عمودي وأزرار متساوية على الهاتف ---------- */
+/* ---------- 6) الاستجابة: ما ينقص من زر يُكتسب للعنوان ---------- */
+/* الأجهزة اللوحية (≤900px): نفس السطر بحشو أصغر (رأس الصفحة كان يُبنى هنا بصفوف) */
+@media(max-width:900px){
+ .topbar{padding-block:0;gap:6px}
+ .topbar>div:not(.top-actions) h1{font-size:15px}
+ .topbar .top-actions{gap:6px}
+}
+/* الهاتف (≤640px): يبقى سطرًا واحدًا — تُخفى العناصر الثانوية فقط:
+   «المظهر» متاح من الإعدادات › المظهر، و«الرئيسية/إغلاق» في شريط التنقل السفلي
+   (NAV_MOBILE_PRIMARY) و«الرجوع» باقٍ في أقصى اليسار. */
+@media(max-width:640px){
+ .topbar{position:static}
+ .topbar>div:not(.top-actions) h1{font-size:14px}
+ .topbar #theme-btn{display:none}
+ .topbar .top-actions #nav-home{display:none!important} /* pro.css يفرض إظهاره بـ!important */
+ /* ui.css (≤600px) يفرض .top-actions{width:100%;justify-content:space-between} فيبتلع
+    العنوان ويدفع «رجوع» خارج الشريط — نُلغيه هنا صراحةً (محدِّد أعلى منه). */
+ .topbar .top-actions{width:auto;justify-content:flex-end;gap:4px}
+ .topbar .top-actions>#quick-add{padding:0 10px}
+ /* #nav-close مخفي أصلًا على ≤900px في pro.css — لا تكرار هنا */
+}
+/* أضيق الشاشات (≤420px): أيقونات 36px وحشو 8px — تبقى كل الأهداف فاعلة */
+@media(max-width:420px){
+ .topbar{padding-inline:8px;gap:4px}
+ .topbar>div:not(.top-actions){gap:5px}
+ .topbar>div:not(.top-actions) h1{font-size:13.5px}
+ .topbar .top-actions{gap:4px}
+ .topbar .top-actions>button,
+ .topbar .nav-cluster>button{padding:0 7px;font-size:12.5px;gap:4px}
+ .topbar #mobile-menu,
+ .topbar .top-actions .icon-btn{width:36px;min-width:36px}
+ .topbar .top-actions>#command-btn{min-width:40px}   /* الحد المفحوص للبحث ≥ 40px */
+ .topbar .top-actions .ic{width:17px;height:17px}
+ .topbar .nav-cluster{padding-inline-start:4px;margin-inline-start:0;gap:3px}
+}
+/* أضيق الهواتف (≤360px): تُخفى شارة الشبكة داخل الشريط (الحالة تظهر في الإعدادات
+   والمزامنة) ليتّسع اسم الصفحة بدل أن يضيق إلى صفر — ويبقى كل زر فاعلًا. */
+@media(max-width:360px){
+ .topbar #network-badge{display:none}
+ .topbar>div:not(.top-actions) h1{font-size:13px}
+}
+/* أجهزة اللمس: نُبقي أهدافًا صحيحة الارتفاع (40px) بالعرض المضغوط بدل 44px
+   التي لا تتسع مع خمسة عناصر في شريط 46px على شاشة 320-360px. */
+@media(pointer:coarse){
+ .topbar .top-actions>button,
+ .topbar .nav-cluster>button,
+ .topbar #mobile-menu{
+  min-height:var(--subbar-btn);
+  height:var(--subbar-btn);
+ }
+ .topbar .top-actions>button,
+ .topbar #mobile-menu{min-width:0}
+ .topbar .top-actions .icon-btn,
+ .topbar #mobile-menu{min-width:var(--subbar-btn)}
+}
+
+/* ---------- 7) مطابقة ارتفاع شريط التنقل العلوي ---------- */
+/* شريط التنقل يرسم حدًّا سفليًا 1px، فنطرحه من ارتفاع صفّه الداخلي ليكون
+   مقاس الشريطين صافيًا متطابقًا (45px + 1px = 46px). كل الباقي تناسق داخلي
+   فقط (حشو رأسي وخط الشعار) بلا تغيير أي خط أو لون في الشريط العلوي. */
+#sidebar.tn-bar .tn-inner{min-height:calc(var(--subbar-h) - 1px);padding-block:3px}
+#sidebar.tn-bar .tn-brand{padding-block:2px}
+#sidebar.tn-bar .tn-brand-mark{width:30px;height:30px;border-radius:9px}
+#sidebar.tn-bar .tn-brand-mark svg{width:17px;height:17px}
+#sidebar.tn-bar .tn-strip{padding-block:2px}
+#sidebar.tn-bar .tn-tab{padding-block:6px}
+#sidebar.tn-bar .tn-btn{padding-block:5px}
+#sidebar.tn-bar .tn-sep{margin-block:6px}
+body.topnav-collapsed #sidebar.tn-bar .tn-inner{min-height:calc(var(--subbar-h) - 1px);padding-block:3px}
+body.topnav-collapsed #sidebar.tn-bar .tn-brand{padding-block:2px}
+
+/* ---------- 8) رأس الصفحة: ترتيب عمودي وأزرار متساوية على الهاتف ---------- */
 @media(max-width:640px){
  .page-head:not(.exec-head):not(.record-head){
   flex-direction:column;
@@ -150,7 +270,7 @@
  .record-head{flex-wrap:wrap;gap:8px}
 }
 
-/* ---------- 5) أدوات القوائم على الهاتف: بحث بعرض كامل وفترات بتمرير أفقي ---------- */
+/* ---------- 9) أدوات القوائم على الهاتف: بحث بعرض كامل وفترات بتمرير أفقي ---------- */
 @media(max-width:640px){
  .list-controls{gap:6px}
  .list-controls .list-search{flex:1 1 100%;min-width:0}
@@ -161,10 +281,10 @@
  .panel-head>h3{min-width:0}
 }
 
-/* ---------- 6) الطباعة: لا تدخل قواعد هذه الطبقة ---------- */
+/* ---------- 10) الطباعة: لا تدخل قواعد هذه الطبقة ---------- */
 @media print{.topbar,.top-actions{position:static!important;min-height:0;height:auto}}
 
-/* ---------- 7) W1: تنقل الهاتف السفلية من سجل المسارات نفسه ---------- */
+/* ---------- 11) W1: تنقل الهاتف السفلية من سجل المسارات نفسه ---------- */
 @media(max-width:640px){
  :root{--tn-mobilebar-h:72px}
  #sidebar.tn-bar{

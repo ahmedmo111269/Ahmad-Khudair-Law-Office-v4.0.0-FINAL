@@ -40,7 +40,9 @@ const P={
  dots:'<circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/>',
  check:'<path d="M20 6 9 17l-5-5"/>',
  inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
- refreshCw:'<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.64 9A8 8 0 0 1 19.07 5.93L20 7M4 17l.93 1.07A8 8 0 0 0 18.36 15"/>'
+ refreshCw:'<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.64 9A8 8 0 0 1 19.07 5.93L20 7M4 17l.93 1.07A8 8 0 0 0 18.36 15"/>',
+ /* سهم «رجوع» — يشير إلى اليمين لأن الواجهة RTL (يعكس سهم الرجوع المعتاد) */
+ arrowBack:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'
 };
 export const icon=(name,cls='')=>P[name]?`<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name]}</svg>`:'';
 export const ROUTE_ICONS={dashboard:'home',actionCenter:'target',files:'folder',clients:'users',opponents:'userX',cases:'gavel',powersOfAttorney:'stamp',hearings:'calendar',procedures:'clipboard',serviceRecords:'send',bailiffs:'userCheck',appointments:'clock',communications:'phone',caseNotes:'note',quickNotes:'note',reminders:'bell',judgments:'landmark',expertReports:'microscope',executionCenter:'hammer',execution:'hammer',fees:'wallet',feePayments:'wallet',documentReferences:'file',search:'search',reports:'report',analytics:'chart',integrity:'shield',repair:'wrench',databases:'database',backup:'save',sync:'refreshCw',settings:'settings'};
@@ -49,4 +51,10 @@ export function decorateNav(){
  const mark=document.querySelector('.brand-mark,.tn-brand-mark');if(mark&&!mark.innerHTML)mark.innerHTML=icon('scale');
  const tb=document.querySelector('#theme-btn');if(tb&&!tb.innerHTML)tb.innerHTML=icon('palette');
  const mm=document.querySelector('#mobile-menu');if(mm&&!mm.querySelector('svg'))mm.innerHTML=icon('menu');
+ // أزرار التنقل في الشريط الفرعي: أيقونات خطوط المشروع بدل الرموز النصية ↩ ✕ ⌂
+ // (الاسم الميسّر يأتي من aria-label في index.html، والرمز لا يُكرر إن وُجد svg أصلًا).
+ for(const [selector,name] of [['#nav-back','arrowBack'],['#nav-close','x'],['#nav-home','home']]){
+  const b=document.querySelector(selector);
+  if(b&&!b.querySelector('svg'))b.insertAdjacentHTML('afterbegin',icon(name));
+ }
 }
