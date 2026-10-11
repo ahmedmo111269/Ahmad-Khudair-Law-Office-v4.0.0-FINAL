@@ -1,3 +1,11 @@
+**مسح انحدار على كل الصفحات (لأن `collapsible.js` مكوّن مشترك):** `tests.html` في Chromium **633/633** ·
+`work-center` **68/68** · `offline-sync` **PASS** · `home-focus` **56/56** · `wave6-context` **54/54** ·
+`legal-context` **PASS** · `execution-feas` **10/10** · `execution-feas-cycle` **19/19** · `execution-print`
+**13/13** · `feas-golden` **16/16**. الحزم الحمراء (`execution-browser` 33/1، `execution-simple` 3/17،
+`execution-settings` 4/6، `wave3-features` 9/2، `execution-practical`/`execution-real-example`، `dom-forms`)
+أُعيد تشغيلها على نسخة الأساس `49dc115` في worktree منفصل وأعطت **النتيجة نفسها بالحرف** ⇒ قائمة مسبقة لا
+علاقة لها بهذا التغيير (التفاصيل في §9 من `docs/FILE-DATA-FIRST-WORKSPACE.md`).
+
 ## جولة تحقق إضافية: طباعة حقيقية + سحب بالماوس + شجرة إمكانية الوصول — 2026-10-11
 
 **ثلاثة فحوص جديدة في المتصفح (العدد 28-30) وإصلاح a11y حقيقي في مكوّن مشترك:**

@@ -176,3 +176,41 @@
 والبقاء في الموضع الهدف وحفظه وإعادة فتحه وانعكاسه على شريط التبويبات، ثم «استعادة الافتراضي» بتأكيدها.
 - **ملاحظات بيئية باقية**: `files-cockpit-browser-tests.mjs` و`grid-browser-tests.mjs` (السطر 392) وفحصا
 `verify-cross-platform.mjs` تتوقف/تفشل بنفس النتيجة على الأساس `49dc115` — ليست من هذا التغيير.
+
+---
+
+## 9) مسح انحدار شامل بعد تعديل المكوّن المشترك (فحص الصفحات الأخرى)
+
+تعديل `js/ui/collapsible.js` يمس كل صفحة فيها لوحات/مجموعات قابلة للطي، فأُعيد تشغيل حزم المتصفح المتبقية
+(لا واحد فقط) — الأخضر يعني «بلا انحدار في صفحات أخرى»:
+
+| الحزمة | النتيجة على هذه النسخة |
+|---|---|
+| `tests-html-browser-tests.mjs` (صفحة `tests.html` في Chromium حقيقي) | **633/633** بلا أخطاء module — ومنها `collapse-state-tests` (الطي/التثبيت) في متصفح حقيقي |
+| `work-center-browser-tests.mjs` | **68/68** (وظيفي + جوال + أداء + دون اتصال) |
+| `offline-sync-browser-tests.mjs` | **PASS** |
+| `home-focus-browser-tests.mjs` | **56/56** |
+| `wave6-context-browser-tests.mjs` | **54/54** |
+| `legal-context-browser-tests.mjs` | **PASS** |
+| `execution-feas-browser-tests.mjs` | **10/10** |
+| `execution-feas-cycle-browser-tests.mjs` | **19/19** |
+| `execution-print-browser-tests.mjs` | **13/13** (يبقى «طباعة ورقية لم تُختبر» كما هو معلن) |
+| `feas-golden-tests.mjs` | **16/16** |
+
+**حزم حمراء سابقة لهذا العمل — أُثبت أنها ليست من التغيير** بإعادة تشغيلها على نسخة الأساس `49dc115` في
+worktree منفصل (منفذ 8099) ومقارنة النتيجة حرفيًا:
+
+| الحزمة | هذه النسخة | الأساس `49dc115` |
+|---|---|---|
+| `execution-browser-tests.mjs` | 33 ناجحًا / 1 فشل (أقسام الصفحة: `hero,numbers,filters,queue,grid` بدل ثلاث) | **نفس الفشل بالحرف** |
+| `execution-simple-browser-tests.mjs` | 3 / 17 («مثال عملي جاهز» داخل قسم مطوي فليس ظاهرًا للنقر) | **نفس النتيجة 3/17** |
+| `execution-settings-browser-tests.mjs` | 4 / 6 (توقعات أرقام تواريخ على الهاتف) | **نفس النتيجة 4/6** |
+| `wave3-features-browser-tests.mjs` | 9 / 2 (بطاقة/صف «توكيلات تحتاج إجراءً») | **نفس النتيجتين بالحرف** |
+| `execution-practical-tests.mjs` · `execution-real-example-tests.mjs` | `location is not defined` في مشغّل Node | `js/app.js` على الأساس يقرأ `location.hash` في الإقلاع أيضًا ⇒ **نفس القيد** |
+| `dom-forms.mjs` | انهيار فوري مستقل (يحتاج شيم DOM) | مشغّل مساعد غير مربوط بأي عدّاء — قيد قائم |
+| `grid-browser-tests.mjs` · `files-cockpit-browser-tests.mjs` | توقف بيئي موثّق (السطر 392 / أول فحص) | موثّق سابقًا كمتطابق مع الأساس |
+
+**ملاحظة بيئة (درس عملي):** تشغيل حزم المتصفح الثقيلة متتابعةً بلا فاصل أسقط تبويب Chromium أثناء سيناريو
+الأداء في `work-center` (58/58 ثم فشل السيناريوهين perf/offline برسالة «Target page… has been closed»)؛
+وبتشغيلها وحدها أعطت **68/68**. الحزم تُشغَّل واحدة تلو الأخرى، والحالات الحمراء أعلاه لا علاقة لها بصفحة الملف.
+
