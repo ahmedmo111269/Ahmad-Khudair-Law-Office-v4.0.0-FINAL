@@ -825,6 +825,175 @@ try{
   assert.equal(unnamed.length,0,`لا عناصر تفاعلية بلا اسم وصول — ${unnamed.slice(0,6).join(' · ')||'—'}`);
  });
 
+ // (31) تبديل الأقسام داخل الصفحة بلا إعادة تحميل + سلامة زر الرجوع
+ await verify('31) تبديل الأقسام بلا إعادة تحميل كاملة وزر الرجوع لا يكسر الصفحة',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  // علامة على كائن النافذة: تختفي حتمًا لو أُعيد تحميل المستند
+  await page.evaluate(()=>{window.__fpSentinel='alive'});
+  const histBefore=await page.evaluate(()=>history.length);
+  const hashBeforeTabs=await page.evaluate(()=>location.hash);
+  await page.locator('.file-tabs-bar [data-tab="hearings"]').click();
+  await page.waitForTimeout(800);
+  await page.locator('.ftb-group[data-group="gRecords"] .ftb-group-btn').click();
+  await page.waitForTimeout(250);
+  await page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]').click();
+  await page.waitForTimeout(900);
+  assert.equal(await page.evaluate(()=>window.__fpSentinel),'alive','لا إعادة تحميل كاملة عند تبديل الأقسام');
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),'الملاحظات','القسم المطلوب ظاهر بعد تبديلين');
+  assert.ok(await activeTabCheck('notes'),'عنصر القائمة النشط معلَّم بعد التبديل');
+  const nav=await page.evaluate(hb=>({hist:history.length,hash:location.hash,same:hb===history.length}),histBefore);
+  assert.equal(nav.hist,histBefore,'تبديل الأقسام داخل الصفحة لا يضيف مدخلات لتاريخ المتصفح');
+  assert.equal(nav.hash,hashBeforeTabs,'العنوان (hash) لا يتغيّر جزئيًا عند تبديل الأقسام');
+  // زر الرجوع في المتصفح: نهاية سليمة بلا أخطاء JS وبلا شاشة فارغة
+  const errsBefore=report.errors.length;
+  const stateBefore=await page.evaluate(()=>({hash:location.hash,route:String(window.__LAW_OFFICE_APP__.route)}));
+  await page.evaluate(()=>history.back());
+  await page.waitForTimeout(1100);
+  const afterBack=await page.evaluate(()=>({hash:location.hash,route:String(window.__LAW_OFFICE_APP__.route),
+   sentinel:window.__fpSentinel||null,main:document.querySelector('#main-content')?.children.length||0,
+   heading:(document.querySelector('#page-title')?.textContent||'').trim().slice(0,40)}));
+  if(process.env.FPW_DEBUG)console.log('DEBUG back:',JSON.stringify({stateBefore,afterBack}));
+  assert.equal(report.errors.length,errsBefore,`زر الرجوع لا يُنتج أخطاء JS (${report.errors.slice(errsBefore).join(' | ')})`);
+  assert.ok(afterBack.main>0,'المحتوى مرسوم بعد الرجوع (لا شاشة فارغة)');
+  // سلوك مقصود: الأقسام ليست مسارات، فالرجوع يخرج من الملف إلى الصفحة السابقة (رئيسية/ملفات) بحالة سليمة
+  const landed=['dashboard','files'].includes(afterBack.route)||Boolean(await page.locator('.file-tabs-bar').count());
+  assert.ok(landed,`الرجوع ينتهي إلى صفحة سليمة (${afterBack.route} · «${afterBack.heading}»)`);
+  assert.ok(afterBack.heading.length>0,'عنوان الصفحة المرسوم غير فارغ بعد الرجوع');
+  await go(`file:${fx.file.id}`);
+ });
+
+ // (32) تباين الألوان الفعلي لعناصر المساحة الجديدة في الثيمين — معيار WCAG AA
+ await verify('32) تباين النصوص في الثيم الداكن الافتراضي والفاتح يستوفي WCAG AA',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  const audit=async()=>page.evaluate(async()=>{
+   const {contrast,getConfig,setTheme}=await import('./js/ui/theme.js');
+   // قارئ ألوان كامل: rgb()/rgba() بالنمط المباشر، وأي صيغة حديثة (color(srgb …) الناتجة من color-mix) عبر canvas
+   const cv=document.createElement('canvas');cv.width=cv.height=1;const cx=cv.getContext('2d',{willReadFrequently:true});
+   const parse=s=>{
+    const m1=/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(s||'');
+    if(m1)return [+m1[1],+m1[2],+m1[3],m1[4]===undefined?1:+m1[4]];
+    if(!s||s==='transparent'||s==='rgba(0, 0, 0, 0)')return null;
+    cx.clearRect(0,0,1,1);cx.fillStyle='#123456';
+    cx.fillStyle=s;
+    if(cx.fillStyle==='#123456'&&!/^#123456$/i.test(s.trim()))return null;
+    cx.fillRect(0,0,1,1);const d=cx.getImageData(0,0,1,1).data;
+    return [d[0],d[1],d[2],d[3]/255];
+   };
+   const hexOf=arr=>'#'+arr.slice(0,3).map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+   // خلفية مركّبة فعلية: نجمع طبقات الأسلاف الشفافة فوق بعضها
+   const bgOf=el=>{const stack=[];let n=el;
+    while(n){const p=parse(getComputedStyle(n).backgroundColor);
+     if(p&&p[3]>0){stack.push(p);if(p[3]>=0.999)break}
+     n=n.parentElement}
+    if(!stack.length)return '#ffffff';
+    let acc=stack[stack.length-1].slice(0,3);
+    for(let i=stack.length-2;i>=0;i--){const [r,g,b,a]=stack[i];acc=[r*a+acc[0]*(1-a),g*a+acc[1]*(1-a),b*a+acc[2]*(1-a)]}
+    return hexOf(acc)};
+   const fgOf=el=>{const p=parse(getComputedStyle(el).color);if(!p)return null;
+    const bg=bgOf(el);if(p[3]>=0.999)return hexOf(p);
+    const b=parse(bg)||[255,255,255,1];
+    return hexOf([p[0]*p[3]+b[0]*(1-p[3]),p[1]*p[3]+b[1]*(1-p[3]),p[2]*p[3]+b[2]*(1-p[3])])};
+   // نص «كبير» حسب WCAG: ≥24px، أو ≥18.66px وبوزن 700+
+   const need=el=>{const s=getComputedStyle(el);const size=parseFloat(s.fontSize);const weight=Number(s.fontWeight)||400;
+    return (size>=24||(size>=18.66&&weight>=700))?3:4.5};
+   const pairs=[
+    ['عنوان القضية في الرأس','.fid-title'],
+    ['سطر ثانوي في الرأس','.fid-sub, .fid-meta'],
+    ['اسم الطرف في الرأس','.fid-party-name'],
+    ['صفة الطرف في الرأس','.fid-party-role'],
+    ['صفة الموكل (ذهبي)','.fid-party--client .fid-party-role'],
+    ['صفة الخصم (تحذيري)','.fid-party--opponent .fid-party-role'],
+    ['صفة طرف آخر (رمادي)','.fid-party:not(.fid-party--client):not(.fid-party--opponent) .fid-party-role'],
+    ['تبويب أساسي غير نشط','.file-subtabs [data-tab]:not(.active) .tab-label'],
+    ['تبويب أساسي نشط','.file-subtabs [data-tab].active .tab-label'],
+    ['زر مجموعة في الشريط','.ftb-group-btn'],
+    ['عنوان القسم الحالي','[data-tab-shell-title]'],
+    ['عنوان بطاقة ملخص','.fx-grid .fx-card .fx-title'],
+    ['بيانات بطاقة ملخص','.fx-grid .fx-card .fx-meta, .fx-grid .fx-card .fx-sub'],
+    ['شارة الحالة في الرأس','.fid-badges .badge'],
+    ['شارة المرحلة الحالية','.fid-badges .badge.stage'],
+    ['عنوان قسم في القائمة المنسدلة','.ftb-menu:not([hidden]) .ftb-item-label'],
+    ['عنوان قسم نشط في القائمة','.ftb-menu:not([hidden]) .ftb-item.is-on .ftb-item-label'],
+   ];
+   const out=[];
+   for(const [label,sel] of pairs){
+    const menu=/ftb-menu/.test(sel);
+    if(menu&&!document.querySelector('.ftb-menu:not([hidden])')){
+     document.querySelector('.ftb-group[data-group="gRecords"] .ftb-group-btn')?.click();
+     await new Promise(r=>setTimeout(r,180));
+    }
+    const el=document.querySelector(sel);
+    if(!menu&&!el)continue;
+    if(!el){continue}
+    const ratio=contrast(fgOf(el),bgOf(el));
+    out.push({label,ratio:Math.round(ratio*100)/100,need:need(el),
+     size:Math.round(parseFloat(getComputedStyle(el).fontSize)*10)/10});
+   }
+   if(document.querySelector('.ftb-menu:not([hidden])')){
+    document.querySelector('.ftb-group[data-group="gRecords"] .ftb-group-btn')?.click();
+    await new Promise(r=>setTimeout(r,150));
+   }
+   return {preset:getConfig().preset,rows:out};
+  });
+  const dark=await audit();
+  if(process.env.FPW_DEBUG)console.log('DEBUG contrast (dark):',JSON.stringify(dark));
+  assert.ok(dark.rows.length>=12,`قياس تباين لعناصر المساحة الجديدة (${dark.rows.length} عنصرًا)`);
+  for(const row of dark.rows)assert.ok(row.ratio>=row.need,`داكن — ${row.label}: ${row.ratio} < ${row.need} (${row.size}px)`);
+  // الثيم الفاتح ثم استعادة الثيم الأصلي كما كان بالضبط
+  const original=await page.evaluate(async()=>{const m=await import('./js/ui/theme.js');return m.getConfig()});
+  const light=await page.evaluate(async()=>{const m=await import('./js/ui/theme.js');m.setTheme({preset:'elegantLight'},{save:false});return m.getConfig().preset});
+  assert.equal(light,'elegantLight','تم تطبيق الثيم الفاتح للقياس');
+  await page.waitForTimeout(500);
+  const lightAudit=await audit();
+  if(process.env.FPW_DEBUG)console.log('DEBUG contrast (light):',JSON.stringify(lightAudit));
+  for(const row of lightAudit.rows)assert.ok(row.ratio>=row.need,`فاتح — ${row.label}: ${row.ratio} < ${row.need} (${row.size}px)`);
+  // لقطة الثيم الفاتح مرجعًا بصريًا لتعديلات التباين (بلا قوائم مفتوحة عابرة)
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.ftb-menu:visible').count(),0,'لا قائمة مفتوحة قبل اللقطة المرجعية');
+  await page.screenshot({path:path.join(artifactDir,'light-theme.png'),fullPage:true});
+  await page.evaluate(async orig=>{const m=await import('./js/ui/theme.js');m.setTheme(orig,{save:false})},original);
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(async()=>{const m=await import('./js/ui/theme.js');return m.getConfig().preset}),dark.preset,'استُعيد الثيم الأصلي بعد القياس');
+ });
+
+ // (33) مسار اللمس الحقيقي (أحداث لمس من المتصفح) على التبويبات والقوائم
+ await verify('33) اللمس: لمسة واحدة تفتح القائمة ولمسة على العنصر تفتح القسم',async()=>{
+  await go(`file:${fx.file.id}`);
+  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
+  await page.waitForTimeout(900);
+  const touchCd=await context.newCDPSession(page);
+  await touchCd.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1});
+  const tap=async sel=>{
+   const box=await page.locator(sel).first().boundingBox();
+   if(!box)throw new Error('لا يوجد عنصر للمس: '+sel);
+   const x=box.x+box.width/2,y=box.y+box.height/2;
+   await touchCd.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+   await page.waitForTimeout(70);
+   await touchCd.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  };
+  const targetLabel=(await page.locator('.ftb-group[data-group="gJudgments"] [data-tab="judgments"] .ftb-item-label').textContent()).trim();
+  await tap('.ftb-group[data-group="gJudgments"] .ftb-group-btn');
+  await page.waitForTimeout(450);
+  assert.equal(await page.locator('.ftb-menu:visible').count(),1,'لمسة واحدة على زر المجموعة تفتح القائمة');
+  await tap('.ftb-group[data-group="gJudgments"] [data-tab="judgments"]');
+  await page.waitForTimeout(1000);
+  assert.equal((await page.locator('[data-tab-shell-title]').textContent()).trim(),targetLabel,'لمسة على عنصر القائمة تفتح قسمه');
+  assert.ok(await activeTabCheck('judgments'),'القسم الملموس معلَّم نشطًا');
+  await tap('.file-tabs-bar [data-tab="hearings"]');
+  await page.waitForTimeout(1000);
+  assert.ok(await activeTabCheck('hearings'),'لمسة على تبويب أساسي تنقل إليه');
+  const hearingsRows=await page.locator('#file-tab .dg tbody tr[data-i]').count();
+  assert.ok(hearingsRows>0,`محتوى قسم الجلسات ظاهر بعد اللمس (${hearingsRows} صفًا)`);
+  await touchCd.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  await touchCd.detach();
+  await page.waitForTimeout(300);
+ });
+
  // (21) الملخص التنفيذي: كل عنصر ملخص مرتبط بمصدره الأصلي وبلا بيانات مُختلقة
  await verify('21) الملخص التنفيذي: روابط إلى السجلات الأصلية وحالات فارغة صادقة',async()=>{
   await go(`file:${fx.file.id}`);

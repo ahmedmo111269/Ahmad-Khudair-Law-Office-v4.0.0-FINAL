@@ -181,7 +181,11 @@ select option{background:var(--surface);color:var(--text)}
 .fid-sub{font-size:13.5px;color:var(--text-muted);margin:0 0 6px}
 .fid-badges{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
 /* شارة المرحلة الحالية: من السجل المسجّل فقط (لا تظهر إذا لا توجد مرحلة) */
-.fid-badges .badge.stage{border-color:var(--primary);color:var(--primary);font-weight:700}
+.fid-badges .badge.stage{border-color:var(--primary);color:color-mix(in srgb,var(--primary) 86%,var(--text) 14%);font-weight:700}
+/* شارة «حالة الملف» المشتركة (.badge.open في css/ui.css) تبلغ 4.29 على سطح الثيم الفاتح.
+   نُقوّيها داخل صفحة الملف فقط (الرأس والشريط المختصر والمحتوى)، وتصحيح القاعدة المشتركة
+   في كل الصفحات قرار منفصل — لا نغيّر مظهر صفحات أخرى بلا طلب. */
+.file-id .badge.open,.file-sticky-bar .badge.open,#file-tab .badge.open{color:color-mix(in srgb,var(--success) 82%,var(--text) 18%)}
 .fid-meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px;text-align:end}
 .fid-fno{display:inline-flex;align-items:baseline;gap:8px;border:1px solid var(--border);background:var(--surface2);border-radius:var(--radius-sm);padding:8px 14px}
 .fid-fno-kind{font-size:12.5px;color:var(--text-muted);font-weight:600}
@@ -193,8 +197,11 @@ select option{background:var(--surface);color:var(--text)}
 .fid-party:hover{border-color:var(--primary)}
 .fid-party:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .fid-party-role{font-size:11.5px;color:var(--text-muted);background:var(--surface2);border-radius:999px;padding:2px 9px;white-space:nowrap;font-weight:700}
-.fid-party--client .fid-party-role{color:var(--primary)}
-.fid-party--opponent .fid-party-role{color:var(--danger)}
+/* تباين WCAG AA: النصوص الصغيرة الرمادية/الذهبية على الأسطح الفاتحة تبلغ 4.48 (أقل من 4.5).
+   نمزجها بنسبة بسيطة مع لون النص الأساسي — يتكيف تلقائيًا مع أي لوحة ألوان مخصّصة. */
+.fid-party-role{color:color-mix(in srgb,var(--text-muted) 88%,var(--text) 12%)}
+.fid-party--client .fid-party-role{color:color-mix(in srgb,var(--primary) 86%,var(--text) 14%)}
+.fid-party--opponent .fid-party-role{color:color-mix(in srgb,var(--danger) 88%,var(--text) 12%)}
 .fid-party-name{font-size:16.5px;font-weight:700;color:var(--text-strong)}
 .fid-party-cap{font-size:12.5px;color:var(--text-muted)}
 .fid-party--more{border-style:dashed;color:var(--text-muted);font:inherit;font-size:13px}
