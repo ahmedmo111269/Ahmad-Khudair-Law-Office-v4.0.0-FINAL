@@ -381,3 +381,43 @@ select option{background:var(--surface);color:var(--text)}
  .fx-grid{grid-template-columns:1fr}
  .file-tabs-bar .file-subtabs .subtab-btn small{display:none}
 }
+
+/* ============================================================================
+   File Overview identity — الهوية التشغيلية أول قسم في «نظرة عامة»
+   ============================================================================ */
+.file-overview-static{display:block;min-width:0}
+.file-overview-identity{display:block;position:relative;overflow:visible}
+.file-overview-crumbs{margin:0 0 12px;padding-bottom:2px}
+.file-overview-identity .fid-top{display:block}
+.file-overview-identity .fid-case{width:100%;max-width:none}
+.fid-title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 6px}
+.fid-title-row .fid-title{flex:1 1 420px;margin:0;min-width:0}
+.fid-status{flex:0 0 auto;font-size:13px;font-weight:800;padding:6px 12px;white-space:nowrap}
+.file-overview-identity .fid-court{margin:0 0 6px}
+.file-overview-identity .fid-sub{margin:0 0 8px}
+.file-overview-identity .fid-parties{margin:10px 0 0;padding:10px 0 0;border-top:1px dashed var(--border)}
+.file-overview-identity .fid-actions{justify-content:flex-start;margin:10px 0 0;padding-top:0}
+.file-overview-identity .fid-badges{justify-content:flex-start;margin:10px 0 0}
+.fid-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}
+.file-overview-identity .fid-tools{margin:0;min-height:36px}
+.fid-file-number{position:relative;display:flex;align-items:center;gap:6px;margin-inline-start:auto}
+.fid-file-number-toggle{font-weight:800;border-color:color-mix(in srgb,var(--primary) 48%,var(--border));color:var(--text-strong);min-height:36px}
+.fid-file-number-toggle:hover,.fid-file-number-toggle[aria-expanded="true"]{border-color:var(--primary);color:var(--primary);background:color-mix(in srgb,var(--primary) 10%,transparent)}
+.fid-file-number-popover{display:inline-flex;align-items:center;min-height:32px;padding:5px 10px;border:1px solid color-mix(in srgb,var(--primary) 50%,var(--border));border-radius:var(--radius-sm);background:var(--surface2);color:var(--text-strong);font-size:13px;font-weight:800;direction:rtl;white-space:nowrap;box-shadow:var(--shadow-sm)}
+.fid-file-number-popover[hidden]{display:none}
+.file-overview-identity .fid-party-empty{display:inline-flex;align-items:center;gap:4px}
+@media(max-width:760px){
+ .fid-title-row{align-items:flex-start;gap:8px}
+ .fid-title-row .fid-title{flex-basis:100%;font-size:19px}
+ .fid-status{align-self:flex-start}
+ .fid-bottom{align-items:flex-start;flex-direction:column;gap:8px}
+ .fid-file-number{margin-inline-start:0;width:100%;justify-content:flex-start}
+ .fid-file-number-popover{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+}
+.file-overview-host[hidden]{display:none}
+.file-sticky-bar.file-overview-sticky-hidden{display:none!important}
+/* هوية الملف خارج جسم الطي؛ الشريط المختصر يبقى sibling قابلًا للالتصاق أثناء التمرير. */
+.file-tab-shell>.file-overview-host{min-width:0}
+/* لا تطوي هوية الملف مع جسم المحتوى: هي أول قسم ثابت في «نظرة عامة». */
+.file-tab-shell.card-collapsed>.file-overview-host:not([hidden]){display:block!important}
+.file-tab-shell.card-collapsed>.file-sticky-bar.is-on:not(.file-overview-sticky-hidden){display:flex!important}
