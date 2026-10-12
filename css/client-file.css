@@ -370,7 +370,7 @@ select option{background:var(--surface);color:var(--text)}
   grid-template-areas:"tabs tabs" "more tools";
   gap:4px 6px;padding:6px 0 4px;
  }
- .file-tabs-bar .file-subtabs{grid-area:tabs;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+ .file-tabs-bar .file-subtabs{grid-area:tabs;display:grid;grid-template-columns:repeat(var(--record-primary-count,4),minmax(0,1fr));gap:4px}
  .file-tabs-bar .file-subtabs .subtab-btn{width:100%;justify-content:center;padding:8px 4px;font-size:12.5px;gap:4px}
  .file-tabs-bar .file-subtabs .subtab-btn small{padding:0 5px}
  .ftb-group.ftb-more{grid-area:more;width:100%;min-width:0}
