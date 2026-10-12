@@ -102,7 +102,7 @@ await runExecutionSupersedeTests(test,expect);
 await runExecutionUiTests(test,expect);
 await runSyncTests(test,expect);
 await runQuickNotesTests(test,expect);
-runRecordContextTests(test,expect);
+await runRecordContextTests(test,expect);
 await runRecordWorkspaceTests(test,expect);
 await runProceduresExtrasTests(test,expect);
 await runSearchCancelTests(test,expect);

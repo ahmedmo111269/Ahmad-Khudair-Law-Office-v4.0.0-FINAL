@@ -15,7 +15,8 @@ import {
  resetAllComponentOverrides,resetPageComponentStyles,sanitizeStyle,getComponentStyleState,
  _reloadComponentStylesForTests
 } from '../core/component-style.js';
-import {_resetDisplayPrefsForTests,setCardDisplay,resolveCardDisplay,setGlobalDisplay} from '../core/display-prefs.js';
+import {_resetDisplayPrefsForTests,setCardDisplay,resolveCardDisplay,setGlobalDisplay,getComponentContent,setComponentContent,resolveComponentContent} from '../core/display-prefs.js';
+import {applyComponentContent,componentContentItems} from '../ui/component-content.js';
 import {_resetCollapseStateForTests} from '../ui/collapse-state.js';
 import {prefs} from '../core/preferences.js';
 import {card,bindCards} from '../ui/card.js';
@@ -369,7 +370,50 @@ export function runComponentStyleTests(test,expect){
   main.remove();
  });
 
- test('تخصيص: حفظ إعدادات الصفحة يُطبق على جذر المحتوى (خلفية/نص)',()=>{
+ test('تخصيص البيانات: إظهار الحقول وترتيبها يُحفظ لكل مكوّن ويُطبّق على العرض فقط',()=>{
+  clean();
+  const host=document.createElement('section');
+  host.innerHTML='<div data-uxc-id="section:fields-a"><dl><div class="kv-item" data-display-item="field:a" data-display-label="أ"><dt>أ</dt><dd>١</dd></div><div class="kv-item" data-display-item="field:b" data-display-label="ب"><dt>ب</dt><dd>٢</dd></div></dl></div><div data-uxc-id="section:fields-b"><dl><div class="kv-item" data-display-item="field:a" data-display-label="أ"><dt>أ</dt><dd>١</dd></div><div class="kv-item" data-display-item="field:b" data-display-label="ب"><dt>ب</dt><dd>٢</dd></div></dl></div>';
+  document.body.append(host);
+  setComponentContent('section:fields-a',{order:['field:b','field:a'],hidden:['field:a']});
+  const a=host.querySelector('[data-uxc-id="section:fields-a"]'),b=host.querySelector('[data-uxc-id="section:fields-b"]');
+  const items=applyComponentContent(a,'section:fields-a');
+  expect(items.map(item=>item.id).join('|')).toBe('field:a|field:b');
+  expect([...a.querySelectorAll('[data-display-item]')].map(item=>item.dataset.displayItem).join('|')).toBe('field:b|field:a');
+  expect(a.querySelector('[data-display-item="field:a"]').classList.contains('ux-content-hidden')).toBe(true);
+  expect(b.querySelector('[data-display-item="field:a"]').classList.contains('ux-content-hidden')).toBe(false);
+  expect(getComponentContent('section:fields-a').order.join('|')).toBe('field:b|field:a');
+  expect(resolveComponentContent('section:fields-b',['field:a','field:b']).order.join('|')).toBe('field:a|field:b');
+  expect(prefs.get('ui:display-prefs').componentContents['section:fields-a'].hidden.join('|')).toBe('field:a');
+  host.remove();
+ });
+
+ test('تخصيص البيانات: تبويب «البيانات» يبدل الحقول مباشرة ويحفظ ترتيب المكوّن',()=>{
+  clean();ensureModalRoot();
+  registerPageLayout({pageId:'content-ux',title:'صفحة الحقول',sections:[{id:'details',title:'التفاصيل'}]});
+  const main=document.createElement('main');main.dataset.uxcPage='content-ux';document.body.append(main);
+  main.innerHTML='<section class="panel-plain" data-section-id="details"><div class="panel-head"><h3>بيانات الاختبار</h3></div><dl><div class="kv-item" data-display-item="field:first" data-display-label="الحقل الأول"><dt>الحقل الأول</dt><dd>١</dd></div><div class="kv-item" data-display-item="field:second" data-display-label="الحقل الثاني"><dt>الحقل الثاني</dt><dd>٢</dd></div></dl></section>';
+  bindCustomizableComponents(main);
+  const section=main.querySelector('[data-section-id="details"]'),id=section.dataset.uxcId;
+  section.querySelector('.uxc-gear').click();
+  const panel=document.querySelector('#modal-root .uxc-modal');
+  expect(Boolean(panel.querySelector('[data-uxc-tab="content"]'))).toBe(true);
+  panel.querySelector('[data-uxc-tab="content"]').click();
+  const hidden=panel.querySelector('[data-uxc-content-visible="field:first"]');
+  hidden.checked=false;hidden.dispatchEvent(new Event('change',{bubbles:true}));
+  expect(section.querySelector('[data-display-item="field:first"]').classList.contains('ux-content-hidden')).toBe(true);
+  panel.querySelector('[data-uxc-content-move="-1"][data-uxc-content-id="field:second"]').click();
+  expect(getComponentContent(id).order.slice(0,2).join('|')).toBe('field:second|field:first');
+  expect([...section.querySelectorAll('[data-display-item]')].map(item=>item.dataset.displayItem).join('|')).toBe('field:second|field:first');
+  panel.querySelector('[data-uxc-content-reset]').click();
+  expect(getComponentContent(id).order.length).toBe(0);
+  expect(getComponentContent(id).hidden.length).toBe(0);
+  expect([...section.querySelectorAll('[data-display-item]')].map(item=>item.dataset.displayItem).join('|')).toBe('field:first|field:second');
+  expect(section.querySelector('[data-display-item="field:first"]').classList.contains('ux-content-hidden')).toBe(false);
+  closeModal();main.remove();
+ });
+
+test('تخصيص: حفظ إعدادات الصفحة يُطبق على جذر المحتوى (خلفية/نص)',()=>{
   clean();
   const main=document.createElement('section');document.body.append(main);
   main.innerHTML='<div class="panel-plain" data-section-id="s"><div class="panel-head"><h3>قسم</h3></div></div>';
@@ -393,7 +437,7 @@ export function runComponentStyleTests(test,expect){
   openCustomizerForElement(cardEl);
   const panel=document.querySelector('#modal-root .uxc-modal');
   expect(Boolean(panel)).toBe(true);
-  expect(panel.querySelectorAll('[data-uxc-tab]').length).toBe(4); // أساسي/النصوص/متقدم/إجراءات
+  expect(panel.querySelectorAll('[data-uxc-tab]').length).toBe(5); // أساسي/البيانات/النصوص/متقدم/إجراءات
   expect(Boolean(panel.querySelector('.uxc-preview-box'))).toBe(true);
   // تبويب النصوص يعرض الأنواع الخمسة عشر المتاحة للبطاقة
   panel.querySelector('[data-uxc-tab="texts"]').click();

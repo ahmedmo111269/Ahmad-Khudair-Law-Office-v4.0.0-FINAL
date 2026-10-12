@@ -14,7 +14,7 @@ import {resolveRefs,fileStages,fileChildren,refLabel} from '../services/entity-q
 import {fileParties,fileRelations,archiveFile,reopenFile,closeFile,removeParty,moveParty} from '../services/legal-files.js';
 import {deleteEntity} from '../services/entity-save.js';
 import {kvHtml,bindRefLinks,notFound} from './record-page.js';
-import {sectionGrid,openRow,listNavHtml,bindListNav} from './list-page.js';
+import {sectionGrid,openRow} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {localDate} from '../core/clock.js';
 import {dateSignal,fileSignal} from '../ui/signals.js';
@@ -33,6 +33,7 @@ import {executionsForFile,executionContextSummary} from '../services/execution-w
 import {trackRecent} from '../services/recents.js';
 import {formatFileNumber} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,hiddenSectionIds,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
+import {bindCustomizableComponents} from '../ui/component-customizer.js';
 import {notesForEntity,completeQuickNote,deleteQuickNote} from '../services/quick-notes.js';
 import {openQuickNoteCapture,openQuickNoteEditor} from './quick-notes.js';
 import {openQuickAdd} from './quick-add.js';
@@ -189,7 +190,6 @@ function fileOverviewStaticHtml(app){
     </div>
    </div>
    <div class="fid-bottom">
-    <div class="fid-tools">${listNavHtml(app,'files',id)}</div>
     <div class="fid-file-number">
      <button type="button" class="ghost small fid-file-number-toggle" data-file-number-toggle aria-expanded="false" aria-controls="file-number-popover-${esc(id)}" title="إظهار رقم الملف الفرعي الداخلي">الملف الفرعي</button>
      <span class="fid-file-number-popover" id="file-number-popover-${esc(id)}" data-file-number-popover role="status" hidden></span>
@@ -318,7 +318,6 @@ function bindFileIdentityControls(root,app,id,f,openItemsCheck){
  };
  const head=root.querySelector('#file-head');
  if(!head)return;
- if(!head.dataset.fileNavBound){bindListNav(root,app,'files');head.dataset.fileNavBound='1'}
  once(head.querySelector('[data-file-edit]'),'fileEditBound',()=>openEntityForm(app,'files',{id}));
  root.querySelectorAll('[data-file-quick]').forEach(b=>once(b,'fileQuickBound',()=>openQuickAdd(app)));
  root.querySelectorAll('[data-party-open]').forEach(b=>once(b,'partyOpenBound',()=>{
@@ -644,14 +643,17 @@ function bindCockpitOnce(root,app){
 async function renderTab(app){
  const el=document.querySelector('#file-tab');
  if(!el)return;
+ el.dataset.uxcInstance=app.__file.id;
  const tab=app.__fileTab.tab;
  const cache=app.__fileTabCache&&app.__fileTabCache.id===app.__file.id?app.__fileTabCache:(app.__fileTabCache={id:app.__file.id,map:new Map()});
  // التحميل الكسول الحقيقي: كل تبويب يُركّب عند أول فتح فقط، ثم يُستعاد من الذاكرة
  // (بنفس عناصره ومستمعيه وقيم نماذجه غير المحفوظة) عند العودة إليه — بلا استعلام IndexedDB.
  if(cache.map.has(tab)){
   el.replaceChildren(...cache.map.get(tab));
+  el.dataset.uxcInstance=app.__file.id;
   updateTabShell(app);
   bindCards(el);
+  bindCustomizableComponents(el);
   if(tab==='summary'){bindStagePath(app,app.__file.f,app.__file.stages);bindCockpitOnce(el,app)}
   return;
  }
@@ -666,6 +668,7 @@ async function renderTab(app){
  // يكفي للتنقل، وكل قسم يحتفظ بزر الطي والدبوس الخاص به — بلا عنصر إضافي فوق المحتوى.
  enhanceCollapsiblePanels(main,`file:${app.__file.id}:${tab}`,{bulk:false});
  bindCards(el);
+ bindCustomizableComponents(el);
  if(tab==='summary'){bindStagePath(app,app.__file.f,app.__file.stages);bindCockpitOnce(el,app)}
  updateTabShell(app);
  cache.map.set(tab,[...el.childNodes]);

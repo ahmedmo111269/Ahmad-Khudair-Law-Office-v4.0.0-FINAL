@@ -46,9 +46,9 @@ try{
   const {saveEntity}=await import('/js/services/entity-save.js');
   const opponent=await saveEntity(app.office,'opponents',{name:`خصم فحص مساحة السجل ${suffix}`});
   const file=await app.office.createFile({title:`ملف فحص مساحة السجل ${suffix}`,openedAt:'2026-01-10'},[client.id]);
-  const stage=await app.office.createCase({fileId:file.id,subject:`قضية فحص مساحة السجل ${suffix}`,caseNumber:'123',caseYear:'2026'},[]);
+  const stage=await app.office.createCase({fileId:file.id,stageType:'دعوى',numberType:'رقم دعوى',subject:`قضية فحص مساحة السجل ${suffix}`,caseNumber:'123',caseYear:'2026'},[]);
   await saveEntity(app.office,'procedures',{fileId:file.id,caseId:stage.id,type:'متابعة',description:'إجراء تركيبي لفحص التحميل الكسول',status:'pending'});
-  return {clientId:client.id,opponentId:opponent.id,stageId:stage.id};
+  return {clientId:client.id,opponentId:opponent.id,stageId:stage.id,fileId:file.id};
  });
  report.fixture='Synthetic-only records in a disposable Chromium profile';
 
@@ -83,17 +83,57 @@ try{
   assert.ok(await page.locator('#main-content [data-rec-delete]').count());
  });
 
- await verify('القضية/المرحلة: الخط الزمني والأقسام الإضافية مع تحميل جدول الأعمال عند الطلب',async()=>{
+ await verify('القضية/المرحلة: بطاقة بيانات بارزة وشريط إجراءات مطوي وتخصيص الحقول',async()=>{
   await go(`case:${fixture.stageId}`);
   assert.equal(await page.locator('#main-content .record-primary-tabs [role="tab"]').count(),4);
   assert.ok(await page.locator('#main-content [data-record-section="case-timeline"] [data-case-timeline]').count());
+  const actions=page.locator('#main-content [data-record-actions]');
+  assert.equal(await actions.count(),1);
+  assert.equal(await actions.getAttribute('open'),null,'الإجراءات مطوية افتراضيًا لتقليل المساحة');
+  assert.ok((await actions.locator('summary').innerText()).includes('إجراءات'));
+  assert.ok(await actions.locator('[data-open-ref^="files:"]').count());
+  assert.ok(await actions.locator('[data-wc-linked-task]').count());
+  assert.ok(await actions.locator('[data-rec-edit]').count());
+  assert.ok(await actions.locator('[data-rec-delete]').count());
+  assert.equal(await page.locator('#main-content [data-list-nav-id]').count(),0,'لا توجد أزرار السابق/التالي في صفحة السجل');
+  const identity=page.locator('#main-content .record-case-identity');
+  assert.equal(await identity.count(),1);
+  const identityText=await identity.innerText();
+  const identityHtml=await identity.evaluate(el=>el.outerHTML);
+  for(const label of ['الموكل','الخصم','رقم القضية والسنة','نوع الدعوى / المرحلة','موضوع الدعوى'])assert.ok(identityText.includes(label),`case identity is missing «${label}»: ${identityText} | ${identityHtml}`);
+  assert.ok((await identity.innerText()).includes('123'));
+  assert.ok((await identity.innerText()).includes('2026'));
+  await identity.locator('.uxc-gear').click();
+  const customizer=page.locator('#modal-root .uxc-modal');
+  await customizer.locator('[data-uxc-tab="content"]').click();
+  const clientField=customizer.locator('[data-uxc-content-visible="case:clients"]');
+  assert.equal(await clientField.isChecked(),true);
+  await clientField.uncheck();
+  assert.equal(await identity.locator('[data-display-item="case:clients"]').evaluate(el=>el.classList.contains('ux-content-hidden')),true);
+  await clientField.check();
+  await customizer.locator('[data-uxc-content-move="-1"][data-uxc-content-id="case:subject"]').click();
+  assert.equal(await identity.locator('dl [data-display-item]').last().evaluate(el=>el.dataset.displayItem),'case:number-type');
+  await customizer.locator('[data-uxc-tab="actions"]').click();
+  await customizer.locator('[data-uxc-done]').click();
   assert.equal(await page.locator('#main-content [data-grid="procedures"] .dg').count(),0);
   await activate('procedures');
   await page.waitForSelector('#main-content [data-record-section="procedures"] .dg',{state:'attached',timeout:15000});
   assert.equal(await page.locator('#main-content [data-record-more-toggle]').getAttribute('aria-current'),'true');
  });
 
+ await verify('صفحة الملف: إزالة السابق/التالي مع بقاء أدوات الملف',async()=>{
+  const route=`file:${fixture.fileId}`;
+  await page.evaluate(value=>window.__LAW_OFFICE_APP__.go(value),route);
+  await page.waitForFunction(expected=>String(window.__LAW_OFFICE_APP__?.route||'').split('?')[0]===expected,route,{timeout:20000});
+  await page.waitForSelector('#main-content #file-head',{timeout:20000});
+  assert.equal(await page.locator('#main-content [data-list-nav-id]').count(),0);
+  assert.equal(await page.locator('#main-content .list-nav').count(),0);
+  assert.ok(await page.locator('#main-content [data-file-edit]').count());
+  assert.ok(await page.locator('#main-content [data-file-quick]').count());
+ });
+
  await verify('أدوات الطي الجماعية محفوظة وموجودة داخل أدوات شريط التبويبات',async()=>{
+  await go(`case:${fixture.stageId}`);
   const bulk=page.locator('#main-content .record-tabs-bar .ftb-tools>.collapse-page-tools');
   await bulk.waitFor({state:'visible'});
   assert.equal(await page.locator('#main-content [data-record-workspace] > .collapse-page-tools').count(),0);
