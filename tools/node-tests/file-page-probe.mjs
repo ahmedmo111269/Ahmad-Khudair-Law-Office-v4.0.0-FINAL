@@ -78,10 +78,11 @@ const dump=async(name,route)=>{
   const t=s=>(document.querySelector(s)?.textContent||'').replace(/\s+/g,' ').trim();
   const tabs=[...document.querySelectorAll('.file-tabs-bar [data-tab]')].map(b=>({tab:b.dataset.tab,label:b.textContent.trim(),sel:b.getAttribute('aria-selected')||b.getAttribute('aria-checked'),inMenu:Boolean(b.closest('.ftb-menu')),hidden:b.hidden}));
   const groups=[...document.querySelectorAll('.ftb-group')].map(g=>({group:g.dataset.group,label:g.querySelector('.ftb-group-btn .tab-label')?.textContent?.trim(),active:g.classList.contains('is-active'),items:[...g.querySelectorAll('.ftb-item')].map(i=>i.dataset.tab)}));
+  const menuSections=[...document.querySelectorAll('.ftb-menu-all .ftb-sec')].map(s=>({title:s.querySelector('.ftb-sec-title')?.textContent?.trim(),hidden:s.classList.contains('ftb-sec-hidden'),items:[...s.querySelectorAll('.ftb-item')].map(i=>i.dataset.tab)}));
   const areas=[...document.querySelectorAll('[data-area]')].map(b=>({area:b.dataset.area,label:b.textContent.trim(),sel:b.getAttribute('aria-selected')}));
   const panels=[...document.querySelectorAll('#main-content section.panel,#main-content .stage-path,#main-content .cp-fc,#main-content .cp-exec')].map(p=>({cls:p.className,collapse:p.dataset?.collapseId||'',collapsed:p.dataset?.collapseCollapsed||'',title:t('h3',p)?'':''}));
   const heads=[...document.querySelectorAll('#main-content h2,#main-content h3')].map(h=>h.textContent.replace(/\s+/g,' ').trim());
-  return {route:window.__LAW_OFFICE_APP__.route,title:document.querySelector('#page-title')?.textContent,tabs,groups,areas,heads,panelsCount:panels.length,headText:t('.file-head'),tabText:t('#file-tab').slice(0,900)};
+  return {route:window.__LAW_OFFICE_APP__.route,title:document.querySelector('#page-title')?.textContent,tabs,groups,menuSections,areas,heads,panelsCount:panels.length,hasBulkTools:Boolean(document.querySelector('.collapse-page-tools')),crumbsHeight:document.querySelector('.file-overview-crumbs')?.getBoundingClientRect().height,headText:t('.file-head'),tabText:t('#file-tab').slice(0,900)};
  });
  await fs.writeFile(path.join(outDir,`${name}.json`),JSON.stringify(info,null,1));
  console.log(`\n===== ${name} (${route}) =====`);

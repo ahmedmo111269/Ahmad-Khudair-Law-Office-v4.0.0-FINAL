@@ -113,20 +113,9 @@ select option{background:var(--surface);color:var(--text)}
 .theme-menu{max-height:min(78vh,640px);overflow:auto;overscroll-behavior:contain}
 
 /* ===================== File Cockpit — القمرة العلوية ===================== */
-/* الشريط المضغوط الثابت عند التمرير: هوية الملف وحالته والخطوة التالية فقط */
-.file-sticky-bar{
- /* z أقل من شريط الصفحة (10) وأعلى من شريط التبويبات (8) — لا تراكب مع أي شريط آخر */
- position:sticky;top:0;z-index:9;display:none;align-items:center;gap:10px;flex-wrap:wrap;
- padding:8px 12px;margin:0 0 10px;background:color-mix(in srgb,var(--surface) 92%,transparent);
- backdrop-filter:blur(8px);border:1px solid var(--border);border-radius:var(--radius);
- box-shadow:var(--shadow-md);
-}
-.file-sticky-bar.is-on{display:flex}
-.file-sticky-bar .fsb-title{font-weight:700;color:var(--text-strong);font-size:13.5px;
- overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:36ch}
-.file-sticky-bar .fsb-next{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:34ch}
-.file-sticky-bar .fsb-actions{margin-inline-start:auto;display:flex;gap:6px}
-@media(max-width:640px){.file-sticky-bar .fsb-next{display:none}.file-sticky-bar .fsb-title{max-width:18ch}}
+/* الشريط الملتصق في صفحة الملف واحد فقط: شريط التبويبات أدناه. أي شريط ثانٍ كان يشترك في
+   أعلى الشاشة يفرض إزاحة متغيّرة تُقرأ من موضع متحرك، فينزل شريط التبويبات إلى منتصف الشاشة
+   عند سحب الصفحة — لذلك أُزيل الشريط المختصر للهوية، والهوية تبقى أول قسم في «نظرة عامة». */
 
 /* وضع التركيز: يختصر العناصر الثانوية دون إخفاء التنبيهات أو الإجراءات */
 #main-content.file-focus-mode .file-stats-panel,
@@ -149,18 +138,14 @@ select option{background:var(--surface);color:var(--text)}
 .file-areas-bar .area-btn .area-count{font-size:11px;opacity:.75}
 .file-subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 10px;padding:0;list-style:none}
 .file-subtabs .subtab-btn{
- border:0;background:transparent;color:var(--text-muted);padding:7px 12px;min-height:40px;
+ border:0;background:transparent;color:var(--text-muted);padding:7px 12px;
  border-radius:8px;cursor:pointer;font:inherit;font-size:12.5px;min-height:44px;display:inline-flex;align-items:center;gap:5px;
 }
 .file-subtabs .subtab-btn.active{background:var(--surface2);color:var(--text-strong);font-weight:700}
-.file-subtabs .subtab-btn.has-data::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--primary)}
 
 /* رأس الملف: تكثيف بصري هادئ */
 .file-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between}
 .file-head .head-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.file-gaps{margin:0 0 12px}
-.file-gaps .gap-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border)}
-.file-gaps .gap-item:last-child{border-bottom:0}
 .file-parties-short{display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center}
 @media(max-width:700px){
  .file-head{flex-direction:column}
@@ -185,7 +170,7 @@ select option{background:var(--surface);color:var(--text)}
 /* شارة «حالة الملف» المشتركة (.badge.open في css/ui.css) تبلغ 4.29 على سطح الثيم الفاتح.
    نُقوّيها داخل صفحة الملف فقط (الرأس والشريط المختصر والمحتوى)، وتصحيح القاعدة المشتركة
    في كل الصفحات قرار منفصل — لا نغيّر مظهر صفحات أخرى بلا طلب. */
-.file-id .badge.open,.file-sticky-bar .badge.open,#file-tab .badge.open{color:color-mix(in srgb,var(--success) 82%,var(--text) 18%)}
+.file-id .badge.open,#file-tab .badge.open{color:color-mix(in srgb,var(--success) 82%,var(--text) 18%)}
 .fid-meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px;text-align:end}
 .fid-fno{display:inline-flex;align-items:baseline;gap:8px;border:1px solid var(--border);background:var(--surface2);border-radius:var(--radius-sm);padding:8px 14px}
 .fid-fno-kind{font-size:12.5px;color:var(--text-muted);font-weight:600}
@@ -208,19 +193,27 @@ select option{background:var(--surface);color:var(--text)}
 .fid-party-empty{font-size:13.5px;color:var(--text-muted)}
 .fid-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
 
-/* شريط التبويبات: أربعة تبويبات أساسية ظاهرة + قوائم منسدلة للأقسام المتقاربة وظيفيًا.
-   ملتصق أعلى المحتوى أثناء التمرير (تحت الشريط العلوي) فيبقى التنقل واضحًا دون حجب المحتوى. */
-#main-content .file-tabs-bar{display:flex;align-items:stretch;gap:6px;margin:0 0 12px;position:sticky;top:0;z-index:8;background:var(--bg);padding:8px 0 2px;border-bottom:1px solid var(--border);min-width:0}
-/* مجموعة القوائم المنسدلة داخل الشريط (سطح المكتب: بجانب التبويبات الأساسية) */
-.ftb-groups{display:flex;align-items:stretch;gap:4px;flex:0 1 auto;min-width:0}
+/* ==========================================================================
+   شريط تبويبات الملف — أربعة تبويبات ثابتة + قائمة منسدلة واحدة لبقية الأقسام
+   • الالتصاق: موضع ثابت يُحسب من ارتفاع الشرائط الملتصقة أعلى الصفحة فقط (syncStickyTop)،
+     فلا يتحرك الشريط مع سحب الصفحة ولا ينزل إلى منتصف الشاشة مهما كان مقدار التمرير.
+   • سطح المكتب: صف واحد (التبويبات ← المزيد ← أدوات العرض).
+   • الهاتف: صف التبويبات الأربعة، وتحته صف «المزيد من الأقسام» + أدوات العرض.
+   ========================================================================== */
+#main-content .file-tabs-bar{
+ display:flex;align-items:center;gap:8px;flex-wrap:nowrap;
+ margin:0 0 12px;padding:6px 0 4px;min-width:0;
+ position:sticky;top:0;z-index:8;
+ background:var(--bg);border-bottom:1px solid var(--border);
+}
 /* التسمية القصيرة تظهر على الشاشات الضيقة فقط */
 .tab-label-short{display:none}
-.file-tabs-bar .file-subtabs{display:flex;gap:2px;overflow-x:auto;flex:1 1 auto;min-width:0;flex-wrap:nowrap;margin:0;padding:2px 2px 0;scrollbar-width:thin;border-bottom:2px solid var(--border)}
+.file-tabs-bar .file-subtabs{display:flex;gap:2px;flex:0 1 auto;min-width:0;flex-wrap:nowrap;margin:0 4px 0 0;padding:0;border-bottom:2px solid var(--border)}
 .file-tabs-bar .file-subtabs .subtab-btn{border:0;background:transparent;color:var(--text-muted);padding:9px 14px;min-height:44px;border-radius:10px 10px 0 0;cursor:pointer;font:inherit;font-size:13.5px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;border-bottom:3px solid transparent;margin-bottom:-2px}
 .file-tabs-bar .file-subtabs .subtab-btn:hover{color:var(--text-strong);background:var(--surface2)}
 .file-tabs-bar .file-subtabs .subtab-btn.active{color:var(--text-strong);font-weight:800;border-bottom-color:var(--primary);background:color-mix(in srgb,var(--primary) 9%,transparent)}
 .file-tabs-bar .file-subtabs .subtab-btn small{background:var(--surface2);border-radius:99px;padding:1px 7px;font-size:11px}
-.ftb-tools{display:flex;gap:4px;align-items:center;padding-bottom:2px}
+.ftb-tools{display:flex;gap:4px;align-items:center;margin-inline-start:auto}
 .ftb-menu{max-height:62vh;overflow:auto;min-width:220px}
 
 /* أقسام البيانات القابلة للطي داخل «نظرة عامة» */
@@ -290,12 +283,14 @@ select option{background:var(--surface);color:var(--text)}
 }
 
 /* ==========================================================================
-   قوائم الأقسام المنسدلة في شريط تبويبات الملف (مجموعات وظيفية)
-   • المجموعة النشطة تُعلَّم بلون/حدود الأساس ويظهر في زرها اسم القسم المفتوح.
-   • القوائم لا تُقطع عند حواف الشاشة: العرض محدود بالمنفذ + إزاحة أفقية من JS
+   القائمة المنسدلة الواحدة لبقية أقسام الملف (كل الأقسام غير الأساسية)
+   • زر واحد في الشريط؛ وعند فتح قسم من داخلها يُعلَّم الزر (is-active) ويظهر اسم القسم
+     المفتوح فيه حتى يعرف المحامي أين هو بلا فتح القائمة.
+   • القائمة لا تُقطع عند حواف الشاشة: العرض محدود بالمنفذ + إزاحة أفقية من JS
      (placeTabMenu) + تمرير داخلي عند الطول الزائد.
+   • عناوين المجموعات داخل القائمة تنظيمية فقط (تقصير مسافة البحث) ولا تُخفي أي قسم.
    ========================================================================== */
-.ftb-group{position:relative;display:inline-flex;align-items:stretch}
+.ftb-group{position:relative;display:inline-flex;align-items:stretch;flex:0 0 auto}
 .ftb-group-btn{
  border:0;background:transparent;color:var(--text-muted);padding:9px 14px;min-height:44px;
  border-radius:10px 10px 0 0;cursor:pointer;font:inherit;font-size:13.5px;white-space:nowrap;
@@ -306,14 +301,25 @@ select option{background:var(--surface);color:var(--text)}
 .ftb-group.is-active .ftb-group-btn{color:var(--text-strong);font-weight:800;border-bottom-color:var(--primary);background:color-mix(in srgb,var(--primary) 9%,transparent)}
 .ftb-caret{font-size:10px;color:var(--text-muted);flex:0 0 auto}
 .ftb-active-name{
- font-size:11.5px;font-weight:700;color:var(--primary);background:color-mix(in srgb,var(--primary) 14%,transparent);
+ flex:0 1 auto;min-width:0;font-size:11.5px;font-weight:700;color:var(--primary);
+ background:color-mix(in srgb,var(--primary) 14%,transparent);
  border-radius:99px;padding:1px 8px;max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .ftb-menu{
- inset-inline-end:auto;inset-inline-start:0;top:calc(100% + 6px);min-width:230px;
- max-width:min(92vw,360px);max-height:min(62vh,420px);overflow:auto;z-index:50;
+ inset-inline-end:auto;inset-inline-start:0;top:calc(100% + 6px);min-width:250px;
+ max-width:min(92vw,360px);max-height:min(64vh,440px);overflow:auto;z-index:50;
 }
-.ftb-menu-all{min-width:260px}
+.ftb-menu-all{min-width:270px;padding:6px}
+.ftb-menu-title{
+ display:flex;align-items:center;gap:8px;margin:0 0 4px;padding:4px 8px 8px;
+ font-size:11.5px;font-weight:800;color:var(--text-muted);letter-spacing:.2px;
+ border-bottom:1px solid var(--border);
+}
+.ftb-menu-title .ftb-n{margin-inline-start:auto}
+.ftb-sec{display:flex;flex-direction:column;padding:4px 0}
+.ftb-sec+.ftb-sec{border-top:1px dashed var(--border);margin-top:2px}
+.ftb-sec-title{margin:2px 8px 4px;font-size:11px;font-weight:700;color:var(--text-muted);opacity:.9}
+.ftb-sec-hidden .ftb-sec-title{color:var(--warn)}
 .ftb-item{display:flex;align-items:center;gap:8px;width:100%;text-align:start}
 .ftb-item-ic{flex:0 0 auto;width:18px;text-align:center;color:var(--text-muted)}
 .ftb-item-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -321,6 +327,7 @@ select option{background:var(--surface);color:var(--text)}
 .ftb-hid{flex:0 0 auto;font-size:10.5px;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);border-radius:99px;padding:0 6px}
 .ftb-item.is-on{background:color-mix(in srgb,var(--primary) 12%,transparent);font-weight:700;color:var(--text-strong)}
 .ftb-item.is-on .ftb-item-ic,.ftb-check{color:var(--primary)}
+.ftb-item:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 .ftb-check{flex:0 0 auto;font-weight:800}
 .ftb-tools .icon-only[data-file-focus][aria-pressed="true"]{color:var(--primary);border-color:var(--primary)}
 @media print{#main-content .file-tabs-bar{position:static}}
@@ -350,32 +357,44 @@ select option{background:var(--surface);color:var(--text)}
 .fx-foot{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding-top:8px;border-top:1px dashed var(--border)}
 
 @media(max-width:1024px){
- /* تخطيط متوسط: التبويبات الأساسية في صف، والمجموعات وأدوات العرض في صف تالٍ */
+ /* تخطيط متوسط: التبويبات الأساسية في صف، والقائمة المنسدلة وأدوات العرض في صف تالٍ */
  #main-content .file-tabs-bar{flex-wrap:wrap;row-gap:4px}
- .file-tabs-bar .file-subtabs{flex:1 1 100%;order:1;border-bottom:0}
- .ftb-groups{flex:1 1 auto;order:2;flex-wrap:wrap;min-width:0}
- .ftb-tools{order:2;margin-inline-start:auto}
+ .file-tabs-bar .file-subtabs{flex:1 1 100%;border-bottom:0}
+ .ftb-tools{margin-inline-start:auto}
 }
 @media(max-width:760px){
- /* الهاتف: شبكة متساوية — صف التبويبات الأساسية + صف الأقسام المنسدلة + أدوات العرض بجانبه.
-    بلا تمرير أفقي ولا عناصر تختفي (التسميات القصيرة للشاشات الضيقة فقط). */
- #main-content .file-tabs-bar{display:grid;grid-template-columns:1fr auto;gap:5px;padding:6px 0 4px}
- .file-tabs-bar .file-subtabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;order:1}
+ /* الهاتف: صف تبويبات متساوٍ (بلا تمرير أفقي) وتحته صف واحد للقائمة المنسدلة وأدوات العرض.
+    الشريط يبقى ملتصقًا في مكانه أثناء السحب — لا ينزل مهما كان مقدار التمرير. */
+ #main-content .file-tabs-bar{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:"tabs tabs" "more tools";
+  gap:4px 6px;padding:6px 0 4px;
+ }
+ .file-tabs-bar .file-subtabs{grid-area:tabs;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
  .file-tabs-bar .file-subtabs .subtab-btn{width:100%;justify-content:center;padding:8px 4px;font-size:12.5px;gap:4px}
  .file-tabs-bar .file-subtabs .subtab-btn small{padding:0 5px}
- .ftb-groups{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;order:2}
- .ftb-group,.ftb-group-btn{width:100%}
- .ftb-group-btn{justify-content:center;padding:8px 4px;font-size:12.5px;gap:4px}
- .ftb-active-name{max-width:9ch}
- .ftb-tools{order:2;align-self:center}
- .tab-label{display:none}
- .tab-label-short{display:inline}
+ .ftb-group.ftb-more{grid-area:more;width:100%;min-width:0}
+ .ftb-more-btn{
+  width:100%;min-width:0;justify-content:flex-start;gap:6px;padding:8px 10px;font-size:12.5px;
+  border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);min-height:40px;
+ }
+ .ftb-more-btn .ftb-caret{margin-inline-start:auto}
+ .ftb-group.is-active .ftb-more-btn{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 9%,transparent)}
+ .ftb-active-name{max-width:14ch}
+ .ftb-tools{grid-area:tools;align-self:center}
+ /* التسمية الكاملة تبقى ظاهرة، وتُستبدل بالقصيرة فقط حين توجد تسمية قصيرة فعلًا
+    (`:has`) — فما عاد أي تبويب ظاهر يبقى أيقونة بلا اسم على الهاتف، والتسمية الطويلة
+    الوحيدة (`الأعمال الإدارية`) تستعمل القصيرة (`الأعمال`). */
+ #main-content .file-tabs-bar .subtab-btn .tab-label{display:inline;min-width:0;overflow:hidden;text-overflow:ellipsis}
+ #main-content .file-tabs-bar .subtab-btn:has(.tab-label-short) .tab-label{display:none}
+ #main-content .file-tabs-bar .subtab-btn .tab-label-short{display:inline}
+ /* الأيقونة زخرفية (aria-hidden): تُخفى على الهاتف لتتسع أسماء التبويبات الأربعة
+    كاملة في صف واحد بلا اقتطاع ولا تمرير أفقي — وتبقى على سطح المكتب/التابلت. */
+ #main-content .file-tabs-bar .file-subtabs .subtab-btn .tab-icon{display:none}
  .fx-grid{grid-template-columns:1fr 1fr}
 }
 @media(max-width:640px){
- /* الهاتف الصغير: أدوات العرض في صف مستقل بعرض كامل */
- #main-content .file-tabs-bar{grid-template-columns:1fr}
- .ftb-tools{justify-self:end}
+ .ftb-tools .icon-only[data-file-focus]{display:none}   /* وضع التركيز اختياري وفي متناول سطح المكتب */
 }
 @media(max-width:520px){
  .fx-grid{grid-template-columns:1fr}
@@ -387,7 +406,16 @@ select option{background:var(--surface);color:var(--text)}
    ============================================================================ */
 .file-overview-static{display:block;min-width:0}
 .file-overview-identity{display:block;position:relative;overflow:visible}
-.file-overview-crumbs{margin:0 0 12px;padding-bottom:2px}
+/* مسار الملف في سطر واحد أفقي (RTL): التمرير داخل السطر نفسه عند ضيق الشاشة، بلا التفاف
+   يستهلك ارتفاع الشاشة على الهاتف. */
+.file-overview-crumbs{
+ display:flex;flex-wrap:nowrap;align-items:center;gap:6px;margin:0 0 12px;padding-bottom:2px;
+ white-space:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;
+ -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;
+}
+.file-overview-crumbs>*{flex:0 0 auto}
+.file-overview-crumbs .link{flex:0 0 auto;white-space:nowrap}
+@media(max-width:760px){.file-overview-crumbs{font-size:12.5px;gap:4px}}
 .file-overview-identity .fid-top{display:block}
 .file-overview-identity .fid-case{width:100%;max-width:none}
 .fid-title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 6px}
@@ -415,9 +443,6 @@ select option{background:var(--surface);color:var(--text)}
  .fid-file-number-popover{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 }
 .file-overview-host[hidden]{display:none}
-.file-sticky-bar.file-overview-sticky-hidden{display:none!important}
-/* هوية الملف خارج جسم الطي؛ الشريط المختصر يبقى sibling قابلًا للالتصاق أثناء التمرير. */
+/* هوية الملف خارج جسم الطي: تبقى أول قسم مرئي في «نظرة عامة». */
 .file-tab-shell>.file-overview-host{min-width:0}
-/* لا تطوي هوية الملف مع جسم المحتوى: هي أول قسم ثابت في «نظرة عامة». */
 .file-tab-shell.card-collapsed>.file-overview-host:not([hidden]){display:block!important}
-.file-tab-shell.card-collapsed>.file-sticky-bar.is-on:not(.file-overview-sticky-hidden){display:flex!important}

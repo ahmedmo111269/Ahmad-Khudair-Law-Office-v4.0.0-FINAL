@@ -1,0 +1,42 @@
+import {chromium} from 'playwright';
+import {createRequire} from 'node:module';
+import path from 'node:path';
+const repository=path.resolve('/home/user/Ahmad-Khudair-Law-Office-v4.0.0-FINAL/');
+const base='http://127.0.0.1:8080';
+const require=createRequire(import.meta.url);
+const {default:slim,inflate}=await import('@sparticuz/chromium');
+await inflate(path.resolve(path.dirname(require.resolve('@sparticuz/chromium')),'../bin/al2023.tar.br'));
+process.env.LD_LIBRARY_PATH=path.join(process.env.TMPDIR||'/tmp','al2023','lib');
+const browser=await chromium.launch({executablePath:await slim.executablePath(),headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+const context=await browser.newContext({viewport:{width:Number(process.env.W||412),height:915},deviceScaleFactor:2,isMobile:true,hasTouch:true,locale:'ar-EG',userAgent:'Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36'});
+const page=await context.newPage();
+await page.goto(`${base}/index.html`,{waitUntil:'domcontentloaded'});
+await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:120000});
+await page.waitForFunction(()=>document.querySelector('#main-content')?.children.length>0,null,{timeout:120000});
+const id=await page.evaluate(async()=>{
+ const app=window.__LAW_OFFICE_APP__;
+ const CF=await import('/js/services/client-files.js');
+ await CF.seedTaxonomy(app.office);
+ const client=await app.office.saveClient({fullName:'فاطمة محمد',nationalId:'29'+String(Date.now()).slice(-12)});
+ const cf=await CF.ensureClientFile(app.office,client.id);
+ const file=await CF.createLegalFileInClientFile(app.office,{clientId:client.id,clientFileId:cf.id,categoryId:'civil',fileTypeId:'civil.lawsuit',title:'دعوى',openedAt:'2026-01-12',steps:[]});
+ return file.id;
+});
+await page.evaluate(i=>window.__LAW_OFFICE_APP__.go('file:'+i),id);
+await page.waitForTimeout(2000);
+const out=await page.evaluate(()=>{
+ const doc=document.documentElement;
+ const bar=document.querySelector('.file-tabs-bar');
+ const r=bar.getBoundingClientRect();
+ const kids=[...bar.children].map(c=>({cls:c.className,box:(b=>b?{l:Math.round(b.left),r:Math.round(b.right),t:Math.round(b.top),w:Math.round(b.width),h:Math.round(b.height)}:null)(c.getBoundingClientRect()),disp:getComputedStyle(c).display}));
+ const subs=[...document.querySelectorAll('.file-subtabs .subtab-btn')].map(b=>{
+  const bb=b.getBoundingClientRect();
+  const full=b.querySelector('.tab-label'),short=b.querySelector('.tab-label-short');
+  const vis=e=>e?getComputedStyle(e).display!=='none':null;
+  return {tab:b.dataset.tab,box:{l:Math.round(bb.left),t:Math.round(bb.top),w:Math.round(bb.width),h:Math.round(bb.height)},overflow:b.scrollWidth>Math.ceil(bb.width)+1,fullText:full?.textContent,fullVis:vis(full),shortText:short?.textContent,shortVis:vis(short)};
+ });
+ const grid=getComputedStyle(document.querySelector('.file-subtabs'));
+ return {title:document.title,docOverflow:doc.scrollWidth>doc.clientWidth,docScrollWidth:doc.scrollWidth,clientWidth:doc.clientWidth,bar:{top:Math.round(r.top),h:Math.round(r.height),w:Math.round(r.width)},kids,subs,rowDisplay:grid.display,rowCols:grid.gridTemplateColumns,rowGap:grid.gap};
+});
+console.log(JSON.stringify(out,null,1));
+await browser.close();

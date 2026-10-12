@@ -1,3 +1,26 @@
+# 2026-10-12 — شريط تبويبات صفحة الملف: 4 ظاهرة + قائمة واحدة، وحذف «نواقص الملف» والشريط المختصر
+
+**لا تغيير في Schema ولا المخازن ولا `APP_VERSION`.** لا تفضيل جديد ولا كتابة في التخزين؛
+كل ما تغيّر هو تركيب DOM داخل صفحة الملف وقواعد CSS الخاصة بها، وإخفاء أقسام من «تخصيص الصفحة» يعمل كما هو.
+
+| المسار | الدور بعد التغيير |
+|---|---|
+| `js/modules/file-page.js` | **الشريط مسطّح بلا مستويات**: `PRIMARY_TABS` = نظرة عامة · الجلسات · الأعمال الإدارية · المراحل (أربعة ظاهرة فقط) + **قائمة منسدلة واحدة** `MORE_GROUP` (زرها `ftb-more-btn`، معرّفها مشتق `ftb-menu-${MORE_GROUP.id}` = `ftb-menu-gMore`) تضم 11 قسمًا في أربع مجموعات عنوانية + ركن «مخفية من الشريط». **حُذف** `TAB_GROUPS` ذو القوائم الأربع و`MENU_ID` الثابت (كان يكسر الفتح لأن `bindTabMenus` يشتق المعرّف من `data-tab-group`). **حُذف** شريط الهوية المختصر (`fileStickyHtml`/`[data-file-sticky]/.fsb-*`) وكل حسابات «التالي» الخاصة به، **وحُذفت** بطاقة «نواقص الملف» + شارة `⚠ نواقص` في الرأس + عنصر «نواقص» في قائمة ⋯ + `[data-gaps-jump]` و`openGaps` و`fileGaps`. `syncStickyTop(root)` يكتب الآن قيمة واحدة فقط: ارتفاع الشريطين الملتصقين أعلاه (التنقل ثم شريط الصفحة) في `top` لشريط التبويبات — الشريط الملتصق الوحيد في الصفحة. عناصر القائمة **لا** تحمل `data-section-id` عن قصد (ترتيبها يأتي من `tabLayout()` وحده، فلا يخرج عنصر من قسمه بتخصيص الصفحة) بينما أزرار الشريط الظاهرة تحمله |
+| `js/modules/file-page.js` (نظرة عامة) | «بيانات الملف» فقط: `section.panel.fp-data.fp-file-data` بحقول `ENTITIES.files.fields` (بلا `fileNumber`). **حُذف** من اللوحة قسما «بيانات المرحلة الحالية» وحقول نوع العمل — مصدرهما الوحيد تبويب «المراحل» وتبويب «بيانات نوع العمل» |
+| `js/app.js`, `js/ui/collapsible.js` | إخفاء أدوات الطي الجماعية في صفحة الملف: `enhanceCollapsiblePanels(main,baseRoute,page.layoutId==='file-details'?{bulk:false}:undefined)` و`collapsible.js` يتخطى `addPageCollapseTools` عند `options.bulk===false` — بلا زر «الأقسام والجداول عناصر» في صفحة الملف |
+| `css/client-file.css` | **إصلاح عطب الهاتف**: قاعدة `≤760px` كانت تُخفي التسمية الكاملة عن كل التبويبات وتُظهر القصيرة لمن لديه واحدة، فبقيت ثلاثة تبويبات أيقونات صامتة — الآن التسمية الكاملة تبقى ظاهرة ولا تُستبدل إلا عند وجود تسمية قصيرة (`:has(.tab-label-short)`) والأيقونة الزخرفية تُخفى على الهاتف فقط (مقيس على 360/390/412/520/760: أربعة أسماء، بلا اقتطاع ولا تمرير أفقي، الشريط 97px) \| شريط ملتصق واحد (`#main-content .file-tabs-bar`, `z-index:8`) بأصناف `.ftb-*` للقائمة الواحدة (`.ftb-menu-all` + `.ftb-menu-title` + `.ftb-sec-title` + `.ftb-sec-hidden` + `.ftb-more-btn` + `.ftb-active-name`)، **حُذفت** قواعد الشريط المختصر والنواقص. الهاتف ≤760px: شبكة `"tabs tabs"/"more tools"` — أربعة تبويبات متساوية في صف، وزر القائمة بعرضه الكامل في صف ثالث، والتسميات القصيرة («كل الأقسام»)، ثم أدوات الشريط |
+| `tools/node-tests/file-page-workspace-tests.mjs` | توقعات الفحوص 3/4/14/16-20/23-25/27/30-33 على التصميم المسطّح: قسم واحد `gMore` وزر واحد و11 `.ftb-item`، غياب `[data-file-sticky]` و`.collapse-page-tools`، ثبات `top` الشريط عند أربعة مواضع تمرير، وجداول تباين تشمل `.ftb-sec-title`/`.ftb-menu-title` |
+| `screenshots/files-{mobile,desktop}-tabs-after.png` · `files-mobile-tabs-menu-after.png` · `files-mobile-tabbar-fixed-after.png` | لقطات الشكل النهائي: أربعة أسماء على الهاتف، القائمة الواحدة مفتوحة، ثبات الشريط أعلى الشاشة عند التمرير، وصف واحد على سطح المكتب |
+| `tools/node-tests/{files-cockpit,grid,quick-notes}-browser-tests.mjs`, `file-page-probe.mjs` | مواءمة المحدّدات: `.ftb-more-btn` ← `.ftb-menu-all [data-tab=…]` بدل مجموعات `gParties/gJudgments/gRecords/gFollow`؛ وفحص القمرة يؤكد غياب النواقص والشريط المختصر |
+
+**التحقق (بعد اكتمال التنفيذ):** `run-tests` **626/626** · `tests.html` في Chromium **648/648** ·
+`file-page-workspace-tests` **33/33 · 0 خطأ** · `files-cockpit-browser-tests` **13/13 · 0 خطأ** ·
+`grid-browser-tests` **37/37 · 0 خطأ** (Print Preview NOT TESTED كما هو معلن) · `android-pwa-browser-tests` **31/31** ·
+`quick-notes-browser-tests` **10/10 · PASS** · `file-page-probe` قياس هندسي: سطح المكتب 1440 ← ارتفاع الشريط 55px،
+`flex`، أكثر زر 161px؛ الهاتف 412 ← 97px، شبكة، زر القائمة 374px (صف كامل)، بلا تمرير أفقي.
+
+---
+
 # 2026-10-12 — شريط صفحة الملفات المضغوط + سجل «العودة» (Undo) + موضع ⚙ التصريحي
 
 **لا تغيير في Schema ولا المخازن ولا `APP_VERSION`.** لا تفضيل جديد ولا كتابة في التخزين: سجل «العودة» حالة جلسة في الذاكرة فقط.
@@ -34,16 +57,16 @@
 | `js/ui/collapse-state.js` | `defaultStateMobile` + `effectiveDefaultMode()` + `isMobileView()` |
 | `js/ui/collapsible.js` | ملخص حي (`updateCollapseSummary`)، فتح مؤقت (`openCollapseTransient` + حارس focusin)، `collapse:reset`، أكورديون (`data-collapse-accordion`)، عناصر رأس دائمة (`[data-collapse-alert]`)، زر دبوس باسم وصول مضبوط عند الإنشاء (`makePinButton`) |
 | `js/ui/card.js`, `js/ui/datagrid.js` | دعم `collapse:reset` |
-| `js/ui/cockpit.js` | `fileNextStep()` — الآلية المشتركة الوحيدة لحساب «التالي» في الملف (تستخدمها القمرة والشريط الثابت) |
-| `js/modules/file-page.js` | رأس هوية قانونية (عنوان القضية/المحكمة يمينًا + رقم الملف الفرعي يسارًا + صف أطراف كامل)، **شريط تبويبات هرمي: 4 تبويبات أساسية ظاهرة (`PRIMARY_TABS`) + 4 قوائم منسدلة وظيفية (`TAB_GROUPS` + «المزيد» تلقائي لأي قسم غير مصنّف) عناصرها هي أزرار التبويبات نفسها** عبر `bindTabMenus` (فتح/Escape/↑↓/Home/End + `placeTabMenu` لمنع القطع عند الحواف) و`syncTabBarDom` (المجموعة النشطة + `aria-checked` + اسم القسم المفتوح)، `syncStickyTop` لإزاحة الالتصاق المقيسة (تنقل ← شريط الصفحة ← الشريط المختصر ← التبويبات)، **تبويب نظرة عامة = لوحة متابعة**: 4 بطاقات ملخص تنفيذي (`execCard`) مرتبطة بمصادرها بالروابط فقط + القمرة + شريط التنفيذ + «بيانات الدعوى والملف» و«المرحلة والتسلسل القضائي» القابلان للطي + مهام الملف، كاش in-memory للتبويبات (lazy) يُصفّر بعد الحفظ، آخر تبويب لكل ملف (`ui:file-last-tab` بصيغة `byFile`) + دعم `?tab=`، نسخ ملخص، فحص قبل الإنهاء/الأرشفة، وضع تركيز (أداة في شريط التبويبات)، السابق/التالي — التفاصيل: `docs/FILE-DATA-FIRST-WORKSPACE.md` |
-| `css/client-file.css` | أصناف الشريط الجديد والقوائم (`.ftb-*`)، بطاقات الملخص التنفيذي (`.fx-*`)، شبكة التبويبات على الهاتف، أولوية `#main-content .file-tabs-bar`، طبقات الالتصاق |
+| `js/ui/cockpit.js` | `fileNextStep()` — الآلية المشتركة الوحيدة لحساب «التالي» في الملف (تستخدمها القمرة) — بلا شريط ثانٍ بعد حذف الشريط المختصر 2026-10-12 |
+| `js/modules/file-page.js` | رأس هوية قانونية (عنوان القضية/المحكمة يمينًا + رقم الملف الفرعي يسارًا + صف أطراف كامل)، **شريط تبويبات مسطّح: 4 تبويبات ظاهرة (`PRIMARY_TABS`) + قائمة منسدلة واحدة (`MORE_GROUP` = «المزيد من الأقسام» وداخلها 11 قسمًا في مجموعات عنوانية + ركن «مخفية من الشريط») عناصرها هي أزرار التبويبات نفسها** عبر `bindTabMenus` (فتح/Escape/↑↓/Home/End + `placeTabMenu` لمنع القطع عند الحواف) و`syncTabBarDom` (المجموعة النشطة + `aria-checked` + اسم القسم المفتوح)، `syncStickyTop` لإزاحة الالتصاق المقيسة (تنقل ← شريط الصفحة ← التبويبات: الشريط الملتصق الوحيد)، **تبويب نظرة عامة = لوحة متابعة**: 4 بطاقات ملخص تنفيذي (`execCard`) مرتبطة بمصادرها بالروابط فقط + القمرة + شريط التنفيذ + «بيانات الملف» و«المرحلة والتسلسل القضائي» القابلان للطي + مهام الملف، كاش in-memory للتبويبات (lazy) يُصفّر بعد الحفظ، آخر تبويب لكل ملف (`ui:file-last-tab` بصيغة `byFile`) + دعم `?tab=`، نسخ ملخص، فحص قبل الإنهاء/الأرشفة، وضع تركيز (أداة في شريط التبويبات)، السابق/التالي — التفاصيل: `docs/FILE-DATA-FIRST-WORKSPACE.md` |
+| `css/client-file.css` | أصناف الشريط والقائمة الواحدة (`.ftb-*`)، بطاقات الملخص التنفيذي (`.fx-*`)، شبكة التبويبات على الهاتف، أولوية `#main-content .file-tabs-bar` (الشريط الملتصق الوحيد بعد حذف الشريط المختصر) |
 | `js/modules/client-file.js` | اتصال/واتساب، ترتيب «تحتاج متابعة» أولًا (Register + DOM)، شارات تنبيه، أكور |
 | `js/modules/list-page.js` | `FILE_LIST_CHIPS` (6 شرائح)، ملخص فلاتر قابل للإزالة، `listNavFor`/`listNavHtml`/`bindListNav`، عمودا «الخطوة التالية» |
 | `js/modules/record-page.js` | السابق/التالي في رأس السجل |
 | `js/modules/quick-add.js` | إجراءات ملف إضافية (حكم/إعلان/مستند/أتعاب) + تمرير `fileId` |
 | `js/modules/settings.js` | الوضع الافتراضي للطي على الهاتف |
 | `js/app.js` | `resetViewState` ينظّف كاش التبويبات/التنقل/فهرس الشرائح |
-| `css/cards.css`, `css/client-file.css`, `css/ui.css` | ملخصات مطوية، قمرة/مناطق، شرائط، ملخص فلاتر، شريط ثابت، وضع تركيز، طباعة، `.ux-menu[hidden]`, 44px |
+| `css/cards.css`, `css/client-file.css`, `css/ui.css` | ملخصات مطوية، قمرة/مناطق، شرائط، ملخص فلاتر، التصاق شريط التبويبات، وضع تركيز، طباعة، `.ux-menu[hidden]`, 44px |
 | `js/tests/collapse-state-tests.js`, `js/tests/ux-tests.js` | اختبارات جديدة: وضع الهاتف، الشرائح، السابق/التالي |
 | `tools/node-tests/files-cockpit-browser-tests.mjs` | فحص Phase G للصفحات (13 فحص) |
 | `tools/node-tests/files-cockpit-perf.mjs` | قياس الأداء (1000 ملف + 500 سجل فرعي) |
