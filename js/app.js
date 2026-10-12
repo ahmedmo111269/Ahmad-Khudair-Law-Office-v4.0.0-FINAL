@@ -336,6 +336,17 @@ class App{
    // صفحة الملف: بلا شريط «الأقسام والجداول» (فتح/طي الكل) فوق المحتوى — التنقل من شريط
    // التبويبات، وكل قسم يحتفظ بزر الطي والدبوس. بقية الصفحات كما هي.
    enhanceCollapsiblePanels(main,baseRoute,page.layoutId==='file-details'?{bulk:false}:undefined);
+   // أبقِ أدوات فتح/طي كل الأقسام في صفحات السجل، لكن اجمعها مع ⚙ داخل شريط التبويبات
+   // حتى لا تزاحم التبويبات أعلى الصفحة؛ صفحة الملف تستخدم تنقلها الخاص كما سبق.
+   const recordWorkspace=main.querySelector('[data-record-workspace]');
+   const bulkCollapseTools=recordWorkspace?.querySelector(':scope > .collapse-page-tools');
+   const recordToolbar=recordWorkspace?.querySelector('.record-tabs-bar .ftb-tools');
+   if(bulkCollapseTools&&recordToolbar){
+    const summary=bulkCollapseTools.querySelector(':scope > summary');
+    summary?.setAttribute('aria-label','أدوات فتح وطي الأقسام والجداول');
+    summary?.setAttribute('title','أدوات فتح وطي الأقسام والجداول');
+    recordToolbar.append(bulkCollapseTools);
+   }
    bindCards(main);
    // نظام العرض الموحّد: إعدادات عرض الصفحة (الصفحة ← العام ← الافتراضي) ثم ترتيب/إظهار
    // الأقسام المحفوظ — نقل DOM فقط، بلا إعادة رسم وبلا إعادة قراءة أي بيانات.
