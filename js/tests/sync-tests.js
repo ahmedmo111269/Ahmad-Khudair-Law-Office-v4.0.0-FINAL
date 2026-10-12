@@ -6,11 +6,13 @@ import {
   syncStatus, initializeSyncBaseline, createSyncBundle, previewSyncBundle,
   applySyncBundle, listSyncConflicts, syncHistory, resolveSyncConflict, validateSyncBundle
 } from '../services/sync-engine.js';
-import {NetworkStatusService, ONLINE, OFFLINE} from '../core/network-status.js';
+import {NetworkStatusService, networkStatus, ONLINE, OFFLINE} from '../core/network-status.js';
 import {OnlineCapabilityRegistry} from '../core/online-capabilities.js';
 import {FileExchangeSyncTransportAdapter} from '../services/sync-transport.js';
 import {encryptSyncEnvelope, decryptSyncEnvelope, ENCRYPTED_SYNC_FORMAT} from '../services/sync-crypto.js';
 import * as QuickNotes from '../services/quick-notes.js';
+import {seedTaxonomy} from '../services/client-files.js';
+import {configureSyncRelay,syncViaRelay,testSyncRelay,disableSyncRelay} from '../services/sync-relay.js';
 
 const rejects = async fn => { try { await fn(); } catch (error) { return error; } throw Error('Expected promise to reject'); };
 
@@ -248,6 +250,95 @@ export async function runSyncTests(test, expect) {
     out.legacyBaseline = {complete: (await syncStatus(legacyCtx)).baselineComplete, oneTimeRow: legacyChanges.some(change => change.baseline && change.entityId === 'LEGACY-SYNC-1')};
     legacyCtx.close();
 
+    // The built-in taxonomy is seeded with stable IDs but historical installations have different seed timestamps.
+    const seedA=await createDevice('SeedCatalogA'),seedB=await createDevice('SeedCatalogB');
+    try{
+      const seedCounts=await Promise.all([seedTaxonomy(seedA.office),seedTaxonomy(seedB.office)]);
+      const seedRowsB=await seedB.office.r.taxonomy.all(1000);
+      const timestampFixture=seedRowsB.find(row=>row.system===true);
+      const contentFixture=seedRowsB.find(row=>row.system===true&&row.id!==timestampFixture?.id);
+      if(timestampFixture)await seedB.office.r.taxonomy.put({...timestampFixture,createdAt:'2000-01-01T00:00:00.000Z',updatedAt:'2000-01-01T00:00:00.000Z'});
+      if(contentFixture)await seedB.office.r.taxonomy.put({...contentFixture,name:'تخصيص محلي على الجهاز B'});
+      await Promise.all([initializeSyncBaseline(seedA.ctx),initializeSyncBaseline(seedB.ctx)]);
+      const seedBundle=await createSyncBundle(seedA.ctx),seedPreview=await previewSyncBundle(seedB.ctx,seedBundle);
+      const seedApply=await applySyncBundle(seedB.ctx,seedBundle),unresolved=(await syncStatus(seedB.ctx)).unresolvedConflicts;
+      const preservedSeed=contentFixture?await seedB.office.r.taxonomy.get(contentFixture.id):null;
+      out.defaultSeedSync={rows:seedCounts[0],changedSeedTimestamps:Boolean(timestampFixture),previewConflicts:seedPreview.conflicts,appliedConflicts:seedApply.conflicts,unresolved,contentConflictPreserved:preservedSeed?.name==='تخصيص محلي على الجهاز B'};
+    }finally{seedA.close();seedB.close()}
+
+    // Encrypted server-relay integration: two independent IndexedDB contexts exchange packages through a mock CORS API.
+    const relayA=await createDevice('RelayA'),relayB=await createDevice('RelayB');
+    const oldFetch=globalThis.fetch,oldNetworkStatus=networkStatus.getState();
+    const relayPackages=[];let relayCursor=0,interleaveRelayPackage=false,returnInvalidRelayCursor=false;
+    const relayToken='R'.repeat(48),relayWorkspace=`workspace_${Date.now()}_relay_test`;
+    const relayProfiles=[`relay-a-${Date.now()}`,`relay-b-${Date.now()}`,`relay-invalid-${Date.now()}`];
+    globalThis.fetch=async(url,options={})=>{
+      const parsed=new URL(String(url));
+      const respond=(payload,status=200)=>new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json'}});
+      if(parsed.pathname==='/v1/health')return respond({service:'akl-sync-relay',protocolVersion:1,status:'ok'});
+      if(options.headers?.Authorization!==`Bearer ${relayToken}`)return respond({error:'unauthorized'},401);
+      if(options.method==='POST'){
+        if(interleaveRelayPackage){interleaveRelayPackage=false;await syncViaRelay(relayB.ctx,relayProfiles[1])}
+        const body=JSON.parse(options.body||'{}');
+        const existing=relayPackages.find(item=>item.packageId===body.packageId);
+        if(existing)return respond({cursor:existing.cursor,created:false});
+        const item={cursor:++relayCursor,packageId:body.packageId,sealed:body.sealed,createdAt:new Date().toISOString()};relayPackages.push(item);
+        return respond({cursor:item.cursor,created:true},201);
+      }
+      if(returnInvalidRelayCursor){returnInvalidRelayCursor=false;return respond({items:[],nextCursor:999,hasMore:true,total:999})}
+      const after=Number(parsed.searchParams.get('after')||0),limit=Number(parsed.searchParams.get('limit')||40);
+      const all=relayPackages.filter(item=>item.cursor>after),items=all.slice(0,limit);
+      return respond({items:items.map(({cursor,sealed,createdAt})=>({cursor,sealed,createdAt})),nextCursor:items.at(-1)?.cursor||after,hasMore:all.length>items.length,total:relayPackages.length});
+    };
+    networkStatus.setStatus(ONLINE,'sync-relay-test');
+    try{
+      const firstRecord=await relayA.office.saveClient({fullName:'سجل اختبار relay أولي'});
+      await Promise.all([initializeSyncBaseline(relayA.ctx),initializeSyncBaseline(relayB.ctx)]);
+      for(const profileId of relayProfiles)await configureSyncRelay(profileId,{endpoint:'https://relay.test',workspaceId:relayWorkspace,token:relayToken,passphrase:'Shared Relay Passphrase 2026',autoSync:false});
+      const sent=await syncViaRelay(relayA.ctx,relayProfiles[0]);
+      const connection=await testSyncRelay(relayProfiles[0]);
+      const wrongKey=await rejects(()=>testSyncRelay(relayProfiles[0],{passphrase:'Different Relay Passphrase 2026'}));
+      const received=await syncViaRelay(relayB.ctx,relayProfiles[1]);
+      const firstImported=await relayB.office.r.clients.get(firstRecord.id);
+      const secondRecord=await relayB.office.saveClient({fullName:'سجل جديد من الجهاز B'});
+      await syncViaRelay(relayB.ctx,relayProfiles[1]);
+      await syncViaRelay(relayA.ctx,relayProfiles[0]);
+      const secondImported=await relayA.office.r.clients.get(secondRecord.id);
+      const raceRemote=await relayB.office.saveClient({fullName:'حزمة وصلت أثناء رفع الجهاز الآخر'});
+      await relayA.office.saveClient({fullName:'تغيير محلي أثناء اختبار مؤشر المرحّل'});
+      interleaveRelayPackage=true;
+      await syncViaRelay(relayA.ctx,relayProfiles[0]);
+      const raceCatchup=await syncViaRelay(relayA.ctx,relayProfiles[0]);
+      const raceImported=await relayA.office.r.clients.get(raceRemote.id);
+      const aRow=await relayA.office.r.clients.get(firstRecord.id),bRow=await relayB.office.r.clients.get(firstRecord.id);
+      await relayA.office.saveClient({...aRow,fullName:'تعديل متزامن من A'},aRow.id,aRow.version);
+      await relayB.office.saveClient({...bRow,fullName:'تعديل متزامن من B'},bRow.id,bRow.version);
+      await syncViaRelay(relayB.ctx,relayProfiles[1]);
+      const relayConflict=await syncViaRelay(relayA.ctx,relayProfiles[0]);
+      await syncViaRelay(relayB.ctx,relayProfiles[1]);
+      returnInvalidRelayCursor=true;
+      const badCursorError=await rejects(()=>syncViaRelay(relayA.ctx,relayProfiles[2]));
+      const badCursorState=await relayA.office.r.syncState.get(`relay:${relayProfiles[2]}:${relayWorkspace}`);
+      out.relay={
+        invalidCursorRejected:Boolean(badCursorError)&&Number(badCursorState?.value?.cursor||0)===0,
+        initialUploaded:sent.uploaded>0,
+        authenticatedHealth:connection.ok,
+        phraseVerified:connection.keyVerified,
+        wrongPhraseRejected:Boolean(wrongKey),
+        remoteChangesDownloaded:received.downloaded>0,
+        initialRecordImported:firstImported?.fullName==='سجل اختبار relay أولي',
+        secondDeviceChangeReachedA:secondImported?.fullName==='سجل جديد من الجهاز B',
+        concurrentUploadCursorSafe:raceCatchup.downloaded>0&&raceImported?.fullName==='حزمة وصلت أثناء رفع الجهاز الآخر',
+        conflictNotOverwritten:(await relayA.office.r.clients.get(firstRecord.id))?.fullName==='تعديل متزامن من A',
+        conflictPreserved:relayConflict.downloaded>0&&(await syncStatus(relayA.ctx)).unresolvedConflicts>0&&(await syncStatus(relayB.ctx)).unresolvedConflicts>0,
+        serverStoredCiphertextOnly:relayPackages.length>=4&&relayPackages.every(item=>item.sealed?.ciphertext&&!JSON.stringify(item.sealed).includes('سجل اختبار relay أولي'))
+      };
+    }finally{
+      globalThis.fetch=oldFetch;networkStatus.setStatus(oldNetworkStatus,'sync-relay-test-cleanup');
+      for(const profileId of relayProfiles)await disableSyncRelay(profileId,{forgetSecrets:true}).catch(()=>{});
+      relayA.close();relayB.close();
+    }
+
     const fileTransport = new FileExchangeSyncTransportAdapter();
     const invalidBundle = {...aOut, changes: [{...aOut.changes[0], entity: 'syncState'}]};
     const validationError = await rejects(() => validateSyncBundle(invalidBundle, {deviceId: 'dev-test-someone-else'}));
@@ -293,6 +384,14 @@ export async function runSyncTests(test, expect) {
     expect(out.firstSync.imported).toBe(true);
     expect(out.firstSync.duplicateCountStable).toBe(true);
     expect(out.firstSync.activityLogIdempotent).toBe(true);
+  });
+  test('Built-in taxonomy seeds with differing timestamps synchronize without false conflicts', () => {
+    expect(out.defaultSeedSync.rows).toBe(273);
+    expect(out.defaultSeedSync.changedSeedTimestamps).toBe(true);
+    expect(out.defaultSeedSync.previewConflicts).toBe(1);
+    expect(out.defaultSeedSync.appliedConflicts).toBe(1);
+    expect(out.defaultSeedSync.unresolved).toBe(1);
+    expect(out.defaultSeedSync.contentConflictPreserved).toBe(true);
   });
   test('Physical delete becomes a Tombstone and safely propagates to another device', () => {
     expect(out.tombstone.localTombstone).toBe(true);
@@ -345,6 +444,20 @@ export async function runSyncTests(test, expect) {
   test('File transport is offline-capable and untrusted payloads cannot target internal stores', () => {
     expect(out.transport.offlineAvailable).toBe(true);
     expect(out.transport.rejectsInternalStores).toBe(true);
+  });
+  test('Self-hosted encrypted relay exchanges changes between independent IndexedDB devices and preserves conflicts',()=>{
+    expect(out.relay.initialUploaded).toBe(true);
+    expect(out.relay.authenticatedHealth).toBe(true);
+    expect(out.relay.phraseVerified).toBe(true);
+    expect(out.relay.wrongPhraseRejected).toBe(true);
+    expect(out.relay.remoteChangesDownloaded).toBe(true);
+    expect(out.relay.initialRecordImported).toBe(true);
+    expect(out.relay.secondDeviceChangeReachedA).toBe(true);
+    expect(out.relay.concurrentUploadCursorSafe).toBe(true);
+    expect(out.relay.invalidCursorRejected).toBe(true);
+    expect(out.relay.conflictNotOverwritten).toBe(true);
+    expect(out.relay.conflictPreserved).toBe(true);
+    expect(out.relay.serverStoredCiphertextOnly).toBe(true);
   });
   test('Device-exchange files use authenticated AES-256-GCM encryption and reject plaintext/wrong passwords', () => {
     expect(out.encryption.format).toBe(ENCRYPTED_SYNC_FORMAT);

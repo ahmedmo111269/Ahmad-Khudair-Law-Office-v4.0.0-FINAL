@@ -28,10 +28,11 @@ const TASK_LINK_STORES=['hearings','procedures','appointments','communications',
 const taskScope=(store,id)=>store==='cases'?{caseId:id}:{relatedId:id};
 const NOTE_ENTITY_TYPES={clients:'CLIENT',files:'LEGAL_FILE',cases:'CASE',fileParties:'PARTY',hearings:'HEARING',procedures:'PROCEDURE',judgments:'JUDGMENT',execution:'EXECUTION',powersOfAttorney:'POA',serviceRecords:'SERVICE_RECORD',expertReports:'EXPERT_REPORT',appointments:'APPOINTMENT',communications:'COMMUNICATION',fees:'FEE',documentReferences:'DOCUMENT_REFERENCE'};
 
-export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
+export function kvHtml(fields,row,refs,{skipEmpty=true,includeEmptyAvailable=false}={}){
  const items=fields.map(f=>{
   const v=displayValue(f,row,refs);
-  if(skipEmpty&&!v)return '';
+  const empty=v===null||v===undefined||v==='';
+  if(skipEmpty&&empty)return '';
   const hasStoredRef=Boolean(f.ref&&row?.[f.k]);
   const refsCanVerify=typeof refs?.has==='function';
   const isLiveRef=hasStoredRef&&refsCanVerify&&refs.has(row[f.k]);
@@ -39,7 +40,9 @@ export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
   const link=route?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';
   const unavailable=hasStoredRef&&refsCanVerify&&!isLiveRef
    ?'<small class="record-ref-unavailable muted" role="status">السجل المرتبط غير متاح حاليًا.</small>':'';
-  return `<div class="kv-item${f.t==='textarea'?' wide':''}" data-display-item="field:${esc(String(f.k))}" data-display-label="${esc(f.l)}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}${unavailable}</dd></div>`;
+  const optionalEmpty=includeEmptyAvailable&&empty,hasAction=Boolean(link);
+  const linkedValue=hasAction?`<button type="button" class="link" data-display-action aria-label="فتح السجل المرتبط: ${esc(f.l)}"><span data-display-hide-target>${esc(v)}</span><span class="record-ref-action-fallback" data-display-action-fallback hidden>فتح السجل المرتبط</span></button>`:esc(v);
+  return `<div class="kv-item${f.t==='textarea'?' wide':''}" data-display-item="field:${esc(String(f.k))}" data-display-label="${esc(f.l)}"${optionalEmpty?' data-display-default-hidden="true"':''}${hasAction?' data-display-preserve-actions="true"':''}><dt${hasAction?' data-display-hide-target="label"':''}>${esc(f.l)}</dt><dd${link}>${empty?'<span class="muted">غير مسجل — أظهر هذا الحقل لإضافته إلى العرض</span>':hasAction?linkedValue:esc(v)}${unavailable}</dd></div>`;
  }).join('');
  return items?`<dl class="kv">${items}</dl>`:'<p class="muted">لا توجد بيانات مسجلة بعد. اضغط «تعديل البيانات» لإضافتها.</p>';
 }
@@ -321,7 +324,7 @@ export async function clientPage(app,id){
  const panelCounts={files:relatedCount(r,'files',r.files),cases:relatedCount(r,'cases',r.cases),poa:relatedCount(r,'powersOfAttorney',r.poas),hearings:relatedCount(r,'hearings',r.hearings),appointments:relatedCount(r,'appointments',r.appointments),communications:relatedCount(r,'communications',r.communications)};
  const tabSections=CLIENT_SECTIONS.map(item=>({...item,count:panelCounts[item.id]??''}));
  const parts={
-  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.clients.fields,c,refs)+clientWorkPanel,{pageId:'client-details',open:true}),
+  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.clients.fields,c,refs,{skipEmpty:false,includeEmptyAvailable:true})+clientWorkPanel,{pageId:'client-details',open:true}),
   files:section('files','الملفات',panelCounts.files,'<div data-grid="files"></div>',{pageId:'client-details',add:'<button class="ghost" data-add="files">+ ملف جديد لهذا الموكل</button>'}),
   cases:section('cases','القضايا والمراحل',panelCounts.cases,'<div data-grid="cases"></div>',{pageId:'client-details'}),
   poa:section('poa','التوكيلات',panelCounts.poa,'<div data-grid="powersOfAttorney"></div>',{pageId:'client-details',add:'<button class="ghost" data-add="powersOfAttorney">+ توكيل</button>'}),
@@ -367,7 +370,7 @@ export async function opponentPage(app,id){
  const counts={files:relatedCount(r,'files',r.files),cases:relatedCount(r,'cases',r.cases),hearings:relatedCount(r,'hearings',r.hearings)};
  const tabSections=OPPONENT_SECTIONS.map(item=>({...item,count:counts[item.id]??''}));
  const parts={
-  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs),{pageId:'opponent-details',open:true}),
+  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs,{skipEmpty:false,includeEmptyAvailable:true}),{pageId:'opponent-details',open:true}),
   files:section('files','الملفات',counts.files,'<div data-grid="files"></div>',{pageId:'opponent-details'}),
   cases:section('cases','القضايا والمراحل',counts.cases,'<div data-grid="cases"></div>',{pageId:'opponent-details'}),
   hearings:section('hearings','الجلسات',counts.hearings,'<div data-grid="hearings"></div>',{pageId:'opponent-details'})
@@ -517,7 +520,8 @@ export async function recordPage(app,store,id){
  ].join('');
  const notePanel=recordQuickNotesPanel(quickNotes,store,id,pageId,'data');
  const workPanel=TASK_LINK_STORES.includes(store)?await linkedTasksPanelHtml(app.office,taskScope(store,id),{title:'المهام المرتبطة',collapseId:`rec-work:${store}`,centerRoute:`actionCenter?${store==='cases'?'caseId':'relatedId'}=${encodeURIComponent(id)}`,recordTab:{sectionId:'work',pageId,panelId:recordPanelId(pageId,'work'),tabId:recordTabId(pageId,'work'),active:'data'}}):'';
- const fullDataBody=store==='cases'?caseIdentityCardHtml(row,caseParties)+kvHtml(ent.fields.filter(field=>!CASE_IDENTITY_FIELD_KEYS.has(field.k)),row,refs):kvHtml(ent.fields,row,refs);
+ const availableFields={skipEmpty:false,includeEmptyAvailable:true};
+ const fullDataBody=store==='cases'?caseIdentityCardHtml(row,caseParties)+kvHtml(ent.fields.filter(field=>!CASE_IDENTITY_FIELD_KEYS.has(field.k)),row,refs,availableFields):kvHtml(ent.fields,row,refs,availableFields);
  const bodyById={
   data:section('data','البيانات الكاملة',null,fullDataBody,{pageId,open:true}),
   quickNotes:notePanel,

@@ -68,3 +68,37 @@ export async function decryptSyncEnvelope(container, passphrase) {
     throw new Error('تعذر فك الحزمة: كلمة المرور غير مطابقة أو الملف عُدّل/تلف. لم تُغيّر أي بيانات.');
   }
 }
+
+// تشفير حزم ناقل الخادم: PBKDF2 يُنفّذ مرة عند إعداد الجهاز، ثم تُحفظ CryptoKey غير قابلة للاستخراج محليًا.
+// يختلف الغلاف عن حزم الملفات اليدوية؛ كلاهما AES-256-GCM، ولا يرى الخادم سوى ciphertext.
+export const RELAY_ENVELOPE_FORMAT='AhmadKhudairLawOfficeRelayEncrypted';
+export const RELAY_ENVELOPE_VERSION=1;
+const relayAad=()=>encoder.encode(`${RELAY_ENVELOPE_FORMAT}:${RELAY_ENVELOPE_VERSION}:${CIPHER}`);
+
+export async function deriveRelayKey(passphrase,workspaceId){
+ const crypto=webCrypto(),id=String(workspaceId||'');
+ if(!/^[A-Za-z0-9_-]{16,120}$/.test(id))throw new Error('معرّف مساحة المزامنة يجب أن يتكون من 16 إلى 120 حرفًا/رقمًا أو شرطة.');
+ const material=await crypto.subtle.importKey('raw',encoder.encode(normalizePassphrase(passphrase)),'PBKDF2',false,['deriveKey']);
+ const salt=encoder.encode(`AKL:sync-relay:v1:${id}`);
+ return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt,iterations:ITERATIONS},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+
+export async function encryptRelayEnvelope(envelope,key){
+ const crypto=webCrypto();
+ if(!key||key.type!=='secret'||key.algorithm?.name!=='AES-GCM')throw new Error('مفتاح تشفير المزامنة المحلية غير صالح.');
+ const iv=crypto.getRandomValues(new Uint8Array(12));
+ const plaintext=encoder.encode(JSON.stringify(envelope));
+ const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:relayAad(),tagLength:128},key,plaintext);
+ return {format:RELAY_ENVELOPE_FORMAT,version:RELAY_ENVELOPE_VERSION,cipher:CIPHER,iv:toBase64(iv),ciphertext:toBase64(new Uint8Array(ciphertext))};
+}
+
+export async function decryptRelayEnvelope(container,key){
+ const crypto=webCrypto();
+ if(!container||typeof container!=='object'||container.format!==RELAY_ENVELOPE_FORMAT||Number(container.version)!==RELAY_ENVELOPE_VERSION||container.cipher!==CIPHER)throw new Error('غلاف المزامنة الوارد غير مدعوم.');
+ const iv=fromBase64(container.iv,'IV'),ciphertext=fromBase64(container.ciphertext,'النص المشفر');
+ if(iv.length!==12||ciphertext.length<16||ciphertext.length>10*1024*1024)throw new Error('حجم الحزمة المشفرة غير صالح.');
+ try{
+  const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:relayAad(),tagLength:128},key,ciphertext);
+  return JSON.parse(decoder.decode(plaintext));
+ }catch{throw new Error('تعذر فتح حزمة المزامنة التلقائية: عبارة التشفير لا تطابق هذا الجهاز أو الحزمة تالفة.');}
+}

@@ -485,7 +485,7 @@ const counts=page=>page.evaluate(async()=>{
  // ---- تحديث التطبيق: كاش جديد مع بقاء البيانات ----
  await verify('App update (version A -> B): new release downloads and waits, then activates on request with data intact',async()=>{
   const page=trackConsole(await context.newPage());
-  const before=await (async()=>{await boot(page);return counts(page)})();
+  const before=await (async()=>{await boot(page);await page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller),null,{timeout:60000});return counts(page)})();
   const previousCache=await page.evaluate(async()=>(await caches.keys())[0]);
   await page.evaluate(async()=>{ // كاش إصدار قديم متروك من نسخة سابقة + كاش غير تابع للتطبيق
    const stale=await caches.open('ahmad-khudair-law-office-v0-obsolete');
@@ -503,12 +503,13 @@ const counts=page=>page.evaluate(async()=>{
     await registration.update();
     const deadline=Date.now()+45000;
     while(Date.now()<deadline){
-     const keys=await caches.keys();
-     if(keys.some(key=>key.endsWith('-e2e-update')))return {found:true,keys,waiting:Boolean(registration.waiting)};
+     const keys=await caches.keys(),found=keys.some(key=>key.endsWith('-e2e-update'));
+     if(found&&registration.waiting)return {found,keys,waiting:true,activeState:registration.active?.state,controller:Boolean(navigator.serviceWorker.controller)};
+     if(found&&registration.installing?.state==='activated')return {found,keys,waiting:false,activeState:registration.active?.state,controller:Boolean(navigator.serviceWorker.controller)};
      await new Promise(resolve=>setTimeout(resolve,400));
     }
     const keys=await caches.keys();
-    return {found:false,keys,waiting:Boolean(registration.waiting)};
+    return {found:keys.some(key=>key.endsWith('-e2e-update')),keys,waiting:Boolean(registration.waiting),activeState:registration.active?.state,installingState:registration.installing?.state,controller:Boolean(navigator.serviceWorker.controller)};
    });
    assert.equal(discovery.found,true,`new release never precached: ${JSON.stringify(discovery)}`);
    assert.equal(discovery.waiting,true,'A new release must WAIT (no silent takeover of the open session)');

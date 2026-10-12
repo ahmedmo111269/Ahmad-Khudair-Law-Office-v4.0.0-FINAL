@@ -294,7 +294,37 @@ export async function runPwaTests(test, expect) {
     applied.registration = {waiting: {postMessage: message => { posted = message; }}};
     expect(applied.accept()).toBe(true);
     expect(posted?.type).toBe('SKIP_WAITING');
-    await new Promise(resolve => setTimeout(resolve, 500));
+    expect(reloaded).toBe(0); // لا reload قبل controllerchange/تفعيل العامل
+    applied.registration.active=applied.registration.waiting;
+    applied.onControllerChange();
+    applied.onControllerChange();
     expect(reloaded).toBe(1);
+  });
+
+  test('PWA: manual check reports offline, unsupported, current, and available without touching storage',async()=>{
+    const previous=Object.getOwnPropertyDescriptor(globalThis,'navigator');
+    const sentinel={id:'do-not-touch'};
+    const network={isOnline:()=>true,subscribe:()=>()=>{}};
+    try{
+      Object.defineProperty(globalThis,'navigator',{configurable:true,value:{serviceWorker:{}}});
+      const offline=new PWAUpdateService({network:{isOnline:()=>false}});
+      expect((await offline.checkNow()).status).toBe('offline');
+      Object.defineProperty(globalThis,'navigator',{configurable:true,value:{}});
+      const unsupported=new PWAUpdateService({network});
+      expect((await unsupported.checkNow()).status).toBe('unsupported');
+      Object.defineProperty(globalThis,'navigator',{configurable:true,value:{serviceWorker:{}}});
+      const current=new PWAUpdateService({network});
+      current.registration={waiting:null,installing:null,update:async()=>{}};
+      expect((await current.checkNow()).status).toBe('current');
+      const actionToasts=[];
+      const available=new PWAUpdateService({network,toast:(message,type,options)=>actionToasts.push(options)});
+      available.registration={waiting:{postMessage(){}},installing:null,update:async()=>{}};
+      expect((await available.checkNow()).status).toBe('available');
+      expect(typeof actionToasts[0]?.action).toBe('function');
+      expect(actionToasts[0]?.actionLabel).toBe('تحديث الآن');
+      expect(sentinel.id).toBe('do-not-touch');
+    }finally{
+      if(previous)Object.defineProperty(globalThis,'navigator',previous);else delete globalThis.navigator;
+    }
   });
 }

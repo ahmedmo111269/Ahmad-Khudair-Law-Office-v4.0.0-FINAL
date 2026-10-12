@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.4.3-record-data-customization';
+const CACHE='ahmad-khudair-law-office-v5.18.0-secure-relay-layout';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -181,6 +181,8 @@ const ASSETS=[
   "./js/services/sync-engine.js",
   "./js/services/sync-transport.js",
   "./js/services/sync-crypto.js",
+  "./js/services/sync-vault.js",
+  "./js/services/sync-relay.js",
   "./js/services/recents.js",
   "./js/services/repair.js",
   "./js/services/search.js",

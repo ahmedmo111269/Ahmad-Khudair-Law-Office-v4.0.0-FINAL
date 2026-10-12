@@ -16,7 +16,7 @@ import {
  _reloadComponentStylesForTests
 } from '../core/component-style.js';
 import {_resetDisplayPrefsForTests,setCardDisplay,resolveCardDisplay,setGlobalDisplay,getComponentContent,setComponentContent,resolveComponentContent} from '../core/display-prefs.js';
-import {applyComponentContent,componentContentItems} from '../ui/component-content.js';
+import {applyComponentContent,componentContentItems,resolveComponentContentView} from '../ui/component-content.js';
 import {_resetCollapseStateForTests} from '../ui/collapse-state.js';
 import {prefs} from '../core/preferences.js';
 import {card,bindCards} from '../ui/card.js';
@@ -385,6 +385,52 @@ export function runComponentStyleTests(test,expect){
   expect(getComponentContent('section:fields-a').order.join('|')).toBe('field:b|field:a');
   expect(resolveComponentContent('section:fields-b',['field:a','field:b']).order.join('|')).toBe('field:a|field:b');
   expect(prefs.get('ui:display-prefs').componentContents['section:fields-a'].hidden.join('|')).toBe('field:a');
+  host.remove();
+ });
+
+ test('تخصيص البيانات: العناصر ذات الإجراءات الأساسية لا تُخفى إلا بوسم اختياري صريح',()=>{
+  clean();
+  const host=document.createElement('section');
+  host.innerHTML='<div data-uxc-id="section:actions"><dl><div class="kv-item" data-display-item="field:linked" data-display-label="سجل مرتبط"><dt>سجل مرتبط</dt><dd><button type="button" data-open-ref="cases:1">فتح السجل</button></dd></div><div class="kv-item" data-display-item="field:optional-link" data-display-optional="true" data-display-label="رابط اختياري"><dt>رابط اختياري</dt><dd><button type="button">عرض</button></dd></div></dl></div>';
+  document.body.append(host);
+  const component=host.firstElementChild,items=componentContentItems(component);
+  expect(items.some(item=>item.id==='field:linked')).toBe(false);
+  expect(items.some(item=>item.id==='field:optional-link')).toBe(true);
+  host.remove();
+ });
+
+ test('تخصيص البيانات: إخفاء قيمة رابط السجل يبقي إجراء فتحه متاحًا',()=>{
+  clean();
+  const host=document.createElement('section');
+  host.innerHTML='<div data-uxc-id="section:linked-action"><dl><div class="kv-item" data-display-item="field:case" data-display-preserve-actions="true"><dt data-display-hide-target="label">القضية</dt><dd data-open-ref="cases:CASE-1"><button type="button" data-display-action aria-label="فتح القضية"><span data-display-hide-target>رقم القضية 12</span><span data-display-action-fallback hidden>فتح السجل المرتبط</span></button></dd></div></dl></div>';
+  document.body.append(host);
+  const component=host.firstElementChild;
+  setComponentContent('section:linked-action',{order:['field:case'],hidden:['field:case']});
+  applyComponentContent(component,'section:linked-action');
+  const row=component.querySelector('[data-display-item="field:case"]'),action=row.querySelector('[data-display-action]');
+  expect(row.classList.contains('ux-content-hidden')).toBe(false);
+  expect(row.querySelector('dt').classList.contains('ux-content-hidden')).toBe(true);
+  expect(action.querySelector('[data-display-hide-target]').classList.contains('ux-content-hidden')).toBe(true);
+  expect(action.querySelector('[data-display-action-fallback]').hidden).toBe(false);
+  expect(row.querySelector('[data-open-ref]').dataset.openRef).toBe('cases:CASE-1');
+  host.remove();
+ });
+
+ test('تخصيص البيانات: الحقول الفارغة متاحة دون حذف وتبقى مخفية افتراضيًا',()=>{
+  clean();
+  const host=document.createElement('section');
+  host.innerHTML='<div data-uxc-id="section:optional-fields"><dl><div class="kv-item" data-display-item="field:present" data-display-label="الاسم"><dt>الاسم</dt><dd>ليلى محفوظ</dd></div><div class="kv-item" data-display-item="field:optional" data-display-label="البريد" data-display-default-hidden="true"><dt>البريد</dt><dd>غير مسجل</dd></div></dl></div>';
+  document.body.append(host);
+  const component=host.firstElementChild,items=applyComponentContent(component,'section:optional-fields');
+  expect(items.map(item=>item.id).join('|')).toBe('field:present|field:optional');
+  expect(component.querySelector('[data-display-item="field:optional"]').textContent.includes('غير مسجل')).toBe(true);
+  expect(component.querySelector('[data-display-item="field:optional"]').classList.contains('ux-content-hidden')).toBe(true);
+  const layout=resolveComponentContentView('section:optional-fields',items);
+  expect(layout.hidden.includes('field:optional')).toBe(true);
+  setComponentContent('section:optional-fields',{order:layout.order,hidden:layout.hidden.filter(id=>id!=='field:optional')});
+  applyComponentContent(component,'section:optional-fields');
+  expect(component.querySelector('[data-display-item="field:optional"]').classList.contains('ux-content-hidden')).toBe(false);
+  expect(getComponentContent('section:optional-fields').hidden.length).toBe(0);
   host.remove();
  });
 

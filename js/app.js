@@ -21,6 +21,7 @@ import {quickNotesPage,bindQuickNotes,openQuickNoteCapture,bindQuickNoteGlobalEv
 import {remindersPage,bindReminders,initReminders,scheduleRemindersBadge} from './modules/reminders.js';
 import {scheduleWorkBadge} from './ui/work-badge.js';
 import {syncStatus} from './services/sync-engine.js';
+import {startAutomaticSyncRelay,getRelayConfiguration} from './services/sync-relay.js';
 import {networkStatus,ONLINE,OFFLINE} from './core/network-status.js';
 import {PWAUpdateService} from './services/pwa-updates.js';
 import {runMaintenance} from './services/maintenance.js';
@@ -34,7 +35,7 @@ import {openPalette,closePalette,paletteOpen} from './ui/palette.js';
 import {icon} from './ui/icons.js';
 import {buildSidebar,initSidebarState,toggleCollapsed,toggleMobile,closeMobile,isDesktop,setActiveRoute} from './ui/sidebar.js';
 import {bindCards} from './ui/card.js';
-import {applyPageDisplay,applyPageLayout} from './ui/page-layout.js';
+import {applyPageDisplay,applyPageLayout,discoverPageLayout,openPageCustomizer} from './ui/page-layout.js';
 import {applyUniversalStyles} from './ui/component-customizer.js';
 import {Clock} from './core/clock.js';
 import {clearUndo} from './core/undo-stack.js';
@@ -112,8 +113,8 @@ function recordRoute(route){
 }
 
 class App{
- constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null;this.routeHistory=null;this.storageWatch=null;this.pwaInstall=null}
- async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';const {renderRecovery,bindRecovery}=await import('./modules/databases.js');$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true});this.scheduleSearchIndexMaintenance()}catch(e){this.booting=false;this.fail(e)}}
+ constructor(){this.constants=constants;this.registry=new DatabaseRegistry();this.manager=new DatabaseManager(this.registry);this.ctx=null;this.office=null;this.route='dashboard';this.history=[];this.boundCrossTab=false;this.busy=false;this.navSeq=0;this.booting=true;this.pendingRoute=null;this.routeHistory=null;this.storageWatch=null;this.pwaInstall=null;this.__stopSyncRelay=null}
+ async boot(){document.title=APP_NAME;this.bindShell();this.bindCrossTab();try{await prefs.init();this.pendingRoute=this.pendingRoute||routeFromHash(location.hash);if(this.registry.recoveryMode){const candidates=await this.registry.scanRecoverableDatabases();this.booting=false;$('#page-title').textContent='وضع الاسترداد';const {renderRecovery,bindRecovery}=await import('./modules/databases.js');$('#main-content').innerHTML=renderRecovery(candidates);bindRecovery(this,candidates);return}this.setContext(await this.manager.openActive());await this.maintenance;await this.runExecutionSettingsMigration();await this.maybeSeedDemo();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.startSyncRelay();this.registry.data.lastBootAt=new Date().toISOString();this.registry.data.lastCleanShutdown=false;this.registry.save();window.addEventListener('pagehide',()=>{this.registry.data.lastCleanShutdown=true;this.registry.save()});this.booting=false;this.startHistoryNav();this.startStorageHardening();const route=this.pendingRoute||'dashboard';this.pendingRoute=null;await this.go(route);scheduleRemindersBadge(this,{force:true});this.scheduleSearchIndexMaintenance()}catch(e){this.booting=false;this.fail(e)}}
  /** تاريخ المتصفح: كل انتقال يُسجَّل، وزر الرجوع في Android يغلق الطبقات ثم يرجع بين الشاشات. */
  startHistoryNav(){
   bindOverlayStack(this.routeHistory=new RouteHistory({
@@ -217,6 +218,12 @@ class App{
   $('#nav-back').onclick=()=>this.back();
   $('#nav-close').onclick=()=>this.closePage();
   $('#nav-home').onclick=()=>this.go('dashboard');
+  $('#check-app-update')?.addEventListener('click',()=>this.checkForAppUpdate());
+  $('#customize-current-page')?.addEventListener('click',()=>{
+   const root=$('#main-content'),pageId=this.__layoutId||String(this.route||'dashboard').split('?')[0];
+   discoverPageLayout(root,pageId,$('#page-title')?.textContent||pageId);
+   openPageCustomizer(this,{pageId,root});
+  });
   // تفويض واحد لكل عناصر التنقل، فيبقى صالحًا بعد أي إعادة رسم للشريط (التخصيص مثلًا)
   $('#sidebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
   $('#tn-mobilebar')?.addEventListener('click',e=>{const b=e.target.closest?.('[data-route]');if(b?.dataset.route)this.go(b.dataset.route)});
@@ -234,7 +241,9 @@ class App{
    syncStatus(context).then(state=>{
     if(!networkStatus.isOnline())return;
     if(state.pendingChanges||state.unresolvedConflicts){
-     toast(`🟢 عاد الاتصال. توجد ${state.pendingChanges} تغييرات جاهزة للمزامنة؛ لم تبدأ تلقائيًا.`, 'info', {duration:7500,action:()=>this.go('sync'),actionLabel:'مزامنة الآن'});
+     const relay=getRelayConfiguration(context.profile?.id);
+     const auto=relay.enabled&&relay.autoSync;
+     toast(auto?`🟢 عاد الاتصال. ستبدأ مزامنة الخادم المفعّلة تلقائيًا؛ توجد ${state.pendingChanges} تغييرات.`:`🟢 عاد الاتصال. توجد ${state.pendingChanges} تغييرات؛ لم يُفعّل ناقل تلقائي لهذا الجهاز.`, 'info', {duration:7500,action:()=>this.go('sync'),actionLabel:'فتح المزامنة'});
     }else toast('🟢 عاد الاتصال بالإنترنت.','ok');
    }).catch(()=>toast('🟢 عاد الاتصال بالإنترنت.','ok'));
   },{immediate:true});
@@ -348,14 +357,20 @@ class App{
     recordToolbar.append(bulkCollapseTools);
    }
    bindCards(main);
-   // نظام العرض الموحّد: إعدادات عرض الصفحة (الصفحة ← العام ← الافتراضي) ثم ترتيب/إظهار
-   // الأقسام المحفوظ — نقل DOM فقط، بلا إعادة رسم وبلا إعادة قراءة أي بيانات.
+   // نظام العرض الموحّد: هوية الصفحة أولًا، ثم تطبيق تفضيلات العرض والتخصيصات على العناصر الفعلية.
    this.__layoutId=page.layoutId||baseRoute;
    applyPageDisplay(main,this.__layoutId);
-   applyPageLayout(main,this.__layoutId);
    // نظام التخصيص الكامل والمستقل: كل عنصر (صفحة/قسم/بطاقة/مرحلة/مكون مسجل)
    // تُطبق إعداداته المحفوظة بهويته الثابتة — نقل أنماط فقط، بلا إعادة رسم.
    applyUniversalStyles(main,this.__layoutId);
+   // أي لوحة/قسم/بطاقة لم يسجلها تعريف يدوي يُكتشف من DOM ويضاف لتخصيص ترتيب الصفحة.
+   discoverPageLayout(main,this.__layoutId,page.title);
+   applyPageLayout(main,this.__layoutId);
+   const pageCustomizeButton=$('#customize-current-page');
+   if(pageCustomizeButton){
+    pageCustomizeButton.hidden=Boolean(main.querySelector('[data-customize-page],[data-order-file-tabs]'));
+    pageCustomizeButton.title=`ترتيب وإظهار أقسام «${page.title}»`;
+   }
    main.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>this.go(b.dataset.route));
    main.querySelectorAll('[data-page-back]').forEach(b=>b.onclick=()=>this.back());
    main.querySelectorAll('[data-page-close]').forEach(b=>b.onclick=()=>this.closePage());
@@ -372,8 +387,9 @@ class App{
   while(this.history.length){const r=this.history.pop();if(r.split('?')[0]!==base)return this.go(r,{replace:true})}
   return this.go('dashboard',{replace:true});
  }
- async switchDb(id,opts={}){const previousId=this.ctx?.profile?.id||this.registry.active?.id;try{const next=await this.manager.switchTo(id);this.setContext(next);await this.maintenance;await this.runExecutionSettingsMigration();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();return next}catch(e){if(!opts.remote&&previousId&&this.registry.active?.id!==previousId){this.registry.data.activeProfileId=previousId;this.registry.save()}throw e}}
+ async switchDb(id,opts={}){const previousId=this.ctx?.profile?.id||this.registry.active?.id;try{const next=await this.manager.switchTo(id);this.setContext(next);await this.maintenance;await this.runExecutionSettingsMigration();await this.runExecutionPeriodMigration();await this.runExecutionSimpleMigration();this.startSyncRelay();return next}catch(e){if(!opts.remote&&previousId&&this.registry.active?.id!==previousId){this.registry.data.activeProfileId=previousId;this.registry.save()}throw e}}
  setContext(ctx){
+  this.__stopSyncRelay?.();this.__stopSyncRelay=null;
   this.ctx=ctx;this.office=new Office(ctx);this.office.app=this;this.resetViewState();$('#db-badge').textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   const sbDb=document.querySelector('#sb-db-name');if(sbDb)sbDb.textContent=this.registry.active?.displayName||ctx?.profile?.displayName||'';
   // صيانة غير مدمرة بعد فتح القاعدة (زرع القوائم، ترحيل روابط الموكلين، فهرس البحث)
@@ -384,14 +400,50 @@ class App{
   this.searchIndexTask=null;
   this.maintenance=runMaintenance(office,{searchIndex:false}).catch(e=>console.error('maintenance',e));
  }
+ startSyncRelay(){
+  this.__stopSyncRelay?.();this.__stopSyncRelay=null;
+  if(!this.ctx||this.ctx.closed)return;
+  const context=this.ctx,profileId=context.profile?.id;
+  this.__stopSyncRelay=startAutomaticSyncRelay(context,{profileId,onStatus:detail=>{
+   if(this.ctx!==context)return;
+   if(detail.status==='failed')toast(`تعذرت المزامنة التلقائية: ${detail.message||'خطأ اتصال'}. ستُعاد المحاولة بأمان.`, 'warn', {duration:7000});
+   if(detail.status==='synced'&&(Number(detail.downloaded||0)+Number(detail.uploaded||0)>0)){
+    toast(`اكتملت مزامنة الخادم: ${Number(detail.downloaded||0)} تغييرًا واردًا و${Number(detail.uploaded||0)} صادرًا.`, 'ok', {duration:6500});
+    if(this.route==='sync')setTimeout(()=>{if(this.ctx===context&&this.route==='sync')this.refresh()},250);
+   }
+   if(this.route==='sync'){
+    const progress=$('#sync-relay-progress');
+    if(progress){
+     if(detail.status==='syncing')progress.textContent=detail.phase==='download'?`استلام حزم مشفرة… ${Number(detail.processed||0)} من ${Number(detail.total||0)}.`:'المزامنة التلقائية قيد التنفيذ…';
+     else if(detail.status==='needs-baseline')progress.textContent='قبل المزامنة عبر الخادم، أنشئ نسخة أمان وابدأ خط الأساس من زر «مزامنة الخادم الآن». لا تُرسل بيانات قبل هذه الخطوة.';
+     else if(detail.status==='offline')progress.textContent='غير متصل؛ لا تنتقل بيانات. ستُستأنف المزامنة عند عودة الشبكة.';
+     else if(detail.status==='failed')progress.textContent=`تعذرت المحاولة الأخيرة: ${detail.message||'خطأ غير معروف'} — سيعاد الاتصال لاحقًا.`;
+     else if(detail.status==='synced')progress.textContent=`آخر دورة خادم انتهت بنجاح؛ ${Number(detail.downloaded||0)} وارد · ${Number(detail.uploaded||0)} صادر.`;
+    }
+   }
+  }});
+ }
  resetViewState(){/* paging cursors and cached view state are bound to a DB session; drop them when the database changes */for(const k of ['__lists','__rec','__file','__fileTab','__fileTabCache','__listNav','__filesChipIndex','__report','__agendaDay','__wc'])delete this[k];/* سجل «العودة» مرتبط بجلسة قاعدة البيانات: عملياته (استعادة/إعادة فتح…) تخصّ سجلاتها، فيُفرَّغ عند أي تبديل قاعدة بدل تنفيذ عكس على قاعدة أخرى. */clearUndo()}
  back(){
   // زر «رجوع» داخل البرنامج: يستخدم تاريخ المتصفح نفسه فيُبقي مدخلات Android متوازنة.
   if(this.routeHistory?.canGoBack?.())return (this.routeHistory.back(),null);
   const r=this.history.pop()||'dashboard';return this.go(r,{replace:true});
  }
- /** التحديث عبر إعادة تحميل واحدة: لا يلمس IndexedDB ولا التفضيلات. */
- reloadForUpdate(){try{location.reload()}catch{/* متجاهَل */}}
+ /** فحص يدوي للقشرة والملفات المخزنة؛ النتيجة لا تمس قاعدة البيانات أو التفضيلات. */
+ async checkForAppUpdate(){
+  const button=$('#check-app-update');
+  if(button){button.disabled=true;button.innerHTML='⟳ <span class="top-action-label">جارٍ التحقق…</span>'}
+  try{
+   const result=await this.pwaUpdates?.checkNow?.()||{status:'unavailable'};
+   if(result.status==='current')toast('التطبيق محدّث؛ لا توجد ملفات إصدار أحدث حاليًا.','ok');
+   else if(result.status==='offline')toast('يلزم الاتصال بالإنترنت للتحقق من إصدار جديد. بياناتك المحلية لم تتأثر.','warn');
+   else if(result.status==='unsupported')toast('تحديث Service Worker غير متاح في هذا السياق؛ افتح التطبيق من رابط HTTPS.','warn');
+   else toast('تعذر إكمال فحص التحديث الآن أو الوصول إلى ملفاته. النسخة الحالية وبياناتك المحلية ما زالت سليمة.','warn');
+  }catch(error){console.info('Manual application update check failed',error);toast('تعذر التحقق الآن؛ لم تُمس أي بيانات. حاول لاحقًا.','warn')}
+  finally{if(button){button.disabled=false;button.innerHTML='⟳ <span class="top-action-label">التحقق من التحديث</span>'}}
+ }
+ /** التحديث الصريح يفتح المستند نفسه مجددًا بعد تفعيل العامل الجديد؛ لا يمس IndexedDB أو التفضيلات. */
+ reloadForUpdate(){try{globalThis.location?.replace?.(`${globalThis.location.pathname}${globalThis.location.search}${globalThis.location.hash}`)}catch{/* متجاهَل */}}
  refresh(){return this.go(this.route,{replace:true,forceRender:true})}
  fail(e){const err=normalizeError(e);console.error(err.code,err,e);const retry=this.route||'dashboard';$('#main-content').innerHTML=`<div class="error-box" role="alert"><h2>تعذر تنفيذ العملية</h2><p>${esc(userError(err))}</p><div class="error-actions"><button class="primary" data-retry>إعادة المحاولة</button><button class="ghost" data-error-home>الرئيسية</button><button class="ghost" data-error-diagnostics>سلامة البيانات</button></div><small class="muted">رمز التشخيص: ${esc(err.code)}</small></div>`;document.querySelector('[data-retry]')?.addEventListener('click',()=>this.go(retry,{replace:true,forceRender:true}));document.querySelector('[data-error-home]')?.addEventListener('click',()=>this.go('dashboard'));document.querySelector('[data-error-diagnostics]')?.addEventListener('click',()=>this.go('integrity'))}
 }
