@@ -342,6 +342,24 @@ try{
   assert.equal(await panel.locator('[data-file-chip]').count(),6,'عدد الشرائح');
   await panel.locator('[data-file-chip="active"]').click();
   await page.waitForTimeout(600);
+  // حماية انحدار: شريط النتائج المضغوط كان ينضغط (flex-shrink) فيصير أقصر من محتواه
+  // ويخرج زر «إزالة الشريحة» عن حدوده متداخلًا مع شبكة الجدول. نقيس: (1) الشريط يحتوي
+  // محتواه فعلًا، (2) الزر هو الهدف الفعلي في مركزه بعد إغلاق اللوحة (اللوحة المفتوحة تغطيه).
+  await closeTimePanel();
+  const strip=await page.evaluate(()=>{
+   const bar=document.querySelector('.fw-strip');
+   if(!bar)return {strip:false};
+   const box=bar.getBoundingClientRect();
+   const content=Math.max(...[...bar.children].map(child=>child.getBoundingClientRect().bottom),box.top)-box.top;
+   const chip=bar.querySelector('[data-fs-clear="chip"]');
+   const chipBox=chip?.getBoundingClientRect();
+   const hit=chipBox?document.elementFromPoint(chipBox.x+chipBox.width/2,chipBox.y+chipBox.height/2):null;
+   return {strip:true,stripH:Math.round(box.height),contentH:Math.round(content),chipH:chipBox?Math.round(chipBox.height):null,
+    clickable:Boolean(chipBox)&&Boolean(hit)&&(hit===chip||chip.contains(hit))};
+  });
+  assert.equal(strip.strip,true,'شريط النتائج موجود بعد الفلترة');
+  assert.ok(strip.contentH<=strip.stripH+1,`شريط النتائج لا يحتوي محتواه (انضغاط/تغطية) — ${JSON.stringify(strip)}`);
+  assert.equal(strip.clickable,true,`زر «إزالة الشريحة» ليس هدف النقر في مركزه — ${JSON.stringify(strip)}`);
   const timeBadge=await page.locator('[data-fw-time-count]').textContent();
   assert.ok(Number(timeBadge)>=1,'شارة فلاتر الوقت لم تُحدّث');
   // فترة «اليوم» تُركَّب فوق الشريحة (لا تلغيها) — الشارة تصبح 2+

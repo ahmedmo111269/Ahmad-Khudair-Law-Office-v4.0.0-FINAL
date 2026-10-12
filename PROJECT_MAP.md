@@ -13,10 +13,15 @@
 | `js/modules/record-page.js` | الحذف المنطقي يُسجّل عكسًا عبر `restoreEntity` (نفس مسار «تراجع» في الإشعار) — يُنفَّذ من الشريط أو من الإشعار، مرة واحدة. |
 | `js/modules/execution-center.js` | `withUndo` وإلغاء سجل التنفيذ يدخلان السجل عبر `voidSimpleRecord`/`undoVoidSimpleRecord`. |
 | `css/files-workspace.css` | شريط صفحة مضغوط (أزرار مربعة وأيقونات 16–20px، مقياس 48px على الهاتف)، حالات زر «العودة» (معطّل · جاهز ذهبي)، و⚙ في نهاية شريط الأدوات (`order:99` = أقصى اليسار في RTL) قبل «مسح التحديد» الذي يبقى طرف الأزرار. |
-| `sw.js` | كاش `v6.4.0-files-bar-undo` + precache للوحدة الجديدة. |
+| `sw.js` | كاش `v6.4.1-files-strip-fix` + precache للوحدة الجديدة. |
+| `css/files-workspace.css` | **إصلاح**: `.fw-strip{flex:none;position:relative;z-index:1}` — كان الشريط ينضغط فيخرج زر «✕ إزالة الفلتر» عن حدوده ويتداخل مع الجدول فيستحيل نقره في مركزه. |
+| `tools/node-tests/{grid,files-cockpit,legal-context,wave6-context,execution-feas-cycle}-browser-tests.mjs` | مواءمة الحزم الحمراء مع واجهة مساحة العمل: شريط الطباعة/الأعمدة/البطاقات + تأكيد الطباعة، شرائح فلاتر الوقت، الثيم من الإعدادات على الهاتف، ورابط تبويب بطاقة التنفيذ العميق (`exc:ID?tab=…`) مع تجريد الاستعلام عند استخراج المعرّف. **37 · 13 · 8 · 54 · 19** كلها ناجحة بلا أي فحص مُخفَّف. |
+| `screenshots/files-{desktop,mobile}-strip-after.png` | لقطتان توثّقان شريط النتائج بعد الإصلاح (شريحة نشطة + زر إزالة قابل للنقر). |
 | `js/tests/files-workspace-tests.js` · `tools/node-tests/files-workspace-final-browser-tests.mjs` | ترتيب الشريط الجديد، غياب العناصر الأربعة، موضع ⚙ وفتح لوحته، وسلوك «العودة»: تعطيل/تفعيل، عكس «مسح الفلاتر»، وعكس حذف منطقي حقيقي من صفحة الملفات. |
 
 **التحقق بعد اكتمال التنفيذ:** `run-tests` **626/626** · `tests.html` في Chromium **648/648** · `files-workspace-final` Chromium **25/25 · 0 خطأ**.
+
+**تكملة (إصلاح + مواءمة الفحص الحمراء):** `grid-browser` **37/37 · 0 خطأ** · `files-cockpit` **13/13 · 0 خطأ** · `legal-context` **8/8** · `wave6-context` **54/54** · `execution-feas-cycle` **19/19** · `files-workspace-final` **25/25** (+ حماية انحدار تمنع انضغاط شريط النتائج) · `work-center` **69/69** · `android-pwa` **31/31** · `home-focus` **56/56** · `quick-notes` و`offline-sync` **PASS** · `restructure-routes` **32/32 + 9/9** · `execution-feas` **10/10** · `release-audit` **PASS** · `module-graph` **0 مفقود**.
 
 ---
 

@@ -51,29 +51,36 @@ try{
  report.fixture='Synthetic-only records in an ephemeral browser profile';
 
  // ---------- قائمة الملفات ----------
- await verify('قائمة الملفات: الشرائح + الفلاتر قابلة للطي بملخص حي',async()=>{
+ await verify('قائمة الملفات: الشرائح في «فلاتر الوقت» + ملخص حي قابل للإزالة في شريط النتائج',async()=>{
   await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('files'));
   await page.waitForTimeout(900);
-  const chips=page.locator('.list-status-chips [data-file-chip]');
+  // البنية الحالية: شريط صفحة مضغوط + شريط أدوات، ولا لوحة فلاتر مطوية قديمة داخل الصفحة
+  assert.equal(await page.locator('.list-filter-panel').count(),0,'لا لوحة الفلاتر القديمة في صفحة الملفات');
+  assert.equal(await page.locator('[data-fw-pagebar]').count(),1,'شريط الصفحة المضغوط موجود');
+  // الشرائح الست تعيش داخل لوحة «فلاتر الوقت» في شريط الأدوات
+  await page.locator('[data-fw-time]').click();
+  const chips=page.locator('[data-fw-panel="time"] .list-status-chips [data-file-chip]');
+  await chips.filter({hasText:'نشطة'}).first().waitFor({state:'visible',timeout:8000});
   assert.equal(await chips.count(),6,'الشرائح الست');
   await chips.filter({hasText:'نشطة'}).click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(600);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  // الشريحة فعّلت الفلترة فعلًا: ملف التهيئة (نشط) يظهر، والشارة والملخص يعكسانها
   const row=page.locator('.dg tbody tr[data-i]').filter({hasText:fixture.file.title}).first();
   await row.waitFor({state:'visible',timeout:8000});
-  const panel=page.locator('.list-filter-panel');
-  const toggle=panel.locator(':scope > .panel-head .collapse-toggle');
-  // اللوحة تبدأ مطوية افتراضيًا: الملخص الحي يجب أن يكون ظاهرًا في الرأس
-  assert.equal(await panel.evaluate(el=>el.dataset.collapseCollapsed),'true','اللوحة تبدأ مطوية');
-  const summaryText=await panel.locator('.panel-head .collapse-summary').textContent();
-  assert.ok(summaryText.includes('الشريحة'),`ملخص يحتوي الشريحة عند الطي: ${summaryText}`);
-  // فتح اللوحة وكشف chips الإزالة
-  await toggle.click();
-  assert.equal(await panel.evaluate(el=>el.dataset.collapseCollapsed),'false','اللوحة فُتحت');
-  const fs=panel.locator('.list-filter-summary');
-  assert.equal(await fs.locator('[data-fs-clear="chip"]').count(),1,'زر إزالة شريحة');
+  assert.equal(await page.locator('[data-fw-time-count]').textContent(),'1','شارة فلاتر الوقت = 1');
+  const fs=page.locator('#list-filter-summary');
+  assert.equal(await fs.locator('[data-fs-clear="chip"]').count(),1,'ملخص حي فيه زر إزالة الشريحة');
+  assert.ok((await fs.textContent()).includes('الشريحة'),`نص الملخص يعرض الشريحة: ${await fs.textContent()}`);
+  // الإزالة من الملخص تعيد النتائج بلا تغيير إعدادات العرض
   await fs.locator('[data-fs-clear="chip"]').click();
-  await page.waitForTimeout(400);
-  assert.equal((await panel.locator('.panel-head .collapse-summary').textContent()).trim(),'','ملخص فارغ بعد إزالة الشريحة');
+  await page.waitForTimeout(600);
+  assert.equal(await page.locator('[data-fw-time-count]').textContent(),'','الشارة أُفرغت بعد إزالة الشريحة');
+  assert.equal(await fs.locator('[data-fs-clear="chip"]').count(),0,'الملخص لم يبقَ فيه أثر للشريحة');
+  // انتظار حقيقي لعودة النتائج بعد إزالة الشريحة (لا مهلة ثابتة: الشبكة تستبدل صفوفها أثناء التحميل)
+  await row.waitFor({state:'visible',timeout:8000});
+  assert.ok(await page.locator('#list-grid tbody tr[data-i]').count()>=1,'النتائج عادت بعد إزالة الشريحة');
  });
 
  await verify('قائمة الملفات: Previous/Next يحافظ على سياق النتائج',async()=>{
@@ -163,10 +170,20 @@ try{
   await page.waitForTimeout(300);
   const clip=await page.evaluate(()=>navigator.clipboard.readText().catch(()=>null));
   assert.ok(clip&&clip.includes('ملف'),`ملخص الملف منسوخ: ${(clip||'').slice(0,60)}`);
-  // وضع التركيز يخفي العناصر الثانوية دون إخفاء التنبيهات
+  // الفحص السابق طوّى لوحة المحتوى والحالة محفوظة — وسّعها لتعود القمرة مرئية،
+  // والقمرة تُرسم في تبويب «نظرة عامة» (التبويب المحفوظ من الفحص السابق كان «الجلسات»).
+  const shell=page.locator('.file-tab-shell');
+  const shellToggle=shell.locator(':scope > .panel-head .collapse-toggle');
+  if((await shellToggle.getAttribute('aria-expanded'))==='false') await shellToggle.click();
+  await page.locator('.file-subtabs [data-tab="summary"]').click();
+  const cockpit=page.locator('.cp-fc');
+  await cockpit.waitFor({state:'visible',timeout:8000});
+  // وضع التركيز يخفي العناصر الثانوية دون إخفاء التنبيهات أو القمرة
   await page.locator('[data-file-focus]').click();
   assert.equal(await page.evaluate(()=>document.querySelector('#main-content').classList.contains('file-focus-mode')),true);
-  assert.equal(await page.locator('.cp-fc').isVisible(),true,'القمرة لا تختفي في التركيز');
+  // إعادة الرسم بعد تبديل الوضع غير متزامنة: نعيد الانتظار ثم نؤكد أن القمرة لم تُخفَ
+  await cockpit.waitFor({state:'visible',timeout:8000});
+  assert.equal(await cockpit.isVisible(),true,'القمرة لا تختفي في التركيز');
   await page.locator('[data-file-focus]').click();
   assert.equal(await page.evaluate(()=>document.querySelector('#main-content').classList.contains('file-focus-mode')),false);
  });
