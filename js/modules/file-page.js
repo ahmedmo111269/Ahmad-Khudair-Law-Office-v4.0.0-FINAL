@@ -31,7 +31,7 @@ import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {fileCockpitHtml,bindCockpit,executionStripHtml,fileNextStep} from '../ui/cockpit.js';
 import {executionsForFile,executionContextSummary} from '../services/execution-work.js';
 import {trackRecent} from '../services/recents.js';
-import {formatFileNumber,fileNumberChip} from '../core/file-number.js';
+import {formatFileNumber} from '../core/file-number.js';
 import {registerPageLayout,resolveSectionOrder,hiddenSectionIds,migrateLegacySectionOrder,openPageCustomizer} from '../ui/page-layout.js';
 import {notesForEntity,completeQuickNote,deleteQuickNote} from '../services/quick-notes.js';
 import {openQuickNoteCapture,openQuickNoteEditor} from './quick-notes.js';
@@ -44,7 +44,7 @@ import {prefs} from '../core/preferences.js';
 // داخل قوائم منسدلة بحسب وظيفتها. المعرّفات (ids) ثابتة تمامًا كما كانت حتى تبقى تفضيلات
 // الترتيب/الإظهار وحالة الطي والكاش وأول تبويب لكل ملف صالحة؛ تغيّر التوزيع والتسميات فقط.
 // [المعرّف، التسمية الكاملة، الأيقونة، التسمية القصيرة للشاشات الضيقة] — نفس الأقسام والمعرّفات.
-const TABS=[['summary','نظرة عامة','◈'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷','الأعمال'],['judicial','المراحل والإجراءات القضائية','▣','المراحل'],['parties','الأطراف والصفات','⚖','الأطراف'],['judgments','الأحكام','⌘'],['serviceRecords','المحضرين والإعلانات','📬','المحضرين'],['money','الأتعاب والمستندات','＄','الأتعاب'],['relations','العلاقات والملفات المرتبطة','↔','الارتباطات'],['typeData','بيانات نوع العمل','▧','نوع العمل'],['assets','العقارات والمركبات','⌂','الأصول'],['timeline','الخط الزمني','⏳'],['notes','الملاحظات','▤'],['extra','بيانات إضافية (قديمة)','▤','بيانات قديمة'],['activity','سجل النشاط','≋']];
+const TABS=[['summary','نظرة عامة','◈'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷','الأعمال'],['judicial','المراحل','▣'],['parties','الأطراف والصفات','⚖','الأطراف'],['judgments','الأحكام','⌘'],['serviceRecords','المحضرين والإعلانات','📬','المحضرين'],['money','الأتعاب والمستندات','＄','الأتعاب'],['relations','العلاقات والملفات المرتبطة','↔','الارتباطات'],['typeData','بيانات نوع العمل','▧','نوع العمل'],['assets','العقارات والمركبات','⌂','الأصول'],['timeline','الخط الزمني','⏳'],['notes','الملاحظات','▤'],['extra','بيانات إضافية (قديمة)','▤','بيانات قديمة'],['activity','سجل النشاط','≋']];
 const TAB_META=new Map(TABS);
 // التبويبات الأساسية الظاهرة في الشريط — الأكثر استخدامًا يوميًا. لا تُنقل إلى قوائم أبدًا.
 const PRIMARY_TABS=['summary','hearings','procedures','judicial'];
@@ -142,6 +142,79 @@ function caseHeadData(f,cur,ftype,cat){
  return {kicker,title,sub,court,isCase:true};
 }
 
+/**
+ * كتلة الهوية التشغيلية للملف — تُعرض كأول قسم داخل «نظرة عامة» فقط.
+ * لا يظهر رقم الملف الداخلي في HTML الأولي: زر «الملف الفرعي» يملأ الشريط
+ * الصغير عند الطلب، حتى لا يختلط الرقم الداخلي برقم الدعوى/الاستئناف.
+ */
+function fileOverviewStaticHtml(app){
+ const v=app.__file?.view||{};
+ const {id,f,head,cat,ftype,headParties,nextStep,gaps,favOn,crumbs}=v;
+ if(!f)return '';
+ const status=label(f.status||'open');
+ const closed=isClosedFile(f);
+ const title=head?.isCase?(head.title||'ملف'):(f.title||ftype?.name||'ملف');
+ const statusClass=closed?'closed':'open';
+ const parties=headParties||[];
+ return `<div class="file-overview-static" data-file-overview-static>
+  <section class="record-head file-head file-id file-overview-identity" id="file-head" aria-labelledby="file-identity-title" style="--cat:${esc(cat?.color||'var(--primary)')}">
+   ${crumbs||''}
+   <div class="fid-top">
+    <div class="fid-case">
+     ${head?.kicker?`<p class="fid-kicker">${esc(head.kicker)}</p>`:''}
+     <div class="fid-title-row">
+      <h2 class="fid-title" id="file-identity-title">${esc(title)}</h2>
+      <span class="badge ${statusClass} fid-status" data-file-status>${esc(status)}</span>
+     </div>
+     ${head?.court?`<p class="fid-court">${esc(head.court)}</p>`:''}
+     ${!head?.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
+     <div class="fid-parties" role="list" aria-label="أطراف الملف: الموكل والخصم وبقية الأطراف">
+      ${parties.slice(0,HEAD_PARTIES_MAX).map(({p,word,kind},i)=>`<button type="button" role="listitem" class="fid-party fid-party--${kind}" data-party-open="${i}" title="فتح بيانات ${esc(p.partyName||p.name||'طرف')} وإجراءاته"><span class="fid-party-role">${esc(word)}</span><b class="fid-party-name">${esc(p.partyName||p.name||'طرف')}</b>${p.role?`<span class="fid-party-cap">${esc(p.role)}</span>`:''}${p.isActive===false?'<span class="fid-party-cap">غير نشط</span>':''}</button>`).join('')}
+      ${parties.length>HEAD_PARTIES_MAX?`<button type="button" class="fid-party fid-party--more" data-tab-jump="parties">+${parties.length-HEAD_PARTIES_MAX} — عرض كل الأطراف (${parties.length})</button>`:''}
+      ${parties.length?'':`<span class="fid-party-empty">لا يوجد أطراف مرتبطون بعد — <button type="button" class="link" data-tab-jump="parties">أضف الأطراف</button></span>`}
+     </div>
+     <div class="head-actions fid-actions">
+      <button class="primary" data-file-quick>+ إضافة</button>
+      <button class="ghost" data-file-edit>✎ تعديل</button>
+      <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-card-menu aria-haspopup="menu" aria-label="إجراءات الملف">⋯</button>
+       <div class="ux-menu" role="menu" hidden>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-task>＋ مهمة مرتبطة</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-reclass>تغيير القسم / النوع</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-pin aria-pressed="${favOn}">${favOn?'★ إلغاء التثبيت':'☆ تثبيت في الرئيسية'}</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-copy>📋 نسخ ملخص الملف</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-gaps>⚠ نواقص الملف (${gaps?.length||0})</button>
+        ${f.isArchived||closed?'<button type="button" role="menuitem" class="ux-menu-item" data-file-reopen>إعادة فتح</button>':'<button type="button" role="menuitem" class="ux-menu-item" data-file-close>إنهاء الملف</button><button type="button" role="menuitem" class="ux-menu-item" data-file-archive>أرشفة</button>'}
+        <button type="button" role="menuitem" class="ux-menu-item is-danger" data-file-delete>حذف منطقي للملف</button>
+       </div>
+      </div>
+     </div>
+     <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}${head?.isCase&&v.cur?`<button type="button" class="badge stage" data-route="case:${esc(v.cur.id)}" title="فتح بيانات المرحلة المسجلة في هذا الملف" aria-label="فتح المرحلة: ${esc(refLabel('cases',v.cur))}">المرحلة: ${esc(v.cur.stageType||v.cur.numberType||'—')}</button>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps?.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
+    </div>
+   </div>
+   <div class="fid-bottom">
+    <div class="fid-tools">${listNavHtml(app,'files',id)}</div>
+    <div class="fid-file-number">
+     <button type="button" class="ghost small fid-file-number-toggle" data-file-number-toggle aria-expanded="false" aria-controls="file-number-popover-${esc(id)}" title="إظهار رقم الملف الفرعي الداخلي">الملف الفرعي</button>
+     <span class="fid-file-number-popover" id="file-number-popover-${esc(id)}" data-file-number-popover role="status" hidden></span>
+    </div>
+   </div>
+  </section>
+  ${gaps?.length?fileGapsHtml(gaps):''}
+ </div>`;
+}
+
+/** الشريط المختصر لا يدخل في جسم التبويب حتى يبقى فوق المحتوى أثناء التمرير. */
+function fileStickyHtml(app){
+ const v=app.__file?.view||{};
+ const {f,head,nextStep}=v;
+ if(!f)return '';
+ const title=head?.isCase?(head.title||'ملف'):(f.title||'ملف');
+ const status=label(f.status||'open');
+ return `<div class="file-sticky-bar" data-file-sticky aria-hidden="true"><span class="fsb-title">${esc(title)}</span><span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(status)}</span>${nextStep?`<span class="fsb-next">التالي: ${esc(nextStep.eyebrow)} — ${esc(nextStep.title)}</span>`:''}<span class="fsb-actions"><button type="button" class="primary small" data-file-quick>+ إضافة</button></span></div>`;
+}
+
+function fileOverviewHtml(app){return `${fileStickyHtml(app)}${fileOverviewStaticHtml(app)}`}
+
 export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
  if(!f||f.isDeleted)return notFound('الملف');
@@ -152,14 +225,11 @@ export async function filePage(app,id){
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
  const cfClient=cfRow?.clientId?await app.office.r.clients.get(cfRow.clientId).catch(()=>null):null;
  app.__file={id,f,parties,stages,tax,serviceCount,executions};
- // التبويب الافتراضي «نظرة عامة» دائمًا، إلا لحالة تنقل مقصودة: رابط صريح (?tab=…) أو
- // آخر تبويب محفوظ لنفس هذا الملف تحديدًا — لا تفضيل عام مشترك يفرض تبويبًا على ملف آخر.
+ // فتح صفحة الملف يبدأ دائمًا من «نظرة عامة»؛ لا تُفرض حالة تبويب قديمة عند
+ // الدخول من قائمة الملفات أو من رابط الملف. التبويب المختلف لا يُفتح إلا برابط
+ // صريح (?tab=hearings مثلًا)، وهو ما يحفظ العودة العميقة دون إرباك المستخدم.
  const explicitTab=routeTab(app);
- const sameFileOpen=app.__fileTab&&app.__fileTab.id===id;
- const remembered=sameFileOpen?app.__fileTab.tab:readLastTab(id);
- // الأولوية: تبويب مقصود من الرابط (?tab=) ← آخر تبويب محفوظ لنفس الملف ← «نظرة عامة».
- // كان الرابط الصريح يُتجاهل إذا كان الملف نفسه مفتوحًا؛ الآن يُطبَّق دائمًا (حالة تنقل مقصودة).
- app.__fileTab=(sameFileOpen&&!explicitTab)?app.__fileTab:{id,tab:explicitTab||(TAB_META.has(remembered)?remembered:'summary')};
+ app.__fileTab={id,tab:explicitTab||'summary'};
  // إذا أخفى المستخدم التبويب النشط من «تخصيص الصفحة»، نعود إلى نظرة عامة (لا بيانات تُفقَد).
  if(hiddenSectionIds('file-details').has(app.__fileTab.tab))app.__fileTab.tab='summary';
  app.__fileTabValid=tab=>TAB_META.has(tab);
@@ -177,46 +247,9 @@ export async function filePage(app,id){
  const focusOn=Boolean(prefs.get(FOCUS_MODE_KEY,false));
  const favOn=isFavorite('file:'+id,app.ctx?.profile?.id||'');
  const tabCount=k=>k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:k==='hearings'?hearingsRes.rows.length:k==='procedures'?proceduresRes.rows.length:0;
- return `${cfRow?.clientId&&cfClient?`<nav class="crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfClient.id)}">${esc(cfClient.fullName||'الموكل')}</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:cfRow?.clientId?`<p class="crumbs muted" role="status">سجل الموكل المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:cfRow?`<p class="crumbs muted" role="status">ملف الموكل موجود لكن لا يوجد موكل مرتبط قابل للتنقل.</p>`:f.clientFileId?`<p class="crumbs muted" role="status">الملف الرئيسي المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:''}
- <div class="file-sticky-bar" data-file-sticky aria-hidden="true"><span>${fileNumberChip(f)}</span><span class="fsb-title">${esc(head.isCase?head.title:(f.title||'ملف'))}</span><span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${nextStep?`<span class="fsb-next">التالي: ${esc(nextStep.eyebrow)} — ${esc(nextStep.title)}</span>`:''}<span class="fsb-actions"><button type="button" class="primary small" data-file-quick>+ إضافة</button></span></div>
- <header class="record-head file-head file-id" id="file-head" style="--cat:${esc(cat?.color||'var(--primary)')}">
-  <div class="fid-top">
-   <div class="fid-case">
-    ${head.kicker?`<p class="fid-kicker">${esc(head.kicker)}</p>`:''}
-    <h2 class="fid-title">${esc(head.title)}</h2>
-    ${head.court?`<p class="fid-court">${esc(head.court)}</p>`:''}
-    ${head.sub?`<p class="fid-sub">عنوان الملف: ${esc(head.sub)}</p>`:''}
-    ${!head.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
-    <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}<span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(label(f.status||'open'))}</span>${cur?`<button type="button" class="badge stage" data-route="case:${esc(cur.id)}" title="فتح بيانات المرحلة المسجلة في هذا الملف" aria-label="فتح المرحلة: ${esc(refLabel('cases',cur))}">المرحلة: ${esc(cur.stageType||cur.numberType||'—')}</button>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
-   </div>
-   <div class="fid-meta">
-    <div class="fid-fno"><span class="fid-fno-kind">ملف فرعي:</span> <b dir="ltr">${esc(formatFileNumber(f)||'—')}</b></div>
-    <small class="muted fid-fno-note">الرقم الداخلي للمكتب — مستقل عن أرقام القضايا الرسمية</small>
-    <div class="head-actions fid-actions">
-     <button class="primary" data-file-quick>+ إضافة</button>
-     <button class="ghost" data-file-edit>✎ تعديل</button>
-     <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-card-menu aria-haspopup="menu" aria-label="إجراءات الملف">⋯</button>
-      <div class="ux-menu" role="menu" hidden>
-       <button type="button" role="menuitem" class="ux-menu-item" data-file-task>＋ مهمة مرتبطة</button>
-       <button type="button" role="menuitem" class="ux-menu-item" data-reclass>تغيير القسم / النوع</button>
-       <button type="button" role="menuitem" class="ux-menu-item" data-file-pin aria-pressed="${favOn}">${favOn?'★ إلغاء التثبيت':'☆ تثبيت في الرئيسية'}</button>
-       <button type="button" role="menuitem" class="ux-menu-item" data-file-copy>📋 نسخ ملخص الملف</button>
-       <button type="button" role="menuitem" class="ux-menu-item" data-file-gaps>⚠ نواقص الملف (${gaps.length})</button>
-       ${f.isArchived||isClosedFile(f)?'<button type="button" role="menuitem" class="ux-menu-item" data-file-reopen>إعادة فتح</button>':'<button type="button" role="menuitem" class="ux-menu-item" data-file-close>إنهاء الملف</button><button type="button" role="menuitem" class="ux-menu-item" data-file-archive>أرشفة</button>'}
-       <button type="button" role="menuitem" class="ux-menu-item is-danger" data-file-delete>حذف منطقي للملف</button>
-      </div></div>
-    </div>
-   </div>
-  </div>
-  <div class="fid-parties" role="list" aria-label="أطراف الملف: الموكل والخصم وبقية الأطراف">
-   ${headParties.slice(0,HEAD_PARTIES_MAX).map(({p,word,kind},i)=>`<button type="button" role="listitem" class="fid-party fid-party--${kind}" data-party-open="${i}" title="فتح بيانات ${esc(p.partyName||p.name||'طرف')} وإجراءاته"><span class="fid-party-role">${esc(word)}</span><b class="fid-party-name">${esc(p.partyName||p.name||'طرف')}</b>${p.role?`<span class="fid-party-cap">${esc(p.role)}</span>`:''}${p.isActive===false?'<span class="fid-party-cap">غير نشط</span>':''}</button>`).join('')}
-   ${headParties.length>HEAD_PARTIES_MAX?`<button type="button" class="fid-party fid-party--more" data-tab-jump="parties">+${headParties.length-HEAD_PARTIES_MAX} — عرض كل الأطراف (${headParties.length})</button>`:''}
-   ${headParties.length?'':`<span class="fid-party-empty">لا يوجد أطراف مرتبطون بعد — <button type="button" class="link" data-tab-jump="parties">أضف الأطراف</button></span>`}
-  </div>
-  <div class="fid-tools">${listNavHtml(app,'files',id)}</div>
- </header>
- ${gaps.length?fileGapsHtml(gaps):''}
- <nav class="file-tabs-bar" id="file-tabs-nav" aria-label="أقسام الملف">
+ const crumbs=cfRow?.clientId&&cfClient?`<nav class="crumbs file-overview-crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfClient.id)}">${esc(cfClient.fullName||'الموكل')}</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:cfRow?.clientId?`<p class="crumbs muted file-overview-crumbs" role="status">سجل الموكل المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:cfRow?`<p class="crumbs muted file-overview-crumbs" role="status">ملف الموكل موجود لكن لا يوجد موكل مرتبط قابل للتنقل.</p>`:f.clientFileId?`<p class="crumbs muted file-overview-crumbs" role="status">الملف الرئيسي المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:'';
+ app.__file.view={id,f,head,cat,ftype,headParties,nextStep,gaps,favOn,cur,crumbs};
+ return `<nav class="file-tabs-bar" id="file-tabs-nav" aria-label="أقسام الملف">
   <div class="file-subtabs" role="tablist" aria-label="تبويبات الملف">${tabLayout().primary.map(([k,l,icon,short])=>tabBtnHtml(app,k,l,icon,tabCount(k),short)).join('')}</div>
   <div class="ftb-groups" role="group" aria-label="أقسام إضافية">${tabGroupsHtml(app,tabCount)}</div>
   <div class="ftb-tools">
@@ -227,6 +260,8 @@ export async function filePage(app,id){
   </div>
  </nav>
  <section class="panel file-tab-shell" data-collapse-id="file-tab-body" data-collapse-key="file-details:tab-body" data-collapse-default="open"><div class="panel-head"><h3 data-tab-shell-title>${esc(TAB_META.get(app.__fileTab.tab)||'المحتوى')}</h3><span class="collapse-summary" data-collapse-summary></span></div>
+ <div class="file-overview-host" data-file-overview-host>${fileOverviewStaticHtml(app)}</div>
+ ${fileStickyHtml(app)}
  <div id="file-tab" role="tabpanel" aria-labelledby="file-tabs-nav"></div></section>`;
 }
 
@@ -299,6 +334,78 @@ function fileGapsHtml(gaps){
   ${gaps.map((g,i)=>`<div class="gap-item"><span>${esc(g.label)}${g.hint?` <small class="muted">— ${esc(g.hint)}</small>`:''}</span><button type="button" class="ghost small" data-gap-go="${i}">${g.action==='edit'?'تعديل البيانات':'فتح القسم'}</button></div>`).join('')}</section>`;
 }
 
+/** ربط عناصر كتلة الهوية بعد تركيب التبويب — يعمل أيضًا عند فتح رابط عميق ثم العودة للملخص. */
+function bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck){
+ const once=(el,key,fn)=>{
+  if(!el||el.dataset[key])return;
+  el.dataset[key]='1';el.addEventListener('click',fn);
+ };
+ const head=root.querySelector('#file-head');
+ if(!head)return;
+ if(!head.dataset.fileNavBound){bindListNav(root,app,'files');head.dataset.fileNavBound='1'}
+ once(head.querySelector('[data-file-edit]'),'fileEditBound',()=>openEntityForm(app,'files',{id}));
+ root.querySelectorAll('[data-file-quick]').forEach(b=>once(b,'fileQuickBound',()=>openQuickAdd(app)));
+ root.querySelectorAll('[data-party-open]').forEach(b=>once(b,'partyOpenBound',()=>{
+  const item=app.__file.headParties?.[Number(b.dataset.partyOpen)];
+  if(item)partyActions(app,item.p);
+ }));
+ head.querySelectorAll('[data-tab-jump]').forEach(b=>once(b,'tabJumpBound',()=>app.__fileGotoTab(b.dataset.tabJump)));
+ const numberButton=head.querySelector('[data-file-number-toggle]');
+ const numberPopover=head.querySelector('[data-file-number-popover]');
+ once(numberButton,'fileNumberBound',()=>{
+  const willOpen=numberPopover?.hidden!==false;
+  if(numberPopover){
+   if(willOpen){numberPopover.textContent=`رقم الملف الفرعي: ${formatFileNumber(f)||'—'}`;numberPopover.hidden=false}
+   else numberPopover.hidden=true;
+  }
+  numberButton?.setAttribute('aria-expanded',String(willOpen));
+ });
+ const openGaps=()=>{const panel=root.querySelector('.file-gaps');if(panel){openCollapseTransient(panel);panel.scrollIntoView?.({block:'nearest'})}else toast('لا توجد نواقص مسجلة لهذا الملف 👌')};
+ root.querySelectorAll('[data-file-copy]').forEach(b=>once(b,'fileCopyBound',()=>copyFileSummary(app)));
+ root.querySelectorAll('[data-file-gaps]').forEach(b=>once(b,'fileGapsBound',openGaps));
+ root.querySelectorAll('[data-gaps-jump]').forEach(b=>once(b,'gapsJumpBound',openGaps));
+ root.querySelectorAll('[data-gap-go]').forEach(b=>once(b,'gapGoBound',()=>{
+  const g=gaps[Number(b.dataset.gapGo)];if(!g)return;
+  if(g.action==='edit')return openEntityForm(app,'files',{id});
+  if(app.__fileGotoTab)app.__fileGotoTab(g.tab);else{app.__fileTab.tab=g.tab;writeLastTab(id,g.tab);syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e))}
+  requestAnimationFrame(()=>openCollapseTransient(document.querySelector('#file-tab')||document.querySelector('.file-tab-shell')));
+ }));
+ root.querySelectorAll('[data-file-task]').forEach(b=>once(b,'fileTaskBound',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await reload(app)}})}));
+ root.querySelectorAll('[data-file-pin]').forEach(b=>once(b,'filePinBound',async e=>{
+  const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()},app.ctx?.profile?.id||'');
+  e.currentTarget.textContent=on?'★ إلغاء التثبيت':'☆ تثبيت في الرئيسية';
+  e.currentTarget.setAttribute('aria-pressed',String(on));
+  toast(on?'ثُبّت الملف في الرئيسية':'أُلغي التثبيت');
+ }));
+ root.querySelectorAll('[data-file-archive]').forEach(b=>once(b,'fileArchiveBound',async()=>{const extra=await openItemsCheck().catch(()=> '');const r=await confirmBox(`أرشفة الملف؟ يبقى الملف وكل بياناته محفوظة ويمكن إعادة فتحه في أي وقت.${extra}`,{okText:'أرشفة',input:true,placeholder:'سبب الأرشفة (اختياري)'});if(!r.ok)return;try{await archiveFile(app.office,id,r.value);toast('تمت الأرشفة');reload(app)}catch(e){toast(userError(e),'error')}}));
+ root.querySelectorAll('[data-file-reopen]').forEach(b=>once(b,'fileReopenBound',async()=>{const r=await confirmBox('إعادة فتح الملف؟',{okText:'إعادة فتح',input:true,placeholder:'سبب إعادة الفتح (اختياري)'});if(!r.ok)return;try{await reopenFile(app.office,id,r.value);toast('تمت إعادة فتح الملف');reload(app)}catch(e){toast(userError(e),'error')}}));
+ root.querySelectorAll('[data-file-close]').forEach(b=>once(b,'fileCloseBound',async()=>{const extra=await openItemsCheck().catch(()=> '');const r=await confirmBox(`تسجيل انتهاء الملف (حالة إدارية فقط)؟${extra}`,{okText:'إنهاء',input:true,placeholder:'سبب الانتهاء (اختياري)'});if(!r.ok)return;try{await closeFile(app.office,id,{closeReason:r.value});toast('تم تسجيل انتهاء الملف');reload(app)}catch(e){toast(userError(e),'error')}}));
+ root.querySelectorAll('[data-file-delete]').forEach(b=>once(b,'fileDeleteBound',async()=>{if(!await confirmBox('حذف منطقي للملف؟ لا يُسمح إذا كان للملف قضايا/مراحل غير محذوفة. البيانات لا تُمحى نهائيًا.',{okText:'حذف منطقي'}))return;try{await deleteEntity(app.office,'files',id);toast('تم الحذف المنطقي');app.go('files')}catch(e){toast(userError(e),'error')}}));
+}
+
+/** هوية الملف جزء من «نظرة عامة» فقط؛ تبقى خارج جسم التبويب لتظل أول قسمًا عند طي بقية المحتوى. */
+function syncOverviewVisibility(root,app){
+ const active=app.__fileTab?.tab==='summary';
+ const host=root.querySelector('[data-file-overview-host]');
+ const sticky=root.querySelector('[data-file-sticky]');
+ if(host){host.hidden=!active;host.setAttribute('aria-hidden',String(!active))}
+ if(sticky){sticky.classList.toggle('file-overview-sticky-hidden',!active);sticky.setAttribute('aria-hidden',String(!active))}
+}
+
+/** يراقب رأس الهوية داخل نظرة عامة فقط؛ عند مغادرته يظهر شريط مختصر بلا رقم الملف. */
+function bindFileSticky(root,app){
+ app.__fileStickyObserver?.disconnect?.();
+ if(app.__fileTab?.tab!=='summary')return;
+ const head=root.querySelector('#file-head'),sticky=root.querySelector('[data-file-sticky]');
+ if(!head||!sticky||!('IntersectionObserver' in window))return;
+ const io=new IntersectionObserver(([entry])=>{
+  const on=!entry.isIntersecting;
+  sticky.classList.toggle('is-on',on);sticky.setAttribute('aria-hidden',String(!on));
+  requestAnimationFrame(()=>{if(document.querySelector('#file-tabs-nav'))syncStickyTop(root)});
+ },{threshold:0});
+ io.observe(head);app.__fileStickyObserver=io;
+}
+
 export async function bindFilePage(app,id){
  const root=document.querySelector('#main-content');const {f}=app.__file;
  if(!app.__fileTabCache||app.__fileTabCache.id!==id)app.__fileTabCache={id,map:new Map()};
@@ -306,42 +413,12 @@ export async function bindFilePage(app,id){
  root.querySelector('[data-order-file-tabs]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'file-details',root,onChanged:()=>{
   if(hiddenSectionIds('file-details').has(app.__fileTab.tab)){app.__fileTab.tab='summary';syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e))}
  }}));
- root.querySelector('[data-file-edit]').onclick=()=>openEntityForm(app,'files',{id});
- bindCockpit(root,app);
- bindListNav(root,app,'files');
- // الإجراء الأساسي: إضافة سياقية بالسياق المعروف (fileId يمرر تلقائيًا — لا إعادة اختيار ملف).
- root.querySelectorAll('[data-file-quick]').forEach(b=>b.addEventListener('click',()=>openQuickAdd(app)));
  // وضع التركيز: يختصر العناصر الثانوية دون إخفاء التنبيهات أو تعطيل الإجراءات.
  // انتقل إلى شريط أدوات التبويبات (أداة عرض ثانوية) بدل ازدحام رأس الملف.
  const focusBtn=root.querySelector('[data-file-focus]');
  const applyFocus=on=>{root.classList.toggle('file-focus-mode',on);if(focusBtn){focusBtn.textContent=on?'◉':'◎';focusBtn.setAttribute('aria-pressed',String(on));focusBtn.setAttribute('aria-label',on?'الخروج من وضع التركيز':'وضع التركيز');focusBtn.title=on?'الخروج من وضع التركيز: إظهار العناصر الثانوية':'وضع التركيز: إخفاء العناصر الثانوية مع بقاء التنبيهات والإجراءات'}};
  applyFocus(Boolean(prefs.get(FOCUS_MODE_KEY,false)));
  focusBtn?.addEventListener('click',async()=>{const on=!root.classList.contains('file-focus-mode');applyFocus(on);await prefs.set(FOCUS_MODE_KEY,on)});
- // نسخ ملخص الملف كنص — من قائمة الإجراءات.
- root.querySelector('[data-file-copy]')?.addEventListener('click',()=>copyFileSummary(app));
- // النواقص: قفزة إلى القسم المستهدف وفتحه مؤقتًا دون تغيير تفضيل الطي المحفوظ.
- const gapsPanel=()=>root.querySelector('.file-gaps');
- const openGaps=()=>{const p=gapsPanel();if(p){openCollapseTransient(p);p.scrollIntoView?.({block:'nearest'})}else toast('لا توجد نواقص مسجلة لهذا الملف 👌')};
- root.querySelector('[data-file-gaps]')?.addEventListener('click',openGaps);
- root.querySelector('[data-gaps-jump]')?.addEventListener('click',openGaps);
- root.querySelectorAll('[data-gap-go]').forEach(b=>b.addEventListener('click',()=>{
-  const g=gaps[Number(b.dataset.gapGo)];if(!g)return;
-  if(g.action==='edit')return openEntityForm(app,'files',{id});
-  if(app.__fileGotoTab)app.__fileGotoTab(g.tab);else{app.__fileTab.tab=g.tab;writeLastTab(id,g.tab);syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e))}
-  requestAnimationFrame(()=>openCollapseTransient(document.querySelector('#file-tab')||document.querySelector('.file-tab-shell')));
- }));
- // الشريط المضغوط عند التمرير: هوية الملف وحالته والخطوة التالية فقط.
- const head=root.querySelector('#file-head'),sticky=root.querySelector('[data-file-sticky]');
- if(head&&sticky&&'IntersectionObserver' in window){
-  const io=new IntersectionObserver(([e])=>{
-   const on=!e.isIntersecting;
-   sticky.classList.toggle('is-on',on);sticky.setAttribute('aria-hidden',String(!on));
-   // ظهور الشريط المختصر/اختفاؤه يغيّر إزاحة الشريط الملتصق: تُعاد القياس بلا قيم ثابتة
-   requestAnimationFrame(()=>{if(document.querySelector('#file-tabs-nav'))syncStickyTop(root)});
-  },{threshold:0});
-  io.observe(head);
-  app.__fileStickyObserver=io;
- }
  // بعد «✓ تم» في مركز الملف: تحديث موضعي لقسم «مركز الملف» فقط — بلا إعادة بناء الصفحة.
  app.__refreshAfterAction=async()=>{
   if(!app.route||!app.route.startsWith('file:'))return app.refresh();
@@ -361,14 +438,6 @@ export async function bindFilePage(app,id){
    window.scrollTo(0,scrollY);
   }catch(err){app.fail(err)}
  };
- root.querySelector('[data-cp-task]')?.addEventListener('click',()=>root.querySelector('[data-file-task]')?.click());
- root.querySelector('[data-file-task]')?.addEventListener('click',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await reload(app)}})});
- root.querySelector('[data-file-pin]')?.addEventListener('click',async e=>{
-  const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()},app.ctx?.profile?.id||'');
-  e.currentTarget.textContent=on?'★ إلغاء التثبيت':'☆ تثبيت في الرئيسية';
-  e.currentTarget.setAttribute('aria-pressed',String(on));
-  toast(on?'ثُبّت الملف في الرئيسية':'أُلغي التثبيت');
- });
  // فحص تشغيلي قبل الأرشفة/الإغلاق: أعمال مفتوحة وجلسات قادمة من البيانات المتاحة فقط.
  const openItemsCheck=async()=>{
   const [hearingsRes,proceduresRes]=await Promise.all([fileChildren(app.office,id,'hearings'),fileChildren(app.office,id,'procedures')]);
@@ -381,10 +450,6 @@ export async function bindFilePage(app,id){
   ].filter(Boolean);
   return lines.length?`<br><br><b>قبل المتابعة — ما زال مفتوحًا في هذا الملف:</b><br>${lines.join('<br>')}<br><small class="muted">لن يُحذف أي سجل، ويمكن إعادة فتح الملف لاحقًا.</small>`:'';
  };
- root.querySelector('[data-file-archive]')?.addEventListener('click',async()=>{const extra=await openItemsCheck().catch(()=> '');const r=await confirmBox(`أرشفة الملف؟ يبقى الملف وكل بياناته محفوظة ويمكن إعادة فتحه في أي وقت.${extra}`,{okText:'أرشفة',input:true,placeholder:'سبب الأرشفة (اختياري)'});if(!r.ok)return;try{await archiveFile(app.office,id,r.value);toast('تمت الأرشفة');reload(app)}catch(e){toast(userError(e),'error')}});
- root.querySelector('[data-file-reopen]')?.addEventListener('click',async()=>{const r=await confirmBox('إعادة فتح الملف؟',{okText:'إعادة فتح',input:true,placeholder:'سبب إعادة الفتح (اختياري)'});if(!r.ok)return;try{await reopenFile(app.office,id,r.value);toast('تمت إعادة فتح الملف');reload(app)}catch(e){toast(userError(e),'error')}});
- root.querySelector('[data-file-close]')?.addEventListener('click',async()=>{const extra=await openItemsCheck().catch(()=> '');const r=await confirmBox(`تسجيل انتهاء الملف (حالة إدارية فقط)؟${extra}`,{okText:'إنهاء',input:true,placeholder:'سبب الانتهاء (اختياري)'});if(!r.ok)return;try{await closeFile(app.office,id,{closeReason:r.value});toast('تم تسجيل انتهاء الملف');reload(app)}catch(e){toast(userError(e),'error')}});
- root.querySelector('[data-file-delete]')?.addEventListener('click',async()=>{if(!await confirmBox('حذف منطقي للملف؟ لا يُسمح إذا كان للملف قضايا/مراحل غير محذوفة. البيانات لا تُمحى نهائيًا.',{okText:'حذف منطقي'}))return;try{await deleteEntity(app.office,'files',id);toast('تم الحذف المنطقي');app.go('files')}catch(e){toast(userError(e),'error')}});
  // التبديل بين التبويبات: تحديث موضعي مع كاش للتبويبات المحمّلة — بلا إعادة جلب وبلا فقد
  // بيانات النماذج غير المحفوظة (العقد المُخزّن في الكاش يحتفظ بقيم الحقول كما هي).
  const applyTab=async(tab,{scrollTo=''}={})=>{
@@ -394,6 +459,10 @@ export async function bindFilePage(app,id){
    writeLastTab(id,tab);
    syncTabBarDom(app);
    await renderTab(app);
+   syncOverviewVisibility(root,app);
+   bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck);
+   bindFileSticky(root,app);
+   syncStickyTop(root);
   }
   if(scrollTo)document.querySelector('#file-tab')?.querySelector(scrollTo)?.scrollIntoView?.({block:'start'});
   return true;
@@ -418,16 +487,13 @@ export async function bindFilePage(app,id){
  window.addEventListener('resize',onViewport);
  window.addEventListener('orientationchange',onViewport);
  requestAnimationFrame(()=>syncStickyTop(root));
- // قفزات المؤشرات والرأس إلى التبويب المعني (الجلسات/الأعمال/الأطراف…).
- root.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tabJump));
- // أطراف الرأس: نفس نافذة إجراءات الطرف الموجودة (فتح السجل/تعديل/إزالة).
- root.querySelectorAll('[data-party-open]').forEach(b=>b.onclick=()=>{
-  const item=app.__file.headParties?.[Number(b.dataset.partyOpen)];
-  if(item)partyActions(app,item.p);
- });
  syncTabBarDom(app);
  root.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
  await renderTab(app);
+ syncOverviewVisibility(root,app);
+ bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck);
+ bindFileSticky(root,app);
+ syncStickyTop(root);
 }
 
 // ===== قوائم الأقسام المنسدلة =====
@@ -509,8 +575,13 @@ function syncStickyTop(root){
  const compact=root.querySelector('[data-file-sticky]');
  if(compact)compact.style.top=`${Math.round(offset)}px`;
  if(compact&&compact.classList.contains('is-on')){
-  const h=compact.getBoundingClientRect().height;
-  if(h)offset+=h; // الشريط المختصر للهوية يظهر بين شريط الصفحة والتبويبات — بلا تراكب
+  const rect=compact.getBoundingClientRect();
+  const h=rect.height;
+  if(h){
+   // في الهاتف قد يظل الشريط المختصر داخل حاوية flex على بعد بضعة بكسلات من
+   // إزاحته النظرية؛ نعتمد الحد السفلي المقاس أيضًا حتى لا تتراكب التبويبات معه.
+   offset=Math.max(offset+h,rect.bottom);
+  }
  }
  bar.style.top=`${Math.round(offset)}px`;
 }
@@ -667,6 +738,8 @@ async function renderTab(app){
 }
 async function renderTabContent(app){
  const el=document.querySelector('#file-tab');const {id,f,parties,stages}=app.__file;const tab=app.__fileTab.tab;const office=app.office;
+ // كتلة الهوية خارج جسم التبويب: تبقى أول قسم مرئيًا عند طي بقية المحتوى،
+ // ولا تُعاد رسمها عند تبديل الأقسام أو فقدان قيمة نموذج غير محفوظ.
  el.innerHTML='<div class="skel-page" role="status" aria-label="جارٍ التحميل"><div class="skel skel-row"><div class="skel-card skel"></div><div class="skel-card skel"></div><div class="skel-card skel"></div><div class="skel-card skel"></div></div><div class="skel skel-block"></div></div>';
  const needStage=what=>`<div class="notice">لإضافة ${what} يجب أولًا إضافة رقم قضائي / مرحلة في تبويب «البيانات القضائية». الملف نفسه لا يحتاج قضية.</div>`;
  if(tab==='summary'){
@@ -766,13 +839,15 @@ async function renderTabContent(app){
   const refs=new Map();
   const tax=app.__file.tax;const ftype=tax.byId.get(f.fileTypeId);
   const typeFields=(ftype?.fields||[]).filter(x=>f['x_'+x.k]!=null&&String(f['x_'+x.k]).trim()!=='');
+  // رقم الملف الداخلي لا يُكرر في البيانات التفصيلية؛ مصدره الوحيد زر «الملف الفرعي».
+  const fileFields=ENTITIES.files.fields.filter(x=>x.k!=='fileNumber');
   const caseFields=cur?ENTITIES.cases.fields.filter(x=>x.k!=='fileId'):[];
   const dataPanel=`<section class="panel fp-data fp-case-data" data-collapse-id="file-case-data" data-collapse-key="file-details:case-data" data-collapse-default="open">
    <div class="panel-head"><h3>بيانات الدعوى والملف</h3><span class="collapse-summary" data-collapse-summary></span>
     <div class="sec-actions"><button type="button" class="ghost small" data-file-edit2>✎ تعديل بيانات الملف</button>${cur?`<button type="button" class="ghost small" data-case-edit="${esc(cur.id)}">✎ تعديل بيانات المرحلة</button>`:''}<button type="button" class="ghost small" data-reclass>تغيير القسم / النوع</button></div></div>
    <div class="fp-kv">
     <h4 class="fp-kv-h">بيانات الملف</h4>
-    ${kvHtml(ENTITIES.files.fields,f,refs)}
+    ${kvHtml(fileFields,f,refs)}
     ${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}
     ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — السبب: '+esc(f.reopenReason):''}</p>`:''}
     ${cur?`<h4 class="fp-kv-h">بيانات المرحلة الحالية — ${esc(refLabel('cases',cur))}</h4>${kvHtml(caseFields,cur,new Map())}`:'<p class="muted fp-kv-note">لا توجد مرحلة أو رقم قضائي مسجل لهذا الملف؛ تُضاف من تبويب «المراحل والإجراءات القضائية» عند الحاجة فقط.</p>'}

@@ -104,9 +104,12 @@ try{
  });
 
  // (2) الهوية من البيانات الحقيقية
- await verify('2) رقم الملف الفرعي وعنوان القضية والأطراف من البيانات الحقيقية',async()=>{
+ await verify('2) هوية القضية والأطراف من البيانات الحقيقية ورقم الملف عند الطلب',async()=>{
   const head=await headText();
-  assert.ok(head.includes(`ملف فرعي: ${fx.fileNo}`),`رقم الملف الفرعي الحقيقي: ${fx.fileNo}`);
+  assert.ok(!head.includes(fx.fileNo),'رقم الملف الفرعي الداخلي مخفي من رأس الملف ابتداءً');
+  assert.ok(!head.includes('الرقم الداخلي للمكتب'),'العبارة القديمة الخاصة بالرقم الداخلي محذوفة');
+  assert.equal(await page.locator('[data-file-number-popover]').isHidden(),true,'شريط الرقم مخفي قبل الطلب');
+  assert.equal((await page.locator('[data-file-number-toggle]').textContent()).trim(),'الملف الفرعي','مصدر إظهار الرقم هو زر الملف الفرعي');
   assert.ok(head.includes('الاستئناف رقم 78 لسنة 2026 — استئناف الحكم الابتدائي'),'العنوان القانوني للمرحلة الحالية مبني من الحقول');
   assert.ok(head.includes('محكمة استئناف طنطا مأمورية بنها · ثاني درجة'),'سطر المحكمة/الدرجة كاملًا دون قص');
   assert.ok(head.includes('محمد عبد الرحمن السيد')&&head.includes('شركة النيل للمقاولات')&&head.includes('ورثة المرحوم أحمد خليل'),'كل الأطراف ظاهرون');
@@ -117,19 +120,27 @@ try{
   assert.ok(nameSize>roleSize+2,`اسم الطرف (${nameSize}px) أكبر من النص الثانوي (${roleSize}px)`);
   const titleSize=await page.locator('.fid-title').evaluate(el=>parseFloat(getComputedStyle(el).fontSize));
   assert.ok(titleSize>=20,`حجم خط العنوان القانوني ${titleSize}px`);
+  await page.locator('[data-file-number-toggle]').click();await page.waitForTimeout(120);
+  assert.equal(await page.locator('[data-file-number-popover]').isVisible(),true,'النقر يظهر شريط الرقم');
+  assert.ok((await page.locator('[data-file-number-popover]').textContent()).includes(fx.fileNo),`الرقم الحقيقي يظهر عند الطلب: ${fx.fileNo}`);
+  await page.locator('[data-file-number-toggle]').click();
+  assert.equal(await page.locator('[data-file-number-popover]').isHidden(),true,'إغلاق الزر يخفي شريط الرقم');
  });
 
  // (3) ملف بلا رقم قضائي
  await verify('3) ملف بلا دعوى: نوع الملف ووصفه دون اختلاق بيانات قضائية',async()=>{
   await go(`file:${fx.plain.id}`);
   const head=await headText();
-  assert.ok(head.includes(`ملف فرعي: ${fx.plainNo}`));
+  assert.ok(!head.includes(fx.plainNo),'رقم الملف الفرعي الداخلي مخفي ابتداءً');
   assert.ok(head.includes('مراجعة عقد إيجار — استشارة'),'عنوان الملف كما هو');
   assert.ok(head.includes('لا توجد أرقام قضائية مسجلة (ملف بلا قضية)'),'إفصاح صريح بلا اختلاق');
   assert.ok(!/رقم \d+ لسنة/.test(head),'لا رقم دعوى مُختلَق');
   const txt=await tabText();
   assert.ok(txt.includes('لا توجد مرحلة أو رقم قضائي مسجل'),'قسم البيانات يفصح بعدم وجود مرحلة');
   assert.ok(txt.includes('بلا مراحل مسجلة'),'قسم التسلسل يفصح بعدم وجود مراحل');
+  await page.locator('[data-file-number-toggle]').click();await page.waitForTimeout(120);
+  assert.ok((await page.locator('[data-file-number-popover]').textContent()).includes(fx.plainNo),'رقم الملف الثاني يظهر فقط بعد الطلب');
+  await page.locator('[data-file-number-toggle]').click();
  });
 
  // (4) الشريطان القابلان للطي
@@ -261,14 +272,20 @@ try{
  });
 
  // (11) عزل الملفات
- await verify('11) لا اختلاط بين بيانات ملفين عند التنقل',async()=>{
+ await verify('11) لا اختلاط بين بيانات ملفين عند التنقل مع عزل الرقم المخفي',async()=>{
   await go(`file:${fx.plain.id}`);
   let head=await headText();
-  assert.ok(head.includes(fx.plainNo)&&!head.includes(fx.fileNo),'رأس الملف الثاني فقط');
+  assert.ok(!head.includes(fx.plainNo)&&!head.includes(fx.fileNo),'رأسا الملفين لا يعرضان الرقم الداخلي قبل الطلب');
   assert.ok(!head.includes('شركة النيل للمقاولات'),'لا أطراف ملف آخر');
+  await page.locator('[data-file-number-toggle]').click();await page.waitForTimeout(120);
+  assert.ok((await page.locator('[data-file-number-popover]').textContent()).includes(fx.plainNo)&&!(await page.locator('[data-file-number-popover]').textContent()).includes(fx.fileNo),'زر الملف الثاني يعرض رقمه فقط');
+  await page.locator('[data-file-number-toggle]').click();
   await go(`file:${fx.file.id}`);
   head=await headText();
-  assert.ok(head.includes(fx.fileNo)&&!head.includes(fx.plainNo),'رأس الملف الأول فقط');
+  assert.ok(!head.includes(fx.fileNo)&&!head.includes(fx.plainNo),'رأس الملف الأول لا يكرر رقم الملف الداخلي');
+  await page.locator('[data-file-number-toggle]').click();await page.waitForTimeout(120);
+  assert.ok((await page.locator('[data-file-number-popover]').textContent()).includes(fx.fileNo)&&!(await page.locator('[data-file-number-popover]').textContent()).includes(fx.plainNo),'زر الملف الأول يعرض رقمه فقط');
+  await page.locator('[data-file-number-toggle]').click();
   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'parties');
   await page.waitForTimeout(800);
   assert.ok(!(await tabText()).includes('هدى إبراهيم منصور'),'أطراف التبويب معزولة');
@@ -337,17 +354,18 @@ try{
   assert.equal(report.errors.length,before,'لا أخطاء جديدة أثناء التنقل');
  });
 
- // (15) آخر تبويب لكل ملف + الافتراض لملف جديد
- await verify('15) التفضيل لكل ملف: نفس الملف يستعيد تبويبه وملف جديد يفتح نظرة عامة',async()=>{
+ // (15) الافتراض العام + التبويب الصريح في الرابط
+ await verify('15) فتح أي ملف يبدأ بنظرة عامة والتبويب المختلف لا يفتح إلا برابط صريح',async()=>{
   await go(`file:${fx.file.id}`);
   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'judgments');
   await page.waitForTimeout(700);
-  await page.reload({waitUntil:'domcontentloaded'});
-  await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:120000});
-  await page.waitForTimeout(1600);
-  assert.ok(await activeTabCheck('judgments'),'نفس الملف يستعيد آخر تبويب له');
+  assert.ok(await activeTabCheck('judgments'),'التبديل اليدوي يفتح القسم المطلوب');
+  await go(`file:${fx.file.id}`);
+  assert.ok(await activeTabCheck('summary'),'إعادة فتح الملف مباشرة تعود إلى نظرة عامة');
+  await go(`file:${fx.file.id}?tab=judgments`);
+  assert.ok(await activeTabCheck('judgments'),'رابط tab صريح يفتح القسم المطلوب');
   await go(`file:${fx.plain.id}`);
-  assert.ok(await activeTabCheck('summary'),'ملف آخر يفتح نظرة عامة لا تبويب الملف السابق');
+  assert.ok(await activeTabCheck('summary'),'ملف آخر يفتح نظرة عامة أيضًا');
  });
 
  // (16) سلوكان قائمان لم يتأثرا: الشريط الثابت عند التمرير + وضع التركيز
@@ -650,7 +668,7 @@ try{
   assert.equal(await rows.count(),15,'كل الأقسام داخل نافذة التخصيص');
   // الأسماء تحمل أيقونة القسم في بدايتها — نقارن النص بلا أيقونة
   const names=(await rows.locator('.pl-name').allTextContents()).map(x=>x.replace(/^[^\p{L}]+/u,'').trim());
-  assert.deepEqual(names.slice(0,4),['نظرة عامة','الجلسات','الأعمال الإدارية','المراحل والإجراءات القضائية'],'ترتيب الأقسام الافتراضي');
+  assert.deepEqual(names.slice(0,4),['نظرة عامة','الجلسات','الأعمال الإدارية','المراحل'],'ترتيب الأقسام الافتراضي');
   await page.locator('#modal-root [data-pl-done]').click();
   await page.waitForTimeout(400);
   assert.equal(await page.locator('#modal-root .pl-row').count(),0,'النافذة أُغلقت');
@@ -758,7 +776,7 @@ try{
   const snap=await page.locator('.file-tabs-bar').ariaSnapshot();
   if(process.env.FPW_DEBUG)console.log('--- aria snapshot ---\n'+snap+'\n--- end ---');
   assert.ok(/tablist/.test(snap),'الشريط يظهر في شجرة الوصول كـ tablist');
-  for(const label of ['نظرة عامة','الجلسات','الأعمال الإدارية','المراحل والإجراءات القضائية']){
+  for(const label of ['نظرة عامة','الجلسات','الأعمال الإدارية','المراحل']){
    assert.ok(new RegExp(`tab "${label}[^"]*"`).test(snap),`تبويب «${label}» له اسم وصول في الشجرة`);
   }
   assert.ok(/\[selected\]/.test(snap),'التبويب النشط معلَّم selected في الشجرة');

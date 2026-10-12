@@ -153,7 +153,10 @@ function addPanelCollapse(panel,scope,index,legacyState){
  }
  const body=document.createElement('div');body.className='panel-collapse-body';
  body.id=`collapse-region-${token(key)}`;body.setAttribute('role','region');body.setAttribute('aria-label',heading);
- [...panel.children].filter(child=>child!==header).forEach(child=>body.append(child));
+ // صفحة الملف تعلن الهوية والتبويبات كمسارين مستقلين: تبقى الهوية (أول قسم
+ // في «نظرة عامة») خارج جسم الطي حتى لا تختفي عند طي بقية المحتوى.
+ const flowOutside=new Set([...panel.children].filter(child=>child.matches?.('[data-file-overview-host],[data-file-sticky]')));
+ [...panel.children].filter(child=>child!==header&&!flowOutside.has(child)).forEach(child=>body.append(child));
  panel.append(body);
  const button=document.createElement('button');button.type='button';button.className='ghost small card-collapse-toggle collapse-toggle';
  button.innerHTML=`<span class="collapse-caret" aria-hidden="true">${collapsed?'›':'⌄'}</span>`;
