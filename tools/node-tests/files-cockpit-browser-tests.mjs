@@ -121,16 +121,16 @@ try{
   assert.ok(await page.locator('.file-subtabs [role="tab"]').count()>=3,'تبويبات الشريط الأساسية');
   assert.equal(await page.locator('[data-file-quick]').count()>=1,true,'زر إضافة أساسي');
   assert.equal(await page.locator('.head-actions [data-card-menu]').count(),1,'قائمة ⋯');
-  assert.ok((await page.locator('.file-head [data-gaps-jump]').count())>=0);
+  assert.equal(await page.locator('.file-head [data-gaps-jump],.file-gaps').count(),0,'بطاقة/زر «نواقص الملف» أُزيلا من صفحة الملف');
   // القمرة تحتوي «الجلسة القادمة» لأن_data 2999
   const fcText=await page.locator('.cp-fc').textContent();
   assert.ok(fcText.includes('الجلسة القادمة')||fcText.includes('الخطوة التالية'),`نص القمرة: ${fcText.slice(0,80)}`);
-  // الشريط المضغوط يختفي في أعلى الصفحة ويظهر عند التمرير
-  assert.equal(await page.locator('[data-file-sticky]').isVisible(),false,'الشريط مخفي في الأعلى');
+  // شريط التبويبات هو الشريط الملتصق الوحيد في الصفحة (لا شريط مختصر ثانٍ للهوية)
+  assert.equal(await page.locator('[data-file-sticky]').count(),0,'لا شريط مختصر ثانٍ للهوية');
   await page.evaluate(()=>window.scrollTo(0,900));
   await page.waitForTimeout(400);
-  assert.equal(await page.locator('[data-file-sticky]').isVisible(),true,'الشريط الثابت ظاهر عند التمرير');
-  assert.ok((await page.locator('[data-file-sticky] .fsb-next').textContent()).includes('التالي'));
+  assert.equal(await page.locator('#main-content .file-tabs-bar').count(),1,'شريط تبويبات واحد ملتصق أثناء التمرير');
+  assert.ok((await page.locator('.file-tabs-bar').boundingBox()).y>=0,'الشريط ظاهر أعلى الشاشة عند التمرير');
  });
 
  await verify('File Cockpit: التنقل بين التبويبات — التبويب محفوظ والكاش لا يعيد البناء',async()=>{
@@ -285,9 +285,9 @@ try{
  await verify('إعادة التحميل: حالة الطي محفوظة + آخر تبويب مستعاد',async()=>{
   await page.evaluate(id=>window.__LAW_OFFICE_APP__.go(`file:${id}`),fixture.file.id);
   await page.waitForTimeout(1200);
-  await page.locator('.ftb-group[data-group="gRecords"] .ftb-group-btn').click();
+  await page.locator('.ftb-more-btn').click();
   await page.waitForTimeout(250);
-  await page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]').click();
+  await page.locator('.ftb-menu-all [data-tab="notes"]').click();
   await page.waitForTimeout(400);
   const shell=page.locator('.file-tab-shell');
   // اثبت حالة طي معروفة قبل إعادة التحميل (قد تكون مفتوحة من اختبار سابق)
@@ -302,7 +302,7 @@ try{
   // we are still on file page after reload? route restored via hash
   const route=await page.evaluate(()=>window.__LAW_OFFICE_APP__.route);
   assert.ok(String(route).startsWith('file:'),`المسار بعد إعادة التحميل: ${route}`);
-  assert.equal(await page.locator('.ftb-group[data-group="gRecords"] [data-tab="notes"]').getAttribute('aria-checked'),'true','آخر تبويب مستعاد');
+  assert.equal(await page.locator('.ftb-menu-all [data-tab="notes"]').getAttribute('aria-checked'),'true','آخر تبويب مستعاد');
   assert.equal(await page.locator('.file-tab-shell').evaluate(el=>el.dataset.collapseCollapsed),'true','حالة الطي محفوظة');
  });
 

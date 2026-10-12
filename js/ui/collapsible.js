@@ -155,7 +155,7 @@ function addPanelCollapse(panel,scope,index,legacyState){
  body.id=`collapse-region-${token(key)}`;body.setAttribute('role','region');body.setAttribute('aria-label',heading);
  // صفحة الملف تعلن الهوية والتبويبات كمسارين مستقلين: تبقى الهوية (أول قسم
  // في «نظرة عامة») خارج جسم الطي حتى لا تختفي عند طي بقية المحتوى.
- const flowOutside=new Set([...panel.children].filter(child=>child.matches?.('[data-file-overview-host],[data-file-sticky]')));
+ const flowOutside=new Set([...panel.children].filter(child=>child.matches?.('[data-file-overview-host]')));
  [...panel.children].filter(child=>child!==header&&!flowOutside.has(child)).forEach(child=>body.append(child));
  panel.append(body);
  const button=document.createElement('button');button.type='button';button.className='ghost small card-collapse-toggle collapse-toggle';

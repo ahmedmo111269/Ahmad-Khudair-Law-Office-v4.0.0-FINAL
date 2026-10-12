@@ -333,7 +333,9 @@ class App{
    }
    main.innerHTML=html;
    await page.bind?.(this,query);
-   enhanceCollapsiblePanels(main,baseRoute);
+   // صفحة الملف: بلا شريط «الأقسام والجداول» (فتح/طي الكل) فوق المحتوى — التنقل من شريط
+   // التبويبات، وكل قسم يحتفظ بزر الطي والدبوس. بقية الصفحات كما هي.
+   enhanceCollapsiblePanels(main,baseRoute,page.layoutId==='file-details'?{bulk:false}:undefined);
    bindCards(main);
    // نظام العرض الموحّد: إعدادات عرض الصفحة (الصفحة ← العام ← الافتراضي) ثم ترتيب/إظهار
    // الأقسام المحفوظ — نقل DOM فقط، بلا إعادة رسم وبلا إعادة قراءة أي بيانات.

@@ -25,7 +25,7 @@ import {hearingCycle} from '../services/operations.js';
 import {taxonomy,saveFileMeta,reclassifyFile,fileAssets,ASSET_KINDS,saveAsset,linkAsset,unlinkAsset,findAssets,assetDetails} from '../services/client-files.js';
 import {stagePathHtml,bindStagePath,metaInput,hydrateLookups} from './client-file.js';
 import {renderFileServiceTab,bindFileServiceTab} from './service-records.js';
-import {enhanceCollapsiblePanels,openCollapseTransient,updateCollapseSummary} from '../ui/collapsible.js';
+import {enhanceCollapsiblePanels,updateCollapseSummary} from '../ui/collapsible.js';
 import {buildFileTimeline} from '../services/timeline.js';
 import {timelineHtml,bindTimeline} from './timeline-view.js';
 import {fileCockpitHtml,bindCockpit,executionStripHtml,fileNextStep} from '../ui/cockpit.js';
@@ -39,25 +39,27 @@ import {openQuickAdd} from './quick-add.js';
 import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.js';
 import {prefs} from '../core/preferences.js';
 
-// شريط تبويبات واحد (Data-First Legal Workspace): أربعة تبويبات أساسية ظاهرة دائمًا
-// (نظرة عامة ← الجلسات ← الأعمال الإدارية ← المراحل والإجراءات القضائية) ثم بقية الأقسام
-// داخل قوائم منسدلة بحسب وظيفتها. المعرّفات (ids) ثابتة تمامًا كما كانت حتى تبقى تفضيلات
-// الترتيب/الإظهار وحالة الطي والكاش وأول تبويب لكل ملف صالحة؛ تغيّر التوزيع والتسميات فقط.
+// شريط تبويبات واحد (Data-First Legal Workspace): أربعة تبويبات ثابتة ظاهرة دائمًا
+// (نظرة عامة ← الجلسات ← الأعمال الإدارية ← المراحل) وبقية الأقسام كلها في قائمة منسدلة
+// واحدة. المعرّفات (ids) ثابتة تمامًا كما كانت حتى تبقى تفضيلات الترتيب/الإظهار وحالة الطي
+// والكاش وآخر تبويب لكل ملف صالحة؛ تغيّر التوزيع والتسميات فقط.
 // [المعرّف، التسمية الكاملة، الأيقونة، التسمية القصيرة للشاشات الضيقة] — نفس الأقسام والمعرّفات.
 const TABS=[['summary','نظرة عامة','◈'],['hearings','الجلسات','◷'],['procedures','الأعمال الإدارية','☷','الأعمال'],['judicial','المراحل','▣'],['parties','الأطراف والصفات','⚖','الأطراف'],['judgments','الأحكام','⌘'],['serviceRecords','المحضرين والإعلانات','📬','المحضرين'],['money','الأتعاب والمستندات','＄','الأتعاب'],['relations','العلاقات والملفات المرتبطة','↔','الارتباطات'],['typeData','بيانات نوع العمل','▧','نوع العمل'],['assets','العقارات والمركبات','⌂','الأصول'],['timeline','الخط الزمني','⏳'],['notes','الملاحظات','▤'],['extra','بيانات إضافية (قديمة)','▤','بيانات قديمة'],['activity','سجل النشاط','≋']];
 const TAB_META=new Map(TABS);
-// التبويبات الأساسية الظاهرة في الشريط — الأكثر استخدامًا يوميًا. لا تُنقل إلى قوائم أبدًا.
+// التبويبات الأساسية الظاهرة في الشريط — الأكثر استخدامًا يوميًا. لا تُنقل إلى القائمة أبدًا.
 const PRIMARY_TABS=['summary','hearings','procedures','judicial'];
-// تصنيف بقية الأقسام داخل قوائم منسدلة بحسب الوظيفة (تنظيم واجهة فقط: لا يغيّر أي بيانات).
-// أي قسم لا يظهر في هذه القوائم (أو يُضاف مستقبلًا) يسقط تلقائيًا في «المزيد» بلا كود إضافي.
+// عناوين تنظيمية *داخل* القائمة المنسدلة الواحدة (تقصير مسافة البحث فقط، ولا تُنشئ قائمة
+// ثانية في الشريط). أي قسم غير مصنّف — أو يُضاف مستقبلًا — يسقط تلقائيًا في «المزيد».
 const TAB_GROUPS=[
  {id:'gParties',label:'أطراف الملف',short:'الأطراف',icon:'⚖',tabs:['parties','assets']},
  {id:'gJudgments',label:'الأحكام والإعلانات',short:'الأحكام',icon:'⌘',tabs:['judgments','serviceRecords']},
  {id:'gRecords',label:'البيانات والمراجع',short:'البيانات',icon:'▤',tabs:['money','notes','typeData','extra']},
  {id:'gFollow',label:'الارتباطات والمتابعة',short:'المتابعة',icon:'↔',tabs:['relations','timeline','activity']},
 ];
-const MORE_GROUP={id:'gMore',label:'المزيد',short:'المزيد',icon:'⋯'};
-const GROUP_OF_TAB=new Map(TAB_GROUPS.flatMap(g=>g.tabs.map(t=>[t,g.id])));
+// القائمة المنسدلة الواحدة: زرها الوحيد في الشريط بجانب التبويبات الأربعة.
+const MORE_GROUP={id:'gMore',label:'المزيد من الأقسام',short:'كل الأقسام',icon:'⋯'};
+// معرّف القائمة يتبع نمط التركيب الذي يقرأه bindTabMenus من data-tab-group (فتح/إغلاق/تركيز).
+const MENU_ID=`ftb-menu-${MORE_GROUP.id}`;
 // آخر تبويب لكل ملف على حدة (تفضيل إضافي): «نظرة عامة» هو الافتراضي دائمًا عند فتح ملف
 // لا تفضيل صالحًا له — لا تفضيل عام مشترك بين كل الملفات يربك المحامي عند فتح ملف جديد.
 const LAST_TAB_KEY='ui:file-last-tab';
@@ -91,27 +93,23 @@ function orderedFileTabs(){
  return [...TABS].sort((a,b)=>(rank.get(a[0])??0)-(rank.get(b[0])??0));
 }
 /**
- * توزيع الأقسام على الشريط: الأساسية كما هي بترتيب المستخدم المحفوظ، وبقية الأقسام داخل
- * قوائمها الوظيفية (وبترتيب المستخدم داخل كل قائمة). الأقسام المخفية من «تخصيص الصفحة»
- * تُستبعد من الشريط والقوائم، لكنها تبقى ظاهرة في قائمة «كل الأقسام» (⋯) بعلامة «مخفي»
+ * توزيع الأقسام: الأساسية كما هي بترتيب المستخدم المحفوظ داخل الشريط، وكل بقية الأقسام
+ * داخل قائمة منسدلة واحدة مرتّبة بعناوين وظيفية (وبترتيب المستخدم داخل كل عنوان). الأقسام
+ * المخفية من «تخصيص الصفحة» تُستبعد من الشريط لكنها تبقى ظاهرة في القائمة بعلامة «مخفي»
  * حتى لا تصبح أي وظيفة غير قابلة للوصول.
- * @returns {{primary:Array,groups:Array<hidden:Set}
+ * @returns {{primary:Array,sections:Array,hiddenTabs:Array}}
  */
 function tabLayout(){
  const order=orderedFileTabs();
  const hidden=hiddenSectionIds('file-details');
  const primary=order.filter(([id])=>PRIMARY_TABS.includes(id)&&!hidden.has(id));
- const groups=TAB_GROUPS.map(g=>{
-  const tabs=order.filter(([id])=>g.tabs.includes(id)&&!hidden.has(id));
-  return {...g,tabs};
- }).filter(g=>g.tabs.length);
  const grouped=new Set(TAB_GROUPS.flatMap(g=>g.tabs));
+ const sections=TAB_GROUPS.map(g=>({...g,tabs:order.filter(([id])=>g.tabs.includes(id)&&!hidden.has(id))})).filter(g=>g.tabs.length);
  const rest=order.filter(([id])=>!PRIMARY_TABS.includes(id)&&!grouped.has(id)&&!hidden.has(id));
- if(rest.length)groups.push({...MORE_GROUP,tabs:rest});
- return {primary,groups,hidden};
+ if(rest.length)sections.push({...MORE_GROUP,tabs:rest});
+ const hiddenTabs=order.filter(([id])=>hidden.has(id));
+ return {primary,sections,hiddenTabs};
 }
-/** المجموعة التي ينتمي إليها تبويب نشط (أو null للأساسية). */
-const groupIdOfTab=tab=>GROUP_OF_TAB.get(tab)||null;
 // عدد الأطراف المعروضة في رأس الملف قبل الاختصار بزر «عرض كل الأطراف» — الأطراف كلها
 // متاحة دائمًا في تبويب الأطراف، والرأس يعرض ما يكفي للهوية دون إطالة غير منضبطة.
 const HEAD_PARTIES_MAX=12;
@@ -149,7 +147,7 @@ function caseHeadData(f,cur,ftype,cat){
  */
 function fileOverviewStaticHtml(app){
  const v=app.__file?.view||{};
- const {id,f,head,cat,ftype,headParties,nextStep,gaps,favOn,crumbs}=v;
+ const {id,f,head,cat,ftype,headParties,favOn,crumbs}=v;
  if(!f)return '';
  const status=label(f.status||'open');
  const closed=isClosedFile(f);
@@ -182,13 +180,12 @@ function fileOverviewStaticHtml(app){
         <button type="button" role="menuitem" class="ux-menu-item" data-reclass>تغيير القسم / النوع</button>
         <button type="button" role="menuitem" class="ux-menu-item" data-file-pin aria-pressed="${favOn}">${favOn?'★ إلغاء التثبيت':'☆ تثبيت في الرئيسية'}</button>
         <button type="button" role="menuitem" class="ux-menu-item" data-file-copy>📋 نسخ ملخص الملف</button>
-        <button type="button" role="menuitem" class="ux-menu-item" data-file-gaps>⚠ نواقص الملف (${gaps?.length||0})</button>
         ${f.isArchived||closed?'<button type="button" role="menuitem" class="ux-menu-item" data-file-reopen>إعادة فتح</button>':'<button type="button" role="menuitem" class="ux-menu-item" data-file-close>إنهاء الملف</button><button type="button" role="menuitem" class="ux-menu-item" data-file-archive>أرشفة</button>'}
         <button type="button" role="menuitem" class="ux-menu-item is-danger" data-file-delete>حذف منطقي للملف</button>
        </div>
       </div>
      </div>
-     <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}${head?.isCase&&v.cur?`<button type="button" class="badge stage" data-route="case:${esc(v.cur.id)}" title="فتح بيانات المرحلة المسجلة في هذا الملف" aria-label="فتح المرحلة: ${esc(refLabel('cases',v.cur))}">المرحلة: ${esc(v.cur.stageType||v.cur.numberType||'—')}</button>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}${gaps?.length?`<button class="badge warn" data-collapse-alert data-gaps-jump title="نواقص بيانات فعلية في هذا الملف">⚠ نواقص (${gaps.length})</button>`:''}</p>
+     <p class="badges fid-badges">${f.needsClassification?'<button class="badge warn" data-reclass title="تم تصنيف الملف تلقائيًا من بيانات قديمة">⚠ راجع التصنيف</button>':''}${head?.isCase&&v.cur?`<button type="button" class="badge stage" data-route="case:${esc(v.cur.id)}" title="فتح بيانات المرحلة المسجلة في هذا الملف" aria-label="فتح المرحلة: ${esc(refLabel('cases',v.cur))}">المرحلة: ${esc(v.cur.stageType||v.cur.numberType||'—')}</button>`:''}${f.isArchived?`<span class="badge warn">مؤرشف${f.archivedReason?' — '+esc(f.archivedReason):''}</span>`:''}${f.priority&&f.priority!=='normal'?`<span class="badge warn">${esc(label(f.priority))}</span>`:''}${f.responsibleLawyer?`<span class="badge">المحامي: ${esc(f.responsibleLawyer)}</span>`:''}</p>
     </div>
    </div>
    <div class="fid-bottom">
@@ -199,21 +196,8 @@ function fileOverviewStaticHtml(app){
     </div>
    </div>
   </section>
-  ${gaps?.length?fileGapsHtml(gaps):''}
  </div>`;
 }
-
-/** الشريط المختصر لا يدخل في جسم التبويب حتى يبقى فوق المحتوى أثناء التمرير. */
-function fileStickyHtml(app){
- const v=app.__file?.view||{};
- const {f,head,nextStep}=v;
- if(!f)return '';
- const title=head?.isCase?(head.title||'ملف'):(f.title||'ملف');
- const status=label(f.status||'open');
- return `<div class="file-sticky-bar" data-file-sticky aria-hidden="true"><span class="fsb-title">${esc(title)}</span><span class="badge ${isClosedFile(f)?'closed':'open'}">${esc(status)}</span>${nextStep?`<span class="fsb-next">التالي: ${esc(nextStep.eyebrow)} — ${esc(nextStep.title)}</span>`:''}<span class="fsb-actions"><button type="button" class="primary small" data-file-quick>+ إضافة</button></span></div>`;
-}
-
-function fileOverviewHtml(app){return `${fileStickyHtml(app)}${fileOverviewStaticHtml(app)}`}
 
 export async function filePage(app,id){
  const f=await app.office.r.files.get(id);
@@ -242,26 +226,21 @@ export async function filePage(app,id){
  app.__file.headParties=headParties;
  const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
  const head=caseHeadData(f,cur,ftype,cat);
- const nextStep=fileNextStep({hearings:hearingsRes.rows,procedures:proceduresRes.rows,today:localDate()});
- const gaps=fileGaps(f,parties,stages,tax);
  const focusOn=Boolean(prefs.get(FOCUS_MODE_KEY,false));
  const favOn=isFavorite('file:'+id,app.ctx?.profile?.id||'');
  const tabCount=k=>k==='parties'?parties.length:k==='judicial'?stages.length:k==='serviceRecords'?serviceCount:k==='hearings'?hearingsRes.rows.length:k==='procedures'?proceduresRes.rows.length:0;
  const crumbs=cfRow?.clientId&&cfClient?`<nav class="crumbs file-overview-crumbs" aria-label="المسار"><button class="link" data-route="client:${esc(cfClient.id)}">${esc(cfClient.fullName||'الموكل')}</button><span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}">الملف الرئيسي ${esc(formatFileNumber(cfRow.clientCode))}</button>${cat?`<span class="sep">‹</span><button class="link" data-route="cfile:${esc(cfClient.id)}?cat=${esc(cat.id)}">${esc(cat.icon||'')} ${esc(cat.name)}</button>`:''}${ftype?`<span class="sep">‹</span><span>${esc(ftype.name)}</span>`:''}</nav>`:cfRow?.clientId?`<p class="crumbs muted file-overview-crumbs" role="status">سجل الموكل المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:cfRow?`<p class="crumbs muted file-overview-crumbs" role="status">ملف الموكل موجود لكن لا يوجد موكل مرتبط قابل للتنقل.</p>`:f.clientFileId?`<p class="crumbs muted file-overview-crumbs" role="status">الملف الرئيسي المرتبط غير متاح حاليًا؛ عُرض الملف كما هو.</p>`:'';
- app.__file.view={id,f,head,cat,ftype,headParties,nextStep,gaps,favOn,cur,crumbs};
+ app.__file.view={id,f,head,cat,ftype,headParties,favOn,cur,crumbs};
  return `<nav class="file-tabs-bar" id="file-tabs-nav" aria-label="أقسام الملف">
   <div class="file-subtabs" role="tablist" aria-label="تبويبات الملف">${tabLayout().primary.map(([k,l,icon,short])=>tabBtnHtml(app,k,l,icon,tabCount(k),short)).join('')}</div>
-  <div class="ftb-groups" role="group" aria-label="أقسام إضافية">${tabGroupsHtml(app,tabCount)}</div>
+  ${moreMenuHtml(app,tabCount)}
   <div class="ftb-tools">
-   <div class="ux-menu-wrap"><button type="button" class="ghost icon-only" data-tabs-menu aria-haspopup="menu" aria-label="كل الأقسام — قائمة التبويبات" title="كل الأقسام">⋯</button>
-    <div class="ux-menu ftb-menu ftb-menu-all" role="menu" aria-label="كل أقسام الملف" hidden>${orderedFileTabs().map(([k,l,icon])=>{const count=tabCount(k);return `<button type="button" role="menuitemradio" aria-checked="${app.__fileTab.tab===k}" class="ux-menu-item ftb-item${hiddenSectionIds('file-details').has(k)?' is-hidden-section':''}" data-menu-tab="${k}" aria-controls="file-tab"><span aria-hidden="true">${icon}</span> ${esc(l)}${count?` <small class="ftb-n">${count}</small>`:''}${hiddenSectionIds('file-details').has(k)?'<small class="ftb-hid">مخفي</small>':''}</button>`}).join('')}</div></div>
    <button type="button" class="ghost icon-only" data-file-focus aria-pressed="${focusOn}" title="وضع التركيز: إخفاء العناصر الثانوية مع بقاء التنبيهات والإجراءات" aria-label="${focusOn?'الخروج من وضع التركيز':'وضع التركيز'}">${focusOn?'◉':'◎'}</button>
    <button type="button" class="ghost icon-only" data-order-file-tabs title="ترتيب الأقسام وإظهارها وإعدادات العرض" aria-label="تخصيص الصفحة">⚙</button>
   </div>
  </nav>
  <section class="panel file-tab-shell" data-collapse-id="file-tab-body" data-collapse-key="file-details:tab-body" data-collapse-default="open"><div class="panel-head"><h3 data-tab-shell-title>${esc(TAB_META.get(app.__fileTab.tab)||'المحتوى')}</h3><span class="collapse-summary" data-collapse-summary></span></div>
  <div class="file-overview-host" data-file-overview-host>${fileOverviewStaticHtml(app)}</div>
- ${fileStickyHtml(app)}
  <div id="file-tab" role="tabpanel" aria-labelledby="file-tabs-nav"></div></section>`;
 }
 
@@ -274,27 +253,44 @@ function tabBtnHtml(app,k,label,icon,count,short){
 }
 
 /**
- * قوائم الأقسام المنسدلة: كل قائمة تجمع الأقسام المتقاربة وظيفيًا، وعناصر القائمة نفسها هي
- * أزرار التبويبات الحقيقية (data-tab) — لا نسخ ولا أزرار شكلية. المجموعة النشطة تُعلَّم
- * بصريًا (is-active) ويظهر في زرها اسم القسم المفتوح، وعنصرها المختار يُعلَّم بـaria-checked.
+ * عنصر قسم واحد داخل القائمة المنسدلة — هو زر التبويب الحقيقي نفسه (data-tab)، بلا نسخ.
+ * بلا data-section-id عن قصد: نظام تخطيط الصفحات يخفي/يرتّب عناصر الأقسام في DOM، وعناصر
+ * القائمة مرتّبة أصلًا من tabLayout() — فلا تختفي أي وظيفة ولا يتحرك عنصر بين المجموعات.
  */
-function tabGroupsHtml(app,tabCount){
- const {groups}=tabLayout();
+function menuItemHtml(app,tabCount,k,l,icon,{hidden=false}={}){
+ const count=tabCount(k),onItem=app.__fileTab.tab===k;
+ return `<button type="button" role="menuitemradio" aria-checked="${onItem}" class="ux-menu-item ftb-item${onItem?' is-on':''}${count?' has-data':''}${hidden?' is-hidden-section':''}" data-tab="${esc(k)}" data-menu-tab="${esc(k)}" data-group-id="${esc(k)}" aria-controls="file-tab" title="${esc(l)}"><span class="ftb-item-ic" aria-hidden="true">${icon}</span><span class="ftb-item-label">${esc(l)}</span>${count?`<small class="ftb-n">${count}</small>`:''}${hidden?'<small class="ftb-hid">مخفي</small>':''}${onItem?'<span class="ftb-check" aria-hidden="true">✓</span>':''}</button>`;
+}
+
+/**
+ * القائمة المنسدلة الواحدة لبقية أقسام الملف: زر واحد في الشريط (بجانب التبويبات الأربعة)
+ * يفتح كل الأقسام غير الأساسية، مرتّبة بعناوين وظيفية للتقصير فقط. العناصر نفسها هي أزرار
+ * التبويبات الحقيقية (data-tab) — لا نسخ ولا أزرار شكلية؛ والقسم المفتوح يُعلَّم
+ * بـaria-checked ويظهر اسمه في الزر (is-active) حتى يعرف المحامي أين هو بلا فتح القائمة.
+ */
+function moreMenuHtml(app,tabCount){
+ const {sections,hiddenTabs}=tabLayout();
  const active=app.__fileTab.tab;
- return groups.map(g=>{
-  const on=g.tabs.some(([id])=>id===active);
-  const activeItem=on?g.tabs.find(([id])=>id===active):null;
-  const items=g.tabs.map(([k,l,icon])=>{
-   const count=tabCount(k);const onItem=active===k;
-   return `<button type="button" role="menuitemradio" aria-checked="${onItem}" class="ux-menu-item ftb-item${onItem?' is-on':''}${count?' has-data':''}" data-tab="${esc(k)}" data-menu-tab="${esc(k)}" data-section-id="${esc(k)}" data-group="${esc(g.id)}" aria-controls="file-tab" title="${esc(l)}"><span class="ftb-item-ic" aria-hidden="true">${icon}</span><span class="ftb-item-label">${esc(l)}</span>${count?`<small class="ftb-n">${count}</small>`:''}${onItem?'<span class="ftb-check" aria-hidden="true">✓</span>':''}</button>`;
-  }).join('');
-  return `<div class="ux-menu-wrap ftb-group${on?' is-active':''}" data-group="${esc(g.id)}">
-   <button type="button" class="subtab-btn ftb-group-btn" data-tab-group="${esc(g.id)}" aria-haspopup="menu" aria-expanded="false" aria-controls="ftb-menu-${esc(g.id)}" aria-current="${on?'true':'false'}" title="${esc(g.label)} — ${g.tabs.map(([,l])=>l).join('، ')}" aria-label="${esc(g.label)}${on&&activeItem?` — المفتوح: ${esc(activeItem[1])}`:''}">
-    <span class="tab-icon" aria-hidden="true">${g.icon}</span><span class="tab-label">${esc(g.label)}</span><span class="tab-label-short" aria-hidden="true">${esc(g.short||g.label)}</span>${on&&activeItem?`<span class="ftb-active-name">${esc(activeItem[1])}</span>`:''}<span class="ftb-caret" aria-hidden="true">▾</span>
+ const all=[...sections.flatMap(g=>g.tabs),...hiddenTabs];
+ const on=all.some(([id])=>id===active);
+ const activeItem=on?all.find(([id])=>id===active):null;
+ const body=sections.map(g=>`<section class="ftb-sec" role="group" aria-label="${esc(g.label)}">
+    <p class="ftb-sec-title" role="presentation">${esc(g.label)}</p>
+    ${g.tabs.map(([k,l,icon])=>menuItemHtml(app,tabCount,k,l,icon)).join('')}
+   </section>`).join('');
+ const hiddenHtml=hiddenTabs.length?`<section class="ftb-sec ftb-sec-hidden" role="group" aria-label="أقسام مخفية">
+    <p class="ftb-sec-title" role="presentation">مخفية من الشريط <small class="muted">— أظهرها من ⚙</small></p>
+    ${hiddenTabs.map(([k,l,icon])=>menuItemHtml(app,tabCount,k,l,icon,{hidden:true})).join('')}
+   </section>`:'';
+ return `<div class="ux-menu-wrap ftb-group ftb-more${on?' is-active':''}" data-group="${MORE_GROUP.id}">
+   <button type="button" class="subtab-btn ftb-group-btn ftb-more-btn" data-tab-group="${MORE_GROUP.id}" data-tabs-menu aria-haspopup="menu" aria-expanded="false" aria-controls="${MENU_ID}" aria-current="${on?'true':'false'}" title="كل أقسام الملف — ${all.map(([,l])=>l).join('، ')}" aria-label="${esc(MORE_GROUP.label)}${on&&activeItem?` — المفتوح: ${esc(activeItem[1])}`:''}">
+    <span class="tab-icon" aria-hidden="true">${MORE_GROUP.icon}</span><span class="tab-label">${esc(MORE_GROUP.label)}</span><span class="tab-label-short" aria-hidden="true">${esc(MORE_GROUP.short)}</span>${on&&activeItem?`<span class="ftb-active-name">${esc(activeItem[1])}</span>`:''}<span class="ftb-caret" aria-hidden="true">▾</span>
    </button>
-   <div class="ux-menu ftb-menu" id="ftb-menu-${esc(g.id)}" role="menu" aria-label="${esc(g.label)}" hidden>${items}</div>
+   <div class="ux-menu ftb-menu ftb-menu-all" id="${MENU_ID}" role="menu" aria-label="بقية أقسام الملف" hidden>
+    <p class="ftb-menu-title" role="presentation">كل أقسام الملف <small class="ftb-n">${all.length}</small></p>
+    ${body}${hiddenHtml}
+   </div>
   </div>`;
- }).join('');
 }
 
 /**
@@ -314,28 +310,8 @@ function execCard({eyebrow,icon='',tone='',title='',meta=[],empty='',actions=[]}
  </article>`;
 }
 
-// ===== نواقص الملف =====
-// معايير بيانات فعلية فقط، مرتبطة بحقول الملف ونوعه/قسمه — لا قواعد قانونية ولا قوائم موحدة:
-// كل بند يشير إلى حقل فارغ أو علاقة غير مسجلة، مع مسار واضح لسدّه.
-function fileGaps(f,parties,stages,tax){
- const gaps=[];
- if(!String(f.title||'').trim())gaps.push({label:'عنوان الملف غير مسجل',action:'edit',hint:'العنوان يظهر في البحث والقوائم'});
- if(!parties.some(p=>p.clientId||p.partyKind==='client'))gaps.push({label:'لا يوجد موكل مرتبط بهذا الملف',tab:'parties',hint:'أضف الموكل من تبويب الأطراف'});
- if(!f.responsibleLawyer)gaps.push({label:'المحامي المسؤول غير محدد',action:'edit'});
- if(!f.openedAt)gaps.push({label:'تاريخ فتح الملف غير مسجل',action:'edit'});
- if(!f.status)gaps.push({label:'حالة الملف غير محددة',action:'edit'});
- const type=tax?.byId?.get?.(f.fileTypeId);
- if(type?.fields?.length&&!type.fields.some(x=>f['x_'+x.k]!=null&&f['x_'+x.k]!==''))gaps.push({label:`بيانات «${type.name}» الخاصة غير مكتملة`,tab:'typeData',hint:'كل الحقول اختيارية ويمكن إكمالها لاحقًا'});
- if(tax?.stagesOf?.(f.categoryId)?.length&&!stages.some(s=>!s.isDeleted))gaps.push({label:'لا توجد مراحل/أرقام قضائية مسجلة لهذا القسم',tab:'judicial',hint:'بعض الملفات لا تحتاج قضية — أضفها عند الحاجة فقط'});
- return gaps;
-}
-function fileGapsHtml(gaps){
- return `<section class="panel file-gaps" data-collapse-id="file-gaps" data-collapse-key="file-details:gaps" data-collapse-default="open" data-collapse-summary="${gaps.length} نواقص بيانات"><div class="panel-head"><h3>⚠ نواقص الملف</h3><span class="badge warn" data-collapse-alert>${gaps.length}</span></div><p class="muted small">بيانات غير مسجلة في هذا الملف فقط — لا تُعد أي أثرًا قانونيًا. عالج ما تحتاجه منها.</p>
-  ${gaps.map((g,i)=>`<div class="gap-item"><span>${esc(g.label)}${g.hint?` <small class="muted">— ${esc(g.hint)}</small>`:''}</span><button type="button" class="ghost small" data-gap-go="${i}">${g.action==='edit'?'تعديل البيانات':'فتح القسم'}</button></div>`).join('')}</section>`;
-}
-
 /** ربط عناصر كتلة الهوية بعد تركيب التبويب — يعمل أيضًا عند فتح رابط عميق ثم العودة للملخص. */
-function bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck){
+function bindFileIdentityControls(root,app,id,f,openItemsCheck){
  const once=(el,key,fn)=>{
   if(!el||el.dataset[key])return;
   el.dataset[key]='1';el.addEventListener('click',fn);
@@ -360,16 +336,7 @@ function bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck){
   }
   numberButton?.setAttribute('aria-expanded',String(willOpen));
  });
- const openGaps=()=>{const panel=root.querySelector('.file-gaps');if(panel){openCollapseTransient(panel);panel.scrollIntoView?.({block:'nearest'})}else toast('لا توجد نواقص مسجلة لهذا الملف 👌')};
  root.querySelectorAll('[data-file-copy]').forEach(b=>once(b,'fileCopyBound',()=>copyFileSummary(app)));
- root.querySelectorAll('[data-file-gaps]').forEach(b=>once(b,'fileGapsBound',openGaps));
- root.querySelectorAll('[data-gaps-jump]').forEach(b=>once(b,'gapsJumpBound',openGaps));
- root.querySelectorAll('[data-gap-go]').forEach(b=>once(b,'gapGoBound',()=>{
-  const g=gaps[Number(b.dataset.gapGo)];if(!g)return;
-  if(g.action==='edit')return openEntityForm(app,'files',{id});
-  if(app.__fileGotoTab)app.__fileGotoTab(g.tab);else{app.__fileTab.tab=g.tab;writeLastTab(id,g.tab);syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e))}
-  requestAnimationFrame(()=>openCollapseTransient(document.querySelector('#file-tab')||document.querySelector('.file-tab-shell')));
- }));
  root.querySelectorAll('[data-file-task]').forEach(b=>once(b,'fileTaskBound',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await reload(app)}})}));
  root.querySelectorAll('[data-file-pin]').forEach(b=>once(b,'filePinBound',async e=>{
   const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()},app.ctx?.profile?.id||'');
@@ -387,29 +354,12 @@ function bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck){
 function syncOverviewVisibility(root,app){
  const active=app.__fileTab?.tab==='summary';
  const host=root.querySelector('[data-file-overview-host]');
- const sticky=root.querySelector('[data-file-sticky]');
  if(host){host.hidden=!active;host.setAttribute('aria-hidden',String(!active))}
- if(sticky){sticky.classList.toggle('file-overview-sticky-hidden',!active);sticky.setAttribute('aria-hidden',String(!active))}
-}
-
-/** يراقب رأس الهوية داخل نظرة عامة فقط؛ عند مغادرته يظهر شريط مختصر بلا رقم الملف. */
-function bindFileSticky(root,app){
- app.__fileStickyObserver?.disconnect?.();
- if(app.__fileTab?.tab!=='summary')return;
- const head=root.querySelector('#file-head'),sticky=root.querySelector('[data-file-sticky]');
- if(!head||!sticky||!('IntersectionObserver' in window))return;
- const io=new IntersectionObserver(([entry])=>{
-  const on=!entry.isIntersecting;
-  sticky.classList.toggle('is-on',on);sticky.setAttribute('aria-hidden',String(!on));
-  requestAnimationFrame(()=>{if(document.querySelector('#file-tabs-nav'))syncStickyTop(root)});
- },{threshold:0});
- io.observe(head);app.__fileStickyObserver=io;
 }
 
 export async function bindFilePage(app,id){
  const root=document.querySelector('#main-content');const {f}=app.__file;
  if(!app.__fileTabCache||app.__fileTabCache.id!==id)app.__fileTabCache={id,map:new Map()};
- const gaps=fileGaps(f,app.__file.parties,app.__file.stages,app.__file.tax);
  root.querySelector('[data-order-file-tabs]')?.addEventListener('click',()=>openPageCustomizer(app,{pageId:'file-details',root,onChanged:()=>{
   if(hiddenSectionIds('file-details').has(app.__fileTab.tab)){app.__fileTab.tab='summary';syncTabBarDom(app);renderTab(app).catch(e=>app.fail(e))}
  }}));
@@ -460,8 +410,7 @@ export async function bindFilePage(app,id){
    syncTabBarDom(app);
    await renderTab(app);
    syncOverviewVisibility(root,app);
-   bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck);
-   bindFileSticky(root,app);
+   bindFileIdentityControls(root,app,id,f,openItemsCheck);
    syncStickyTop(root);
   }
   if(scrollTo)document.querySelector('#file-tab')?.querySelector(scrollTo)?.scrollIntoView?.({block:'start'});
@@ -491,8 +440,7 @@ export async function bindFilePage(app,id){
  root.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
  await renderTab(app);
  syncOverviewVisibility(root,app);
- bindFileIdentityControls(root,app,id,f,gaps,openItemsCheck);
- bindFileSticky(root,app);
+ bindFileIdentityControls(root,app,id,f,openItemsCheck);
  syncStickyTop(root);
 }
 
@@ -553,35 +501,22 @@ function bindTabMenus(root){
 }
 
 /**
- * إزاحة الالتصاق لشريط التبويبات (والشريط المختصر للهوية) أسفل الشرائط الملتصقة
- * الموجودة فعلًا (شريط التنقل + شريط الصفحة العلوي عند وجوده) — بقياس حقيقي لأن
- * ارتفاعاتها تتغير بالشاشة والالتفاف، فلا نثبّت رقمًا. الشريط الملتصق يبقى واضحًا
- * أثناء التمرير دون أن يحجب رأس الملف أو يختفي خلف شريط آخر.
+ * إزاحة الالتصاق لشريط التبويبات أسفل الشرائط الملتصقة الموجودة فعلًا (شريط التنقل +
+ * شريط الصفحة العلوي عند وجوده) — بقياس ارتفاعها الثابت (offsetHeight) لا بمواضع متحركة،
+ * فلا يعتمد الموضع على مقدار التمرير أبدًا: الشريط يبقى ملتصقًا في مكان واحد من أعلى الشاشة
+ * طوال السحب. أي شريط آخر في الصفحة (مثل شريط الهوية المختصر سابقًا) كان يعيد تغذية هذه
+ * الإزاحة بموضع متحرك فينزل شريط التبويبات إلى منتصف الشاشة عند التمرير — وقد أُزيل.
  */
 function syncStickyTop(root){
  const bar=root.querySelector('.file-tabs-bar');
  if(!bar)return;
- let chrome=0,topbar=0;
- for(const [sel,slot] of [['#sidebar.tn-bar','chrome'],['.topbar','topbar']]){
+ let offset=0;
+ for(const sel of ['#sidebar.tn-bar','.topbar']){
   const el=document.querySelector(sel);
   if(!el)continue;
   const st=getComputedStyle(el);
-  if(st.display==='none'||st.position!=='sticky')continue;
-  const h=el.getBoundingClientRect().height;
-  if(slot==='chrome')chrome+=h;else topbar+=h;
- }
- // الترتيب الرأسي عند التمرير: شريط التنقل ← شريط الصفحة ← الشريط المختصر للهوية ← التبويبات
- let offset=chrome+topbar;
- const compact=root.querySelector('[data-file-sticky]');
- if(compact)compact.style.top=`${Math.round(offset)}px`;
- if(compact&&compact.classList.contains('is-on')){
-  const rect=compact.getBoundingClientRect();
-  const h=rect.height;
-  if(h){
-   // في الهاتف قد يظل الشريط المختصر داخل حاوية flex على بعد بضعة بكسلات من
-   // إزاحته النظرية؛ نعتمد الحد السفلي المقاس أيضًا حتى لا تتراكب التبويبات معه.
-   offset=Math.max(offset+h,rect.bottom);
-  }
+  if(st.display==='none'||st.position!=='sticky')continue; // شريط ثابت (sticky) فقط يشارك الإزاحة
+  offset+=el.offsetHeight;
  }
  bar.style.top=`${Math.round(offset)}px`;
 }
@@ -669,27 +604,24 @@ function syncTabBarDom(app){
   x.classList.toggle('active',on);x.setAttribute('aria-selected',String(on));
   if(on&&row&&x.scrollIntoView)x.scrollIntoView({block:'nearest',inline:'nearest'});
  });
- const activeGroup=groupIdOfTab(tab);
- root.querySelectorAll('.ftb-item[data-tab]').forEach(x=>{
+ // القائمة المنسدلة الواحدة: تعليم العنصر المفتوح + إظهار اسمه في زر القائمة.
+ const menu=root.querySelector('.ftb-menu-all');
+ menu?.querySelectorAll('.ftb-item[data-tab]').forEach(x=>{
   const on=x.dataset.tab===tab;
   x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));
   if(on&&!x.querySelector('.ftb-check')){const c=document.createElement('span');c.className='ftb-check';c.setAttribute('aria-hidden','true');c.textContent='✓';x.append(c)}
   else if(!on)x.querySelector('.ftb-check')?.remove();
  });
- root.querySelectorAll('.ftb-menu-all .ftb-item[data-menu-tab]').forEach(x=>{
-  const on=x.dataset.menuTab===tab;
-  x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));
- });
- root.querySelectorAll('.ftb-group').forEach(g=>{
-  const on=g.dataset.group===activeGroup;
-  g.classList.toggle('is-active',on);
+ root.querySelectorAll('.ftb-more').forEach(g=>{
   const btn=g.querySelector('.ftb-group-btn');if(!btn)return;
+  const item=menu?.querySelector(`.ftb-item[data-tab="${CSS.escape(tab)}"]`)||null;
+  const on=Boolean(item);
+  g.classList.toggle('is-active',on);
   btn.setAttribute('aria-current',on?'true':'false');
-  const label=on?TAB_META.get(tab):'';
   let chip=btn.querySelector('.ftb-active-name');
-  if(on&&label){
+  if(on){
    if(!chip){chip=document.createElement('span');chip.className='ftb-active-name';btn.insertBefore(chip,btn.querySelector('.ftb-caret'))}
-   chip.textContent=label;
+   chip.textContent=TAB_META.get(tab)||'';
   }else chip?.remove();
  });
 }
@@ -730,7 +662,9 @@ async function renderTab(app){
   bindLinkedTasksPanel(app,el,{relatedType:'files',relatedId:app.__file.id});
  }
  const main=document.querySelector('#main-content');
- enhanceCollapsiblePanels(main,`file:${app.__file.id}:${tab}`);
+ // أدوات «فتح/طي الكل» (بطاقة «الأقسام والجداول») لا تُبنى في صفحة الملف: الشريط العلوي
+ // يكفي للتنقل، وكل قسم يحتفظ بزر الطي والدبوس الخاص به — بلا عنصر إضافي فوق المحتوى.
+ enhanceCollapsiblePanels(main,`file:${app.__file.id}:${tab}`,{bulk:false});
  bindCards(el);
  if(tab==='summary'){bindStagePath(app,app.__file.f,app.__file.stages);bindCockpitOnce(el,app)}
  updateTabShell(app);
@@ -835,23 +769,18 @@ async function renderTabContent(app){
    </p>
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
   </section>`;
-  // (ب) البيانات التفصيلية: كل حقل من مصدره (سجل الملف/المرحلة/حقول نوع العمل) — بلا تكرار بين الأقسام
+  // (ب) بيانات الملف فقط — كل حقل من مصدره. بيانات المرحلة/الرقم القضائي وحقول نوع العمل
+  // لا تُعرض هنا: مصدرها الوحيد تبويب «المراحل» وتبويب «بيانات نوع العمل» فلا تتكرر المعلومات.
   const refs=new Map();
-  const tax=app.__file.tax;const ftype=tax.byId.get(f.fileTypeId);
-  const typeFields=(ftype?.fields||[]).filter(x=>f['x_'+x.k]!=null&&String(f['x_'+x.k]).trim()!=='');
   // رقم الملف الداخلي لا يُكرر في البيانات التفصيلية؛ مصدره الوحيد زر «الملف الفرعي».
   const fileFields=ENTITIES.files.fields.filter(x=>x.k!=='fileNumber');
-  const caseFields=cur?ENTITIES.cases.fields.filter(x=>x.k!=='fileId'):[];
-  const dataPanel=`<section class="panel fp-data fp-case-data" data-collapse-id="file-case-data" data-collapse-key="file-details:case-data" data-collapse-default="open">
-   <div class="panel-head"><h3>بيانات الدعوى والملف</h3><span class="collapse-summary" data-collapse-summary></span>
-    <div class="sec-actions"><button type="button" class="ghost small" data-file-edit2>✎ تعديل بيانات الملف</button>${cur?`<button type="button" class="ghost small" data-case-edit="${esc(cur.id)}">✎ تعديل بيانات المرحلة</button>`:''}<button type="button" class="ghost small" data-reclass>تغيير القسم / النوع</button></div></div>
+  const dataPanel=`<section class="panel fp-data fp-file-data" data-collapse-id="file-file-data" data-collapse-key="file-details:file-data" data-collapse-default="open">
+   <div class="panel-head"><h3>بيانات الملف</h3><span class="collapse-summary" data-collapse-summary></span>
+    <div class="sec-actions"><button type="button" class="ghost small" data-file-edit2>✎ تعديل بيانات الملف</button><button type="button" class="ghost small" data-reclass>تغيير القسم / النوع</button></div></div>
    <div class="fp-kv">
-    <h4 class="fp-kv-h">بيانات الملف</h4>
     ${kvHtml(fileFields,f,refs)}
     ${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}
     ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — السبب: '+esc(f.reopenReason):''}</p>`:''}
-    ${cur?`<h4 class="fp-kv-h">بيانات المرحلة الحالية — ${esc(refLabel('cases',cur))}</h4>${kvHtml(caseFields,cur,new Map())}`:'<p class="muted fp-kv-note">لا توجد مرحلة أو رقم قضائي مسجل لهذا الملف؛ تُضاف من تبويب «المراحل والإجراءات القضائية» عند الحاجة فقط.</p>'}
-    ${typeFields.length?`<h4 class="fp-kv-h">بيانات ${esc(ftype.name)}</h4><dl class="kv">${typeFields.map(x=>`<div class="kv-item${x.t==='textarea'?' wide':''}"><dt>${esc(x.l)}</dt><dd>${esc(String(f['x_'+x.k]))}</dd></div>`).join('')}</dl>`:''}
    </div></section>`;
   // (ج) المسار القضائي: المراحل والعلاقات المسجلة فعلًا، وكل عنصر يفتح سجله الأصلي
   const stagePanel=await stageSequenceHtml(app,{id,f,stages,cur,hearings,procedures,judgments:judgmentsRes.rows,relRows});
@@ -859,7 +788,6 @@ async function renderTabContent(app){
    ${executionStripHtml({summary:executionContextSummary(app.__file.executions||[]),scope:'file',route:`executionCenter?fileId=${encodeURIComponent(id)}`})}`;
   // (د) كل إجراءات «نظرة عامة» تنقل إلى المصدر الأصلي أو إلى تبويبه — بلا كتابة من هنا
   el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>openEntityForm(app,'files',{id}));
-  el.querySelector('[data-case-edit]')?.addEventListener('click',e=>openEntityForm(app,'cases',{id:e.currentTarget.dataset.caseEdit}));
   el.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
   el.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tabJump));
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
