@@ -16,6 +16,33 @@
 .record-workspace-hero .head-actions>button{min-height:38px;}
 .record-workspace-hero .record-context-links{margin-top:7px;}
 .record-workspace-hero .record-context-links .record-context-current{font-size:12px;}
+/* شريط «إجراءات» المطوي: يبقي العنوان والسجل واضحين ويؤجل روابط السياق والأوامر حتى الطلب. */
+.record-actions-disclosure{flex:1 1 100%;min-width:0;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--surface2) 55%,var(--surface));overflow:hidden}
+.record-actions-disclosure>summary{display:flex;align-items:center;gap:9px;min-height:42px;padding:8px 12px;cursor:pointer;list-style:none;color:var(--text-strong);font-weight:750}
+.record-actions-disclosure>summary::-webkit-details-marker{display:none}
+.record-actions-title{font-size:13px}
+.record-actions-hint{font-size:11px;color:var(--text-muted);font-weight:500}
+.record-actions-caret{margin-inline-start:auto;color:var(--primary);font-size:17px;transition:transform .16s ease}
+.record-actions-disclosure[open]>summary{border-bottom:1px solid var(--border);background:var(--surface2)}
+.record-actions-disclosure[open] .record-actions-caret{transform:rotate(180deg)}
+.record-actions-content{display:grid;gap:9px;padding:10px 12px}
+.record-actions-content .record-context-links{margin:0;gap:6px}
+.record-actions-buttons{width:100%;flex:1 1 100%!important;justify-content:flex-start!important;flex-wrap:wrap}
+.record-actions-buttons>button{max-width:100%;white-space:normal}
+.record-actions-disclosure:focus-within>summary{outline:2px solid color-mix(in srgb,var(--primary) 48%,transparent);outline-offset:-2px}
+/* بطاقة هوية القضية: المعلومات الأكثر بحثًا أعلى البيانات الكاملة وبلا نسخة ثانية في قائمة الحقول. */
+.record-case-identity{position:relative;min-width:0;margin:0 0 12px;padding:12px 14px;border:1px solid var(--primary-border,var(--border));border-inline-start:4px solid var(--primary);border-radius:13px;background:linear-gradient(125deg,color-mix(in srgb,var(--primary-soft) 45%,var(--surface)),var(--surface));box-shadow:var(--shadow-sm)}
+.record-case-identity-head{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.record-case-identity-head h3{margin:0;color:var(--text-strong);font-size:16px}
+.record-case-kicker{display:block;color:var(--primary);font-size:10.5px;font-weight:800;letter-spacing:.25px}
+.record-case-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px 16px;margin:0}
+.record-case-field{min-width:0;padding:7px 8px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);border-radius:9px;background:color-mix(in srgb,var(--surface) 90%,transparent)}
+.record-case-field dt{font-size:11px;font-weight:700;color:var(--text-muted)}
+.record-case-field dd{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:3px 0 0;color:var(--text-strong);font-size:14px;font-weight:750;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.record-case-field[data-display-item="case:number"] dd{align-items:baseline;gap:9px}
+.record-case-field[data-display-item="case:number"] small{font-size:11px;color:var(--text-muted);font-weight:600}
+.record-case-field.wide{grid-column:1/-1}
+.record-case-party{display:inline-flex;align-items:center;max-width:100%;padding:2px 9px;border:1px solid var(--primary-border,var(--border));border-radius:999px;background:var(--primary-soft);color:var(--text-strong);font-size:12.5px;font-weight:700;overflow-wrap:anywhere}
 .record-tabs-bar{width:100%;border-radius:0 0 var(--radius-sm) var(--radius-sm);}
 .record-tab-panels{min-width:0;}
 .record-tab-panels>.record-tab-panel{min-width:0;}

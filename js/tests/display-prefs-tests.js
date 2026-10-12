@@ -4,7 +4,7 @@
 import {
  _resetDisplayPrefsForTests,resolveCardDisplay,setCardDisplay,clearCardDisplay,
  setPageDisplay,setGlobalDisplay,resetAllDisplay,resolveGridDisplay,
- stepCardFontSize,saveSectionLayout,
+ stepCardFontSize,saveSectionLayout,setComponentContent,getComponentContent,
  CARD_FONT_SIZES,DISPLAY_DEFAULTS
 } from '../core/display-prefs.js';
 import {
@@ -79,9 +79,12 @@ export function runDisplayPrefsTests(test,expect){
   registerPageLayout({pageId:'reset-test',title:'t',sections:[{id:'a',title:'A'},{id:'b',title:'B'}]});
   saveSectionLayout('reset-test',{order:['b','a']});
   setGlobalDisplay('card',{fontSize:'xl'});
+  setComponentContent('reset:content',{order:['b','a'],hidden:['a']});
   resetAllDisplay();
   expect(resolveGridDisplay().fontSize).toBe('medium'); // العام عاد للافتراضي
-  expect(resolveSectionOrder('reset-test').join(',')).toBe('b,a'); // الترتيب بقي
+  expect(getComponentContent('reset:content').order.length).toBe(0); // ترتيب الحقول عاد للافتراضي
+  expect(getComponentContent('reset:content').hidden.length).toBe(0); // الحقول المخفية عادت للظهور
+  expect(resolveSectionOrder('reset-test').join(',')).toBe('b,a'); // ترتيب الأقسام بقي
  });
 
  // ===== تكامل الجدول + عدم تكرار «فتح المحدد» =====

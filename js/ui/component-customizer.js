@@ -29,8 +29,10 @@ import {
 } from '../core/component-style.js';
 import {
  CARD_DENSITIES,CARD_DENSITY_LABELS,FIELD_LAYOUTS,FIELD_LAYOUT_LABELS,
- resolveCardDisplay,resolvePageDisplay,setCardDisplay,setPageDisplay
+ resolveCardDisplay,resolvePageDisplay,setCardDisplay,setPageDisplay,
+ resolveComponentContent,setComponentContent,clearComponentContent
 } from '../core/display-prefs.js';
+import {applyComponentContent,componentContentItems} from './component-content.js';
 
 // ===== سجل المكونات القابلة للتخصيص (قابلية التوسع — البند 24) =====
 const componentRegistry=new Map();
@@ -308,6 +310,28 @@ function advancedTabHtml(){
   </div>
  </section>`;
 }
+function contentTabHtml(){
+ const items=current?.scope==='element'&&current.el?componentContentItems(current.el):[];
+ const layout=resolveComponentContent(current?.id||'',items.map(item=>item.id));
+ const byId=new Map(items.map(item=>[item.id,item]));
+ const ordered=layout.order.map(id=>byId.get(id)).filter(Boolean);
+ const hidden=new Set(layout.hidden);
+ const rows=ordered.map((item,index)=>{
+  const peers=ordered.filter(candidate=>candidate.parent===item.parent);
+  const peerIndex=peers.findIndex(candidate=>candidate.id===item.id);
+  return `<li class="uxc-content-row" data-uxc-content-row="${esc(item.id)}">
+   <label class="uxc-content-label"><input type="checkbox" data-uxc-content-visible="${esc(item.id)}" ${hidden.has(item.id)?'':'checked'}><span>${esc(item.label||`جزء ${index+1}`)}</span></label>
+   <span class="uxc-content-moves"><button type="button" class="ghost small" data-uxc-content-move="-1" data-uxc-content-id="${esc(item.id)}" ${peerIndex<=0?'disabled':''} aria-label="تحريك ${esc(item.label)} لأعلى" title="تحريك لأعلى">▲</button><button type="button" class="ghost small" data-uxc-content-move="1" data-uxc-content-id="${esc(item.id)}" ${peerIndex<0||peerIndex===peers.length-1?'disabled':''} aria-label="تحريك ${esc(item.label)} لأسفل" title="تحريك لأسفل">▼</button></span>
+  </li>`;
+ }).join('');
+ return `<section class="uxc-pane" data-pane="content" role="tabpanel" aria-labelledby="uxc-tab-content" hidden>
+  <div class="uxc-group"><h4>البيانات والأجزاء المعروضة</h4>
+   <p class="uxc-note">أظهر أو أخفِ أي حقل أو جزء، ثم رتّب عناصر الحاوية نفسها بالسهمين. التغيير محفوظ لهذا القسم أو البطاقة وحدها، ويؤثر على العرض فقط — لا يغيّر بيانات السجل.</p>
+   ${items.length?`<ol class="uxc-content-list">${rows}</ol>`:'<p class="muted small">لا توجد أجزاء مستقلة قابلة للتخصيص هنا.</p>'}
+   <div class="form-actions"><button type="button" class="ghost danger" data-uxc-content-reset ${items.length?'':'disabled'}>↺ استعادة حقول وترتيب هذا العنصر</button></div>
+  </div>
+ </section>`;
+}
 function actionsTabHtml(){
  const typeLabel=COMPONENT_TYPE_LABELS[current.type]||current.type;
  const s=current.scope;
@@ -386,9 +410,9 @@ export function openComponentCustomizer(opts={}){
    <div class="uxc-preview-box uxc-preview" data-uxc-id="uxc-preview" data-uxc-type="card" aria-label="معاينة مباشرة">${PREVIEW_HTML}</div>
    <span class="uxc-pv-label">معاينة مباشرة</span>
    <div class="uxc-tabs" role="tablist" aria-label="أقسام تخصيص العرض">
-    ${tabButton('basic','أساسي',true)}${tabButton('texts','النصوص',false)}${tabButton('advanced','متقدم',false)}${tabButton('actions','إجراءات',false)}
+    ${tabButton('basic','أساسي',true)}${tabButton('content','البيانات',false)}${tabButton('texts','النصوص',false)}${tabButton('advanced','متقدم',false)}${tabButton('actions','إجراءات',false)}
    </div>
-   ${basicTabHtml()}${textsTabHtml()}${advancedTabHtml()}${actionsTabHtml()}
+   ${basicTabHtml()}${contentTabHtml()}${textsTabHtml()}${advancedTabHtml()}${actionsTabHtml()}
   </div>`);
  current.card=card;
  bindPanel(card);
@@ -416,6 +440,13 @@ export function openTypeDefaultCustomizer(type){
 
 // ===== أحداث اللوحة =====
 function bindPanel(card){
+ const redrawContentPane=()=>{
+  const old=card.querySelector('[data-pane="content"]');
+  if(!old)return;
+  const active=Boolean(card.querySelector('[data-uxc-tab="content"]')?.classList.contains('active'));
+  old.outerHTML=contentTabHtml();
+  if(active){const pane=card.querySelector('[data-pane="content"]');if(pane)pane.hidden=false}
+ };
  // التبويبات
  card.querySelector('.uxc-tabs').addEventListener('click',e=>{
   const btn=e.target.closest('[data-uxc-tab]');if(!btn)return;
@@ -432,8 +463,33 @@ function bindPanel(card){
   if(segBtn){commit(segBtn.closest('[data-uxc-seg]').dataset.uxcSeg,segBtn.dataset.v||null);return}
   const coarseBtn=e.target.closest('[data-coarse] button');
   if(coarseBtn){commitCoarse(coarseBtn.closest('[data-coarse]').dataset.coarse,coarseBtn.dataset.v);return}
+  const move=e.target.closest('[data-uxc-content-move]');
+  if(move&&!move.disabled&&current?.el){
+   const itemId=move.dataset.uxcContentId,items=componentContentItems(current.el),byId=new Map(items.map(item=>[item.id,item]));
+   const item=byId.get(itemId),layout=resolveComponentContent(current.id,items.map(entry=>entry.id));
+   if(!item)return;
+   const positions=layout.order.map((id,index)=>byId.get(id)?.parent===item.parent?index:-1).filter(index=>index>=0);
+   const from=layout.order.indexOf(itemId),peer=positions.indexOf(from),to=positions[peer+Number(move.dataset.uxcContentMove)];
+   if(to===undefined)return;
+   const order=[...layout.order];[order[from],order[to]]=[order[to],order[from]];
+   setComponentContent(current.id,{order,hidden:layout.hidden});
+   applyComponentContent(current.el,current.id);redrawContentPane();toast('تم حفظ ترتيب أجزاء هذا العنصر');
+   return;
+  }
+  const resetContent=e.target.closest('[data-uxc-content-reset]');
+  if(resetContent&&current?.el){
+   clearComponentContent(current.id);applyComponentContent(current.el,current.id);redrawContentPane();toast('عادت حقول وترتيب هذا العنصر إلى الوضع الافتراضي');return;
+  }
  });
  card.addEventListener('change',e=>{
+  const visible=e.target.closest('[data-uxc-content-visible]');
+  if(visible&&current?.el){
+   const items=componentContentItems(current.el),layout=resolveComponentContent(current.id,items.map(item=>item.id));
+   const hidden=new Set(layout.hidden),id=visible.dataset.uxcContentVisible;
+   if(visible.checked)hidden.delete(id);else hidden.add(id);
+   setComponentContent(current.id,{order:layout.order,hidden:[...hidden]});
+   applyComponentContent(current.el,current.id);toast(visible.checked?'أُظهر الجزء المحدد':'أُخفي الجزء المحدد');return;
+  }
   const tg=e.target.closest('[data-coarse-tg]');
   if(tg){commitCoarse(tg.dataset.coarseTg,tg.checked);return}
   const color=e.target.closest('[data-uxc-color]');
@@ -588,7 +644,8 @@ const headTitle=el=>el.querySelector('.panel-head h3,.panel-head h2,.sp-head>b,s
 // رؤوس الأقسام التي يُوضع فيها ⚙ داخل التدفق الطبيعي (لا فوق النص).
 const GEAR_HEAD_SEL='.panel-head,.panel-collapse-head,.sp-head,.cp-focus-head,.cp-day-head,.cp-attn-head,.cp-exec-head,summary,header';
 // عناصر تفاعلية لا تحمل ⚙ أبدًا: زر داخل زر = HTML غير صالح وتداخل مع النص (مثل تبويبات الملف).
-const INTERACTIVE_SEL='button,a,input,select,textarea,label,summary,[role="tab"],[role="tablist"],[role="button"]';
+// summary مسموح كرأس للقسم؛ زر التخصيص داخله يمنع افتراضيًا فتح/طي details عند النقر.
+const INTERACTIVE_SEL='button,a,input,select,textarea,label,[role="tab"],[role="tablist"],[role="button"]';
 const isGearable=el=>Boolean(el)&&!el.matches?.(INTERACTIVE_SEL);
 /** الرأس الذي يستقبل ⚙ لعنصر: رأس مباشر أولًا، ثم رأس داخلي يخص العنصر نفسه (لا يخص عنصرًا موسومًا داخله). */
 function gearHeadOf(el){
@@ -641,8 +698,10 @@ function ensureGear(el,{id,title}){
 export function bindCustomizableComponents(root=document){
  if(!root?.querySelectorAll)return;
  const pageId=root.dataset?.uxcPage||root.closest?.('[data-uxc-page]')?.dataset?.uxcPage||'';
+ const instanceId=el=>el?.closest?.('[data-uxc-instance]')?.dataset?.uxcInstance||root.dataset?.uxcInstance||'';
+ const scopedId=(type,el,suffix)=>`${type}:${pageId||'page'}${instanceId(el)?`:${instanceId(el)}`:''}:${suffix}`;
  const seen=new Set();
- // 1) البطاقات — نظام البطاقات الموجود (displayKey هو الهوية الثابتة)
+ // 1) البطاقات الموحدة — تبقى هويتها المعلنة (displayKey) مستقلة وثابتة.
  root.querySelectorAll('.ux-card[data-display-key]').forEach(el=>{
   const key=el.dataset.displayKey,id=`card:${key}`;
   if(!el.dataset.uxcId){el.dataset.uxcId=id;el.dataset.uxcType='card'}
@@ -653,22 +712,42 @@ export function bindCustomizableComponents(root=document){
   applyComponentStyle(el,id,{type:'card',pageId:pid,cardKey:key});
   seen.add(el);
  });
- // 2) الأقسام غير البطاقة (لوحات/تفاصيل/حاويات) — لكل قسم هوية مستقرة
+ // 2) الأقسام المسجّلة لتخصيص الصفحة. إذا كان هناك معرّف مسبق (لكل سجل) نحافظ عليه؛
+ // وإلا تُشتق هوية مستقرة من الصفحة/مثيل السجل/معرّف القسم.
  root.querySelectorAll('[data-section-id]').forEach(el=>{
   if(seen.has(el)||el.classList.contains('ux-card'))return;
-  // أزرار التنقل (مثل تبويبات الملف) ليست أقسامًا قابلة للتخصيص — تُدار بترتيب الصفحة فقط
   if(!isGearable(el)){seen.add(el);return}
-  const sid=el.dataset.sectionId,id=`section:${pageId||'page'}:${sid}`;
-  el.dataset.uxcId=id;el.dataset.uxcType='section';
+  const sid=el.dataset.sectionId;
+  const id=el.dataset.uxcId||scopedId('section',el,sid);
+  el.dataset.uxcId=id;el.dataset.uxcType=el.dataset.uxcType||'section';
   const title=el.dataset.uxcTitle||headTitle(el)||sid;
   el.dataset.uxcTitle=title;
-  noteComponent({id,type:'section',title,pageId});
+  noteComponent({id,type:el.dataset.uxcType,title,pageId});
   ensureGear(el,{id,title});
-  applyComponentStyle(el,id,{type:'section',pageId});
+  applyComponentStyle(el,id,{type:el.dataset.uxcType,pageId});
   seen.add(el);
  });
- // 3) المراحل وأي مكون موسوم (stage / stagepath / component / مسجل مسبقًا)
-  const processTagged=el=>{
+ // 3) بطاقات ولوحات مستقلة لا تمر بنظام section/card الموحد: امنحها ⚙ وهوية ثابتة.
+ // المعرّف يعتمد على collapse-id/id أو ترتيب ثابت داخل النوع؛ لا يدخل فيه أي نص شخصي.
+ const autoComponents=[...root.querySelectorAll('.panel:not(.uxc-preview),.fx-card,.stat-card,.lf-card,.exec-quick-card,.record-case-identity')];
+ const typeCounts=new Map();
+ autoComponents.forEach(el=>{
+  if(seen.has(el)||el.hasAttribute('data-section-id')||el.classList.contains('ux-card')||el.closest('.uxc-modal'))return;
+  if(!isGearable(el)){seen.add(el);return}
+  const type=el.classList.contains('panel')?'panel':'card';
+  const ordinal=typeCounts.get(type)||0;typeCounts.set(type,ordinal+1);
+  const stable=el.dataset.uxcKey||el.dataset.collapseKey||el.dataset.collapseId||el.id||`${el.localName}:${[...el.classList].filter(Boolean).sort().join('.')||type}:${ordinal+1}`;
+  const id=el.dataset.uxcId||scopedId(type,el,stable);
+  el.dataset.uxcId=id;el.dataset.uxcType=el.dataset.uxcType||type;
+  const title=el.dataset.uxcTitle||headTitle(el)||stable;
+  el.dataset.uxcTitle=title;
+  noteComponent({id,type:el.dataset.uxcType,title,pageId});
+  ensureGear(el,{id,title});
+  applyComponentStyle(el,id,{type:el.dataset.uxcType,pageId,cardKey:el.dataset.displayKey||''});
+  seen.add(el);
+ });
+ // 4) المراحل وأي مكوّن موسوم/مسجّل مسبقًا.
+ const processTagged=el=>{
   if(seen.has(el)||el.classList.contains('uxc-preview'))return;
   if(!isGearable(el)){seen.add(el);return}
   const id=el.dataset.uxcId,type=el.dataset.uxcType||'component';
@@ -682,8 +761,14 @@ export function bindCustomizableComponents(root=document){
   seen.add(el);
  };
  root.querySelectorAll('[data-uxc-id]').forEach(processTagged);
- // 4) الجذر نفسه إن كان مكوّنًا موسومًا (جذر الصفحة page:<id> مثلًا)
  if(root.matches?.('[data-uxc-id]'))processTagged(root);
+ // 5) بعد اكتمال وسم المتداخلات، طبّق إعداد محتوى مستقلًا على كل مكوّن.
+ const components=[...root.querySelectorAll('[data-uxc-id]')];
+ if(root.matches?.('[data-uxc-id]'))components.push(root);
+ for(const el of components){
+  if(el.classList?.contains('uxc-preview')||el.dataset.uxcType==='page')continue;
+  applyComponentContent(el,el.dataset.uxcId);
+ }
 }
 
 /**

@@ -6,8 +6,9 @@ import {confirmBox} from '../ui/modal.js';
 import {openEntityForm} from '../ui/form.js';
 import {ENTITIES,displayValue,label,fmtDate,phonesOf,entityRoute} from '../domain/entities.js';
 import {resolveRefs,clientRelated,opponentRelated,refLabel} from '../services/entity-query.js';
+import {fileParties as loadFileParties} from '../services/legal-files.js';
 import {deleteEntity,restoreEntity} from '../services/entity-save.js';
-import {sectionGrid,routeFor,listNavHtml,bindListNav} from './list-page.js';
+import {sectionGrid,routeFor} from './list-page.js';
 import {userError} from '../core/errors.js';
 import {hearingCycle} from '../services/operations.js';
 import {serviceCycle} from '../services/service-records.js';
@@ -38,7 +39,7 @@ export function kvHtml(fields,row,refs,{skipEmpty=true}={}){
   const link=route?` data-open-ref="${esc(f.ref)}:${esc(row[f.k])}"`:'';
   const unavailable=hasStoredRef&&refsCanVerify&&!isLiveRef
    ?'<small class="record-ref-unavailable muted" role="status">السجل المرتبط غير متاح حاليًا.</small>':'';
-  return `<div class="kv-item${f.t==='textarea'?' wide':''}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}${unavailable}</dd></div>`;
+  return `<div class="kv-item${f.t==='textarea'?' wide':''}" data-display-item="field:${esc(String(f.k))}" data-display-label="${esc(f.l)}"><dt>${esc(f.l)}</dt><dd${link}>${link?`<button type="button" class="link">${esc(v)}</button>`:esc(v)}${unavailable}</dd></div>`;
  }).join('');
  return items?`<dl class="kv">${items}</dl>`:'<p class="muted">لا توجد بيانات مسجلة بعد. اضغط «تعديل البيانات» لإضافتها.</p>';
 }
@@ -73,7 +74,7 @@ function recordPanelAttrs(pageId,key,{active='data',count=null}={}){
 }
 export function section(key,title,count,body,{open=true,add='',pageId='',active='data'}={}){
  const panelAttrs=pageId?recordPanelAttrs(pageId,key,{active,count}):`data-section-id="${esc(key)}"`;
- return `<details class="rec-section record-tab-panel" data-sec="${esc(key)}" ${panelAttrs} ${open?'open':''}><summary><span>${esc(title)}</span>${count!==null&&count!==undefined?`<span class="count">${esc(String(count))}</span>`:''}</summary>${add?`<div class="sec-actions">${add}</div>`:''}<div class="sec-body">${body}</div></details>`;
+ return `<details class="rec-section record-tab-panel" data-sec="${esc(key)}" data-collapse-default="${open?'open':'collapsed'}" ${panelAttrs} ${open?'open':''}><summary><span>${esc(title)}</span>${count!==null&&count!==undefined?`<span class="count">${esc(String(count))}</span>`:''}</summary>${add?`<div class="sec-actions">${add}</div>`:''}<div class="sec-body">${body}</div></details>`;
 }
 function usefulTabCount(value){
  if(value===null||value===undefined||value==='')return false;
@@ -117,9 +118,9 @@ function recordTabBarContents(pageId,pageTitle,sections,primaryIds,active){
  </div>`:'';
  return `<div class="file-subtabs record-primary-tabs" role="tablist" aria-label="تبويبات ${esc(pageTitle)}">${primary}</div>${more}<div class="ftb-tools"><button type="button" class="ghost icon-only" data-customize-page title="ترتيب التبويبات وإظهارها وإعدادات العرض" aria-label="تخصيص الصفحة">⚙</button></div>`;
 }
-export function recordWorkspaceMarkup({pageId,pageTitle,sections,primaryTabs,head,notice='',content,active='data'}){
+export function recordWorkspaceMarkup({pageId,pageTitle,sections,primaryTabs,head,notice='',content,active='data',instanceId=''}){
  const primaryIds=primaryTabs||sections.slice(0,4).map(section=>section.id);
- return `<div class="record-workspace" data-record-workspace data-record-page="${esc(pageId)}" data-active-tab="${esc(active)}">
+ return `<div class="record-workspace" data-record-workspace data-record-page="${esc(pageId)}"${instanceId?` data-uxc-instance="${esc(instanceId)}"`:''} data-active-tab="${esc(active)}">
   ${head}${notice}
   <nav class="file-tabs-bar record-tabs-bar" data-record-tabs-bar aria-label="أقسام ${esc(pageTitle)}" style="--record-primary-count:${Math.max(1,Math.min(4,primaryIds.length))}">${recordTabBarContents(pageId,pageTitle,sections,primaryIds,active)}</nav>
   <div class="record-tab-panels" data-record-tab-panels>${content}</div>
@@ -261,6 +262,10 @@ function recordContextNav(ent,row,refs){
  ).join('');
  return currentContextNav(ent.label,links+unavailable);
 }
+function recordActionsDisclosure(context='',actions='',label='إجراءات'){
+ const hasContent=Boolean(String(context||'').trim()||String(actions||'').trim());
+ return `<details class="record-actions-disclosure" data-record-actions${hasContent?'':' data-empty="true"'}><summary><span class="record-actions-title">${esc(label)}</span><span class="record-actions-hint">السياق والأوامر</span><span class="record-actions-caret" aria-hidden="true">⌄</span></summary><div class="record-actions-content">${context||''}${actions?`<div class="head-actions record-actions-buttons">${actions}</div>`:''}</div></details>`;
+}
 function relatedCount(r,key,rows){return `${rows.length}${r.more?.[key]?'+':''}`}
 function relatedLimitNotice(r){
  const labels={files:'الملفات',cases:'القضايا',hearings:'الجلسات',powersOfAttorney:'التوكيلات',appointments:'المواعيد',communications:'الاتصالات'};
@@ -316,7 +321,7 @@ export async function clientPage(app,id){
  const panelCounts={files:relatedCount(r,'files',r.files),cases:relatedCount(r,'cases',r.cases),poa:relatedCount(r,'powersOfAttorney',r.poas),hearings:relatedCount(r,'hearings',r.hearings),appointments:relatedCount(r,'appointments',r.appointments),communications:relatedCount(r,'communications',r.communications)};
  const tabSections=CLIENT_SECTIONS.map(item=>({...item,count:panelCounts[item.id]??''}));
  const parts={
-  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.clients.fields,c,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>'+clientWorkPanel,{pageId:'client-details',open:true}),
+  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.clients.fields,c,refs)+clientWorkPanel,{pageId:'client-details',open:true}),
   files:section('files','الملفات',panelCounts.files,'<div data-grid="files"></div>',{pageId:'client-details',add:'<button class="ghost" data-add="files">+ ملف جديد لهذا الموكل</button>'}),
   cases:section('cases','القضايا والمراحل',panelCounts.cases,'<div data-grid="cases"></div>',{pageId:'client-details'}),
   poa:section('poa','التوكيلات',panelCounts.poa,'<div data-grid="powersOfAttorney"></div>',{pageId:'client-details',add:'<button class="ghost" data-add="powersOfAttorney">+ توكيل</button>'}),
@@ -324,9 +329,9 @@ export async function clientPage(app,id){
   appointments:section('appointments','المواعيد',panelCounts.appointments,'<div data-grid="appointments"></div>',{pageId:'client-details',open:false,add:'<button class="ghost" data-add="appointments">+ موعد</button>'}),
   communications:section('communications','الاتصالات',panelCounts.communications,'<div data-grid="communications"></div>',{pageId:'client-details',open:false,add:'<button class="ghost" data-add="communications">+ اتصال</button>'})
  };
- const head=`<header class="record-head record-workspace-hero" aria-labelledby="client-record-title"><div class="record-workspace-identity"><span class="record-workspace-kicker">سجل الموكل</span><h2 id="client-record-title">${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p>${currentContextNav('موكل')}</div>
-  <div class="head-actions"><button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-wc-client-task>+ مهمة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></header>`;
- return recordWorkspaceMarkup({pageId:'client-details',pageTitle:'سجل الموكل',sections:tabSections,primaryTabs:CLIENT_PRIMARY_TABS,head,notice:relatedLimitNotice(r),content:orderedClientSectionKeys().map(key=>parts[key]).join('')});
+ const head=`<header class="record-head record-workspace-hero" aria-labelledby="client-record-title"><div class="record-workspace-identity"><span class="record-workspace-kicker">سجل الموكل</span><h2 id="client-record-title">${esc(c.fullName)}</h2><p class="badges">${c.clientCode?fileNumberChip(c):''}${phonesOf(c).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${c.nationalId?`<span class="badge">ر.ق ${esc(c.nationalId)}</span>`:''}<span class="badge">${esc(label(c.status||'active'))}</span></p></div>
+  ${recordActionsDisclosure(currentContextNav('موكل'),`<button class="primary" data-route="cfile:${esc(id)}">📂 فتح ملف الموكل</button><button class="ghost" data-wc-client-task>+ مهمة</button><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button>`)}</header>`;
+ return recordWorkspaceMarkup({pageId:'client-details',pageTitle:'سجل الموكل',sections:tabSections,primaryTabs:CLIENT_PRIMARY_TABS,head,notice:relatedLimitNotice(r),content:orderedClientSectionKeys().map(key=>parts[key]).join(''),instanceId:id});
 }
 export async function bindClientPage(app,id){
  const root=document.querySelector('#main-content');
@@ -362,14 +367,14 @@ export async function opponentPage(app,id){
  const counts={files:relatedCount(r,'files',r.files),cases:relatedCount(r,'cases',r.cases),hearings:relatedCount(r,'hearings',r.hearings)};
  const tabSections=OPPONENT_SECTIONS.map(item=>({...item,count:counts[item.id]??''}));
  const parts={
-  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{pageId:'opponent-details',open:true}),
+  data:section('data','البيانات الكاملة',null,kvHtml(ENTITIES.opponents.fields,o,refs),{pageId:'opponent-details',open:true}),
   files:section('files','الملفات',counts.files,'<div data-grid="files"></div>',{pageId:'opponent-details'}),
   cases:section('cases','القضايا والمراحل',counts.cases,'<div data-grid="cases"></div>',{pageId:'opponent-details'}),
   hearings:section('hearings','الجلسات',counts.hearings,'<div data-grid="hearings"></div>',{pageId:'opponent-details'})
  };
- const head=`<header class="record-head record-workspace-hero" aria-labelledby="opponent-record-title"><div class="record-workspace-identity"><span class="record-workspace-kicker">سجل الخصم</span><h2 id="opponent-record-title">${esc(o.name)}</h2><p class="badges">${phonesOf(o).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${o.capacity?`<span class="badge">${esc(o.capacity)}</span>`:''}</p>${currentContextNav('خصم')}</div>
-  <div class="head-actions"><button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></header>`;
- return recordWorkspaceMarkup({pageId:'opponent-details',pageTitle:'سجل الخصم',sections:tabSections,primaryTabs:OPPONENT_SECTIONS.map(item=>item.id),head,notice:relatedLimitNotice(r),content:OPPONENT_SECTIONS.map(item=>parts[item.id]).join('')});
+ const head=`<header class="record-head record-workspace-hero" aria-labelledby="opponent-record-title"><div class="record-workspace-identity"><span class="record-workspace-kicker">سجل الخصم</span><h2 id="opponent-record-title">${esc(o.name)}</h2><p class="badges">${phonesOf(o).map(p=>`<span class="badge">☎ ${esc(p)}</span>`).join('')}${o.capacity?`<span class="badge">${esc(o.capacity)}</span>`:''}</p></div>
+  ${recordActionsDisclosure(currentContextNav('خصم'),'<button class="ghost" data-rec-edit>تعديل البيانات</button><button class="ghost danger" data-rec-delete>حذف منطقي</button>')}</header>`;
+ return recordWorkspaceMarkup({pageId:'opponent-details',pageTitle:'سجل الخصم',sections:tabSections,primaryTabs:OPPONENT_SECTIONS.map(item=>item.id),head,notice:relatedLimitNotice(r),content:OPPONENT_SECTIONS.map(item=>parts[item.id]).join(''),instanceId:id});
 }
 export async function bindOpponentPage(app,id){
  const root=document.querySelector('#main-content');
@@ -427,6 +432,60 @@ async function createRelatedFromRecord(app,row,store){
  if(!file||!clientFile?.clientId){toast('لا يمكن إنشاء ملف موكل مرتبط تلقائيًا لأن الملف الحالي غير مرتبط بملف موكل.','error');return}
  openLegalFileWizard(app,{clientId:clientFile.clientId,related:{fileId:file.id,relationCode:'RELATED_TO',title:`${formatFileNumber(file.fileNumber)||''} — ${file.title||ENTITIES.files.title(file)}`}});
 }
+function uniquePartyNames(kind,links,partyRows,records){
+ const isClient=kind==='client',idField=isClient?'clientId':'opponentId',byId=new Map(records.map(record=>[record.id,record]));
+ const candidates=[];
+ for(const link of links||[])candidates.push({id:link[idField],record:byId.get(link[idField]),fallback:link.name||link.partyName||''});
+ for(const party of partyRows||[]){
+  const matches=isClient?(party.clientId||party.partyKind==='client'||party.partyType==='client'):(party.opponentId||party.partyKind==='opponent'||party.partyType==='opponent');
+  if(matches)candidates.push({id:party[idField],record:byId.get(party[idField]),fallback:party.partyName||party.name||''});
+ }
+ const names=[],ids=new Set(),normalized=new Set();
+ for(const item of candidates){
+  const name=String((isClient?(item.record?.fullName||item.record?.name):(item.record?.name||item.record?.fullName))||item.fallback||'').trim();
+  if(!name)continue;
+  const key=name.toLocaleLowerCase().replace(/\s+/g,' '),id=String(item.id||'');
+  if(id&&ids.has(id)||normalized.has(key))continue;
+  if(id)ids.add(id);normalized.add(key);names.push(name);
+ }
+ return names;
+}
+async function casePartiesForDisplay(office,row){
+ const [partyRowsRaw,clientLinksRaw,opponentLinksRaw]=await Promise.all([
+  row.fileId?loadFileParties(office,row.fileId).catch(()=>[]):[],
+  office.r.caseClients.byIndex('caseId',row.id,1000).catch(()=>[]),
+  office.r.caseOpponents.byIndex('caseId',row.id,1000).catch(()=>[])
+ ]);
+ // legal-files.fileParties intentionally leaves lifecycle policy to its caller.
+ const partyRows=(partyRowsRaw||[]).filter(party=>!party.isDeleted);
+ const clientLinks=(clientLinksRaw||[]).filter(link=>!link.isDeleted),opponentLinks=(opponentLinksRaw||[]).filter(link=>!link.isDeleted);
+ const clientIds=[...new Set([...clientLinks.map(link=>link.clientId),...partyRows.filter(party=>party.partyKind==='client'||party.partyType==='client'||party.clientId).map(party=>party.clientId)].filter(Boolean))];
+ const opponentIds=[...new Set([...opponentLinks.map(link=>link.opponentId),...partyRows.filter(party=>party.partyKind==='opponent'||party.partyType==='opponent'||party.opponentId).map(party=>party.opponentId)].filter(Boolean))];
+ const [clientsRaw,opponentsRaw]=await Promise.all([office.r.clients.getMany(clientIds),office.r.opponents.getMany(opponentIds)]);
+ return {
+  clients:uniquePartyNames('client',clientLinks,partyRows,(clientsRaw||[]).filter(person=>!person.isDeleted)),
+  opponents:uniquePartyNames('opponent',opponentLinks,partyRows,(opponentsRaw||[]).filter(person=>!person.isDeleted))
+ };
+}
+function caseIdentityField(id,label,value,{wide=false}={}){
+ return `<div class="kv-item record-case-field${wide?' wide':''}" data-display-item="case:${esc(id)}" data-display-label="${esc(label)}"><dt>${esc(label)}</dt><dd>${value||'<span class="muted">غير مسجل</span>'}</dd></div>`;
+}
+function caseIdentityCardHtml(row,parties){
+ const clients=parties.clients.map(name=>`<span class="record-case-party">${esc(name)}</span>`).join('')||'<span class="muted">غير محدد</span>';
+ const opponents=parties.opponents.map(name=>`<span class="record-case-party">${esc(name)}</span>`).join('')||'<span class="muted">غير محدد</span>';
+ const type=row.stageType||row.numberType||'';
+ const number=`<strong>${esc(row.caseNumber||'—')}</strong><small>السنة: ${esc(row.caseYear||'—')}</small>`;
+ const numberType=row.numberType&&row.numberType!==type?caseIdentityField('number-type','نوع الرقم',esc(row.numberType)):'';
+ return `<article class="record-case-identity" aria-label="بطاقة بيانات القضية"><header class="record-case-identity-head"><div><span class="record-case-kicker">بيانات بارزة</span><h3>القضية / المرحلة</h3></div></header><dl class="record-case-grid">
+  ${caseIdentityField('clients','الموكل',clients)}
+  ${caseIdentityField('opponents','الخصم',opponents)}
+  ${caseIdentityField('number','رقم القضية والسنة',number)}
+  ${caseIdentityField('type','نوع الدعوى / المرحلة',esc(type))}
+  ${numberType}
+  ${caseIdentityField('subject','موضوع الدعوى',esc(row.subject||''),{wide:true})}
+ </dl></article>`;
+}
+const CASE_IDENTITY_FIELD_KEYS=new Set(['fileId','stageType','numberType','caseNumber','caseYear','subject']);
 export async function recordPage(app,store,id){
  const ent=ENTITIES[store];if(!ent)return notFound('السجل');
  const pageId=`rec:${store}`,pageTitle=`صفحة ${ent.label}`;
@@ -435,6 +494,7 @@ export async function recordPage(app,store,id){
  const row=await app.office.r[store].get(id);
  if(!row||row.isDeleted)return notFound(ent.label);
  const refs=await resolveRefs(app.office,[row],ent.fields);
+ const caseParties=store==='cases'?await casePartiesForDisplay(app.office,row):null;
  const hearingSequence=store==='hearings'?await hearingCycle(app.office,id):null;
  const serviceSequence=store==='serviceRecords'?await serviceCycle(app.office,id):null;
  const children={};
@@ -457,8 +517,9 @@ export async function recordPage(app,store,id){
  ].join('');
  const notePanel=recordQuickNotesPanel(quickNotes,store,id,pageId,'data');
  const workPanel=TASK_LINK_STORES.includes(store)?await linkedTasksPanelHtml(app.office,taskScope(store,id),{title:'المهام المرتبطة',collapseId:`rec-work:${store}`,centerRoute:`actionCenter?${store==='cases'?'caseId':'relatedId'}=${encodeURIComponent(id)}`,recordTab:{sectionId:'work',pageId,panelId:recordPanelId(pageId,'work'),tabId:recordTabId(pageId,'work'),active:'data'}}):'';
+ const fullDataBody=store==='cases'?caseIdentityCardHtml(row,caseParties)+kvHtml(ent.fields.filter(field=>!CASE_IDENTITY_FIELD_KEYS.has(field.k)),row,refs):kvHtml(ent.fields,row,refs);
  const bodyById={
-  data:section('data','البيانات الكاملة',null,kvHtml(ent.fields,row,refs)+'<div class="sec-actions end"><button class="primary" data-rec-edit>تعديل البيانات</button></div>',{pageId,open:true}),
+  data:section('data','البيانات الكاملة',null,fullDataBody,{pageId,open:true}),
   quickNotes:notePanel,
   work:workPanel,
   'hearing-cycle':store==='hearings'?section('hearing-cycle','دورة الجلسات',hearingSequence?.items.length||0,`<ol class="hearing-cycle">${(hearingSequence?.items||[]).map((h,i)=>`<li style="--depth:${Math.min(6,h.__depth||0)}"><button type="button" data-cycle-hearing="${esc(h.id)}"><time>${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(h.hearingTime):''}</time><b>${esc(h.type||'جلسة')}</b><small>${esc(h.court||'')}${h.chamber?' · '+esc(h.chamber):''}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></button>${i<(hearingSequence?.items.length||0)-1?'<span class="cycle-arrow">↓</span>':''}</li>`).join('')}</ol>`,{pageId,open:true}):'',
@@ -479,17 +540,16 @@ export async function recordPage(app,store,id){
  }
  if(store==='fees')sectionCounts.payments=children.feePayments.length;
  const tabSections=sectionDefs.map(section=>({...section,count:sectionCounts[section.id]??''}));
- const head=`<header class="record-head record-workspace-hero" aria-labelledby="record-title-${recordToken(pageId)}"><div class="record-workspace-identity"><span class="record-workspace-kicker">${esc(ent.label)}</span><h2 id="record-title-${recordToken(pageId)}">${esc(ent.title(row)||ent.label)}</h2>${contextNav}</div>
-  <div class="head-actions">${listNavHtml(app,store,id)}${extraBtns}<button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button></div></header>`;
+ const head=`<header class="record-head record-workspace-hero" aria-labelledby="record-title-${recordToken(pageId)}"><div class="record-workspace-identity"><span class="record-workspace-kicker">${esc(ent.label)}</span><h2 id="record-title-${recordToken(pageId)}">${esc(ent.title(row)||ent.label)}</h2></div>
+  ${recordActionsDisclosure(contextNav,`${extraBtns}<button class="ghost" data-rec-edit>تعديل</button><button class="ghost danger" data-rec-delete>حذف منطقي</button>`)}</header>`;
  const primaryTabs=primaryRecordTabs(store,tabSections);
- return recordWorkspaceMarkup({pageId,pageTitle,sections:tabSections,primaryTabs,head,content:sectionDefs.map(section=>bodyById[section.id]||'').join('')});
+ return recordWorkspaceMarkup({pageId,pageTitle,sections:tabSections,primaryTabs,head,content:sectionDefs.map(section=>bodyById[section.id]||'').join(''),instanceId:id});
 }
 export async function bindRecordPage(app,store,id){
  const root=document.querySelector('#main-content');
  // __rec قد يبقى من الصفحة السابقة إذا عُرض «غير موجود» (رابط قديم أو سجل حُذف): لا تربط القديم.
  if(app.__rec?.store!==store||app.__rec?.id!==id)return;
  const {row,children,activity,quickNotes,noteEntityType}=app.__rec;
- bindListNav(root,app,store);
  bindRecordQuickNotes(root,quickNotes,app,store,id,noteEntityType);
  if(TASK_LINK_STORES.includes(store)){
   const opts={relatedType:store,relatedId:id,title:store==='hearings'?'متابعة الجلسة':''};

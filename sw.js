@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v6.4.2-record-workspace';
+const CACHE='ahmad-khudair-law-office-v6.4.3-record-data-customization';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -204,6 +204,7 @@ const ASSETS=[
   "./js/ui/work-panels.js",
   "./js/ui/work-views.js",
   "./js/ui/card-display.js",
+  "./js/ui/component-content.js",
   "./js/ui/collapsible.js",
   "./js/ui/collapse-state.js",
   "./js/ui/component-customizer.js",

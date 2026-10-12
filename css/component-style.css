@@ -254,6 +254,15 @@ summary .uxc-gear{margin-inline-start:auto}
 .uxc-group{display:grid;gap:8px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;background:color-mix(in srgb,var(--surface2) 45%,var(--surface))}
 .uxc-group>h4{margin:0;font-size:12px;color:var(--text-muted);letter-spacing:.2px}
 .uxc-note{font-size:11.5px;color:var(--text-muted);line-height:1.6;margin:0}
+.ux-content-hidden{display:none!important}
+.uxc-content-list{display:grid;gap:5px;max-height:min(42vh,360px);overflow:auto;list-style:none;margin:0;padding:2px}
+.uxc-content-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:6px 8px;border:1px solid var(--border);border-radius:9px;background:var(--surface)}
+.uxc-content-label{display:flex;align-items:center;gap:9px;min-width:0;flex:1 1 auto;margin:0;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-strong)}
+.uxc-content-label input{flex:none;width:17px;height:17px;margin:0;accent-color:var(--primary)}
+.uxc-content-label span{min-width:0;overflow-wrap:anywhere}
+.uxc-content-moves{display:flex;gap:3px;flex:none}
+.uxc-content-moves button{min-width:32px;min-height:30px;padding:3px 7px;line-height:1}
+.uxc-content-moves button:disabled{opacity:.35;cursor:not-allowed}
 
 /* صفوف التحكم الموحدة (تُستخدم أيضًا في popover مظهر الجدول) */
 .uxc-ctl{display:grid;grid-template-columns:minmax(96px,150px) 1fr;gap:6px 10px;align-items:center}
@@ -341,6 +350,8 @@ summary .uxc-gear{margin-inline-start:auto}
  .uxc-gear{width:38px;height:38px}
  .uxc-tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
  .uxc-tab{padding:10px 12px}
+ .uxc-content-row{gap:6px;padding:6px}
+ .uxc-content-moves button{min-width:38px;min-height:38px}
  .uxc-preview-box{padding:10px}
  #modal-root .modal-card:has(.uxc-modal){max-height:92vh}
 }

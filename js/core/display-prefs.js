@@ -64,6 +64,13 @@ function normalizeSections(raw){
   legacyMigrated:Boolean(raw.legacyMigrated)
  };
 }
+function normalizeComponentLayout(raw){
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return {order:[],hidden:[]};
+ return {
+  order:Array.isArray(raw.order)?[...new Set(raw.order.map(String))]:[],
+  hidden:Array.isArray(raw.hidden)?[...new Set(raw.hidden.map(String))]:[]
+ };
+}
 function normalize(raw){
  const src=(raw&&typeof raw==='object'&&!Array.isArray(raw))?raw:{};
  const pages={};
@@ -80,7 +87,14 @@ function normalize(raw){
    if(Object.keys(clean).length)cards[String(cardKey)]=clean;
   }
  }
- return {version:1,global:{card:sanitizeCardPatch(src.global?.card),grid:sanitizeGridPatch(src.global?.grid)},pages,cards};
+ const componentContents={};
+ if(src.componentContents&&typeof src.componentContents==='object'&&!Array.isArray(src.componentContents)){
+  for(const [componentId,value] of Object.entries(src.componentContents)){
+   const clean=normalizeComponentLayout(value);
+   if(clean.order.length||clean.hidden.length)componentContents[String(componentId)]=clean;
+  }
+ }
+ return {version:1,global:{card:sanitizeCardPatch(src.global?.card),grid:sanitizeGridPatch(src.global?.grid)},pages,cards,componentContents};
 }
 
 // ذاكرة معيارية واحدة: قراءة فورية متسقة (مثل collapse-state) وكتابة مباشرة عبر prefs.
@@ -103,7 +117,7 @@ function ensurePage(state,pageId){
 /** نسخة كاملة من حالة التفضيلات (للعرض في الإعدادات والاختبارات). */
 export function getDisplayState(){
  const st=read();
- return {version:st.version,global:{card:{...st.global.card},grid:{...st.global.grid}},pages:JSON.parse(JSON.stringify(st.pages)),cards:JSON.parse(JSON.stringify(st.cards))};
+ return {version:st.version,global:{card:{...st.global.card},grid:{...st.global.grid}},pages:JSON.parse(JSON.stringify(st.pages)),cards:JSON.parse(JSON.stringify(st.cards)),componentContents:JSON.parse(JSON.stringify(st.componentContents))};
 }
 
 /** دمج على مستوى الحقل: Card → Page → Global → Default */
@@ -182,6 +196,45 @@ export function setGlobalDisplay(scope,patch){
  return write(st);
 }
 
+/**
+ * تخطيط محتوى مكوّن واحد (ترتيب حقوله/أجزائه وإخفاؤها) — واجهة فقط،
+ * محفوظ بمعرّف المكوّن نفسه ومستقل تمامًا عن سجلات المكتب.
+ */
+export function getComponentContent(componentId){
+ if(!componentId)return {order:[],hidden:[]};
+ const saved=read().componentContents[String(componentId)];
+ return saved?{order:[...saved.order],hidden:[...saved.hidden]}:{order:[],hidden:[]};
+}
+export function resolveComponentContent(componentId,itemIds=[]){
+ const saved=getComponentContent(componentId);
+ const available=[...new Set((Array.isArray(itemIds)?itemIds:[]).map(String))];
+ if(!available.length)return saved;
+ const allowed=new Set(available),seen=new Set();
+ const order=[];
+ for(const id of saved.order)if(allowed.has(id)&&!seen.has(id)){order.push(id);seen.add(id)}
+ for(const id of available)if(!seen.has(id)){order.push(id);seen.add(id)}
+ return {order,hidden:saved.hidden.filter(id=>allowed.has(id))};
+}
+export function setComponentContent(componentId,{order,hidden}={}){
+ if(!componentId)return null;
+ const st=read(),id=String(componentId);
+ const previous=st.componentContents[id]||{order:[],hidden:[]};
+ const clean=normalizeComponentLayout({order:Array.isArray(order)?order:previous.order,hidden:Array.isArray(hidden)?hidden:previous.hidden});
+ const componentContents={...st.componentContents};
+ if(clean.order.length||clean.hidden.length)componentContents[id]=clean;
+ else delete componentContents[id];
+ st.componentContents=componentContents;
+ return write(st);
+}
+export function clearComponentContent(componentId){
+ if(!componentId)return read();
+ const st=read(),id=String(componentId);
+ if(!(id in st.componentContents))return st;
+ const componentContents={...st.componentContents};delete componentContents[id];
+ st.componentContents=componentContents;
+ return write(st);
+}
+
 /** A− / A+ : تحريك متدرج خطوة واحدة داخل القائمة المعتمدة. */
 export function stepCardFontSize(current,direction){
  const index=CARD_FONT_SIZES.indexOf(current);
@@ -222,14 +275,15 @@ export function resetPagePreferences(pageId){
  return write(st);
 }
 /**
- * إعادة ضبط إعدادات العرض بالكامل: العام + كل البطاقات + عرض كل صفحة.
- * لا يمس ترتيب/إظهار الأقسام (تلك «تخطيط الصفحة» وتُعاد من نافذة تخصيص الصفحة)
+ * إعادة ضبط إعدادات العرض بالكامل: العام + كل البطاقات + عرض الصفحات + تخطيط بيانات المكونات.
+ * لا يمس ترتيب/إظهار أقسام الصفحة (تلك «تخطيط الصفحة» وتُعاد من نافذة تخصيص الصفحة)
  * ولا يمس أي بيانات أو فلاتر/أعمدة الجداول المحفوظة لكل جدول.
  */
 export function resetAllDisplay(){
  const st=read();
  st.global={card:{},grid:{}};
  st.cards={};
+ st.componentContents={};
  for(const id of Object.keys(st.pages))st.pages[id].display={};
  return write(st);
 }
