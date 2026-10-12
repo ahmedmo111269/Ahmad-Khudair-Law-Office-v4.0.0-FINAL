@@ -58,16 +58,8 @@ body:has(.fw) .topbar{position:static}
  overscroll-behavior-x:contain;
  scrollbar-width:thin;
 }
-.fw-title{
- margin:0;
- padding:0 4px 0 0;
- color:var(--primary);
- font-size:1.28rem;
- font-weight:800;
- letter-spacing:.01em;
- white-space:nowrap;
- flex:none;
-}
+/* الشريط المضغوط: [+ إضافة ملف جديد] · [رجوع] · [عودة] · [المزيد] — بلا عنوان ولا بحث
+   ولا إضافة سريعة ولا زر رئيسية: كلها موجودة في الشريط العام فوقه. */
 .fw-pagebar > button,
 .fw-toolbar > button{
  flex:none;
@@ -78,13 +70,36 @@ body:has(.fw) .topbar{position:static}
  padding:8px 14px;font-weight:700;
 }
 .fw-pagebar .fw-addfile .ic{width:16px;height:16px;flex:none}
-.fw-pagebar .fw-icon{
- width:40px;height:40px;min-width:40px;padding:0;
- display:inline-grid;place-items:center;
+.fw-pagebar .fw-back{
+ display:inline-flex;align-items:center;gap:6px;
+ padding:8px 10px;
 }
-.fw-pagebar .fw-icon .ic{width:20px;height:20px}
-.fw-pagebar .fw-quickadd{padding:8px 12px}
-.fw-pagebar .fw-back{padding:8px 10px}
+.fw-pagebar .fw-back .ic{width:16px;height:16px;flex:none}
+/* «العودة» (undo): زر أحدث الإجراءات القابلة للعكس. يبقى معطّلًا وهادئًا حين لا يوجد
+   ما يُعكس، ويُبرَز بنفسج/ذهبي الحدود حين يصبح فعّالًا — بلا أي أثر على بقية الأزرار. */
+.fw-undo[disabled]{
+ opacity:.45;
+ cursor:not-allowed;
+}
+.fw-undo:not([disabled]):not(.is-ready){
+ opacity:.85;
+}
+.fw-toolbar .fw-undo.is-ready,
+.fw-pagebar .fw-undo.is-ready{
+ border-color:var(--primary-border);
+ background:var(--primary-soft);
+ color:var(--primary);
+}
+.fw-undo.is-ready .ic{color:currentColor}
+/* ⚙ «تخصيص الصفحة» في هذه الصفحة: عنصر داخل شريط الأدوات في أقصى يساره (نهاية
+   اتجاه RTL) فيبقى بجانب فلاتر الجدول بدل أن يشغل مساحة في شريط الصفحة المضغوط.
+   order مرتفع يثبّته في النهاية البصرية مهما أُضيف عنصر بعده، وبلا أي تموضع مطلق. */
+.fw-toolbar .uxc-gear{
+ margin-inline-start:2px;
+ margin-inline-end:0;
+ order:99;
+ align-self:center;
+}
 .fw-pagebar .fw-morebtn{margin-inline-start:auto}
 
 /* ---------- شريط أدوات الجدول ---------- */
@@ -154,9 +169,14 @@ body:has(.fw) .topbar{position:static}
  align-items:center;
  gap:6px 10px;
  min-height:0;
+ /* flex:none ضروري: بدونها ينضغط الشريط (flex-shrink الافتراضي) تحت ارتفاع محتواه
+   فيصير نصف أزرار «إزالة الفلتر» تحت شبكة الجدول وغير قابل للنقر بالماوس/اللمس. */
+ flex:none;
  padding:4px 12px;
  background:var(--surface);
  border-bottom:1px solid var(--border);
+ position:relative;
+ z-index:1;
 }
 .fw-strip .list-status{margin:0;min-height:0}
 .fw-strip .list-status:empty{display:none}
@@ -374,16 +394,26 @@ body:has(.fw) .topbar{position:static}
 }
 
 @media(max-width:900px){
- .fw-title{font-size:1.12rem}
  .fw-search{max-width:none;flex:1 1 160px}
  .fw-lbl{display:none}
 }
 @media(max-width:640px){
  .fw-pagebar,.fw-toolbar{height:48px;min-height:48px;max-height:48px;padding:0 8px;gap:4px}
- .fw-pagebar .fw-icon{width:36px;height:36px;min-width:36px}
  .fw-tb-btn{padding:6px 8px;font-size:12px}
  .fw-search{min-width:96px;font-size:13px}
+ /* أزرار الشريط تبقى بأهداف لمس 40px كما في باقي البرنامج */
+ .fw-pagebar .fw-addfile{height:40px;min-height:40px;padding:0 12px;font-size:13px}
+ .fw-pagebar .fw-back{height:40px;min-height:40px;padding:0 10px}
+ .fw-pagebar .fw-morebtn{height:40px;min-height:40px;padding:0 12px}
  .fw .dg.dg-cards tbody{grid-template-columns:1fr}
+}
+/* شاشات ضيقة (320px): ضغط أفقي فقط — الأهداف اللمسية تبقى 40px والزران بأيقونتين
+   يصيران مربعين 40×40، فلا يُخفى أي زر ولا ينزل شيء عن حد اللمس. */
+@media(max-width:360px){
+ .fw-pagebar{padding:0 6px;gap:3px}
+ .fw-pagebar .fw-addfile{padding:0 10px;font-size:12.5px;gap:5px}
+ .fw-pagebar .fw-back{width:40px;min-width:40px;padding:0;justify-content:center}
+ .fw-pagebar .fw-morebtn{padding:0 10px;font-size:12.5px}
 }
 @media print{
  .fw-pagebar,.fw-toolbar,.fw-strip,.fw-panel,.dg-fs-exit{display:none}

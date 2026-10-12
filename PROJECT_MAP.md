@@ -1,3 +1,30 @@
+# 2026-10-12 — شريط صفحة الملفات المضغوط + سجل «العودة» (Undo) + موضع ⚙ التصريحي
+
+**لا تغيير في Schema ولا المخازن ولا `APP_VERSION`.** لا تفضيل جديد ولا كتابة في التخزين: سجل «العودة» حالة جلسة في الذاكرة فقط.
+
+| المسار | الدور والتكامل |
+|---|---|
+| `js/core/undo-stack.js` (جديد) | سجل «العودة» الوحيد: `pushUndo/peekUndo/undoDepth/removeUndo/runUndo/clearUndo`، عمق 6، LIFO، مفتاح يمنع تكرار النوع نفسه، وإشعار `undo:changed` محلي على ناقل الأحداث نفسه. دالة العكس هي المسؤول الوحيد عن التحقق (الخدمات القائمة). |
+| `js/modules/files-workspace.js` | شريط الصفحة المضغوط: `addfile` · `back` · `undo` · `more` فقط (أُزيلت كلمة «الملفات» وأيقونة البحث وزر «+ إضافة» وأيقونة الرئيسية وبدائلها في الشريط العام)، `undoState()`/`paintUndoButton` لحالتي الزر (معطّل/جاهز + وصف في `title`/`aria-label`)، ربط حيّ واحد بـ`undo:changed` يحدّث الزر بلا إعادة رسم، و«مسح الفلاتر» يُسجّل عكسًا يعيد البحث والفترة والشرائح مع مزامنة مدخلاتها. |
+| `js/ui/toast.js` | خيارا `undoable`/`undoLabel`: الإشعارات التي تحمل عكسًا حقيقيًا فقط تدخل السجل، وضغطة زر الإشعار تُفرّغ التسجيل فلا يتكرر عكس واحد مرتين. |
+| `js/ui/component-customizer.js` | `gearTargetFor` + `data-uxc-gear-target`: العنصر يعلن موضع زر ⚙ داخل التدفق (شريط أدوات المُستضيف) بدل رأس القسم أو شريط علوي — بلا تموضع مطلق ولا مساس ببقية الصفحات (الافتراضي كما هو عند غياب السمة). |
+| `js/ui/icons.js` | أيقونة `undo` خطية معكوسة الاتجاه لسياق RTL، بنفس شبكة أيقونات Lucide المستخدمة. |
+| `js/modules/list-page.js` | الأرشفة الجماعية (ملفات) و«تعليم كمنجَز» (أعمال إدارية) يُسجّلان عكسًا بخدمات التحقق نفسها (`reopenFile` / `saveEntity`) فيعمل زر «العودة» في القوائم كلها، لا في صفحة الملفات وحدها. |
+| `js/modules/record-page.js` | الحذف المنطقي يُسجّل عكسًا عبر `restoreEntity` (نفس مسار «تراجع» في الإشعار) — يُنفَّذ من الشريط أو من الإشعار، مرة واحدة. |
+| `js/modules/execution-center.js` | `withUndo` وإلغاء سجل التنفيذ يدخلان السجل عبر `voidSimpleRecord`/`undoVoidSimpleRecord`. |
+| `css/files-workspace.css` | شريط صفحة مضغوط (أزرار مربعة وأيقونات 16–20px، مقياس 48px على الهاتف)، حالات زر «العودة» (معطّل · جاهز ذهبي)، و⚙ في نهاية شريط الأدوات (`order:99` = أقصى اليسار في RTL) قبل «مسح التحديد» الذي يبقى طرف الأزرار. |
+| `sw.js` | كاش `v6.4.1-files-strip-fix` + precache للوحدة الجديدة. |
+| `css/files-workspace.css` | **إصلاح**: `.fw-strip{flex:none;position:relative;z-index:1}` — كان الشريط ينضغط فيخرج زر «✕ إزالة الفلتر» عن حدوده ويتداخل مع الجدول فيستحيل نقره في مركزه. |
+| `tools/node-tests/{grid,files-cockpit,legal-context,wave6-context,execution-feas-cycle}-browser-tests.mjs` | مواءمة الحزم الحمراء مع واجهة مساحة العمل: شريط الطباعة/الأعمدة/البطاقات + تأكيد الطباعة، شرائح فلاتر الوقت، الثيم من الإعدادات على الهاتف، ورابط تبويب بطاقة التنفيذ العميق (`exc:ID?tab=…`) مع تجريد الاستعلام عند استخراج المعرّف. **37 · 13 · 8 · 54 · 19** كلها ناجحة بلا أي فحص مُخفَّف. |
+| `screenshots/files-{desktop,mobile}-strip-after.png` | لقطتان توثّقان شريط النتائج بعد الإصلاح (شريحة نشطة + زر إزالة قابل للنقر). |
+| `js/tests/files-workspace-tests.js` · `tools/node-tests/files-workspace-final-browser-tests.mjs` | ترتيب الشريط الجديد، غياب العناصر الأربعة، موضع ⚙ وفتح لوحته، وسلوك «العودة»: تعطيل/تفعيل، عكس «مسح الفلاتر»، وعكس حذف منطقي حقيقي من صفحة الملفات. |
+
+**التحقق بعد اكتمال التنفيذ:** `run-tests` **626/626** · `tests.html` في Chromium **648/648** · `files-workspace-final` Chromium **25/25 · 0 خطأ**.
+
+**تكملة (إصلاح + مواءمة الفحص الحمراء):** `grid-browser` **37/37 · 0 خطأ** · `files-cockpit` **13/13 · 0 خطأ** · `legal-context` **8/8** · `wave6-context` **54/54** · `execution-feas-cycle` **19/19** · `files-workspace-final` **25/25** (+ حماية انحدار تمنع انضغاط شريط النتائج) · `work-center` **69/69** · `android-pwa` **31/31** · `home-focus` **56/56** · `quick-notes` و`offline-sync` **PASS** · `restructure-routes` **32/32 + 9/9** · `execution-feas` **10/10** · `release-audit` **PASS** · `module-graph` **0 مفقود**.
+
+---
+
 # File Cockpit — إعادة هندسة قسم الملفات والموكلين + قابلية طي كاملة (2026-10-09)
 
 **لا تغيير في Schema أو المخازن أو `APP_VERSION`.** تفضيلات جديدة: `ui:file-last-tab`, `ui:focus-mode`, `defaultStateMobile` (داخل `ui:collapse-state`), `chip` (داخل `ui:list-view:*`).

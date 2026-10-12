@@ -80,7 +80,7 @@ await wait(700);
 
 const created = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const execution = await app.office.r.execution.get(id);
   const S = await import('/js/services/execution-simple.js');
   const bundle = await S.simpleCardBundle(app.office, id, {asOf: '2026-06-30'});
@@ -93,7 +93,7 @@ check('تنفيذ FEAS جديد بلا اعتراف: صفر فترات وصفر 
   created.periods === 0, JSON.stringify({periods: created.periods}));
 
 // ===== 1ب) الخطوة التالية على تبويب الحساب: زر واحد للاعتراف بدل رقم صفري مبهم =====
-await page.evaluate(() => window.__LAW_OFFICE_APP__.go(`exc:${window.__LAW_OFFICE_APP__.route.replace(/^exc:/, '')}`));
+await page.evaluate(() => window.__LAW_OFFICE_APP__.go(`exc:${window.__LAW_OFFICE_APP__.route.replace(/^exc:/, '').split('?')[0]}`));
 await page.waitForSelector('.exec-numbers', {timeout: 30000});
 await wait(600);
 const nextStep = await page.evaluate(() => {
@@ -107,7 +107,7 @@ check('البطاقة تعرض «الخطوة التالية» بزر واحد �
 
 // ===== 2) تعريف التزام FEAS من أدوات متقدمة =====
 const openAdvanced = async () => {
-  await page.evaluate(() => window.__LAW_OFFICE_APP__.go(`exc:${window.__LAW_OFFICE_APP__.route.replace(/^exc:/, '')}`));
+  await page.evaluate(() => window.__LAW_OFFICE_APP__.go(`exc:${window.__LAW_OFFICE_APP__.route.replace(/^exc:/, '').split('?')[0]}`));
   await page.waitForSelector('.exec-numbers', {timeout: 30000});
   await page.locator('.exec-toolbar [data-more]').first().evaluate(node => node.click());
   await wait(400);
@@ -136,7 +136,7 @@ await openAdvanced();
 const obligation = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
   const FEAS = await import('/js/services/execution-feas.js');
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const rows = await FEAS.executionObligations(app.office, id);
   const slices = await app.office.r.executionValuePeriods.byIndex('executionId', id, 20);
   const periods = await app.office.r.executionPeriods.byIndex('executionId', id, 20);
@@ -187,7 +187,7 @@ await page.locator('[data-preview]').first().click();
 await wait(700);
 const previewState = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const periods = await app.office.r.executionPeriods.byIndex('executionId', id, 20);
   const output = document.querySelector('#modal-root [data-preview-output]')?.textContent.replace(/\s+/g, ' ') || '';
   const recognizeEnabled = !document.querySelector('#modal-root [data-recognize]')?.disabled;
@@ -207,7 +207,7 @@ const accountTab = page.locator('#main-content [data-tab="account"]').first();
 if (await accountTab.count()) { await accountTab.click(); await wait(700); }
 const recognized = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const FEAS = await import('/js/services/execution-feas.js');
   const periods = await app.office.r.executionPeriods.byIndex('executionId', id, 20);
   const balance = await FEAS.executionFeasBalanceData(app.office, id);
@@ -235,7 +235,7 @@ check('البطاقة الموحّدة تعرض أرقام FEAS نفسها مع 
 // ===== 5) تحصيل داخل FEAS يُخصم من الرصيد المعترف به =====
 const collection = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const S = await import('/js/services/execution-simple.js');
   await S.recordSimpleCollection(app.office, {executionId: id, amount: 5000, date: '2025-03-10', paymentMethod: 'cash'});
   const FEAS = await import('/js/services/execution-feas.js');
@@ -252,7 +252,7 @@ await wait(400);
 const sheetOpened = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
   const FORMS = await import('/js/ui/execution-simple-forms.js');
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   FORMS.recordSheet(app, id);
   return true;
 }).catch(() => false);
@@ -268,7 +268,7 @@ await page.locator('[data-save]').last().click();
 await wait(1500);
 const laterJudgment = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const slices = await app.office.r.executionValuePeriods.byIndex('executionId', id, 20);
   const FEAS = await import('/js/services/execution-feas.js');
   const [obligation] = await FEAS.executionObligations(app.office, id);
@@ -289,7 +289,7 @@ await wait(500);
 const settlementDialog = await page.evaluate(() => ({title: document.querySelector('#modal-root .modal-title')?.textContent.trim() || '', text: document.querySelector('#modal-root .modal-card')?.textContent.replace(/\s+/g, ' ').slice(0, 200) || ''}));
 const ledgerBeforePost = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const rows = await app.office.r.executionLedger.byIndex('executionId', id, 50).catch(() => []);
   return rows.length;
 });
@@ -300,7 +300,7 @@ await page.locator('#modal-root [data-ok]').first().click();
 await wait(1200);
 const approved = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const DF = await import('/js/services/execution-differences.js');
   const rows = await app.office.r.differenceRecords.byIndex('executionId', id, 50).catch(() => []);
   const settlementRows = await app.office.r.executionSettlements.byIndex('executionId', id, 50).catch(() => []);
@@ -320,7 +320,7 @@ if (approved.postEnabled) {
 }
 const posted = await page.evaluate(async () => {
   const app = window.__LAW_OFFICE_APP__;
-  const id = app.route.replace(/^exc:/, '');
+  const id = app.route.replace(/^exc:/, '').split('?')[0];
   const settlementRows = await app.office.r.executionSettlements.byIndex('executionId', id, 50).catch(() => []);
   const FEAS = await import('/js/services/execution-feas.js');
   const balance = await FEAS.executionFeasBalanceData(app.office, id);

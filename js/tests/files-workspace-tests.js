@@ -1,10 +1,12 @@
 // اختبارات مساحة عمل الملفات (Four-Zone Files Workspace)
 import {listPage} from '../modules/list-page.js';
-import {filesWorkspaceHtml,paintFilesWorkspace,bindFilesChrome} from '../modules/files-workspace.js';
+import {filesWorkspaceHtml,paintFilesWorkspace,bindFilesChrome,undoState} from '../modules/files-workspace.js';
 import {FILE_LIST_CHIPS} from '../modules/list-page.js';
 import {mountGrid} from '../ui/datagrid.js';
 import {openWorkspaceMenu,closeWorkspaceMenu,isWorkspaceMenuOpen} from '../ui/workspace-menu.js';
 import {PRESETS} from '../services/entity-query.js';
+import {pushUndo,removeUndo,runUndo,clearUndo,undoDepth} from '../core/undo-stack.js';
+import {toast,clearToasts} from '../ui/toast.js';
 
 const mockApp=()=>({route:'files',ctx:{profile:{id:'test'}},office:{},__lists:{}});
 const parse=html=>{const d=document.createElement('div');d.innerHTML=html;return d};
@@ -22,7 +24,7 @@ export function runFilesWorkspaceTests(test,expect){
   expect(html.includes('data-list-add')).toBe(true);
  });
 
- test('صفحة الملفات: ترتيب شريط الصفحة من اليمين إلى اليسار',()=>{
+ test('صفحة الملفات: الشريط المضغوط — إضافة ملف جديد · رجوع · عودة · المزيد فقط',()=>{
   const root=parse(listPage(mockApp(),'files',null));
   const bar=root.querySelector('[data-fw-pagebar]');
   expect(Boolean(bar)).toBe(true);
@@ -32,13 +34,19 @@ export function runFilesWorkspaceTests(test,expect){
    if(el.hasAttribute('data-fw-search'))return 'search';
    if(el.hasAttribute('data-fw-quick-add'))return 'quick';
    if(el.hasAttribute('data-fw-back'))return 'back';
+   if(el.hasAttribute('data-fw-undo'))return 'undo';
    if(el.hasAttribute('data-fw-home'))return 'home';
    if(el.hasAttribute('data-fw-page-more'))return 'more';
    return el.className;
   });
-  expect(keys.join('|')).toBe('addfile|title|search|quick|back|home|more');
+  expect(keys.join('|')).toBe('addfile|back|undo|more');
   expect(bar.querySelector('[data-list-add]').textContent).toContain('إضافة ملف جديد');
   expect(bar.querySelectorAll('[data-list-add]').length).toBe(1);
+  // العناصر المزالة من هذا الشريط انتقلت أو اختفت نهائيًا من الشريط نفسه
+  expect(Boolean(bar.querySelector('.fw-title'))).toBe(false);
+  expect(Boolean(bar.querySelector('[data-fw-search]'))).toBe(false);
+  expect(Boolean(bar.querySelector('[data-fw-quick-add]'))).toBe(false);
+  expect(Boolean(bar.querySelector('[data-fw-home]'))).toBe(false);
  });
 
  test('صفحة الملفات: ترتيب شريط أدوات الجدول — «مسح التحديد» أخيرًا (أقصى اليسار)',()=>{
@@ -82,7 +90,90 @@ export function runFilesWorkspaceTests(test,expect){
   const html=listPage(mockApp(),'files',null);
   expect(html.includes('data-page-back')).toBe(false);
   expect(html.includes('data-fw-back')).toBe(true);
-  expect(html.includes('data-fw-home')).toBe(true);
+  expect(html.includes('data-fw-undo')).toBe(true);
+ });
+
+ test('العودة (undo): معطّلة بلا سجل، وتتفعّل فور تسجيل إجراء قابل للعكس',()=>{
+  clearUndo();
+  const host=parse(listPage(mockApp(),'files',null));
+  document.body.append(host);
+  const st={q:'',preset:'all',from:'',to:'',chip:'all',status:'all'};
+  paintFilesWorkspace(host,st,null);
+  const btn=host.querySelector('[data-fw-undo]');
+  expect(btn.disabled).toBe(true);
+  expect(btn.classList.contains('is-ready')).toBe(false);
+  let ran=0;
+  const rec=pushUndo({label:'إجراء تجريبي',run:async()=>{ran++}});
+  paintFilesWorkspace(host,st,null);
+  expect(btn.disabled).toBe(false);
+  expect(btn.classList.contains('is-ready')).toBe(true);
+  expect(btn.title.includes('إجراء تجريبي')).toBe(true);
+  expect(undoState().ready).toBe(true);
+  removeUndo(rec);
+  paintFilesWorkspace(host,st,null);
+  expect(btn.disabled).toBe(true);
+  expect(ran).toBe(0);
+  clearUndo();
+  host.remove();
+ });
+
+ test('العودة (undo): تنفيذ أعلى السجل يُفرغه ويُبطل الزر',async()=>{
+  clearUndo();
+  let ran=0;
+  pushUndo({label:'أولًا',run:async()=>{ran++}});
+  pushUndo({label:'ثانيًا',run:async()=>{ran+=10}});
+  expect(undoDepth()).toBe(2);
+  const done=await runUndo();
+  expect(done.label).toBe('ثانيًا');
+  expect(ran).toBe(10);
+  expect(undoDepth()).toBe(1);
+  const second=await runUndo();
+  expect(second.label).toBe('أولًا');
+  expect(ran).toBe(11);
+  expect(await runUndo()).toBe(null);
+  expect(undoState().ready).toBe(false);
+  clearUndo();
+ });
+
+ test('العودة (undo): «مسح الفلاتر» تُسجَّل وترجع البحث والفترة والشرائح كما كانت',async()=>{
+  clearUndo();
+  const host=parse(listPage(mockApp(),'files',null));
+  document.body.append(host);
+  const st={q:'دعوى',preset:'today',from:'',to:'',chip:'active',status:'all'};
+  let loads=0;
+  const grid=mountGrid(host.querySelector('#list-grid'),{workspace:true,title:'الملفات',storageKey:'test:fw-undo-clear:'+Date.now(),rows:[{id:'1',name:'أ'}],columns:[{key:'name',label:'الاسم',searchable:true,filterable:true}]});
+  bindFilesChrome(mockApp(),{root:host,st,getGrid:()=>grid,load:()=>{loads++},syncFilterSummary:()=>{},saveListView:()=>{}});
+  paintFilesWorkspace(host,st,grid);
+  host.querySelector('[data-fw-clear]').click();
+  expect(st.q).toBe('');
+  expect(st.preset).toBe('all');
+  expect(st.chip).toBe('all');
+  expect(undoDepth()).toBe(1);
+  expect(host.querySelector('#list-q').value).toBe('');
+  const undoBtn=host.querySelector('[data-fw-undo]');
+  expect(undoBtn.disabled).toBe(false);
+  undoBtn.click();
+  await new Promise(r=>setTimeout(r,0));
+  expect(st.q).toBe('دعوى');
+  expect(st.preset).toBe('today');
+  expect(st.chip).toBe('active');
+  expect(host.querySelector('#list-q').value).toBe('دعوى');
+  expect(host.querySelector('[data-preset="today"]').classList.contains('active')).toBe(true);
+  expect(host.querySelector('[data-file-chip="active"]').classList.contains('active')).toBe(true);
+  expect(undoDepth()).toBe(0);
+  clearUndo();
+  host.remove();
+ });
+
+ test('العودة (undo): إشعار يحمل عكسًا حقيقيًا يدخل السجل، والإجراء غير العكسي لا يدخل',()=>{
+  clearUndo();
+  toast('تم التنقل','ok',{actionLabel:'افتح',action:()=>{},duration:0});
+  expect(undoDepth()).toBe(0);
+  toast('تم الحذف المنطقي','warn',{actionLabel:'تراجع',undoable:true,undoLabel:'حذف سجل',action:()=>{},duration:0});
+  expect(undoDepth()).toBe(1);
+  expect(undoState().label).toBe('حذف سجل');
+  clearUndo();
+  clearToasts();
  });
 
  test('قائمة مساحة العمل: تفتح وتُغلق بالنقر المتكرر وEscape',()=>{

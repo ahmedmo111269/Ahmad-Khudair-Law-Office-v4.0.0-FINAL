@@ -1,6 +1,9 @@
 // Phase Final — التدقيق الوظيفي الشامل لصفحة الملفات بعد اللمسات النهائية.
 // يفحص فعليًا (Chromium حقيقي + IndexedDB حقيقية، ملف شخصي مؤقت):
-//  1) زر «إضافة ملف جديد» يمين عنوان «الملفات» ومرئي وقابل للنقر ويفتح مسار الإنشاء الحقيقي.
+//  1) الشريط المضغوط: [+ إضافة ملف جديد] · [رجوع] · [عودة/undo] · [المزيد] فقط — بلا عنوان
+//     ولا بحث ولا إضافة سريعة ولا رئيسية (بدائلها في الشريط العام)، وزر الإضافة يفتح مسار الإنشاء الحقيقي.
+//  1.ب) ⚙ تخصيص الصفحة أول عنصر في شريط الأدوات (أقصى اليسار، قبل الفلاتر) ويفتح لوحته.
+//  1.ج) زر «العودة»: معطّل بلا سجل، يُسجَّل مسح الفلاتر والحذف المنطقي والأرشفة، ويُرجعها فعليًا.
 //  2) «مسح التحديد» في أقصى يسار شريط الأدوات، يمسح التحديد الفعلي ولا يمس البحث/الفلاتر.
 //  3) شريط الإجراءات الجماعية القديم (أرشفة/طباعة المحدد/فتح المحدد) محذوف من الصفحة.
 //  4) الأرشفة/الطباعة/الفتح لم تتعطل في مواضعها الأخرى.
@@ -77,38 +80,148 @@ try{
  await go('files');await waitGrid();
 
  // ================= أولًا: بنية الصفحة الجديدة =================
- await verify('بنية: شريط عنوان الصفحة مرئي وغير مغطّى — [+ إضافة ملف جديد] يمين «الملفات»',async()=>{
+ await verify('بنية: الشريط المضغوط — [+ إضافة ملف جديد] · [رجوع] · [عودة] · [المزيد] فقط',async()=>{
   const data=await page.evaluate(()=>{
    const bar=document.querySelector('[data-fw-pagebar]');const r=bar.getBoundingClientRect();
    const add=bar.querySelector('[data-list-add]');const ar=add.getBoundingClientRect();
-   const title=bar.querySelector('.fw-title');const tr=title.getBoundingClientRect();
    const p=document.elementFromPoint(ar.x+ar.width/2,ar.y+ar.height/2);
-   const t=document.elementFromPoint(tr.x+tr.width/2,tr.y+tr.height/2);
-   return {addCovered:p?p.closest('[data-list-add]')!==add:true,titleCovered:t?t.closest('.fw-title')!==title:true,
-    addRightOfTitle:ar.x>tr.x,addInTitleBar:bar.contains(add),oneAdd:bar.querySelectorAll('[data-list-add]').length,
-    quick:bar.querySelectorAll('[data-fw-quick-add]').length,label:add.textContent.trim(),y:r.y,h:r.height};
+   const keys=[...bar.children].map(el=>{
+    if(el.hasAttribute('data-list-add'))return 'addfile';
+    if(el.hasAttribute('data-fw-back'))return 'back';
+    if(el.hasAttribute('data-fw-undo'))return 'undo';
+    if(el.hasAttribute('data-fw-page-more'))return 'more';
+    return el.className||el.tagName.toLowerCase();
+   });
+   const undo=bar.querySelector('[data-fw-undo]');
+   const back=bar.querySelector('[data-fw-back]');
+   // الترتيب البصري في RTL: الإضافة في أقصى اليمين ثم الرجوع ثم العودة ثم «المزيد» يسارًا
+   const order=[...bar.children].map(el=>el.getBoundingClientRect().x);
+   return {addCovered:p?p.closest('[data-list-add]')!==add:true,keys,oneAdd:bar.querySelectorAll('[data-list-add]').length,
+    removedTitle:bar.querySelectorAll('.fw-title').length,removedSearch:bar.querySelectorAll('[data-fw-search]').length,
+    removedQuick:bar.querySelectorAll('[data-fw-quick-add]').length,removedHome:bar.querySelectorAll('[data-fw-home]').length,
+    undoDisabled:undo.disabled,backHasIcon:Boolean(back.querySelector('svg')),undoHasIcon:Boolean(undo.querySelector('svg')),
+    addRightOfBack:ar.x>back.getBoundingClientRect().x,lastIsMore:bar.lastElementChild.hasAttribute('data-fw-page-more'),
+    order,label:add.textContent.trim(),y:r.y,h:r.height,
+    globalQuick:document.querySelectorAll('#quick-add').length,globalHome:document.querySelectorAll('#nav-home').length,
+    globalSearch:document.querySelectorAll('#command-btn').length};
   });
   assert.equal(data.addCovered,false,'زر الإضافة مغطّى بعنصر آخر');
-  assert.equal(data.titleCovered,false,'عنوان الصفحة مغطّى');
-  assert.ok(data.addRightOfTitle,'الزر يجب أن يكون يمين كلمة «الملفات»');
-  assert.ok(data.addInTitleBar&&data.oneAdd===1,'زر واحد فقط في شريط العنوان');
-  assert.equal(data.quick,1,'زر «+ إضافة» العام موجود ولم يُمس');
+  assert.equal(data.keys.join('|'),'addfile|back|undo|more',`ترتيب الشريط: ${data.keys.join('|')}`);
+  assert.ok(data.oneAdd===1,'زر إضافة ملف جديد ليس واحدًا');
+  assert.equal(data.removedTitle,0,'كلمة «الملفات» ما زالت في الشريط');
+  assert.equal(data.removedSearch,0,'أيقونة البحث ما زالت في الشريط');
+  assert.equal(data.removedQuick,0,'زر «+ إضافة» ما زال في الشريط');
+  assert.equal(data.removedHome,0,'أيقونة الرئيسية ما زالت في الشريط');
+  assert.ok(data.addRightOfBack,'الإضافة يجب أن تكون يمين الرجوع');
+  assert.ok(data.lastIsMore,'«المزيد» ليس آخر عنصر (أقصى اليسار)');
+  assert.ok(data.backHasIcon&&data.undoHasIcon,'الرجوع/العودة بلا أيقونة');
   assert.ok(data.label.includes('إضافة ملف جديد'),`نص الزر: ${data.label}`);
+  // البدائل العامة باقية في الشريط العلوي الموحّد (لم يُنقل شيء بلا بديل)
+  assert.equal(data.globalQuick,1,'زر «+ إضافة» العام مفقود');
+  assert.equal(data.globalHome,1,'زر الرئيسية العام مفقود');
+  assert.equal(data.globalSearch,1,'زر البحث العام مفقود');
  });
 
- await verify('بنية: «مسح التحديد» آخر شريط الأدوات (أقصى اليسار في RTL) ومخفي بلا تحديد',async()=>{
+ await verify('بنية: ⚙ تخصيص الصفحة في أقصى يسار شريط الأدوات (يسار الفلاتر) ويفتح لوحته',async()=>{
+  const data=await page.evaluate(()=>{
+   const tb=document.querySelector('[data-fw-toolbar]');
+   const gear=tb.querySelector('.uxc-gear');
+   if(!gear)return {found:false};
+   const others=[...tb.children].filter(el=>el!==gear).map(el=>el.getBoundingClientRect()).filter(b=>b.width>0);
+   const g=gear.getBoundingClientRect();
+   const tbRect=tb.getBoundingClientRect();
+   return {found:true,last:tb.lastElementChild===gear,order:getComputedStyle(gear).order,label:gear.getAttribute('aria-label'),
+    leftOfAll:others.every(b=>g.x<b.x),insideBar:g.y>=tbRect.y-2&&g.y+g.height<=tbRect.y+tbRect.height+2,
+    inPagebar:document.querySelectorAll('[data-fw-pagebar] .uxc-gear').length,count:tb.querySelectorAll('.uxc-gear').length};
+  });
+  assert.ok(data.found,'⚙ غير موجود في شريط الأدوات');
+  assert.ok(data.last,'⚙ ليس آخر عنصر في تدفق شريط الأدوات (نهاية RTL = أقصى اليسار)');
+  assert.ok(data.leftOfAll,'⚙ ليس أقصى يسار الشريط (يسار الفلاتر وكل الأزرار)');
+  assert.ok(data.insideBar,'⚙ خارج حدود شريط الأدوات');
+  assert.ok(data.label&&data.label.includes('تخصيص'),'⚙ بلا اسم وصول واضح');
+  assert.equal(data.inPagebar,0,'⚙ ما زال داخل شريط الصفحة');
+  assert.equal(data.count,1,'⚙ مكرر في الشريط');
+  await page.locator('[data-fw-toolbar] .uxc-gear').first().click();
+  await page.waitForSelector('#modal-root .uxc-modal',{timeout:8000});
+  await page.keyboard.press('Escape');await page.waitForTimeout(250);
+  if(await page.locator('#modal-root .uxc-modal').count())await page.locator('#modal-root [data-close]').first().click();
+  await page.waitForTimeout(250);
+ });
+
+ await verify('العودة (undo): معطّلة بلا سجل، ومسح الفلاتر يُسجَّل ويُرجع البحث والشرائح كما كانت',async()=>{
+  const btn=page.locator('[data-fw-undo]');
+  const beforeUndo=await page.evaluate(()=>{
+   const b=document.querySelector('[data-fw-undo]');
+   return {disabled:b.disabled,title:b.title,clean:b.title.includes('لا يوجد')};
+  });
+  if(!beforeUndo.disabled)await page.evaluate(async()=>{await window.__LAW_OFFICE_APP__.__undo?.run?.().catch(()=>{})});
+  await searchFiles(MARK);
+  await openTimePanel();
+  await page.locator('[data-fw-panel="time"] [data-file-chip="active"]').click();
+  await page.waitForTimeout(700);
+  await closeTimePanel();
+  const stBefore=await page.evaluate(()=>({q:document.querySelector('#list-q').value,chip:[...document.querySelectorAll('[data-file-chip]')].find(b=>b.classList.contains('active'))?.dataset.fileChip}));
+  assert.ok(stBefore.q.includes(MARK),'البحث لم يُضبط قبل الاختبار');
+  assert.equal(stBefore.chip,'active','الشريحة لم تُضبط قبل الاختبار');
+  await page.locator('[data-fw-clear]').click();
+  await page.waitForTimeout(600);
+  const cleared=await page.evaluate(()=>({q:document.querySelector('#list-q').value,disabled:document.querySelector('[data-fw-undo]').disabled,title:document.querySelector('[data-fw-undo]').title}));
+  assert.equal(cleared.q,'','مسح الفلاتر لم يمسح البحث');
+  assert.equal(cleared.disabled,false,'زر العودة لم يتفعّل بعد إجراء قابل للعكس');
+  assert.ok(cleared.title.includes('مسح الفلاتر'),`وصف العودة لا يذكر الإجراء: ${cleared.title}`);
+  await page.locator('[data-fw-undo]').click();
+  await page.waitForTimeout(900);
+  const restored=await page.evaluate(()=>({q:document.querySelector('#list-q').value,chip:[...document.querySelectorAll('[data-file-chip]')].find(b=>b.classList.contains('active'))?.dataset.fileChip,
+   disabled:document.querySelector('[data-fw-undo]').disabled,toast:document.querySelector('#toast-stack')?.textContent||''}));
+  assert.equal(restored.q,stBefore.q,'العودة لم تُرجع نص البحث');
+  assert.equal(restored.chip,'active','العودة لم تُرجع الشريحة');
+  assert.equal(restored.disabled,true,'السجل لم يُفرغ بعد العودة');
+  assert.ok(restored.toast.includes('تمت العودة'),'لا إشعار تأكيد للعودة');
+ });
+
+ await verify('العودة (undo): حذف منطقي لسجل من صفحته يُسجَّل في السجل ويُرجعه الزر من صفحة الملفات',async()=>{
+  // سجل مستقل (موكل) يُنشأ للحذف ثم يُستعاد بالزر نفسه — بلا مساس ببيانات التثبيت.
+  const clientId=await page.evaluate(async MARK=>{
+   const app=window.__LAW_OFFICE_APP__;
+   const c=await app.office.saveClient({fullName:`موكل حذف ${MARK}`,phones:['01033333333']});
+   return c.id;
+  },MARK);
+  await page.evaluate(id=>window.__LAW_OFFICE_APP__.go('client:'+id),clientId);
+  await page.waitForTimeout(1200);
+  await page.locator('[data-rec-delete]').first().click();
+  await page.waitForTimeout(400);
+  const ok=page.locator('#modal-root [data-ok],#modal-root .modal-ok,#modal-root button.primary').first();
+  await ok.click();
+  await page.waitForTimeout(1200);
+  const deleted=await page.evaluate(async id=>{const c=await window.__LAW_OFFICE_APP__.office.r.clients.get(id);return Boolean(c?.isDeleted)},clientId);
+  assert.equal(deleted,true,'الحذف المنطقي لم يُنفَّذ');
+  await go('files');await waitGrid();
+  const state=await page.evaluate(()=>{const b=document.querySelector('[data-fw-undo]');return {disabled:b.disabled,title:b.title}});
+  assert.equal(state.disabled,false,'الحذف لم يُسجَّل في سجل العودة');
+  await page.locator('[data-fw-undo]').click();
+  await page.waitForTimeout(1200);
+  const restored=await page.evaluate(async id=>{const c=await window.__LAW_OFFICE_APP__.office.r.clients.get(id);return Boolean(c&&!c.isDeleted)},clientId);
+  assert.equal(restored,true,'زر العودة لم يُرجع السجل المحذوف');
+ });
+
+ await verify('بنية: «مسح التحديد» طرف شريط الأدوات (يسار كل الأزرار) ومخفي بلا تحديد',async()=>{
   const data=await page.evaluate(()=>{
    const tb=document.querySelector('[data-fw-toolbar]');
    const sel=tb.querySelector('[data-fw-sel-clear]');
-   const others=[...tb.children].filter(el=>el!==sel).map(el=>el.getBoundingClientRect().x);
+   const gear=tb.querySelector('.uxc-gear');
    const sr=sel.getBoundingClientRect();
-   return {last:tb.lastElementChild===sel,count:tb.querySelectorAll('[data-fw-sel-clear]').length,
-    hidden:sel.hidden,leftMost:others.every(x=>sr.x<x),oldSelbar:!!document.querySelector('.dg-selbar')};
+   // كل الأزرار الظاهرة غير «مسح التحديد» وغير ⚙: يجب أن تكون يمين زر مسح التحديد
+   const others=[...tb.children].filter(el=>el!==sel&&el!==gear).map(el=>el.getBoundingClientRect()).filter(b=>b.width>0).map(b=>b.x);
+   const g=gear.getBoundingClientRect();
+   return {count:tb.querySelectorAll('[data-fw-sel-clear]').length,hidden:sel.hidden,
+    // الزر مخفي في هذه المرحلة (لا تحديد) فيكون مستطيله صفريًا: نتحقق من الترتيب
+    // النسبي فقط عند ظهوره، والترتيب الفعلي مع تحديد حقيقي مفحوص في اختبار التحديد.
+    leftOfActions:others.every(x=>sr.x<x),gearLeftOfSel:sel.hidden||g.x<sr.x,oldSelbar:!!document.querySelector('.dg-selbar')};
   });
-  assert.ok(data.last,'الزر ليس آخر عنصر');
   assert.equal(data.count,1,'تكرار زر مسح التحديد');
   assert.equal(data.hidden,true,'يجب أن يكون مخفيًا بلا تحديد');
-  assert.ok(data.leftMost,'ليس أقصى يسار الشريط');
+  assert.ok(data.leftOfActions,'ليس طرف الشريط (يسار بقية الأزرار)');
+  assert.ok(data.gearLeftOfSel,'⚙ يجب أن يبقى أقصى يسار الشريط بعد ظهور مسح التحديد');
   assert.equal(data.oldSelbar,false,'الشريط القديم ما زال موجودًا في DOM');
  });
 
@@ -121,6 +234,19 @@ try{
   assert.equal(await btn.isHidden(),false,'زر مسح التحديد لم يظهر');
   const badge=await page.locator('[data-fw-sel-count]').textContent();
   assert.ok(Number(badge)>=1||badge.trim().length>0,'عدّاد التحديد لا يعمل');
+  // مع تحديد فعليّ: ⚙ يبقى أقصى يسار الشريط وزر «مسح التحديد» إلى يمينه مباشرة
+  const layout=await page.evaluate(()=>{
+   const tb=document.querySelector('[data-fw-toolbar]');
+   const gearEl=tb.querySelector('.uxc-gear'),selEl=tb.querySelector('[data-fw-sel-clear]');
+   const g=gearEl.getBoundingClientRect(),s=selEl.getBoundingClientRect();
+   // بقية الأزرار = كل عناصر الشريط عدا ⚙ و«مسح التحديد» نفسه
+   const others=[...tb.children].filter(el=>el!==gearEl&&el!==selEl).map(el=>el.getBoundingClientRect()).filter(b=>b.width>0).map(b=>b.x);
+   return {gearLeftOfSel:g.x<s.x,selLeftOfOthers:others.every(x=>x>s.x),inside:g.y>=tb.getBoundingClientRect().y-2,
+    debug:{gx:Math.round(g.x),sx:Math.round(s.x),others:others.map(x=>Math.round(x))}};
+  });
+  assert.ok(layout.gearLeftOfSel,`⚙ ليس يسار زر مسح التحديد ${JSON.stringify(layout.debug)}`);
+  assert.ok(layout.selLeftOfOthers,`زر مسح التحديد ليس طرف الشريط ${JSON.stringify(layout.debug)}`);
+  assert.ok(layout.inside,'⚙ خرج عن شريط الأدوات');
   await btn.click();
   await page.waitForTimeout(300);
  });
@@ -216,6 +342,24 @@ try{
   assert.equal(await panel.locator('[data-file-chip]').count(),6,'عدد الشرائح');
   await panel.locator('[data-file-chip="active"]').click();
   await page.waitForTimeout(600);
+  // حماية انحدار: شريط النتائج المضغوط كان ينضغط (flex-shrink) فيصير أقصر من محتواه
+  // ويخرج زر «إزالة الشريحة» عن حدوده متداخلًا مع شبكة الجدول. نقيس: (1) الشريط يحتوي
+  // محتواه فعلًا، (2) الزر هو الهدف الفعلي في مركزه بعد إغلاق اللوحة (اللوحة المفتوحة تغطيه).
+  await closeTimePanel();
+  const strip=await page.evaluate(()=>{
+   const bar=document.querySelector('.fw-strip');
+   if(!bar)return {strip:false};
+   const box=bar.getBoundingClientRect();
+   const content=Math.max(...[...bar.children].map(child=>child.getBoundingClientRect().bottom),box.top)-box.top;
+   const chip=bar.querySelector('[data-fs-clear="chip"]');
+   const chipBox=chip?.getBoundingClientRect();
+   const hit=chipBox?document.elementFromPoint(chipBox.x+chipBox.width/2,chipBox.y+chipBox.height/2):null;
+   return {strip:true,stripH:Math.round(box.height),contentH:Math.round(content),chipH:chipBox?Math.round(chipBox.height):null,
+    clickable:Boolean(chipBox)&&Boolean(hit)&&(hit===chip||chip.contains(hit))};
+  });
+  assert.equal(strip.strip,true,'شريط النتائج موجود بعد الفلترة');
+  assert.ok(strip.contentH<=strip.stripH+1,`شريط النتائج لا يحتوي محتواه (انضغاط/تغطية) — ${JSON.stringify(strip)}`);
+  assert.equal(strip.clickable,true,`زر «إزالة الشريحة» ليس هدف النقر في مركزه — ${JSON.stringify(strip)}`);
   const timeBadge=await page.locator('[data-fw-time-count]').textContent();
   assert.ok(Number(timeBadge)>=1,'شارة فلاتر الوقت لم تُحدّث');
   // فترة «اليوم» تُركَّب فوق الشريحة (لا تلغيها) — الشارة تصبح 2+
@@ -298,13 +442,17 @@ try{
   await page.waitForTimeout(300);
   assert.equal((await gridUi()).selected,2,'التحديد لم يسجّل');
   assert.equal(await btn.isHidden(),false);
-  // يقف في أقصى اليسار حتى بعد ظهوره
-  const [sx,others]=await page.evaluate(()=>{
+  // يقف في طرف الشريط (يسار كل الأزرار الفعلية) بعد ظهوره؛ و⚙ يبقى يساره تمامًا
+  const [sx,others,gx]=await page.evaluate(()=>{
    const tb=document.querySelector('[data-fw-toolbar]');
    const sel=tb.querySelector('[data-fw-sel-clear]');
-   return [sel.getBoundingClientRect().x,[...tb.children].filter(el=>el!==sel&&!el.hidden).map(el=>el.getBoundingClientRect().x)];
+   const gear=tb.querySelector('.uxc-gear');
+   return [sel.getBoundingClientRect().x,
+    [...tb.children].filter(el=>el!==sel&&el!==gear&&!el.hidden).map(el=>el.getBoundingClientRect().x),
+    gear.getBoundingClientRect().x];
   });
-  assert.ok(others.every(x=>sx<x),'الزر الظاهر ليس أقصى اليسار');
+  assert.ok(others.every(x=>sx<x),'الزر الظاهر ليس طرف الشريط');
+  assert.ok(gx<sx,'⚙ ليس أقصى يسار الشريط بعد ظهور مسح التحديد');
   await btn.click();
   await page.waitForTimeout(300);
   assert.equal((await gridUi()).selected,0,'لم يُمسح التحديد الفعلي');
@@ -408,7 +556,7 @@ try{
 
  // --- البحث الشامل + الإضافة العامة + الرئيسية/الرجوع ---
  await verify('البحث الشامل العام يفتح ويغلق بـ Escape ويعرض نتائج',async()=>{
-  await page.locator('[data-fw-search]').click();
+  await page.locator('#command-btn').click();
   const pal=page.locator('#modal-root .palette-card');
   await pal.waitFor({timeout:8000});
   const input=pal.locator('.pal-q');
@@ -423,14 +571,14 @@ try{
   assert.equal(await pal.count(),0,'Escape لم يغلق لوحة الأوامر');
  });
  await verify('زر «+ إضافة» العام يفتح الإضافة السريعة ويغلق',async()=>{
-  await page.locator('[data-fw-quick-add]').click();
+  await page.locator('#quick-add').click();
   await page.waitForTimeout(700);
   const open=await page.evaluate(()=>Boolean(document.querySelector('#modal-root .modal-card')));
   assert.ok(open,'الإضافة السريعة لم تفتح');
   await page.locator('#modal-root [data-close]').first().click();await page.waitForTimeout(300);
  });
- await verify('زر الرئيسية وزر الرجوع ينقلان فعليًا',async()=>{
-  await page.locator('[data-fw-home]').click();await page.waitForTimeout(800);
+ await verify('زر الرئيسية العام وزر الرجوع في شريط الصفحة ينقلان فعليًا',async()=>{
+  await page.locator('#nav-home').click();await page.waitForTimeout(800);
   assert.equal((await route()).split(':')[0],'dashboard','زر الرئيسية لم ينقل للوحة');
   await go('clients');await page.waitForTimeout(700);
   await go('files');await waitGrid();

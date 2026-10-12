@@ -61,8 +61,21 @@ async function openTools(locator){
  if(await locator.locator('.dg-tools-summary-toggle').getAttribute('aria-expanded')==='false')await locator.locator('.dg-tools-summary-toggle').click();
 }
 async function printPopup(locator,{screenshot='',button='.dg-print'}={}){
- await openTools(locator);
- const opened=locator.page().context().waitForEvent('page');await locator.locator(button).click();const popup=await opened;
+ // وضع مساحة العمل (صفحة الملفات) يخفي أدوات الجدول الداخلية عن قصد: الطباعة تُطلب من
+ // قائمة «المزيد» في شريط الأدوات وبالنطاق المقابل للزر المطلوب — نفس مسار الطباعة نفسه.
+ const workspace=await locator.evaluate(element=>element.classList.contains('dg-workspace')).catch(()=>false);
+ const opened=locator.page().context().waitForEvent('page');
+ if(workspace){
+  const scope=button.includes('sel')?'selected':'page';
+  await locator.page().locator('[data-fw-io]').click();
+  await locator.page().locator(`.dg-ws-pop [data-ws-io="print"][data-ws-scope="${scope}"]`).click();
+  // مسار الطباعة في مساحة العمل يمرّ بـ«تأكيد» صريح (لا يطبع مباشرة كما في الجداول الداخلية)
+  await locator.page().locator('#modal-root .modal-card [data-ok]').click();
+ }else{
+  await openTools(locator);
+  await locator.locator(button).click();
+ }
+ const popup=await opened;
  popup.on('pageerror',error=>report.errors.push(error.message));
  await popup.waitForFunction(()=>document.querySelector('.dg-print-header')&&window.__printRequested>0,null,{timeout:20000});
  const data=await popup.evaluate(()=>({
@@ -389,7 +402,10 @@ async function verifyFullSuite(){
  await go('files');await page.waitForSelector('#list-grid tbody tr[data-i]');await openTools(page.locator('#list-grid'));
  const keys=await page.locator('#list-grid thead th[data-key]').evaluateAll(nodes=>nodes.map(node=>node.dataset.key));
  await verify('Legal file table exposes three independent columns, not concatenated file titles',()=>{assert.deepEqual(keys.slice(0,3),['fileNumber','clientId','opponentId'])});
- await page.locator('#list-grid .dg-cols-btn').click();
+ // في وضع مساحة العمل تُفتح لوحة الأعمدة نفسها من «إعدادات العرض» في شريط الأدوات
+ // (زر «تخصيص الجدول» الداخلي مخفي مع بقية أدوات الجدول عن قصد).
+ await page.locator('[data-fw-display]').click();
+ await page.locator('.dg-ws-pop [data-ws-cols]').click();
  await page.locator('.dg-cols-list input[value="title"]').uncheck();
  await page.locator('.dg-cols-list li[data-k="opponentId"] [data-mv="-1"]').click();await page.locator('.dg-pop .dg-x').click();
  await page.locator('#list-grid th[data-key="opponentId"] .dg-resizer').press('ArrowLeft');
@@ -439,7 +455,8 @@ async function verifyFullSuite(){
  await page.locator('#list-grid .dg-rowchk[data-i="0"]').check();output=await printPopup(page.locator('#list-grid'),{button:'.dg-sel-print'});
  await verify('Selected-rows Print uses the same popup/context pipeline without inferring a client from one row',()=>{assert.equal(output.rows.length,1);assert.ok(!('الموكل' in output.fields))});
  await page.setViewportSize({width:390,height:844});await openTools(page.locator('#list-grid'));
- await page.locator('#list-grid .dg-cards-btn').click();
+ // تبديل البطاقات في وضع مساحة العمل بزر شريط الأدوات نفسه (نفس دالة toggleCards)
+ await page.locator('[data-fw-cards]').click();
  await verify('Responsive grid presentation retains file/client/opponent labels on mobile',async()=>{
   assert.ok(await page.locator('#list-grid.dg-cards td[data-label="الخصم"]').count());
   assert.ok(await page.locator('#list-grid.dg-cards td[data-label="الموكل"]').count());

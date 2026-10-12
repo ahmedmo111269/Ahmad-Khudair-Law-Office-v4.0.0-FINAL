@@ -17,6 +17,7 @@ import {getFavorites} from '../services/favorites.js';
 import {updateCollapseSummary} from '../ui/collapsible.js';
 import {PROCEDURES_EXTRAS} from './procedures-extras.js';
 import {filesWorkspaceHtml,bindFilesChrome,paintFilesWorkspace} from './files-workspace.js';
+import {pushUndo} from '../core/undo-stack.js';
 
 // ===== سجل إضافات القائمة =====
 // صفحة قائمة عامة تستضيف لوحات مخصصة فوق الجدول (ملخص/إحصاء/لوحة حالات)
@@ -362,15 +363,25 @@ async function handleBulk(app,store,id,rows,reload){
  }
  if(id==='archive'&&store==='files'){
   const {archiveFile}=await import('../services/legal-files.js');
-  let n=0;
-  for(const r of rows){if(r.isArchived)continue;await archiveFile(app.office,r.id,'أرشفة جماعية من الجدول');n++}
-  toast(n?`تمت أرشفة ${n} ملفًا`:'الملفات المحددة مؤرشفة بالفعل');
+  const {reopenFile}=await import('../services/legal-files.js');
+  const archived=[];
+  for(const r of rows){if(r.isArchived)continue;await archiveFile(app.office,r.id,'أرشفة جماعية من الجدول');archived.push(r.id)}
+  if(!archived.length){toast('الملفات المحددة مؤرشفة بالفعل');return}
+  toast(`تمت أرشفة ${archived.length} ملفًا — يمكنك العودة عنها الآن`, 'ok', {undoable:true,undoLabel:`أرشفة ${archived.length} ملفًا`});
+  // «العودة» في شريط صفحة الملفات تعيد فتح نفس الملفات عبر خدمة إعادة الفتح نفسها.
+  pushUndo({key:'files:bulk-archive',label:`أرشفة ${archived.length} ملفًا`,run:async()=>{
+   for(const fid of archived)await reopenFile(app.office,fid,'تراجع عن أرشفة جماعية');
+  }});
   return reload?.();
  }
  if(id==='done'&&store==='procedures'){
   const {saveEntity}=await import('../services/entity-save.js');
+  const before=rows.map(r=>({id:r.id,status:r.status}));
   for(const r of rows)await saveEntity(app.office,'procedures',{...r,status:'done'},r.id);
-  toast('تم تحديث حالة الأعمال المحددة');
+  toast('تم تحديث حالة الأعمال المحددة — يمكنك العودة عنها الآن','ok',{undoable:true,undoLabel:'تعليم الأعمال كمنجَزة'});
+  pushUndo({key:'procedures:bulk-done',label:'تعليم الأعمال كمنجَزة',run:async()=>{
+   for(const b of before){const cur=await app.office.r.procedures.get(b.id);if(cur)await saveEntity(app.office,'procedures',{...cur,status:b.status||''},b.id)}
+  }});
   return reload?.();
  }
 }

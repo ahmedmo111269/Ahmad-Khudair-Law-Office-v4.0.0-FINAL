@@ -109,25 +109,47 @@ try{
 
  await verify('معاينة السجل تلتزم بمتغيرات الثيم في الفاتح والداكن',async()=>{
   const openPreview=async()=>{
+   await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('clients'));
+   const filterToggle=page.locator('.list-filter-panel .collapse-toggle');
+   if(await filterToggle.getAttribute('aria-expanded')==='false')await filterToggle.click();
+   await page.locator('#list-q').waitFor({state:'visible'});
+   await page.locator('#list-q').fill(fixture.client.fullName);
    const row=page.locator('.dg tbody tr[data-i]').filter({hasText:fixture.client.fullName}).first();
+   await row.waitFor({state:'visible'});
    await row.locator('.dg-qa-btn').click();await page.locator('.dg-ctx [data-act="preview"]').click();
    const preview=page.locator('.record-preview-card');await preview.waitFor({state:'visible'});return preview;
+  };
+  // الهاتف يُخفي زر المظهر في الشريط العلوي عن قصد: التبديل من الإعدادات › المظهر (نفس setTheme).
+  const pickPreset=async preset=>{
+   await page.evaluate(()=>{window.__LAW_OFFICE_APP__.__settingsTab='appearance';window.__LAW_OFFICE_APP__.go('settings')});
+   const card=page.locator(`.preset-card[data-preset="${preset}"]`);
+   await card.waitFor({state:'attached',timeout:10000});
+   // لوحة «الثيم الأساسي» قد تكون مطوية (الحالة محفوظة): نفتحها كما يفعل زر الطي نفسه.
+   await card.evaluate(element=>{for(let node=element;node;node=node.parentElement){if(node.dataset.collapseReady==='true')node.dispatchEvent(new CustomEvent('collapse:bulk',{detail:{collapsed:false,persist:false}}))}});
+   await card.waitFor({state:'visible',timeout:10000});
+   await card.click();
+   await page.waitForTimeout(250);
   };
   const darkPreview=await openPreview();
   const dark=await darkPreview.locator('.rp-fields>div').first().evaluate(element=>getComputedStyle(element).backgroundColor);
   await darkPreview.locator('[data-close]').first().click();
-  await page.locator('#theme-btn').click();await page.locator('.theme-menu [data-preset="elegantLight"]').click();
+  await pickPreset('elegantLight');
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'elegantLight');
   const lightPreview=await openPreview();
   const light=await lightPreview.locator('.rp-fields>div').first().evaluate(element=>getComputedStyle(element).backgroundColor);
   assert.notEqual(light,dark,`light=${light}; dark=${dark}`);
-  assert.equal(await page.locator('html').getAttribute('data-theme'),'elegantLight');
   await lightPreview.locator('[data-close]').first().click();
-  await page.locator('#theme-btn').click();await page.locator('.theme-menu [data-preset="luxuryGold"]').click();
+  await pickPreset('luxuryGold');
+  assert.equal(await page.locator('html').getAttribute('data-theme'),null,'عاد الثيم الافتراضي (الأسود والذهبي)');
  });
 
  await verify('نموذج الموكل يحجب الحفظ عند رقم قومي مطابق حتى إقرار المتابعة صراحةً',async()=>{ 
   const before=await page.evaluate(()=>window.__LAW_OFFICE_APP__.office.r.clients.count());
-  await page.locator('[data-list-add]').click();
+  // الفحص السابق انتهى على صفحة الإعدادات (تبديل الثيم): نعود إلى قائمة الموكلين قبله مباشرة.
+  await page.evaluate(()=>window.__LAW_OFFICE_APP__.go('clients'));
+  const addBtn=page.locator('[data-list-add]');
+  await addBtn.waitFor({state:'visible',timeout:15000});
+  await addBtn.click();
   await page.locator('.entity-form[data-store="clients"] [name="fullName"]').fill(`موكل مستقل بإقرار اختبار ${suffix}`);
   await page.locator('.entity-form[data-store="clients"] [name="nationalId"]').fill(fixture.nationalId);
   const warning=page.locator('.client-duplicate-warning');await warning.waitFor({state:'visible'});

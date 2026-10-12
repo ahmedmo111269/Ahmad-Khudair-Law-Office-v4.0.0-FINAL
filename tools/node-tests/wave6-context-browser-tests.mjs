@@ -58,6 +58,10 @@ const go = async (route, waitFor = 400) => {
   await settle(waitFor);
 };
 const route = () => page.evaluate(() => window.__LAW_OFFICE_APP__.route);
+// بطاقة التنفيذ تُثبّت تبويبها النشط في المسار كرابط عميق (exc:ID?tab=…)،
+// فالمقارنة تكون على المسار الأساس بلا استعلام — مع بقاء التبويب جزءًا صريحًا من العنوان.
+const baseRoute = value => String(value || '').split('?')[0];
+const tabOf = value => new URLSearchParams(String(value || '').split('?')[1] || '').get('tab');
 const text = selector => page.evaluate(sel => document.querySelector(sel)?.textContent?.replace(/\s+/g, ' ').trim() || '', selector);
 const count = selector => page.locator(selector).count();
 const visible = selector => page.locator(selector).first().isVisible().catch(() => false);
@@ -247,7 +251,7 @@ try {
       await settle(1200);
     }
     check('من الطابور إلى بطاقة التنفيذ نفسها (Open Context)',
-      (await route()) === `exc:${seeded.executionId}`, await route());
+      baseRoute(await route()) === `exc:${seeded.executionId}` && Boolean(tabOf(await route())), await route());
     await go('dashboard', 900);
   }
   // الفلتر العملي داخل الصفوف المعروضة (سلوك قائم: الطابور مقصوص عند 12 صفًا).
@@ -289,7 +293,8 @@ try {
   await page.locator('#main-content .cp-exec-main').first().click();
   await settle(1100);
   check('نقرة الصف تفتح بطاقة التنفيذ نفسها (Relation: File → Execution)',
-    (await route()) === rowRoute, `${await route()} vs ${rowRoute}`);
+    baseRoute(await route()) === baseRoute(rowRoute) && baseRoute(rowRoute) === `exc:${seeded.executionId}`,
+    `${await route()} vs ${rowRoute}`);
   const cardTitle = await text('#page-title');
   check('بطاقة التنفيذ مفتوحة من سياق الملف', cardTitle.includes('التنفيذ'), cardTitle);
 

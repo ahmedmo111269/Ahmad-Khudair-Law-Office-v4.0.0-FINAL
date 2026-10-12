@@ -1,27 +1,53 @@
 // مساحة عمل الملفات — أربعة أقسام: الشريط العام (خارج هذه الوحدة) + شريط الصفحة + شريط الجدول + البيانات.
 // لا تُنشئ محرك بيانات جديدًا: البحث والفلاتر والجدول تبقى عبر list-page + datagrid.
+// شريط الصفحة المضغوط: [+ إضافة ملف جديد] + [رجوع] + [عودة/undo] + [المزيد] فقط —
+// العنوان والبحث والإضافة السريعة والرئيسية أُزيلت منه لأن الشريط العام فوقها يحملها.
 import {esc} from '../ui/dom.js';
 import {icon} from '../ui/icons.js';
-import {openPalette} from '../ui/palette.js';
-import {openQuickAdd} from './quick-add.js';
+import {events} from '../core/events.js';
+import {peekUndo,runUndo,pushUndo} from '../core/undo-stack.js';
+import {toast} from '../ui/toast.js';
 import {openThemeMenuAt} from '../ui/theme-menu.js';
 import {openWorkspaceMenu,closeWorkspaceMenu} from '../ui/workspace-menu.js';
 
 const timeCount=st=>(st.preset&&st.preset!=='all'?1:0)+(st.chip&&st.chip!=='all'?1:0)+((st.from||st.to)&&st.preset==='custom'?0:0);
+
+/** مزامنة مدخلات الفلاتر الظاهرة مع حالة البحث (تُستخدم بعد مسح الفلاتر وبعد عكسه). */
+const syncFilterInputs=(root,st)=>{
+ const q=root.querySelector('#list-q');if(q)q.value=st.q||'';
+ root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset===(st.preset||'all')));
+ root.querySelectorAll('[data-file-chip]').forEach(x=>{
+  const on=x.dataset.fileChip===(st.chip||'all');
+  x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on));
+ });
+ const cr=root.querySelector('.custom-range');
+ if(cr){
+  cr.hidden=st.preset!=='custom';
+  const from=cr.querySelector('#list-from'),to=cr.querySelector('#list-to');
+  if(from)from.value=st.from||'';
+  if(to)to.value=st.to||'';
+ }
+};
+
+/** وصف حالة زر «العودة» (نص/title) من أعلى السجل — بلا أي قراءة من التخزين. */
+export function undoState(){
+ const top=peekUndo();
+ return top
+  ?{ready:true,label:top.label||'آخر إجراء',title:`عودة — تراجع عن: ${top.label||'آخر إجراء'}`}
+  :{ready:false,label:'',title:'لا يوجد إجراء للتراجع عنه'};
+}
 
 export function filesWorkspaceHtml({st,presets,chips,hasDate}){
  const q=esc(st.q||'');
  const chipsHtml=`<div class="list-status-chips" role="group" aria-label="حالات الملفات السريعة">${chips.map(([k,l])=>`<button type="button" class="chip${st.chip===k?' active':''}" data-file-chip="${k}" aria-pressed="${st.chip===k}">${esc(l)}</button>`).join('')}</div>`;
  const presetsHtml=hasDate?`<div class="preset-bar" role="group" aria-label="فترة تاريخ الفتح">${presets.map(([k,l])=>`<button type="button" class="chip${st.preset===k?' active':''}" data-preset="${k}">${esc(l)}</button>`).join('')}</div>
   <div class="custom-range"${st.preset==='custom'?'':' hidden'}><label>من<input type="date" id="list-from" value="${esc(st.from||'')}"></label><label>إلى<input type="date" id="list-to" value="${esc(st.to||'')}"></label><button type="button" class="ghost" data-range-apply>عرض</button></div>`:'';
+ const und=undoState();
  return `<div class="fw" data-files-workspace>
  <header class="fw-pagebar" data-fw-pagebar>
   <button type="button" class="primary fw-addfile" data-list-add title="إنشاء ملف قانوني جديد — نفس مسار الإنشاء المعتمد (تحقق وترقيم تلقائي وتنقّل)">${icon('plus')}<span class="fw-addfile-lbl">إضافة ملف جديد</span></button>
-  <h2 class="fw-title">الملفات</h2>
-  <button type="button" class="ghost icon-btn fw-icon" data-fw-search aria-label="بحث شامل" title="لوحة الأوامر — البحث الشامل">${icon('search')}</button>
-  <button type="button" class="primary fw-quickadd" data-fw-quick-add title="إضافة سريعة لأي سجل">+ إضافة</button>
-  <button type="button" class="ghost fw-back" data-fw-back title="رجوع">↩ <span class="fw-lbl">رجوع</span></button>
-  <button type="button" class="ghost icon-btn fw-icon" data-fw-home aria-label="الرئيسية" title="الرئيسية">${icon('home')}</button>
+  <button type="button" class="ghost fw-back" data-fw-back title="رجوع" aria-label="رجوع">${icon('arrowBack')}<span class="fw-lbl">رجوع</span></button>
+  <button type="button" class="ghost fw-back fw-undo${und.ready?' is-ready':''}" data-fw-undo title="${esc(und.title)}" aria-label="عودة — تراجع عن آخر إجراء"${und.ready?'':' disabled'}>${icon('undo')}<span class="fw-lbl">عودة</span></button>
   <button type="button" class="ghost fw-morebtn" data-fw-page-more aria-haspopup="true" aria-expanded="false">المزيد</button>
  </header>
  <div class="fw-panel" data-fw-panel="page-more" hidden role="menu" aria-label="المزيد">
@@ -48,7 +74,7 @@ export function filesWorkspaceHtml({st,presets,chips,hasDate}){
   <span class="fw-sr" data-list-filter-count></span>
   <div class="list-filter-summary" id="list-filter-summary" aria-live="polite"></div>
  </div>
- <div id="list-grid" class="fw-grid" data-section-id="grid"></div>
+ <div id="list-grid" class="fw-grid" data-section-id="grid" data-uxc-gear-target="[data-fw-toolbar]"></div>
 </div>`;
 }
 
@@ -77,6 +103,15 @@ export function paintFilesWorkspace(root,st,grid){
   cardsBtn.setAttribute('aria-pressed',String(cards));
   cardsBtn.title=cards?'عرض جدول':'عرض بطاقات';
  }
+ // زر «العودة»: يتفعّل فقط حين يوجد إجراء قابل للعكس في السجل، ويحمل وصفه في التلميح.
+ const undoBtn=root.querySelector('[data-fw-undo]');
+ if(undoBtn){
+  const und=undoState();
+  undoBtn.disabled=!und.ready;
+  undoBtn.classList.toggle('is-ready',und.ready);
+  undoBtn.title=und.title;
+  undoBtn.setAttribute('aria-label',und.ready?`عودة — تراجع عن: ${und.label}`:'عودة — لا يوجد إجراء للتراجع عنه');
+ }
  const nList=(String(st.q||'').trim()?1:0)+nTime+(st.status&&st.status!=='all'?1:0);
  const clearBtn=root.querySelector('[data-fw-clear]');
  if(clearBtn){
@@ -86,16 +121,40 @@ export function paintFilesWorkspace(root,st,grid){
  }
 }
 
+// ربط «حي» واحد بوحدة الصفحة الظاهرة حاليًا: أي تسجيل أو تنفيذ في سجل العودة
+// (من هذه الصفحة أو من غيرها) يُحدّث الزر فورًا بلا إعادة رسم للصفحة.
+let liveBinding=null;
+events.on('undo:changed',()=>{
+ if(!liveBinding?.root||!document.body.contains(liveBinding.root))return;
+ paintFilesWorkspace(liveBinding.root,liveBinding.st,liveBinding.getGrid?.());
+});
+
 export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,saveListView}){
  if(!root?.querySelector?.('[data-files-workspace]'))return;
  const gridOf=()=>getGrid?.()||root.querySelector('#list-grid')?.__grid||null;
+ liveBinding={root,st,getGrid:gridOf};
  const closeAll=()=>{closeWorkspaceMenu();document.querySelectorAll('.dg-pop .dg-x').forEach(x=>x.click())};
  const panel=name=>root.querySelector(`[data-fw-panel="${name}"]`);
 
- root.querySelector('[data-fw-search]')?.addEventListener('click',()=>{closeAll();openPalette(app)});
- root.querySelector('[data-fw-quick-add]')?.addEventListener('click',()=>{closeAll();openQuickAdd(app)});
  root.querySelector('[data-fw-back]')?.addEventListener('click',()=>{closeAll();app.back()});
- root.querySelector('[data-fw-home]')?.addEventListener('click',()=>{closeAll();app.go('dashboard')});
+
+ // «العودة» (undo): عكس آخر إجراء مسجَّل — الحذف المنطقي والأرشفة وإلغاء السجلات
+ // ومسح الفلاتر… كلها تعكس نفسها عبر خدمة التحقق الخاصة بها (لا كتابة مباشرة هنا).
+ root.querySelector('[data-fw-undo]')?.addEventListener('click',async e=>{
+  closeAll();
+  const btn=e.currentTarget;
+  if(!peekUndo()){toast('لا يوجد إجراء للتراجع عنه','info');return}
+  btn.disabled=true;
+  try{
+   const done=await runUndo();
+   toast(done?.label?`تمت العودة عن: ${done.label}`:'تمت العودة عن آخر إجراء');
+  }catch(error){
+   console.error('undo',error);
+   toast(error?.message||'تعذّر التراجع عن آخر إجراء','error');
+  }
+  await load?.();
+  paintFilesWorkspace(root,st,gridOf());
+ });
 
  root.querySelector('[data-fw-page-more]')?.addEventListener('click',e=>{
   const btn=e.currentTarget;
@@ -148,16 +207,23 @@ export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,save
  });
  root.querySelector('[data-fw-clear]')?.addEventListener('click',()=>{
   closeAll();
+  // حِفظ ما سيُمحى أولًا: «مسح الفلاتر» أشيع خطأ يمكن تصحيحه بضغطة «عودة».
+  const before={q:st.q||'',preset:st.preset||'all',from:st.from||'',to:st.to||'',chip:st.chip||'all',status:st.status||'all'};
+  const hadFilters=Boolean(String(before.q).trim()||before.preset!=='all'||before.chip!=='all'||before.status!=='all');
   st.q='';st.preset='all';st.from='';st.to='';st.chip='all';st.status='all';
-  const q=root.querySelector('#list-q');if(q)q.value='';
-  root.querySelectorAll('[data-preset]').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));
-  root.querySelectorAll('[data-file-chip]').forEach(x=>{const on=x.dataset.fileChip==='all';x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on))});
-  const cr=root.querySelector('.custom-range');if(cr)cr.hidden=true;
+  syncFilterInputs(root,st);
   saveListView?.();
   syncFilterSummary?.();
   const g=gridOf();
   if(g?.clearQueryFilters)g.clearQueryFilters();
   else load?.();
+  if(hadFilters)pushUndo({key:'files:clear-filters',label:'مسح الفلاتر',run:async()=>{
+   Object.assign(st,before);
+   syncFilterInputs(root,st);
+   saveListView?.();
+   syncFilterSummary?.();
+   await load?.();
+  }});
   paintFilesWorkspace(root,st,g);
  });
 

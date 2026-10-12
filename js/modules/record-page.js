@@ -82,7 +82,7 @@ async function confirmDelete(app,store,id){
  try{await deleteEntity(app.office,store,id)}catch(e){toast(userError(e),'error');return}
  // «تراجع» خلال ١٢ ثانية: الحذف المنطقي علَمٌ فقط، وإعادة العلم آمنة تمامًا.
  // الإشعار يُعرض قبل الرجوع ولا يُنتظَر به: فشل التنقل أو بطؤه لا يبتلع فرصة التراجع.
- toast('تم الحذف المنطقي — يمكنك التراجع الآن','warn',{duration:12000,actionLabel:'تراجع',action:async()=>{
+ toast('تم الحذف المنطقي — يمكنك التراجع الآن','warn',{duration:12000,actionLabel:'تراجع',undoable:true,undoLabel:`حذف ${ENTITIES[store]?.label||'سجل'}`,action:async()=>{
   try{await restoreEntity(app.office,store,id);toast('تم التراجع: السجل عاد كما كان');await app.refresh()}
   catch(error){toast(userError(error),'error')}
  }});
