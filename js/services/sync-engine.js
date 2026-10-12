@@ -69,6 +69,22 @@ function sameValue(a, b) {
   try { return stableValue(a) === stableValue(b); }
   catch { return false; }
 }
+function sameEntityValue(entity, a, b) {
+  if (sameValue(a, b)) return true;
+  // Built-in taxonomy/catalog rows have stable IDs and content on every install,
+  // but their seed timestamps were historically generated at first launch. Those
+  // metadata-only differences must not create hundreds of false sync conflicts.
+  const stableSystemSeed = ['taxonomy', 'caseTemplates'].includes(entity)
+    && a?.system === true && b?.system === true && String(a?.id) === String(b?.id);
+  if (!stableSystemSeed) return false;
+  const withoutSeedTimes = row => {
+    const copy = {...row};
+    delete copy.createdAt;
+    delete copy.updatedAt;
+    return copy;
+  };
+  return sameValue(withoutSeedTimes(a), withoutSeedTimes(b));
+}
 function idbRequest(req) {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
@@ -214,13 +230,14 @@ export function validateSyncBundle(bundle, {deviceId = getDeviceId()} = {}) {
 }
 
 function decideRemoteApplication(localRow, localHead, remoteChange) {
-  if (!localHead) return localRow ? (sameValue(localRow, remoteChange.payload) ? {kind: 'same'} : {kind: 'conflict'}) : {kind: 'apply'};
+  const sameEntity = (left, right) => sameEntityValue(remoteChange.entity, left, right);
+  if (!localHead) return localRow ? (sameEntity(localRow, remoteChange.payload) ? {kind: 'same'} : {kind: 'conflict'}) : {kind: 'apply'};
   // A locally purged row is physically absent; its applied change-log head still
   // prevents an older offline branch from recreating it on a later exchange.
   const relation = vectorRelation(remoteChange.causalVector, localHead.causalVector);
   if (relation === 'after') return {kind: 'apply'};
   if (relation === 'before') return {kind: 'stale'};
-  if (localRow && sameValue(localRow, remoteChange.payload)) return {kind: 'same'};
+  if (localRow && sameEntity(localRow, remoteChange.payload)) return {kind: 'same'};
   if (!localRow && remoteChange.operation === 'delete' && remoteChange.payload?.isPurged === true && localHead.operation === 'delete' && localHead.payload?.isPurged === true && sameValue(localHead.payload, remoteChange.payload)) return {kind: 'same'};
   // Equal or concurrent vectors with different data are anomalies/conflicts, never timestamp ties.
   return {kind: 'conflict'};

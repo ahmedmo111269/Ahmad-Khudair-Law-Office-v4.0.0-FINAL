@@ -29,10 +29,10 @@ import {
 } from '../core/component-style.js';
 import {
  CARD_DENSITIES,CARD_DENSITY_LABELS,FIELD_LAYOUTS,FIELD_LAYOUT_LABELS,
- resolveCardDisplay,resolvePageDisplay,setCardDisplay,setPageDisplay,
- resolveComponentContent,setComponentContent,clearComponentContent
+ resolveCardDisplay,resolvePageDisplay,setCardDisplay,setPageDisplay,clearCardDisplay,clearPageDisplay,
+ setComponentContent,clearComponentContent
 } from '../core/display-prefs.js';
-import {applyComponentContent,componentContentItems} from './component-content.js';
+import {applyComponentContent,componentContentItems,resolveComponentContentView} from './component-content.js';
 
 // ===== سجل المكونات القابلة للتخصيص (قابلية التوسع — البند 24) =====
 const componentRegistry=new Map();
@@ -144,14 +144,31 @@ function refreshApplied(){
  updatePreview();
  syncControls();
 }
+function updateContentPreview(){
+ const host=current?.card?.querySelector('[data-uxc-content-preview]');
+ if(!host)return;
+ const items=current?.scope==='element'&&current.el?componentContentItems(current.el):[];
+ const layout=resolveComponentContentView(current?.id||'',items);
+ const hidden=new Set(layout.hidden),byId=new Map(items.map(item=>[item.id,item]));
+ const visible=layout.order.map(id=>byId.get(id)).filter(item=>item&&!hidden.has(item.id)).slice(0,6);
+ host.hidden=!visible.length;
+ host.innerHTML=visible.map(item=>{
+  const copy=item.el.cloneNode(true);
+  copy.querySelectorAll?.('[data-display-action]').forEach(node=>{const value=node.querySelector('[data-display-hide-target]')?.textContent||node.textContent||'';node.replaceWith(document.createTextNode(value))});
+  copy.querySelectorAll?.('button,a,input,select,textarea,[data-display-ignore]').forEach(node=>node.remove());
+  const value=String(copy.textContent||'').replace(/\s+/g,' ').trim().slice(0,140)||'—';
+  return `<div class="uxc-pv-field"><span>${esc(item.label)}</span><b>${esc(value)}</b></div>`;
+ }).join('');
+}
 function updatePreview(){
  const card=current?.card;if(!card)return;
  const box=card.querySelector('.uxc-preview-box');
  const eff=effectiveStyle();
  if(box)applyComponentStyle(box,'uxc-preview',{type:'card',pageId:'',cardKey:'',styleOverride:eff});
- // عيّنات أنواع النصوص داخل تبويب «النصوص» تتبع الإعداد الفعّال مباشرة
+ // عيّنات أنواع النصوص والمحتوى المحدد تتبع الإعداد الفعّال مباشرة.
  const rolePane=card.querySelector('[data-uxc-rolepane]');
  if(rolePane)applyStyleVars(rolePane,eff,{type:'card'});
+ updateContentPreview();
 }
 /** مزامنة قيم التحكم مع الحالة الفعّالة + إظهار ↺ فقط عند وجود Override في هذا المستوى. */
 function syncControls(){
@@ -312,7 +329,7 @@ function advancedTabHtml(){
 }
 function contentTabHtml(){
  const items=current?.scope==='element'&&current.el?componentContentItems(current.el):[];
- const layout=resolveComponentContent(current?.id||'',items.map(item=>item.id));
+ const layout=resolveComponentContentView(current?.id||'',items);
  const byId=new Map(items.map(item=>[item.id,item]));
  const ordered=layout.order.map(id=>byId.get(id)).filter(Boolean);
  const hidden=new Set(layout.hidden);
@@ -326,7 +343,7 @@ function contentTabHtml(){
  }).join('');
  return `<section class="uxc-pane" data-pane="content" role="tabpanel" aria-labelledby="uxc-tab-content" hidden>
   <div class="uxc-group"><h4>البيانات والأجزاء المعروضة</h4>
-   <p class="uxc-note">أظهر أو أخفِ أي حقل أو جزء، ثم رتّب عناصر الحاوية نفسها بالسهمين. التغيير محفوظ لهذا القسم أو البطاقة وحدها، ويؤثر على العرض فقط — لا يغيّر بيانات السجل.</p>
+   <p class="uxc-note">أظهر أو أخفِ كل حقل/مؤشر/جزء متاح، ثم رتّب عناصر الحاوية نفسها بالسهمين. في صفحات السجلات تظهر أيضًا الحقول الفارغة المتاحة للإضافة (مخفية افتراضيًا). التغيير مستقل لهذا العنصر ويخص العرض فقط؛ لا يحذف البيانات ولا يغيّر السجل.</p>
    ${items.length?`<ol class="uxc-content-list">${rows}</ol>`:'<p class="muted small">لا توجد أجزاء مستقلة قابلة للتخصيص هنا.</p>'}
    <div class="form-actions"><button type="button" class="ghost danger" data-uxc-content-reset ${items.length?'':'disabled'}>↺ استعادة حقول وترتيب هذا العنصر</button></div>
   </div>
@@ -339,8 +356,8 @@ function actionsTabHtml(){
   <div class="uxc-actions">
    ${s==='element'?`
    <div class="uxc-group"><h4>إعادة الضبط — لهذا العنصر فقط</h4>
-    <div class="form-actions"><button type="button" class="ghost danger" data-uxc-reset-element>↺ إعادة إعدادات هذا العنصر</button></div>
-    <p class="uxc-note">يعود هذا العنصر وحده إلى الإعداد الموروث (النوع ← الصفحة ← العام ← الافتراضي) — دون تغيير أي عنصر آخر ودون أي مساس بالبيانات.</p>
+    <div class="form-actions"><button type="button" class="ghost danger" data-uxc-reset-element>↺ استعادة العرض والمحتوى لهذا العنصر</button></div>
+    <p class="uxc-note">يعيد هذا العنصر وحده إلى الإعداد الموروث: المظهر والحقول المخفية وترتيبها وكثافة البطاقة. لا يؤثر في بطاقة أخرى ولا يمس أي سجل.</p>
    </div>
    <div class="uxc-group"><h4>نسخ الإعدادات وتطبيقها (بأمر صريح فقط)</h4>
     <div class="form-actions">
@@ -407,8 +424,8 @@ export function openComponentCustomizer(opts={}){
    <h2 class="modal-title">⚙ تخصيص العرض${current.title?` — ${esc(current.title)}`:''}</h2>
    <div class="uxc-idline">${id?`<code class="uxc-idchip" dir="ltr">${esc(id)}</code>`:''}<span class="uxc-typechip">${esc(COMPONENT_TYPE_LABELS[type]||type)}</span><span class="uxc-scope-note">${esc(scopeNote)}</span></div>
    <p class="uxc-note">السلسلة: <b>العنصر ← افتراضي النوع ← الصفحة ← العام ← تصميم النظام</b>. كل تغيير يُحفظ فورًا لهذا المستوى ويُعاين مباشرة — بلا إعادة تحميل وبلا أي مساس بالبيانات.</p>
-   <div class="uxc-preview-box uxc-preview" data-uxc-id="uxc-preview" data-uxc-type="card" aria-label="معاينة مباشرة">${PREVIEW_HTML}</div>
-   <span class="uxc-pv-label">معاينة مباشرة</span>
+   <div class="uxc-preview-box uxc-preview" data-uxc-id="uxc-preview" data-uxc-type="card" aria-label="معاينة مباشرة">${PREVIEW_HTML}<div class="uxc-pv-content" data-uxc-content-preview hidden></div></div>
+   <span class="uxc-pv-label">معاينة مباشرة — يتغير العنصر الأصلي ومعاينة مختصرة هنا فورًا</span>
    <div class="uxc-tabs" role="tablist" aria-label="أقسام تخصيص العرض">
     ${tabButton('basic','أساسي',true)}${tabButton('content','البيانات',false)}${tabButton('texts','النصوص',false)}${tabButton('advanced','متقدم',false)}${tabButton('actions','إجراءات',false)}
    </div>
@@ -466,29 +483,29 @@ function bindPanel(card){
   const move=e.target.closest('[data-uxc-content-move]');
   if(move&&!move.disabled&&current?.el){
    const itemId=move.dataset.uxcContentId,items=componentContentItems(current.el),byId=new Map(items.map(item=>[item.id,item]));
-   const item=byId.get(itemId),layout=resolveComponentContent(current.id,items.map(entry=>entry.id));
+   const item=byId.get(itemId),layout=resolveComponentContentView(current.id,items);
    if(!item)return;
    const positions=layout.order.map((id,index)=>byId.get(id)?.parent===item.parent?index:-1).filter(index=>index>=0);
    const from=layout.order.indexOf(itemId),peer=positions.indexOf(from),to=positions[peer+Number(move.dataset.uxcContentMove)];
    if(to===undefined)return;
    const order=[...layout.order];[order[from],order[to]]=[order[to],order[from]];
    setComponentContent(current.id,{order,hidden:layout.hidden});
-   applyComponentContent(current.el,current.id);redrawContentPane();toast('تم حفظ ترتيب أجزاء هذا العنصر');
+   applyComponentContent(current.el,current.id);redrawContentPane();updateContentPreview();toast('تم حفظ ترتيب أجزاء هذا العنصر');
    return;
   }
   const resetContent=e.target.closest('[data-uxc-content-reset]');
   if(resetContent&&current?.el){
-   clearComponentContent(current.id);applyComponentContent(current.el,current.id);redrawContentPane();toast('عادت حقول وترتيب هذا العنصر إلى الوضع الافتراضي');return;
+   clearComponentContent(current.id);applyComponentContent(current.el,current.id);redrawContentPane();updateContentPreview();toast('عادت حقول وترتيب هذا العنصر إلى الوضع الافتراضي');return;
   }
  });
  card.addEventListener('change',e=>{
   const visible=e.target.closest('[data-uxc-content-visible]');
   if(visible&&current?.el){
-   const items=componentContentItems(current.el),layout=resolveComponentContent(current.id,items.map(item=>item.id));
+   const items=componentContentItems(current.el),layout=resolveComponentContentView(current.id,items);
    const hidden=new Set(layout.hidden),id=visible.dataset.uxcContentVisible;
    if(visible.checked)hidden.delete(id);else hidden.add(id);
    setComponentContent(current.id,{order:layout.order,hidden:[...hidden]});
-   applyComponentContent(current.el,current.id);toast(visible.checked?'أُظهر الجزء المحدد':'أُخفي الجزء المحدد');return;
+   applyComponentContent(current.el,current.id);updateContentPreview();toast(visible.checked?'أُظهر الجزء المحدد':'أُخفي الجزء المحدد');return;
   }
   const tg=e.target.closest('[data-coarse-tg]');
   if(tg){commitCoarse(tg.dataset.coarseTg,tg.checked);return}
@@ -540,8 +557,15 @@ function bindPanel(card){
   if(hit('[data-uxc-done]')){closeModal();return}
   if(hit('[data-uxc-reset-element]')){
    const btn=hit('[data-uxc-reset-element]');
-   if(btn.dataset.confirm!=='1'){btn.dataset.confirm='1';btn.textContent='تأكيد إعادة هذا العنصر؟';setTimeout(()=>{if(btn.isConnected){btn.dataset.confirm='';btn.textContent='↺ إعادة إعدادات هذا العنصر'}},4000);return}
-   clearComponentStyle(current.id);refreshApplied();toast('أُعيد هذا العنصر إلى الإعداد الموروث — وحده');return;
+   if(btn.dataset.confirm!=='1'){btn.dataset.confirm='1';btn.textContent='تأكيد الاستعادة لهذا العنصر؟';setTimeout(()=>{if(btn.isConnected){btn.dataset.confirm='';btn.textContent='↺ استعادة العرض والمحتوى لهذا العنصر'}},4000);return}
+   clearComponentStyle(current.id);
+   clearComponentContent(current.id);
+   if(current.cardKey)clearCardDisplay(current.cardKey);
+   if(current.type==='page'&&current.pageId)clearPageDisplay(current.pageId);
+   if(current.pageId){const {applyPageDisplay}=await import('./page-layout.js');applyPageDisplay(document.querySelector('#main-content')||current.el,current.pageId)}
+   if(current.el)applyComponentContent(current.el,current.id);
+   refreshApplied();
+   toast('أُعيد مظهر ومحتوى هذا العنصر فقط إلى الوضع الافتراضي');return;
   }
   if(hit('[data-uxc-reset-type]')){
    if(!await confirmBox(`إعادة افتراضي نوع «${COMPONENT_TYPE_LABELS[current.type]||current.type}»؟ يمسح هذا المستوى فقط؛ تخصيصات العناصر الفردية تبقى كما هي. لا يمس أي بيانات.`,{okText:'إعادة افتراضي النوع'}))return;

@@ -31,20 +31,69 @@ const registry=new Map();
  * فتفضيلات محفوظة separately. يمكن استدعاؤها أكثر من مرة (idempotent).
  * sections: [{id,title,icon?,canHide=true,defaultHidden=false}]
  */
+const PROTECTED_SECTION_ACTIONS='button,a[href],input,select,textarea,form,[role="button"],[role="tab"],[role="menuitem"],[data-route],[data-action],[data-open-ref]';
+const PRESENTATION_CONTROLS='[data-display-ignore],.uxc-gear,.ux-card-toggle,.ux-card-pin,.collapse-pin,[data-pl-vis],[data-pl-move],[data-pl-collapse],[data-pl-pin]';
+function hasEssentialSectionAction(el){
+ if(!el?.querySelectorAll)return false;
+ return [...el.querySelectorAll(PROTECTED_SECTION_ACTIONS)].some(control=>!control.matches?.(PRESENTATION_CONTROLS)&&!control.closest?.(PRESENTATION_CONTROLS));
+}
+
 export function registerPageLayout(def){
  const pageId=String(def?.pageId||'');
  if(!pageId)return null;
  const seen=new Set();
  const sections=(Array.isArray(def.sections)?def.sections:[])
   .filter(s=>s&&s.id&&!seen.has(String(s.id))&&seen.add(String(s.id)))
-  .map(s=>({id:String(s.id),title:String(s.title||s.id),icon:String(s.icon||''),canHide:s.canHide!==false,defaultHidden:Boolean(s.defaultHidden)}));
- const entry={pageId,title:String(def.title||pageId),sections};
+  .map(s=>{const id=String(s.id);return {id,title:String(s.title||id),icon:String(s.icon||''),canHide:s.canHide!==false&&!['data','grid'].includes(id),defaultHidden:Boolean(s.defaultHidden)}});
+ const normalizedTitle=String(def.title||pageId);
+ let finalSections=sections;
+ if(def.merge===true&&registry.has(pageId)){
+  const existing=registry.get(pageId),byId=new Map(existing.sections.map(section=>[section.id,section]));
+  for(const section of sections){
+   const previous=byId.get(section.id);
+   if(!previous)byId.set(section.id,section);
+   else if(section.canHide===false&&previous.canHide!==false)byId.set(section.id,{...previous,canHide:false});
+  }
+  finalSections=[...byId.values()];
+ }
+ const entry={pageId,title:registry.get(pageId)?.title||normalizedTitle,sections:finalSections};
  registry.set(pageId,entry);
  return entry;
 }
 export const getPageLayout=pageId=>registry.get(String(pageId||''))||null;
 export const listRegisteredLayouts=()=>[...registry.values()];
 const legacySectionId=(pageId,id)=>pageId==='dashboard'&&id==='activity'?'tasks':id;
+
+/** يوسّع تعريف الصفحة الحالي بعناصرها الفعلية (الأقسام واللوحات والبطاقات)، مع هويات مستقرة لكل صفحة. */
+export function discoverPageLayout(root,pageId,title=''){
+ if(!root?.querySelectorAll||!pageId)return getPageLayout(pageId);
+ const sections=[],seen=new Set();
+ const add=(el,id,defaultTitle='')=>{
+  const key=String(id||'').trim();
+  if(!key||seen.has(key))return;
+  seen.add(key);
+  const heading=el?.dataset?.uxcTitle||el?.dataset?.displayLabel||el?.querySelector?.('.ux-card-title h3,.panel-head h3,.panel-head h2,.record-tab-label,h2,h3,h4,summary span')?.textContent?.trim()||defaultTitle||key;
+  sections.push({id:key,title:String(heading).replace(/\s+/g,' ').trim().slice(0,120),canHide:el?.dataset?.sectionRequired!=='true'&&!hasEssentialSectionAction(el)});
+ };
+ for(const el of root.querySelectorAll('[data-section-id]'))add(el,el.dataset.sectionId);
+ if(root.matches?.('[data-section-id]'))add(root,root.dataset.sectionId);
+ // الصفحات التي لا تعرّف layout يدويًا لا تُترك بلا تخصيص: أضف بطاقاتها ولوحاتها.
+ for(const el of root.querySelectorAll('.panel,.ux-card[data-display-key]')){
+  if(el.hasAttribute('data-section-id'))continue;
+  const stable=el.dataset.layoutKey||el.dataset.displayKey||el.dataset.collapseKey||el.dataset.collapseId||el.id||el.dataset.uxcId;
+  if(!stable)continue;
+  const id=`auto:${stable}`;
+  el.dataset.sectionId=id;
+  el.dataset.autoSectionId='true';
+  add(el,id);
+ }
+ if(root.matches?.('.panel,.ux-card[data-display-key]')&&!root.hasAttribute('data-section-id')){
+  const stable=root.dataset.layoutKey||root.dataset.displayKey||root.dataset.collapseKey||root.dataset.collapseId||root.id||root.dataset.uxcId;
+  if(stable){root.dataset.sectionId=`auto:${stable}`;root.dataset.autoSectionId='true';add(root,root.dataset.sectionId)}
+ }
+ if(!sections.length)return getPageLayout(pageId);
+ return registerPageLayout({pageId,title:title||getPageLayout(pageId)?.title||pageId,sections,merge:true});
+}
 
 /** الترتيب الفعّال: المحفوظ أولًا (المطابق للأقسام المسجلة) ثم الباقي بالترتيب الافتراضي. */
 export function resolveSectionOrder(pageId){
@@ -67,7 +116,8 @@ export function hiddenSectionIds(pageId){
  const layout=getPageLayout(pageId);
  if(!layout)return new Set();
  const ids=new Set(layout.sections.map(s=>s.id));
- return new Set((getSectionLayout(pageId).hidden||[]).map(id=>legacySectionId(pageId,id)).filter(id=>ids.has(id)));
+ const hideable=new Set(layout.sections.filter(section=>section.canHide).map(section=>section.id));
+ return new Set((getSectionLayout(pageId).hidden||[]).map(id=>legacySectionId(pageId,id)).filter(id=>ids.has(id)&&hideable.has(id)));
 }
 export const isSectionHidden=(pageId,id)=>hiddenSectionIds(pageId).has(id);
 
@@ -239,7 +289,12 @@ export function openPageCustomizer(app,{pageId,root,onChanged}={}){
   const id=box.closest('[data-pl]')?.dataset.pl;
   if(!id)return;
   const hidden=new Set(hiddenSectionIds(pageId));
-  if(box.checked)hidden.delete(id);else hidden.add(id);
+  if(box.checked)hidden.delete(id);
+  else{
+   const visibleCount=layout.sections.filter(section=>!section.canHide||!hidden.has(section.id)).length;
+   if(visibleCount<=1){box.checked=true;toast('أبقِ قسمًا واحدًا ظاهرًا على الأقل حتى تبقى الصفحة قابلة للاستخدام','warn');return}
+   hidden.add(id);
+  }
   saveSectionLayout(pageId,{hidden:[...hidden]});
   change({type:'visibility',id,hidden:!box.checked});
  });
@@ -291,7 +346,7 @@ export function openPageCustomizer(app,{pageId,root,onChanged}={}){
    // اللوحة العالمية الموحدة — إعدادات الصفحة المستقلة (page:<pageId>) في نظام
    // التخصيص الكامل: لا تمس صفحة أخرى، ولا تتجاوز Override أي عنصر داخلها.
    const {openComponentCustomizer}=await import('./component-customizer.js');
-   openComponentCustomizer({id:`page:${pageId}`,type:'page',title:layout.title,el:host,pageId:''});
+   openComponentCustomizer({id:`page:${pageId}`,type:'page',title:layout.title,el:host,pageId});
    return;
   }
   if(e.target.closest('[data-pl-done]')){closeModal();return}

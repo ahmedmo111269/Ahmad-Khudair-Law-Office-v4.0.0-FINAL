@@ -191,6 +191,8 @@ body.topnav-collapsed{--subbar-h:42px} /* الوضع المطوي: ينقص ال
     العنوان ويدفع «رجوع» خارج الشريط — نُلغيه هنا صراحةً (محدِّد أعلى منه). */
  .topbar .top-actions{width:auto;justify-content:flex-end;gap:4px}
  .topbar .top-actions>#quick-add{padding:0 10px}
+ .topbar .top-action-label{display:none}
+ .topbar .top-actions>#check-app-update,.topbar .top-actions>#customize-current-page{width:40px;min-width:40px;padding:0}
  /* #nav-close مخفي أصلًا على ≤900px في pro.css — لا تكرار هنا */
 }
 /* أضيق الشاشات (≤420px): أيقونات 36px وحشو 8px — تبقى كل الأهداف فاعلة */
@@ -205,6 +207,8 @@ body.topnav-collapsed{--subbar-h:42px} /* الوضع المطوي: ينقص ال
  .topbar .top-actions .icon-btn{width:36px;min-width:36px}
  .topbar .top-actions>#command-btn{min-width:40px}   /* الحد المفحوص للبحث ≥ 40px */
  .topbar .top-actions .ic{width:17px;height:17px}
+ .topbar .top-actions>#check-app-update,.topbar .top-actions>#customize-current-page{width:36px;min-width:36px}
+ .topbar .top-actions>#reminders-btn{display:none}
  .topbar .nav-cluster{padding-inline-start:4px;margin-inline-start:0;gap:3px}
 }
 /* أضيق الهواتف (≤360px): تُخفى شارة الشبكة داخل الشريط (الحالة تظهر في الإعدادات

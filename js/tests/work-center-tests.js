@@ -361,7 +361,8 @@ export async function runWorkCenterTests(test, expect) {
     const row = await saveEntity(office, 'workItems', {title: 'مهمة اختبار 1', dueDate: today, dueTime: '14:00', priority: 'high', tags: 'عاجل، مراجعة', fileId: file.id, caseId: stage.id, clientId: client.id, type: 'مهمة'});
     taskId = row.id;
     expect(typeof row.id).toBe('string'); expect(row.id.length).toBe(20); expect(row.kind).toBe('native'); expect(row.sourceType).toBe('task'); expect(row.sourceId).toBe(row.id);
-    const text = JSON.stringify(row);
+    const {id,sourceId,clientId,fileId,caseId,relatedId,...contentOnly}=row;
+    const text = JSON.stringify(contentOnly);
     for (const forbidden of ['موكل اختبار مركز العمل', 'ملف مركز العمل', 'الخصم الأول', 'محكمة', '777']) expect(text.includes(forbidden)).toBe(false);
     expect(row.fileId).toBe(file.id); expect(row.caseId).toBe(stage.id); expect(row.tags.join()).toBe('عاجل,مراجعة');
   });

@@ -10,6 +10,7 @@ import {
 } from '../services/sync-engine.js';
 import {networkStatus} from '../core/network-status.js';
 import {getDeviceName, setDeviceName} from '../core/device-id.js';
+import {getRelayConfiguration,configureSyncRelay,testSyncRelay,disableSyncRelay,syncViaRelay,triggerAutomaticSyncRelay} from '../services/sync-relay.js';
 
 const STATUS_LABELS = {
   SYNCED: ['متزامن', 'is-synced'], PENDING: ['تغييرات بانتظار المزامنة', 'is-pending'],
@@ -27,6 +28,8 @@ export async function renderSyncPage(app) {
   const [status, conflicts, history] = await Promise.all([
     syncStatus(app.ctx), listSyncConflicts(app.ctx, {limit: 30}), syncHistory(app.ctx, 20)
   ]);
+  const relay=getRelayConfiguration(app.ctx.profile?.id);
+  const relayConfigured=Boolean(relay.enabled&&relay.endpoint&&relay.workspaceId);
   const [statusLabel, statusClass] = STATUS_LABELS[status.status] || STATUS_LABELS.PENDING;
   const networkLabel = networkStatus.isOnline() ? '🟢 متصل' : '⚪ عدم الاتصال';
   const peers = status.peers.map(peer => `<li><b>${escapeText(peer.deviceName)}</b><small>${escapeText(peer.deviceId)} · آخر تواصل ${escapeText(dateLabel(peer.lastSyncAt))}</small>${peer.remoteConflictCount ? `<span class="sync-chip is-conflict">${peer.remoteConflictCount} تعارض لدى الجهاز الآخر</span>` : ''}</li>`).join('');
@@ -43,11 +46,15 @@ export async function renderSyncPage(app) {
     <article class="panel sync-status-card"><span>التعارضات المحلية</span><strong>${status.unresolvedConflicts.toLocaleString('ar-EG')}</strong><small>لن تُستبدل القيم المتعارضة تلقائيًا.</small></article>
   </section>
   <section class="panel sync-device-panel"><div><h3>هذا الجهاز</h3><p>Device ID: <code dir="ltr">${escapeText(status.deviceId)}</code></p></div><form id="sync-device-form" class="sync-device-form"><label>اسم الجهاز<input name="deviceName" maxlength="80" value="${escapeText(getDeviceName())}" required></label><button class="ghost" type="submit">حفظ الاسم</button></form></section>
-  <section class="panel sync-action-panel" data-collapse-default="open"><h3>مزامنة الآن</h3><p>اختر حزمة واردة من الجهاز الآخر إن وجدت. إذا لم تختر ملفًا، ستُنشأ حزمة تغييرات صادرة فقط لتبادلها يدويًا.</p><div class="sync-actions"><label class="file-input sync-file-label">اختيار حزمة من جهاز آخر<input id="sync-incoming-file" type="file" accept="application/json,.json"></label><span id="sync-file-name" class="muted small">لم يتم اختيار ملف وارد.</span><button class="primary" id="sync-now" type="button">🔄 مزامنة الآن</button></div><div class="notice sync-warning"><b>قبل المتابعة:</b> سيظهر ملخص بالأجهزة والتغييرات والتعارضات. بعد التأكيد تُنشأ نسخة احتياطية كاملة باستخدام نظام النسخ الحالي. حزم الأجهزة مشفرة بـ AES-256-GCM؛ استخدم كلمة مرور مشتركة قوية (12 حرفًا على الأقل) وشاركها بقناة منفصلة. كلمة المرور لا تُحفظ. ملاحظة: النسخة الاحتياطية الحالية بصيغة JSON غير مشفرة؛ احفظ الملف في موقع موثوق. لا يبدأ أي نقل أو مزامنة تلقائيًا عند عودة الإنترنت.</div><p id="sync-progress" class="muted small" role="status" aria-live="polite">${escapeText(baselineText)}</p></section>
+  <section class="panel sync-action-panel" data-collapse-default="open"><h3>مزامنة الآن</h3><p>اختر حزمة واردة من الجهاز الآخر إن وجدت. إذا لم تختر ملفًا، ستُنشأ حزمة تغييرات صادرة فقط لتبادلها يدويًا.</p><div class="sync-actions"><label class="file-input sync-file-label">اختيار حزمة من جهاز آخر<input id="sync-incoming-file" type="file" accept="application/json,.json"></label><span id="sync-file-name" class="muted small">لم يتم اختيار ملف وارد.</span><button class="primary" id="sync-now" type="button">🔄 مزامنة الآن</button></div><div class="notice sync-warning"><b>قبل المتابعة:</b> سيظهر ملخص بالأجهزة والتغييرات والتعارضات. بعد التأكيد تُنشأ نسخة احتياطية كاملة باستخدام نظام النسخ الحالي. حزم الأجهزة مشفرة بـ AES-256-GCM؛ استخدم كلمة مرور مشتركة قوية (12 حرفًا على الأقل) وشاركها بقناة منفصلة. كلمة المرور لا تُحفظ. ملاحظة: النسخة الاحتياطية الحالية بصيغة JSON غير مشفرة؛ احفظ الملف في موقع موثوق. تبادل الملفات يدوي؛ المزامنة التلقائية لا تعمل إلا بعد إعداد الخادم وتفعيل موافقتك صراحةً في القسم أدناه.</div><p id="sync-progress" class="muted small" role="status" aria-live="polite">${escapeText(baselineText)}</p></section>
+  <section class="panel sync-relay-panel" data-collapse-default="open"><div class="sync-relay-heading"><div><h3>مزامنة تلقائية مشفّرة عبر خادم المكتب</h3><p>خيار ذاتي الاستضافة — لا تتصل الخدمة بأي مزود خارجي. يلزم إعداد خادم HTTPS خاص بالمكتب (التفاصيل في docs/SYNC-OFFLINE-FIRST.md).</p></div><span id="sync-relay-badge" class="sync-chip ${relayConfigured?'is-synced':'is-pending'}">${relayConfigured?(relay.autoSync?'الاتصال مفعّل · تلقائي':'الاتصال مفعّل · يدوي'):'غير مُعدّ'}</span></div>
+   <form id="sync-relay-form" class="sync-relay-form"><label>عنوان خادم HTTPS<input name="endpoint" type="url" inputmode="url" placeholder="https://sync.example.org" value="${escapeText(relay.endpoint||'')}" required autocomplete="url"></label><label>معرّف مساحة المكتب<input name="workspaceId" dir="ltr" maxlength="120" value="${escapeText(relay.workspaceId||'')}" placeholder="معرّف يزوّدك به مسؤول الخادم" required></label><label>رمز وصول الجهاز<input name="token" type="password" dir="ltr" minlength="32" maxlength="512" placeholder="يُترك فارغًا لاستخدام الرمز المحفوظ" autocomplete="new-password"></label><label>عبارة التشفير المشتركة<input name="passphrase" type="password" minlength="12" placeholder="12 حرفًا على الأقل — لا تُحفظ كنص" autocomplete="new-password"></label><label class="sync-relay-autosync"><input name="autoSync" type="checkbox" ${relayConfigured&&relay.autoSync?'checked':''}>مزامنة تلقائية عند عودة الاتصال أو حدوث تغييرات (خيار موافقة صريح)</label><div class="sync-relay-actions"><button class="primary" type="submit">حفظ اتصال هذا الجهاز</button><button class="ghost" type="button" id="sync-relay-test">اختبار الاتصال والتشفير</button><button class="ghost" type="button" id="sync-relay-run" ${relayConfigured?'':'disabled'}>مزامنة الخادم الآن</button><button class="ghost danger" type="button" id="sync-relay-disable" ${relayConfigured?'':'disabled'}>تعطيل مؤقت</button><button class="ghost danger" type="button" id="sync-relay-forget" ${relayConfigured?'':'disabled'}>تعطيل وحذف الأسرار المحلية</button></div></form>
+   <p class="notice sync-relay-safety"><b>الخصوصية والسلامة:</b> الخادم يخزن الحزم المشفرة فقط (AES-256-GCM) ولا يستقبل عبارة التشفير. رمز الوصول ومفتاح تشفير Web Crypto غير القابل للاستخراج يُحفظان في IndexedDB محليًا. عند تفعيل التلقائي، يسمح هذا الجهاز بتطبيق تغييرات غير متعارضة في الخلفية؛ التعارضات تُحفظ للمراجعة. يُنشأ ملف أمان محلي قابل للتنزيل قبل إعداد خط الأساس وعند كل مزامنة يدوية.</p><p id="sync-relay-progress" class="muted small" role="status" aria-live="polite">${relay.invalid?'إعداد سابق غير صالح؛ أعد إدخال العنوان ومعرّف المساحة.':relayConfigured?'لم يُجر اختبار اتصال في هذه الجلسة.':'لا يوجد اتصال بخادم حتى تحفظ إعدادًا صحيحًا.'}</p>
+  </section>
   <section class="sync-lower-grid"><article class="panel"><h3>الأجهزة المعروفة</h3>${peers ? `<ul class="sync-peer-list">${peers}</ul>` : '<p class="muted">لا توجد أجهزة معروفة. ابدأ بإنشاء حزمة، واستوردها على الجهاز الآخر، ثم تبادلا حزم الرد حتى يتأكد الطرفان من الاستلام.</p>'}</article>
   <article class="panel"><h3>التعارضات</h3>${conflictRows || '<p class="muted">لا توجد تعارضات تحتاج مراجعة.</p>'}</article></section>
   <section class="panel sync-history-panel"><h3>سجل المزامنة</h3>${logRows ? `<ul class="sync-history-list">${logRows}</ul>` : '<p class="muted">لا توجد عمليات مزامنة سابقة. يُعاد استخدام Activity Log الموجود.</p>'}</section>
-  <section class="notice sync-provider-note"><b>وسيلة النقل الحالية:</b> حزمة ملف مشفرة بـ AES-256-GCM وتعمل Offline، ولا تحتاج إلى Google Drive أو خادم. يمكن إضافة Google Drive أو LAN أو API لاحقًا كـ <code>SyncTransportAdapter</code> دون ربطها بطبقة IndexedDB.</section>`;
+  <section class="notice sync-provider-note"><b>وسائل النقل المتاحة:</b> تبادل ملفات مشفرة يعمل Offline، أو خادم relay ذاتي الاستضافة اختياري لمزامنة الأجهزة عند الاتصال. لا تعتمد المزامنة على تحديث PWA أو localStorage أو BroadcastChannel؛ كل جهاز يحتفظ بقاعدة IndexedDB مستقلة.</section>`;
 }
 
 export async function bindSyncPage(app) {
@@ -115,12 +122,94 @@ export async function bindSyncPage(app) {
       if (runButton?.isConnected) runButton.disabled = false;
     }
   });
+  const relayForm=document.querySelector('#sync-relay-form'),relayProgress=document.querySelector('#sync-relay-progress');
+  const relayProfileId=app.ctx.profile?.id;
+  relayForm?.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const submit=relayForm.querySelector('[type="submit"]'),formData=new FormData(relayForm);
+    if(submit){submit.disabled=true;submit.textContent='جارٍ حفظ الاتصال…'}
+    try{
+      await configureSyncRelay(relayProfileId,{
+        endpoint:formData.get('endpoint'),workspaceId:formData.get('workspaceId'),token:formData.get('token'),
+        passphrase:formData.get('passphrase'),autoSync:formData.get('autoSync')==='on'
+      });
+      relayForm.elements.token.value='';relayForm.elements.passphrase.value='';
+      if(relayProgress)relayProgress.textContent='حُفظ الإعداد محليًا. يجري اختبار الخادم ثم تبدأ المزامنة الآلية إذا كان خيارها مفعّلًا وخط الأساس مكتملًا.';
+      triggerAutomaticSyncRelay(relayProfileId,'configuration');
+      toast('تم حفظ اتصال المزامنة المشفرة لهذا الجهاز.','ok');
+      if(app.route==='sync')await app.refresh();
+    }catch(error){if(relayProgress)relayProgress.textContent=`تعذر حفظ الاتصال: ${error.message||'خطأ غير معروف'}`;toast(error.message||'تعذر حفظ إعداد المزامنة.','error')}
+    finally{if(submit?.isConnected){submit.disabled=false;submit.textContent='حفظ اتصال هذا الجهاز'}}
+  });
+  document.querySelector('#sync-relay-test')?.addEventListener('click',async event=>{
+    const button=event.currentTarget,form=relayForm;if(!form)return;
+    button.disabled=true;button.textContent='جارٍ الاختبار…';if(relayProgress)relayProgress.textContent='التحقق من HTTPS، رمز الوصول، وبصمة التشفير…';
+    try{
+      const data=new FormData(form),result=await testSyncRelay(relayProfileId,{
+        endpoint:data.get('endpoint'),workspaceId:data.get('workspaceId'),token:data.get('token'),passphrase:data.get('passphrase')
+      });
+      if(relayProgress)relayProgress.textContent=`نجح الاتصال بخادم متوافق. ${result.packagesAvailable} حزمة في المساحة.${result.keyVerified?' تم التحقق من عبارة التشفير مع حزمة موجودة.':' لا توجد حزمة سابقة للتحقق من عبارة التشفير بعد.'}`;
+      toast('نجح اختبار خادم المزامنة.','ok');
+    }catch(error){if(relayProgress)relayProgress.textContent=`فشل الاختبار: ${error.message||'تحقق من الإعدادات والشبكة.'}`;toast(error.message||'فشل اختبار الاتصال.','warn')}
+    finally{if(button.isConnected){button.disabled=false;button.textContent='اختبار الاتصال والتشفير'}}
+  });
+  document.querySelector('#sync-relay-run')?.addEventListener('click',async event=>{
+    const button=event.currentTarget;button.disabled=true;button.textContent='جارٍ المزامنة…';
+    try{
+      if(!networkStatus.isOnline())throw new Error('يتطلب الاتصال بالخادم إنترنت نشطًا. لم تُمس البيانات المحلية.');
+      const current=await syncStatus(app.ctx);
+      if(!current.baselineComplete){
+        const accepted=await confirmRelayBaseline();if(!accepted)return;
+        await backupBeforeSync(app);
+        updateRelayProgress('تم تنزيل نسخة الأمان؛ تجهيز خط الأساس المحلي على دفعات…');
+        await initializeSyncBaseline(app.ctx,{onProgress:progress=>updateRelayProgress(`خط الأساس: ${progress.scanned.toLocaleString('ar-EG')} سجلًا مفحوصًا، ${progress.generated.toLocaleString('ar-EG')} تغييرًا.`)});
+      }else{
+        await backupBeforeSync(app);
+        updateRelayProgress('تم تنزيل نسخة الأمان؛ يجري استلام التغييرات المشفرة…');
+      }
+      const result=await syncViaRelay(app.ctx,relayProfileId,{onProgress:progress=>updateRelayProgress(progress.phase==='download'?`استلام/تطبيق حزمة: ${Number(progress.processed||0)} من ${Number(progress.total||0)}.`:'إرسال الدفعة التالية…')});
+      const after=await syncStatus(app.ctx);
+      updateRelayProgress(`اكتملت المزامنة: ${result.downloaded||0} وارد · ${result.uploaded||0} صادر · ${after.unresolvedConflicts} تعارض للمراجعة.`);
+      if(after.unresolvedConflicts)toast(`انتهت المزامنة وبقي ${after.unresolvedConflicts} تعارضًا؛ لم يُستبدل المحتوى المتعارض تلقائيًا.`,'warn',{duration:7000});
+      else toast('اكتملت مزامنة الخادم بعد إنشاء نسخة الأمان.','ok');
+      if(app.route==='sync')await app.refresh();
+    }catch(error){console.error('relay sync operation',error);updateRelayProgress(`لم تكتمل الدورة: ${error.message||'خطأ غير معروف'}. الحزم السابقة والمحتوى المحلي محفوظة؛ يمكن إعادة المحاولة.`);toast(error.message||'تعذرت مزامنة الخادم.','error',{duration:7000})}
+    finally{if(button.isConnected){button.disabled=false;button.textContent='مزامنة الخادم الآن'}}
+  });
+  document.querySelector('#sync-relay-disable')?.addEventListener('click',async()=>{
+    if(!await confirmRelayDisable(false))return;
+    await disableSyncRelay(relayProfileId);toast('عُطّل النقل التلقائي؛ لم تُحذف أي بيانات أو أسرار محفوظة.','ok');if(app.route==='sync')await app.refresh();
+  });
+  document.querySelector('#sync-relay-forget')?.addEventListener('click',async()=>{
+    if(!await confirmRelayDisable(true))return;
+    await disableSyncRelay(relayProfileId,{forgetSecrets:true});toast('حُذفت أسرار اتصال الخادم المحلية فقط؛ لم تُحذف بيانات المكتب.','ok');if(app.route==='sync')await app.refresh();
+  });
   document.querySelectorAll('[data-review-conflict]').forEach(button => button.addEventListener('click', () => reviewConflict(app, button.dataset.reviewConflict)));
 }
 
 function updateProgress(message) {
   const element = document.querySelector('#sync-progress');
   if (element) element.textContent = String(message || '');
+}
+function updateRelayProgress(message){const element=document.querySelector('#sync-relay-progress');if(element)element.textContent=String(message||'')}
+function confirmRelayBaseline(){
+ return new Promise(resolve=>{
+  const card=modal(`<h2>إعداد أول مزامنة للخادم</h2><p>سيُنزل التطبيق أولًا نسخة أمان كاملة غير مشفرة بصيغة JSON، ثم ينشئ خط أساس محليًا على دفعات ويربطه بالخادم المشفر. لن تُرسل سجلات قبل اكتمال النسخة وخط الأساس.</p><div class="form-actions"><button class="primary" type="button" data-relay-baseline-yes>إنشاء النسخة والمتابعة</button><button class="ghost" type="button" data-relay-baseline-no>إلغاء</button></div>`);
+  const finish=value=>{closeModal();resolve(value)};
+  card.querySelector('[data-relay-baseline-yes]').onclick=()=>finish(true);
+  card.querySelector('[data-relay-baseline-no]').onclick=()=>finish(false);
+  card.querySelectorAll('[data-close],[data-modal-back],[data-modal-home]').forEach(button=>button.addEventListener('click',()=>resolve(false)));
+ });
+}
+function confirmRelayDisable(forget){
+ return new Promise(resolve=>{
+  const message=forget?'سيُعطّل النقل وتُحذف نسخة رمز الوصول ومفتاح التشفير من هذا الجهاز فقط. تبقى قاعدة المكتب والحزم المخزنة على الخادم بلا تغيير. يلزم إدخال الأسرار مجددًا للاتصال.':'سيُعطّل النقل التلقائي مؤقتًا. تبقى بيانات المكتب وأسرار الاتصال المحلية بلا تغيير.';
+  const card=modal(`<h2>${forget?'حذف أسرار الاتصال المحلية؟':'تعطيل اتصال المزامنة؟'}</h2><p>${esc(message)}</p><div class="form-actions"><button class="ghost danger" type="button" data-relay-disable-yes>تأكيد</button><button class="ghost" type="button" data-relay-disable-no>إلغاء</button></div>`);
+  const finish=value=>{closeModal();resolve(value)};
+  card.querySelector('[data-relay-disable-yes]').onclick=()=>finish(true);
+  card.querySelector('[data-relay-disable-no]').onclick=()=>finish(false);
+  card.querySelectorAll('[data-close],[data-modal-back],[data-modal-home]').forEach(button=>button.addEventListener('click',()=>resolve(false)));
+ });
 }
 
 function requestTransferPassphrase({confirmRepeat = false} = {}) {

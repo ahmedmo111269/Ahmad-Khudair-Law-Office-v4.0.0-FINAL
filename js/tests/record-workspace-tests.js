@@ -1,7 +1,16 @@
-import {bindRecordWorkspaceTabs,primaryRecordTabs,recordSectionsFor,recordWorkspaceMarkup,section} from '../modules/record-page.js';
+import {bindRecordWorkspaceTabs,primaryRecordTabs,recordSectionsFor,recordWorkspaceMarkup,section,kvHtml} from '../modules/record-page.js';
 import {registerPageLayout} from '../ui/page-layout.js';
 
 export function runRecordWorkspaceTests(test,expect){
+ test('سجل البيانات: الحقل الفارغ يبقى محفوظًا ويصبح خيار عرض مستقلًا افتراضيًا',()=>{
+  const html=kvHtml([{k:'email',l:'البريد الإلكتروني',t:'text'}],{email:''},new Map(),{skipEmpty:false,includeEmptyAvailable:true});
+  const host=document.createElement('div');host.innerHTML=html;
+  const field=host.querySelector('[data-display-item="field:email"]');
+  expect(Boolean(field)).toBe(true);
+  expect(field.dataset.displayDefaultHidden).toBe('true');
+  expect(field.textContent.includes('غير مسجل')).toBe(true);
+ });
+
  test('مساحة سجل القضية تسجل الخط الزمني والجلسات والأحكام وبقية الوظائف',()=>{
   const sections=recordSectionsFor('cases');
   const ids=sections.map(section=>section.id);

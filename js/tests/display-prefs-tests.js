@@ -9,7 +9,7 @@ import {
 } from '../core/display-prefs.js';
 import {
  registerPageLayout,resolveSectionOrder,orderedSections,hiddenSectionIds,
- migrateLegacySectionOrder,applyPageLayout,applyPageDisplay,openPageCustomizer,getPageLayout
+ migrateLegacySectionOrder,applyPageLayout,applyPageDisplay,openPageCustomizer,getPageLayout,discoverPageLayout
 } from '../ui/page-layout.js';
 import {card,bindCards} from '../ui/card.js';
 import {applyCardDisplay} from '../ui/card-display.js';
@@ -231,6 +231,43 @@ export function runDisplayPrefsTests(test,expect){
   expect(root.querySelector('[data-section-id="s2"]').classList.contains('section-hidden')).toBe(true);
   // الرأس غير المسجّل يبقى أولًا
   expect(root.firstElementChild.classList.contains('hero')).toBe(true);
+  root.remove();
+ });
+
+ test('أقسام: اكتشاف لوحات الصفحة يضيف المكونات غير المسجلة ويحفظ ترتيب كل صفحة منفصلًا',()=>{
+  clean();
+  registerPageLayout({pageId:'discover-a',title:'أ',sections:[{id:'known',title:'معروف'}]});
+  const root=document.createElement('div');
+  root.innerHTML='<section data-section-id="known">معروف</section><article class="panel" data-uxc-id="panel:discover-a:second" data-uxc-title="لوحة ثانية">ثانٍ</article><article class="panel" data-uxc-id="panel:discover-a:third" data-uxc-title="لوحة ثالثة">ثالث</article>';
+  document.body.append(root);
+  const discovered=discoverPageLayout(root,'discover-a','أ');
+  expect(discovered.sections.length).toBe(3);
+  expect(root.querySelectorAll('[data-section-id="auto:panel:discover-a:second"]').length).toBe(1);
+  saveSectionLayout('discover-a',{order:['auto:panel:discover-a:third','known','auto:panel:discover-a:second']});
+  applyPageLayout(root,'discover-a');
+  expect([...root.children].map(el=>el.dataset.sectionId).join('|')).toBe('auto:panel:discover-a:third|known|auto:panel:discover-a:second');
+  const other=document.createElement('div');other.innerHTML='<section data-section-id="known">معروف</section><article class="panel" data-uxc-id="panel:discover-b:second">ثانٍ</article>';
+  discoverPageLayout(other,'discover-b','ب');
+  expect(resolveSectionOrder('discover-b').join('|')).toBe('known|auto:panel:discover-b:second');
+  expect(resolveSectionOrder('discover-a').join('|')).toBe('auto:panel:discover-a:third|known|auto:panel:discover-a:second');
+  root.remove();other.remove();
+ });
+
+ test('أقسام: القسم الذي يحمل إجراءً أساسيًا لا يمكن إخفاؤه؛ زر التخصيص وحده لا يمنع الإخفاء',()=>{
+  clean();
+  registerPageLayout({pageId:'actions-safe',title:'إجراءات',sections:[{id:'record',title:'السجل'},{id:'display-only',title:'معلومة'}]});
+  const root=document.createElement('div');
+  root.innerHTML='<section data-section-id="record"><button type="button" data-save-record>حفظ السجل</button><button type="button" class="uxc-gear" data-display-ignore>تخصيص</button></section><section data-section-id="display-only"><p>معلومة اختيارية</p><button type="button" class="uxc-gear" data-display-ignore>تخصيص</button></section>';
+  document.body.append(root);
+  const layout=discoverPageLayout(root,'actions-safe','إجراءات');
+  expect(layout.sections.find(section=>section.id==='record').canHide).toBe(false);
+  expect(layout.sections.find(section=>section.id==='display-only').canHide).toBe(true);
+  saveSectionLayout('actions-safe',{hidden:['record','display-only']});
+  expect(hiddenSectionIds('actions-safe').has('record')).toBe(false);
+  expect(hiddenSectionIds('actions-safe').has('display-only')).toBe(true);
+  applyPageLayout(root,'actions-safe');
+  expect(root.querySelector('[data-section-id="record"]').classList.contains('section-hidden')).toBe(false);
+  expect(root.querySelector('[data-section-id="display-only"]').classList.contains('section-hidden')).toBe(true);
   root.remove();
  });
 
