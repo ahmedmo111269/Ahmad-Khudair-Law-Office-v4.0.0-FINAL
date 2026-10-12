@@ -40,6 +40,40 @@
   · `android-pwa` **31/31** · `quick-notes` **10/10 PASS** (تشغيل أول فشل عابر في ترقيم الصفحات ثم أعاد
   التشغيل نفسه PASS بلا أي تغيير في الكود) · `release-audit` **PASS** (387 ملفًا/271 JavaScript، بلا تحذيرات)
   · `module-graph` بلا وحدات مفقودة.
+**مسح انحدار شامل (بعد اكتمال كل التعديلات، حزمة واحدة في كل مرة):**
+
+| الحزمة | النتيجة | ملاحظة |
+|---|---|---|
+| `run-tests` (Node) | **626/626** | — |
+| `tests.html` في Chromium | **648/648** | بلا أخطاء وحدات |
+| `file-page-workspace-tests` | **33/33 · 0 خطأ** | صفحة الملف |
+| `files-cockpit-browser-tests` | **13/13 · 0 خطأ** | القمرة/القوائم/القياسات الثلاثة |
+| `grid-browser-tests` | **37/37 · 0 خطأ** | Print Preview NOT TESTED كما هو معلن |
+| `android-pwa-browser-tests` | **31/31** | أُعيد بعد إصلاح تسميات الهاتف |
+| `quick-notes-browser-tests` | **10/10 · PASS** | — |
+| `work-center-browser-tests` | **69/69** | الطبقة المشتركة للطي |
+| `home-focus-browser-tests` | **56/56** | فحص عابر موثّق أدناه |
+| `wave6-context-browser-tests` | **54 · 0 فشل** | — |
+| `legal-context-browser-tests` | **8/8** | — |
+| `offline-sync-browser-tests` | **PASS** | — |
+| `execution-feas-browser-tests` | **10 · 0** | — |
+| `execution-feas-cycle-browser-tests` | **19 · 0** | — |
+| `execution-print-browser-tests` | **13 · 0** | PDF من محرك Chromium متحقَّق |
+| `restructure-routes-browser-tests` | **32/32 + 9/9** | 0 أخطاء صفحة |
+| `files-workspace-final-browser-tests` | **25/25** | صفحة الملفات + الحماية من انضغاط الشريط |
+| `feas-golden-tests` | **16/16** | — |
+| `files-cockpit-perf` | **PASS** | الطي 16.5ms متوسط · **0** نداء IndexedDB |
+| `restructure-inventory-check` | **0 إخفاق** | — |
+| `verify-cross-platform` | **PASS 49 · WARN 0 · FAIL 0** | — |
+| `release-audit` | **PASS** | 387 ملفًا/271 JavaScript · بلا تحذيرات |
+| `module-graph` | **0 وحدة مفقودة** | — |
+
+**حالات حمراء أُثبت أنها سابقة للتغيير** بإعادة تشغيلها على نسخة الأساس `356242b` في clone منفصل (منفذ 8099):
+`execution-browser` **33/1** (فشل «أقسام الصفحة ثلاث فقط» بالحرف نفسه) · `execution-settings` **4/6** (نفسه) ·
+`wave3-features` **9/2** (نفسهما) · `execution-practical` و`execution-real-example` (`location is not defined` في مشغّل Node) ·
+`execution-simple` **21/0 على النسختين** (أفضل من الرقم القديم الموثّق 3/17). وفحص عابر واحد في `home-focus`
+(«Quick Add يرفض التاريخ الرقمي الملتبس») **يتكرر على الأساس بنفس الرسالة والقيم** (مرة من 10 تشغيلات) — ليس من هذا التغيير.
+
 - **لقطات توثّق الشكل النهائي** (مُلتقطة من التطبيق الفعلي بعد آخر إصلاح؛ القائمة المفتوحة كاملة في `.cache/shots/`):
   `screenshots/files-mobile-tabs-after.png` (الشريط على الهاتف: أربعة أسماء كاملة + صف «كل الأقسام» + ⚙)،
   `screenshots/files-mobile-tabs-menu-after.png` (القائمة الواحدة مفتوحة بكل أقسامها وعدّاداتها)،
