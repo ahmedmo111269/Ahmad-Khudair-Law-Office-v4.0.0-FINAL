@@ -113,7 +113,7 @@ function tabLayout(){
 }
 // عدد الأطراف المعروضة في رأس الملف قبل الاختصار بزر «عرض كل الأطراف» — الأطراف كلها
 // متاحة دائمًا في تبويب الأطراف، والرأس يعرض ما يكفي للهوية دون إطالة غير منضبطة.
-const HEAD_PARTIES_MAX=12;
+const HEAD_PARTIES_MAX=3;
 /** ترتيب الأطراف اليدوي المحفوظ (sequence ثم تاريخ الإضافة ثم الاسم) — لا يُختزل ولا يُعاد ترتيبه. */
 const sortParties=rows=>[...rows].sort((a,b)=>(Number(a.sequence)||Number.MAX_SAFE_INTEGER)-(Number(b.sequence)||Number.MAX_SAFE_INTEGER)||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||String(a.partyName||a.name||'').localeCompare(String(b.partyName||b.name||''),'ar'));
 /** الاسم المعرّف للمرحلة: «دعوى»←«الدعوى»، «استئناف»←«الاستئناف»، والأسماء المركّبة كما هي. */
@@ -684,99 +684,23 @@ async function renderTabContent(app){
   // الأصلي (الجلسات/الأعمال/المراحل/سجل النشاط) وكل زر يفتح السجل نفسه أو تبويبه، ولا
   // يُنشئ أي سجل أو نسخة قابلة للتحرير، ولا يُخترع رقم أو تاريخ أو حالة غير مسجلة.
   const today=localDate();
-  const dayOf=v=>String(v||'').slice(0,10);
-  const [hearingResult,procedures,judgmentsRes,relRows]=await Promise.all([
+  const [hearingResult,procedures]=await Promise.all([
    fileChildren(office,id,'hearings'),
-   office.r.procedures.byIndex('fileId',id,2000),
-   fileChildren(office,id,'judgments').catch(()=>({rows:[]})),
-   fileRelations(office,id).catch(()=>[])
+   office.r.procedures.byIndex('fileId',id,2000)
   ]);
   const hearings=hearingResult.rows;
-  const upcomingAll=hearings.filter(h=>dayOf(h.hearingDate)>=today).sort((a,b)=>(dayOf(a.hearingDate)+(a.hearingTime||'99')).localeCompare(dayOf(b.hearingDate)+(b.hearingTime||'99')));
-  const previousAll=hearings.filter(h=>dayOf(h.hearingDate)<today).sort((a,b)=>(dayOf(b.hearingDate)+(b.hearingTime||'')).localeCompare(dayOf(a.hearingDate)+(a.hearingTime||'')));
-  const nextH=upcomingAll[0],lastH=previousAll[0];
-  const openProc=procedures.filter(p=>!p.status||['open','pending'].includes(p.status));
-  const openUnfinished=openProc.filter(p=>dayOf(p.internalDueDate)<today||!p.result);
-  // «آخر عمل إداري مسجل» = أحدث سجل فعلي في مخزن الأعمال (نفس مفتاح الترتيب المستخدم في تبويبه).
-  const procSorted=[...procedures].sort((a,b)=>String(b.actionDate||b.internalDueDate||b.createdAt||'').localeCompare(String(a.actionDate||a.internalDueDate||a.createdAt||'')));
-  const latestProc=procSorted[0];
   const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
-  const clientParty=parties.find(p=>p.clientId);
-  const lastActivity=f.lastActivityAt?fmtDate(dayOf(f.lastActivityAt)):'';
-  const sig=nextH?dateSignal(dayOf(nextH.hearingDate)):null;
-  // (أ) الملخص التنفيذي: أربع بطاقات ملخص فقط، كل واحدة مرتبطة بمصدرها الأصلي
-  const nextCard=nextH?execCard({
-   eyebrow:'أقرب جلسة قادمة',icon:'◷',tone:sig?.tone||'',
-   title:`${esc(fmtDate(nextH.hearingDate))}${nextH.hearingTime?` <span class="fx-sub">· ${esc(String(nextH.hearingTime).slice(0,5))}</span>`:''}${sig?` <span class="ux-badge ux-badge--${esc(sig.tone)}">${esc(sig.text)}</span>`:''}`,
-   meta:[nextH.type,nextH.court,nextH.chamber,nextH.reason?`المطلوب: ${nextH.reason}`:''].filter(Boolean).map(esc),
-   actions:[
-    {label:'عرض الجلسة',kind:'primary',attr:`data-open="hearings:${esc(nextH.id)}"`},
-    {label:`كل الجلسات (${hearings.length})`,attr:'data-tab-jump="hearings"'},
-    {label:'دورة الجلسات',attr:`data-hearing-cycle="${esc(nextH.id)}"`}
-   ]
-  }):execCard({
-   eyebrow:'أقرب جلسة قادمة',icon:'◷',
-   empty:hearings.length?'لا توجد جلسة قادمة مسجلة؛ كل الجلسات المسجلة سابقة.':'لا توجد جلسات مسجلة لهذا الملف بعد.',
-   actions:[{label:'فتح تبويب الجلسات',kind:'primary',attr:'data-tab-jump="hearings"'}]
-  });
-  const procCard=latestProc?execCard({
-   eyebrow:'آخر عمل إداري مسجل',icon:'☷',tone:openUnfinished.length?'warn':'',
-   title:esc(latestProc.type||latestProc.description||'عمل إداري'),
-   meta:[
-    latestProc.description?esc(latestProc.description):'',
-    latestProc.actionDate?`تاريخ العمل ${esc(fmtDate(latestProc.actionDate))}`:'',
-    latestProc.internalDueDate?`موعد المتابعة ${esc(fmtDate(latestProc.internalDueDate))}`:'',
-    latestProc.status?`الحالة: ${esc(label(latestProc.status))}`:'',
-    openProc.length?`مفتوحة في الملف: ${openProc.length}`:'',
-    openUnfinished.length?`غير مكتملة: ${openUnfinished.length}`:''
-   ].filter(Boolean),
-   actions:[
-    {label:'عرض العمل',kind:'primary',attr:`data-open="procedures:${esc(latestProc.id)}"`},
-    {label:`الأعمال (${procedures.length})`,attr:'data-tab-jump="procedures"'}
-   ]
-  }):execCard({
-   eyebrow:'آخر عمل إداري مسجل',icon:'☷',
-   empty:'لا توجد أعمال إدارية مسجلة لهذا الملف.',
-   actions:[{label:'فتح تبويب الأعمال الإدارية',kind:'primary',attr:'data-tab-jump="procedures"'}]
-  });
-  const stageCard=cur?execCard({
-   eyebrow:'المرحلة الحالية',icon:'▣',
-   title:esc(refLabel('cases',cur)),
-   meta:[cur.courtId,cur.chamber,cur.degree,cur.filingDate?`تاريخ القيد ${fmtDate(cur.filingDate)}`:'',stages.length>1?`إجمالي المراحل في الملف: ${stages.length}`:''].filter(Boolean).map(esc),
-   actions:[
-    {label:'فتح بيانات المرحلة',kind:'primary',attr:`data-open-case="${esc(cur.id)}"`},
-    {label:`المراحل (${stages.length})`,attr:'data-tab-jump="judicial"'}
-   ]
-  }):execCard({
-   eyebrow:'المرحلة الحالية',icon:'▣',
-   empty:'لا توجد مرحلة أو رقم قضائي مسجل (ملف بلا قضية).',
-   actions:[{label:'فتح المراحل والأرقام القضائية',kind:'primary',attr:'data-tab-jump="judicial"'}]
-  });
-  const lastCard=lastH?execCard({
-   eyebrow:'الجلسة السابقة',icon:'⌛',
-   title:`${esc(fmtDate(lastH.hearingDate))}${lastH.hearingTime?` <span class="fx-sub">· ${esc(String(lastH.hearingTime).slice(0,5))}</span>`:''}`,
-   meta:[lastH.type,lastH.result?`القرار: ${lastH.result}`:'لم يُسجل القرار',lastH.adjournedTo?`التأجيل إلى ${fmtDate(lastH.adjournedTo)}`:''].filter(Boolean).map(esc),
-   actions:[
-    {label:'عرض الجلسة',kind:'primary',attr:`data-open="hearings:${esc(lastH.id)}"`},
-    {label:'كل الجلسات',attr:'data-tab-jump="hearings"'}
-   ]
-  }):execCard({eyebrow:'الجلسة السابقة',icon:'⌛',empty:'لا توجد جلسات سابقة مسجلة.'});
+  // نظرة عامة هي لوحة قرار ومتابعة، لا نسخة من تبويبات الجلسات والمراحل والعلاقات.
+  // مصدر كل معلومة يظل السجل الأصلي؛ تفاصيله الكاملة في تبويبه المتخصص.
   const execPanel=`<section class="panel fp-exec" data-collapse-id="file-exec" data-collapse-key="file-details:exec" data-collapse-default="open">
-   <div class="panel-head"><h3>الملخص التنفيذي</h3><span class="collapse-summary" data-collapse-summary></span></div>
-   <div class="fx-grid">${nextCard}${procCard}${stageCard}${lastCard}</div>
+   <div class="panel-head"><h3>المتابعة والخطوة التالية</h3><span class="collapse-summary" data-collapse-summary>ملخص حي من الجلسات والأعمال الإدارية المسجلة</span></div>
    ${fileCockpitHtml({hearings,procedures,stages,parties,today,currentStage:cur?refLabel('cases',cur):''})}
-   <p class="fx-foot muted small">
-    <span>${lastActivity?`آخر نشاط مسجل: <b>${esc(lastActivity)}</b>`:'لا يوجد نشاط مسجل بعد'}</span>
-    ${openUnfinished.length?`<span>متابعات غير مكتملة: <button type="button" class="link" data-tab-jump="procedures">${openUnfinished.length}</button></span>`:''}
-    ${clientParty?.clientId?`<span>الموكل المسجل: <button type="button" class="link" data-route="client:${esc(clientParty.clientId)}">${esc(clientParty.name||clientParty.partyName||'')}</button>${clientParty.role?` — ${esc(clientParty.role)}`:''}</span>`:''}
-   </p>
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
   </section>`;
-  // (ب) بيانات الملف فقط — كل حقل من مصدره. بيانات المرحلة/الرقم القضائي وحقول نوع العمل
-  // لا تُعرض هنا: مصدرها الوحيد تبويب «المراحل» وتبويب «بيانات نوع العمل» فلا تتكرر المعلومات.
   const refs=new Map();
   // رقم الملف الداخلي لا يُكرر في البيانات التفصيلية؛ مصدره الوحيد زر «الملف الفرعي».
-  const fileFields=ENTITIES.files.fields.filter(x=>x.k!=='fileNumber');
+  const identityKeys=new Set(['fileNumber','title','fileType','mainCategory','subCategory','status','priority','responsibleLawyer']);
+  const fileFields=ENTITIES.files.fields.filter(x=>!identityKeys.has(x.k));
   const dataPanel=`<section class="panel fp-data fp-file-data" data-collapse-id="file-file-data" data-collapse-key="file-details:file-data" data-collapse-default="open">
    <div class="panel-head"><h3>بيانات الملف</h3><span class="collapse-summary" data-collapse-summary></span>
     <div class="sec-actions"><button type="button" class="ghost small" data-file-edit2>✎ تعديل بيانات الملف</button><button type="button" class="ghost small" data-reclass>تغيير القسم / النوع</button></div></div>
@@ -785,9 +709,8 @@ async function renderTabContent(app){
     ${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}
     ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — السبب: '+esc(f.reopenReason):''}</p>`:''}
    </div></section>`;
-  // (ج) المسار القضائي: المراحل والعلاقات المسجلة فعلًا، وكل عنصر يفتح سجله الأصلي
-  const stagePanel=await stageSequenceHtml(app,{id,f,stages,cur,hearings,procedures,judgments:judgmentsRes.rows,relRows});
-  el.innerHTML=`${execPanel}${dataPanel}${stagePanel}
+  // المراحل الكاملة والعلاقات والأحكام تُدار في تبويباتها المتخصصة؛ لا نعيد نسخها هنا.
+  el.innerHTML=`${execPanel}${dataPanel}
    ${executionStripHtml({summary:executionContextSummary(app.__file.executions||[]),scope:'file',route:`executionCenter?fileId=${encodeURIComponent(id)}`})}`;
   // (د) كل إجراءات «نظرة عامة» تنقل إلى المصدر الأصلي أو إلى تبويبه — بلا كتابة من هنا
   el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>openEntityForm(app,'files',{id}));
