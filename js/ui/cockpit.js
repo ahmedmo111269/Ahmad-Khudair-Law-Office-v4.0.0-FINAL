@@ -254,7 +254,7 @@ export function fileNextStep({hearings=[],procedures=[],today=''}={}){
  * كوكبيت الملف: الخطوة التالية + مؤشرات الحالة، فوق التبويبات مباشرة.
  * يُعرض قبل الخوض في التفاصيل: أين وصل الملف، وماذا يجب فعله.
  */
-export function fileCockpitHtml({hearings=[],procedures=[],stages=[],parties=[],today='',currentStage=''}={}){
+export function fileCockpitHtml({hearings=[],procedures=[],stages=[],parties=[],today='',currentStage='',compact=false}={}){
  const dayOf=v=>String(v||'').slice(0,10);
  const upcomingHearings=hearings.filter(h=>dayOf(h.hearingDate)>=today&&!h.result).sort((a,b)=>(dayOf(a.hearingDate)+(a.hearingTime||'99')).localeCompare(dayOf(b.hearingDate)+(b.hearingTime||'99')));
  const active=procedures.filter(p=>!p.status||p.status==='open'||p.status==='pending');
@@ -274,14 +274,14 @@ export function fileCockpitHtml({hearings=[],procedures=[],stages=[],parties=[],
   </div>`;
  return `<section class="cp-fc" aria-label="مركز الملف">
   ${nextBlock}
-  <dl class="cp-fc-stats">
+  ${compact?'':`<dl class="cp-fc-stats">
    <div><dt>جلسات قادمة</dt><dd>${upcomingHearings.length}</dd></div>
    <div><dt>أعمال مفتوحة</dt><dd>${active.length}</dd></div>
    <div class="${overdue.length?'is-alert':''}"><dt>متأخرة</dt><dd>${overdue.length}</dd></div>
    <div><dt>المراحل</dt><dd>${stages.length}</dd></div>
    <div><dt>الأطراف</dt><dd>${parties.length}</dd></div>
    ${currentStage?`<div class="cp-fc-stage"><dt>المرحلة الحالية</dt><dd>${esc(currentStage)}</dd></div>`:''}
-  </dl>
+  </dl>`}
  </section>`;
 }
 
