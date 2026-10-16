@@ -49,6 +49,7 @@ const {runTodayViewTests}=await import(`${R}/tests/today-view-tests.js`);
 const {runWorkHidesTests}=await import(`${R}/tests/work-hides-tests.js`);
 const {runMyDayTests}=await import(`${R}/tests/my-day-tests.js`);
 const {runTomorrowPrepTests}=await import(`${R}/tests/tomorrow-prep-tests.js`);
+const {runFilePageDisplayTests}=await import(`${R}/tests/file-page-display-tests.js`);
 
 test('Date format DD/MM/YYYY',()=>expect(formatDate('2026-09-28')).toBe('28/09/2026'));
 test('Date parse from DD/MM/YYYY',()=>expect(parseDisplayDate('5/9/2026')).toBe('2026-09-05'));
@@ -118,6 +119,7 @@ await runTodayViewTests(test,expect);
 await runWorkHidesTests(test,expect);
 await runMyDayTests(test,expect);
 await runTomorrowPrepTests(test,expect);
+await runFilePageDisplayTests(test,expect);
 await runPwaTests(test,expect);
 
 // ===== حراسة الإقلاع: قائمة Precache في Service Worker تغطي كل وحدات الإقلاع =====

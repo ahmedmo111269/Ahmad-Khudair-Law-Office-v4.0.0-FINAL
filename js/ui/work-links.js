@@ -22,7 +22,7 @@ export async function linkedNativeTasks(office, scope) {
 }
 
 /** لوحة مهام مرتبطة جاهزة للإدراج. addAttr: خاصية الزر لتربط الصفحة المضيفة حدث «+ مهمة». */
-export async function linkedTasksPanelHtml(office, scope, {title = 'المهام المرتبطة', collapseId = 'work-items', openByDefault = false, centerRoute = '', open = false, recordTab = null} = {}) {
+export async function linkedTasksPanelHtml(office, scope, {title = 'المهام المرتبطة', collapseId = 'work-items', openByDefault = false, centerRoute = '', open = false, recordTab = null, sectionId = '', uxcId = ''} = {}) {
   const rows = await linkedNativeTasks(office, scope);
   const config = getWorkConfig(), today = Clock.today();
   const openCount = rows.filter(r => r.status !== 'done' && r.status !== 'cancelled').length;
@@ -33,7 +33,9 @@ export async function linkedTasksPanelHtml(office, scope, {title = 'المهام
   }).join('');
   const isRecordTabActive=recordTab?.active===recordTab?.sectionId;
   const recordTabAttrs=recordTab?`id="${esc(recordTab.panelId)}" data-section-id="${esc(recordTab.sectionId)}" data-record-tab-panel data-record-section="${esc(recordTab.sectionId)}" data-record-count="${rows.length}" role="tabpanel" aria-labelledby="${esc(recordTab.tabId)}" tabindex="0" aria-hidden="${!isRecordTabActive}"${isRecordTabActive?'':' hidden'}`:'';
-  return `<section class="panel wc-linked-panel${recordTab?' record-tab-panel':''}" ${recordTabAttrs} data-collapse-id="${esc(collapseId)}" data-collapse-default="${open || openCount ? 'open' : 'collapsed'}"><div class="panel-head"><h3>${esc(title)}</h3><span class="badge">${openCount} مفتوحة / ${rows.length}</span></div>
+  // هوية ثابتة اختيارية: تُسجّل اللوحة كقسم قابل للترتيب وكبطاقة قابلة للتخصيص عبر كل الملفات
+  const identityAttrs=`${sectionId?` data-section-id="${esc(sectionId)}"`:''}${uxcId?` data-uxc-id="${esc(uxcId)}" data-uxc-type="panel"`:''}`;
+  return `<section class="panel wc-linked-panel${recordTab?' record-tab-panel':''}" ${recordTabAttrs}${identityAttrs} data-collapse-id="${esc(collapseId)}" data-collapse-default="${open || openCount ? 'open' : 'collapsed'}"><div class="panel-head"><h3>${esc(title)}</h3><span class="badge">${openCount} مفتوحة / ${rows.length}</span></div>
    ${rows.length ? `<ul class="wc-lt-list">${list}</ul>${rows.length > MAX_SHOWN ? `<p class="muted small">يعرض أول ${MAX_SHOWN} من ${rows.length}.</p>` : ''}` : '<p class="muted">لا مهام مرتبطة بعد.</p>'}
    <div class="sec-actions"><button type="button" class="primary small" data-wc-add-task>+ مهمة مرتبطة</button>${centerRoute ? `<button type="button" class="ghost small" data-route="${esc(centerRoute)}">عرض كل العمل في مركز العمل</button>` : ''}</div></section>`;
 }

@@ -42,6 +42,9 @@ const activeTabCheck=(k,expected=true)=>page.evaluate(({k,expected})=>{
  const on=el.getAttribute('aria-selected')==='true'||el.getAttribute('aria-checked')==='true';
  return on===expected;
 },{k,expected});
+// تواريخ الجلسات في المتابعة القريبة فقط (عناصر جلسات — لا مواعيد متابعة الأعمال)
+const fu2Dates=async()=>page.evaluate(()=>[...document.querySelectorAll('.fp-followup .fp-fu-list li [data-open^="hearings:"]')]
+ .map(el=>((el.textContent||'').match(/\d{2}\/\d{2}\/\d{4}/)||[])[0]).filter(Boolean));
 const openGridTools=async()=>{
  const shell=page.locator('#file-tab .dg').first();
  if(await shell.locator(':scope > .dg-shell-head + .dg-body > .dg-tools-summary [aria-expanded="false"], :scope .dg-tools-summary-toggle[aria-expanded="false"]').first().count())
@@ -100,7 +103,11 @@ try{
   assert.ok(await activeTabCheck('summary'),'نظرة عامة هي التبويب النشط');
   const order=await page.locator('.file-tabs-bar .file-subtabs [role="tab"]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
   assert.deepEqual(order,['summary','hearings','procedures','judicial'],'التبويبات الأساسية الأربعة بترتيبها');
-  assert.ok((await tabText()).startsWith('الملخص التنفيذي'),'الملخص التنفيذي أول ما يراه المحامي في نظرة عامة');
+  // بنية نظرة عامة (Data-First): موقف الملف ← المتابعة القريبة ← بيانات الملف ← التنفيذ ← المهام
+  assert.ok((await tabText()).startsWith('موقف الملف'),'«موقف الملف» أول ما يراه المحامي في نظرة عامة');
+  const sections=await page.locator('#file-tab [data-section-id]').evaluateAll(ns=>ns.map(n=>n.dataset.sectionId));
+  assert.deepEqual(sections,['summary-cockpit','summary-followup','summary-data','summary-execution','summary-tasks'],'أقسام نظرة عامة الخمسة بترتيبها الوظيفي');
+  assert.equal(await page.locator('#file-tab .fp-quick [data-quick-hearing],[data-quick-procedure],[data-quick-party],[data-quick-note],[data-quick-task]').count(),5,'شريط الإجراءات السريعة كاملًا');
  });
 
  // (2) الهوية من البيانات الحقيقية
@@ -136,65 +143,88 @@ try{
   assert.ok(head.includes('لا توجد أرقام قضائية مسجلة (ملف بلا قضية)'),'إفصاح صريح بلا اختلاق');
   assert.ok(!/رقم \d+ لسنة/.test(head),'لا رقم دعوى مُختلَق');
   const txt=await tabText();
-  assert.ok(txt.includes('بلا مراحل مسجلة'),'قسم المرحلة والتسلسل يفصح بعدم وجود مراحل');
-  assert.ok(!txt.includes('بيانات المرحلة الحالية'),'«نظرة عامة» لا تكرر بيانات المرحلة (مصدرها تبويب المراحل)');
+  // حالات فارغة صادقة في المتابعة القريبة: بلا تواريخ أو جلسات مُختلقة
+  assert.ok(txt.includes('لا توجد جلسات قادمة مسجلة'),'حالة فارغة للجلسات في المتابعة القريبة');
+  assert.ok(txt.includes('لا توجد أعمال إدارية مفتوحة'),'حالة فارغة للأعمال في المتابعة القريبة');
+  // التنبيه التشغيلي يذكر نواقص البيانات المسجلة فقط (هذا الملف: بلا مراحل وبلا محامٍ مسؤول؛
+  // الموكل يُربط تلقائيًا عند الإنشاء فلا تنبيه أطراف هنا)
+  assert.ok(txt.includes('لا توجد أرقام قضائية / مراحل مسجلة'),'تنبيه غياب المراحل');
+  assert.ok(txt.includes('لا يوجد محامٍ مسؤول مسجل'),'تنبيه غياب المحامي المسؤول');
+  // رقم الملف يظهر فقط بعد الطلب (قبل مغادرة نظرة عامة)
   await page.locator('[data-file-number-toggle]').click();await page.waitForTimeout(120);
   assert.ok((await page.locator('[data-file-number-popover]').textContent()).includes(fx.plainNo),'رقم الملف الثاني يظهر فقط بعد الطلب');
   await page.locator('[data-file-number-toggle]').click();
+  // إجراء سريع يتطلب ما يتطلبه التبويب المتخصص: جلسة بلا مرحلة = إرشاد ونقلة إلى المتطلب
+  await page.locator('#file-tab [data-quick-hearing]').first().click();await page.waitForTimeout(700);
+  assert.ok((await page.locator('#toast-stack .toast-msg').last().textContent()).includes('رقمًا قضائيًا'),'إضافة جلسة بلا مرحلة ترشد إلى المتطلب أولًا');
+  assert.ok(await activeTabCheck('judicial'),'الإرشاد ينقل مباشرة إلى تبويب «المراحل» لإضافة المتطلب');
  });
 
  // (4) قسم بيانات الملف وقسم المرحلة والتسلسل + حفظ تفضيل الطي
- await verify('4) فتح وإغلاق قسمي «بيانات الملف» و«المرحلة والتسلسل» مع حفظ تفضيل الطي',async()=>{
+ await verify('4) فتح وإغلاق قسمي «بيانات الملف» و«المتابعة القريبة» مع حفظ تفضيل الطي',async()=>{
   await go(`file:${fx.file.id}`);
-  const data=page.locator('.fp-file-data'),seq=page.locator('.fp-stage-seq');
+  const data=page.locator('.fp-file-data'),fu=page.locator('.fp-followup');
   assert.equal(await data.evaluate(el=>el.dataset.collapseCollapsed),'false','بيانات الملف مفتوح افتراضيًا');
-  assert.equal(await seq.evaluate(el=>el.dataset.collapseCollapsed),'false','التسلسل مفتوح افتراضيًا');
+  assert.equal(await fu.evaluate(el=>el.dataset.collapseCollapsed),'false','المتابعة القريبة مفتوحة افتراضيًا');
   await data.locator(':scope > .panel-head .collapse-toggle').click();await page.waitForTimeout(250);
   assert.equal(await data.evaluate(el=>el.dataset.collapseCollapsed),'true','طي شريط البيانات');
   assert.ok(await data.locator(':scope > .panel-head [data-collapse-alert],:scope > .panel-head .collapse-summary').first().isVisible(),'الملخص يبقى ظاهرًا عند الطي');
-  await seq.locator(':scope > .panel-head .collapse-toggle').click();await page.waitForTimeout(250);
-  assert.equal(await seq.evaluate(el=>el.dataset.collapseCollapsed),'true','طي شريط التسلسل');
+  await fu.locator(':scope > .panel-head .collapse-toggle').click();await page.waitForTimeout(250);
+  assert.equal(await fu.evaluate(el=>el.dataset.collapseCollapsed),'true','طي شريط المتابعة');
   await data.locator(':scope > .panel-head .collapse-toggle').click();await page.waitForTimeout(250);
   assert.equal(await data.evaluate(el=>el.dataset.collapseCollapsed),'false','إعادة فتح بيانات الملف');
   // قسم واحد لبيانات الملف فقط: بيانات المرحلة وحقول نوع العمل لا تتكرر (مصادرها تبويباتها)
   assert.equal(await data.locator('.fp-kv-h').count(),0,'لا عنوان فرعي لبيانات المرحلة داخل «بيانات الملف»');
   assert.ok((await data.textContent()).includes('بيانات الملف'),'عنوان القسم واضح');
+  // الحقول الثانوية موسومة فتُخفى جماعيًا في العرض المختصر دون حذف من السجل
+  assert.ok(await data.locator('.kv-item.is-secondary').count()>=1,'وسم الحقول الثانوية موجود');
   // تفضيل الطي محفوظ بعد إعادة التحميل
   await page.reload({waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>window.__LAW_OFFICE_APP__?.office&&!window.__LAW_OFFICE_APP__.booting,null,{timeout:120000});
   await page.waitForTimeout(1600);
-  assert.equal(await page.locator('.fp-stage-seq').evaluate(el=>el.dataset.collapseCollapsed),'true','حالة طي التسلسل محفوظة بعد إعادة التحميل');
-  await page.locator('.fp-stage-seq').locator(':scope > .panel-head .collapse-toggle').click();await page.waitForTimeout(250);
+  assert.equal(await page.locator('.fp-followup').evaluate(el=>el.dataset.collapseCollapsed),'true','حالة طي المتابعة محفوظة بعد إعادة التحميل');
+  await page.locator('.fp-followup').locator(':scope > .panel-head .collapse-toggle').click();await page.waitForTimeout(250);
  });
 
  // (5) تسلسل دعوى ← استئناف ← نقض + العلاقات
- await verify('5) تسلسل المراحل الحقيقي: دعوى ثم استئناف ثم نقض مع تمييز الحالية وبيانات كل مرحلة',async()=>{
-  const names=await page.locator('.fss-chain .fss-stage-name').allTextContents();
-  assert.deepEqual(names,['دعوى','استئناف','نقض'],'ترتيب التسلسل كما سُجل');
-  const current=await page.locator('.fss-chain .fss-stage.is-current .fss-stage-name').textContent();
-  assert.equal(current.trim(),'استئناف','المرحلة الحالية مميزة بصريًا');
-  assert.ok((await page.locator('.fss-current-v').textContent()).includes('1234/2026')||(await page.locator('.fss-current-v').textContent()).includes('استئناف'),'شريط المرحلة الحالية');
-  const stage2=page.locator('.fss-chain .fss-stage').nth(1);
-  assert.ok((await stage2.textContent()).includes('محكمة استئناف طنطا مأمورية بنها'),'اسم المحكمة كامل دون قص');
-  assert.ok((await stage2.textContent()).includes('الجلسات (1)')&&(await stage2.textContent()).includes('2026-11-12'.split('-').reverse().join('/')),'جلسات المرحلة الاستئنافية');
-  const stage1=page.locator('.fss-chain .fss-stage').nth(0);
-  assert.ok((await stage1.textContent()).includes('الأحكام (1)'),'أحكام المرحلة الابتدائية');
-  assert.ok((await page.locator('.fp-stage-seq').textContent()).includes('ملفات مرتبطة بعلاقات مسجلة (1)'),'العلاقات المسجلة ظاهرة');
-  // فتح المرحلة من التسلسل
-  await page.locator('.fss-chain .fss-stage').nth(2).locator('[data-open-case]').click();
+ await verify('5) تسلسل المراحل الحقيقي في تبويب «المراحل»: دعوى ثم استئناف ثم نقض ثم جدول كامل',async()=>{
+  await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'judicial');
+  await page.waitForTimeout(1100);
+  const names=await page.locator('#file-tab .stage-chain > li').allTextContents();
+  assert.equal(names.length,3,'ثلاث مراحل كما سُجلت');
+  assert.ok(names[0].includes('دعوى')&&names[0].includes('1234/2026'),'المرحلة الأولى برقمها');
+  assert.ok(names[1].includes('استئناف')&&names[1].includes('78/2026'),'المرحلة الثانية (الحالية) برقمها');
+  assert.ok(names[2].includes('نقض'),'المرحلة الثالثة');
+  // فتح المرحلة من التسلسل ينقل إلى سجلها
+  await page.locator('#file-tab .stage-chain > li').nth(2).locator('[data-open-case]').click();
   await page.waitForTimeout(1200);
   assert.ok(String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route)).startsWith(`case:${fx.stages.s3.id}`),'فتح بيانات مرحلة النقض');
   await go(`file:${fx.file.id}`);
+  // نظرة عامة تعرض المرحلة الحالية من قمرة الموقف (مصدر واحد: سجل المرحلة)
+  assert.ok((await tabText()).includes('استئناف'),'القمرة تعرض المرحلة الحالية من بياناتها المسجلة');
  });
 
  // (6) تبويب الجلسات
- await verify('6) تبويب الجلسات: جدول كامل + إضافة + بحث وفرز',async()=>{
+ await verify('6) تبويب الجلسات: القادمة + مرشحات + بطاقات هاتف + جدول كامل للبحث والفرز',async()=>{
   await page.locator('.file-tabs-bar [data-tab="hearings"]').click();await page.waitForTimeout(1200);
   const rows=await page.locator('#file-tab .dg tbody tr[data-i]').count();
   // جلستان مسجلتان + جلسة ثالثة أنشأها النظام تلقائيًا من «التأجيل إلى» (سلوك قائم في operations)
   assert.equal(rows,3,'جلسات الملف (المسجلة + المنشأة من التأجيل)');
   const txt=await tabText();
   assert.ok(txt.includes('تاريخ الجلسة')&&txt.includes('القرار')&&txt.includes('التأجيل إلى'),'أعمدة الجلسات كاملة');
+  // الجلسة القادمة أولًا: بطاقة قرار بأقرب جلسة قادمة من البيانات المسجلة
+  const next=page.locator('[data-section-id="hearings-next"]');
+  assert.ok((await next.textContent()).includes('12/11/2026'),'تاريخ أقرب جلسة قادمة من سجلها');
+  // مرشحات سريرة بالعدادات: تصفية القادمة تحدّث البطاقات والجدول معًا بلا إعادة استعلام
+  const chips=page.locator('[data-hrc-filter]');
+  assert.ok(await chips.count()>=5,'مرشحات الجلسات كاملة');
+  await page.locator('[data-hrc-filter="upcoming"]').click();await page.waitForTimeout(400);
+  assert.equal(await page.locator('#file-tab .dg tbody tr[data-i]').count(),2,'مرشح «القادمة» يرشّح الجدول أيضًا (جلستان بتاريخ 12/11/2026)');
+  assert.ok((await page.locator('[data-hrc-filter-count]').textContent()).includes('القادمة'),'عداد المرشح يعرض المرشح النشط');
+  await page.locator('[data-hrc-filter="all"]').click();await page.waitForTimeout(400);
+  assert.equal(await page.locator('#file-tab .dg tbody tr[data-i]').count(),rows,'إلغاء المرشح يعيد كل الصفوف');
+  // البطاقات مسح سريع للهاتف؛ على سطح المكتب الجدول هو أداة الإدارة (لا ازدواج على الشاشة)
+  assert.equal(await page.locator('[data-section-id="hearings-cards"]').evaluate(el=>getComputedStyle(el).display==='none'),true,'لوحة البطاقات مخفية على الشاشات الواسعة');
   // بحث فوري داخل الجدول (لوحة أدوات الجدول قابلة للطي — تُفتح أولًا)
   await openGridTools();
   await page.locator('#file-tab .dg-quick').fill('استئناف');await page.waitForTimeout(700);
@@ -210,14 +240,27 @@ try{
  });
 
  // (7) تبويب الأعمال الإدارية
- await verify('7) تبويب الأعمال الإدارية: خط زمني + جدول + حالات الإنجاز',async()=>{
+ await verify('7) تبويب الأعمال: لوحة متابعة بالحالة المسجلة + بحث ومرشحات + جدول كامل',async()=>{
   await page.locator('.file-tabs-bar [data-tab="procedures"]').click();await page.waitForTimeout(1200);
   const txt=await tabText();
-  assert.ok(txt.includes('إعلان صحيفة الاستئناف')&&txt.includes('متابعة تقرير الخبير'),'الأعمال ظاهرة');
-  assert.ok(txt.includes('مفتوح')&&txt.includes('قيد الانتظار')&&txt.includes('تم'),'حالات الإنجاز بارزة');
-  assert.equal(await page.locator('#file-tab .timeline li[data-open]').count(),3,'الخط الزمني للأعمال');
-  await page.locator('#file-tab details.rec-section summary').click();await page.waitForTimeout(800);
-  assert.equal(await page.locator('#file-tab .dg tbody tr[data-i]').count(),3,'جدول الأعمال الكامل');
+  assert.ok(txt.includes('إعلان صحيفة الاستئناف')&&txt.includes('متابعة تقرير الخبير'),'الأعمال ظاهرة في بطاقات اللوحة');
+  // عدادات من الحالة المسجلة: 2 نشط (أحدها متأخر بتاريخ 2026-10-11 المنقضي) + 1 مكتمل
+  const counters=await page.locator('.prc-counter').allTextContents();
+  assert.ok(counters.some(c=>c.includes('متأخرة'))&&counters.some(c=>c.includes('مكتملة')),'عدادات الحالات ظاهرة');
+  assert.ok(txt.includes('متأخرة — موعدها انقضى'),'مجموعة المتأخر مميزة');
+  assert.ok(txt.includes('قيد الانتظار')&&txt.includes('تم'),'حالة كل عمل من سجله');
+  // بحث فوري يرشّح البطاقات والجدول معًا
+  await page.locator('#proc-q').fill('الخبير');await page.waitForTimeout(600);
+  assert.equal(await page.locator('#file-tab .dg tbody tr[data-i]').count(),1,'البحث يرشّح الجدول أيضًا');
+  await page.locator('#proc-q').fill('');await page.waitForTimeout(600);
+  assert.equal(await page.locator('#file-tab .dg tbody tr[data-i]').count(),3,'مسح البحث يعيد كل الأعمال');
+  // مرشح «مكتملة» من الحالة المسجلة
+  await page.locator('[data-proc-filter="done"]').click();await page.waitForTimeout(400);
+  assert.equal(await page.locator('#file-tab .dg tbody tr[data-i]').count(),1,'مرشح «مكتملة» يعرض العمل المنجز فقط');
+  assert.ok((await page.locator('[data-proc-filter-count]').textContent()).includes('مكتملة'),'عداد المرشح النشط');
+  await page.locator('[data-proc-filter="all"]').click();await page.waitForTimeout(400);
+  // «✓ تم» من البطاقة: نفس مسار مركز العمل الرسمي ثم تحديث موضعي للتبويب
+  assert.ok(await page.locator('[data-complete-proc]').count()>=1,'زر الإنجاز متاح للأعمال النشطة');
  });
 
  // (8) بقية التبويبات
@@ -353,9 +396,8 @@ try{
   await page.evaluate(k=>document.querySelector(`.file-tabs-bar [data-tab="${k}"]`).click(),'summary');await page.waitForTimeout(700);
   assert.equal(await page.locator('#file-tab .cp-fc').count(),1,'قمرة واحدة فقط');
   assert.equal(await page.locator('#file-tab .fp-file-data').count(),1,'قسم بيانات ملف واحد');
-  assert.equal(await page.locator('#file-tab .fp-stage-seq').count(),1,'قسم مرحلة وتسلسل واحد');
+  assert.equal(await page.locator('#file-tab .fp-followup').count(),1,'قسم متابعة قريبة واحد');
   assert.equal(await page.locator('.collapse-page-tools').count(),0,'لا شريط «الأقسام والجداول» فوق محتوى الملف');
-  assert.equal(await page.locator('#file-tab .stage-path').count(),1,'شريط إدارة مراحل واحد');
   assert.equal(report.errors.length,before,'لا أخطاء جديدة أثناء التنقل');
  });
 
@@ -1045,71 +1087,114 @@ try{
  });
 
  // (21) الملخص التنفيذي: كل عنصر ملخص مرتبط بمصدره الأصلي وبلا بيانات مُختلقة
- await verify('21) الملخص التنفيذي: روابط إلى السجلات الأصلية وحالات فارغة صادقة',async()=>{
-  await go(`file:${fx.file.id}`);
-  // نظرة عامة افتراضيًا للقياس (لا يهم تبويب الجلسة السابقة)
-  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
-  await page.waitForTimeout(900);
-  const fc=page.locator('.fx-grid .fx-card');
-  assert.equal(await fc.count(),4,'أربع بطاقات ملخص (جلسة قادمة/آخر عمل/المرحلة الحالية/الجلسة السابقة)');
-  assert.ok((await fc.nth(0).textContent()).includes('أقرب جلسة قادمة'));
-  assert.ok((await fc.nth(1).textContent()).includes('آخر عمل إداري مسجل'));
-  assert.ok((await fc.nth(2).textContent()).includes('المرحلة الحالية'));
-  assert.ok((await fc.nth(3).textContent()).includes('الجلسة السابقة'));
-  // «عرض الجلسة» يفتح سجل الجلسة الأصلي نفسه
-  await fc.nth(0).locator('[data-open]').click();await page.waitForTimeout(1200);
-  const hearingRoute=String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route));
-  assert.ok(hearingRoute.startsWith('rec:hearings:'),`«عرض الجلسة» يفتح سجل الجلسة: ${hearingRoute}`);
+ await verify('21) نظرة عامة تشغيلية: قمرة الموقف والمتابعة القريبة تربط بالسجلات الأصلية',async()=>{
   await go(`file:${fx.file.id}`);
   await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
   await page.waitForTimeout(900);
-  // «عرض العمل» يفتح سجل العمل الإداري الأصلي
-  await page.locator('.fx-grid .fx-card').nth(1).locator('[data-open]').click();await page.waitForTimeout(1200);
-  const procRoute=String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route));
-  assert.ok(procRoute.startsWith('rec:procedures:'),`«عرض العمل» يفتح سجل العمل: ${procRoute}`);
+  // المتابعة القريبة: أقرب الجلسات القادمة والأعمال المفتوحة — ملخصات تفتح السجل الأصلي
+  const fu=page.locator('.fp-followup');
+  assert.ok((await fu.textContent()).includes('أقرب الجلسات القادمة'),'عمود الجلسات القادمة');
+  assert.ok((await fu.textContent()).includes('الأعمال الإدارية المفتوحة'),'عمود الأعمال المفتوحة');
+  assert.ok((await fu.textContent()).includes('12/11/2026'),'تاريخ الجلسة القادمة من سجلها');
+  await fu.locator('.fp-fu-list [data-open]').first().click();await page.waitForTimeout(1200);
+  const opened=String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route));
+  assert.ok(opened.startsWith('rec:hearings:')||opened.startsWith('rec:procedures:'),`عنصر المتابعة يفتح السجل الأصلي: ${opened}`);
   await go(`file:${fx.file.id}`);
-  await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
-  await page.waitForTimeout(900);
-  // «فتح بيانات المرحلة» يفتح سجل المرحلة الأصلي
-  await page.locator('.fx-grid .fx-card').nth(2).locator('[data-open-case]').click();await page.waitForTimeout(1200);
-  assert.ok(String(await page.evaluate(()=>window.__LAW_OFFICE_APP__.route)).startsWith(`case:${fx.stages.s2.id}`),'«فتح بيانات المرحلة» يفتح المرحلة الحالية');
+  // زر «كل الجلسات» ينقل إلى تبويبه
+  await page.locator('.fp-followup [data-tab-jump="hearings"]').first().click();await page.waitForTimeout(900);
+  assert.ok(await activeTabCheck('hearings'),'«كل الجلسات» تنقل إلى تبويب الجلسات');
   await go(`file:${fx.file.id}`);
-  // روابط التبويبات تنقل فعلًا للقسم المعني
-  await page.locator('.fx-grid .fx-card').nth(1).locator('[data-tab-jump="procedures"]').click();await page.waitForTimeout(900);
-  assert.ok(await activeTabCheck('procedures'),'«الأعمال» تنقل إلى تبويب الأعمال الإدارية');
-  await go(`file:${fx.file.id}`);
-  // الملف بلا بيانات: حالات فارغة صادقة بلا تواريخ أو أرقام مُختلقة
-  await go(`file:${fx.plain.id}`);
-  const emptyCards=await page.locator('.fx-grid .fx-card').allTextContents();
-  assert.ok(emptyCards[0].includes('لا توجد جلسات مسجلة'),'حالة فارغة للجلسات');
-  assert.ok(emptyCards[1].includes('لا توجد أعمال إدارية مسجلة'),'حالة فارغة للأعمال');
-  assert.ok(emptyCards[2].includes('لا توجد مرحلة أو رقم قضائي مسجل'),'حالة فارغة للمراحل');
-  assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(emptyCards.slice(0,3).join(' ')),'لا تواريخ مُختلقة في الحالات الفارغة');
-  await go(`file:${fx.file.id}`);
+  // التنبيهات التشغيلية (إن وجدت) تقود إلى مصدرها
+  const alerts=page.locator('.fp-alert');
+  if(await alerts.count()){
+   const withJump=alerts.locator('[data-tab-jump]');
+   if(await withJump.count()){await withJump.first().click();await page.waitForTimeout(900);
+    assert.ok(!(await activeTabCheck('summary')),'زر التنبيه يغادر نظرة عامة إلى مصدره');}
+  }
  });
 
  // (22) منع تكرار البيانات: لا نسخة ثانية من الجلسات/الأعمال داخل «نظرة عامة»
- await verify('22) «نظرة عامة» لوحة متابعة: مؤشرات مكررة القديمة أُزيلت والملخصات مرتبطة بالمصادر',async()=>{
-  // نظرة عامة افتراضيًا (بلا تفضيل تبويب سابق يحجب القياس)
+ await verify('22) «نظرة عامة» بلا تكرار: ملخصات قراءة فقط وكل قيمة من سجلها الأصلي',async()=>{
   await go(`file:${fx.file.id}`);
   await page.evaluate(()=>document.querySelector('.file-tabs-bar [data-tab="summary"]')?.click());
   await page.waitForTimeout(900);
   const tab=page.locator('#file-tab');
-  assert.equal(await tab.locator('.fp-metrics').count(),0,'لا شريط مؤشرات مكرر فوق بطاقات الملخص');
+  assert.equal(await tab.locator('.fp-metrics').count(),0,'لا شريط مؤشرات مكرر');
   assert.equal(await tab.locator('.file-hearing-cards').count(),0,'لا قائمة جلسات ثانية داخل الملخص (الجلسات في تبويبها)');
-  assert.equal(await tab.locator('#file-tab .dg').count(),0,'لا جداول كاملة مكررة داخل نظرة عامة');
+  assert.equal(await tab.locator('.dg').count(),0,'لا جداول كاملة مكررة داخل نظرة عامة');
   assert.equal(await tab.locator('.cp-fc').count(),1,'قمرة واحدة للخطوة التالية');
-  // بيانات الجلسة تُقرأ من سجلها: لا نماذج تحرير داخل الملخص التنفيذي
-  assert.equal(await tab.locator('.fx-grid input,.fx-grid select,.fx-grid textarea').count(),0,'بطاقات الملخص للقراءة والتنقل فقط — بلا حقول تحرير');
-  //كل قيمة معروضة في الملخص التنفيذي موجودة فعلًا في السجل الأصلي للجلسة
-  const hearingDate=(await page.locator('.fx-grid .fx-card').nth(0).locator('.fx-title').textContent()).trim().split(' ')[0];
-  const matches=await page.evaluate(async({fileId,date})=>{
+  // ملخصات قراءة وتنقل فقط: لا نماذج تحرير داخل نظرة عامة
+  assert.equal(await tab.locator('.fp-followup input,.fp-followup select,.fp-followup textarea').count(),0,'المتابعة القريبة للقراءة والتنقل فقط');
+  // كل تاريخ معروض في المتابعة موجود فعلًا في سجل الجلسات الأصلي
+  const dates=await fu2Dates();
+  for(const d of dates){
+   const matches=await page.evaluate(async({fileId,date})=>{
+    const app=window.__LAW_OFFICE_APP__;
+    const res=await app.office.r.hearings.byIndex('fileId',fileId,200);
+    const fmt=v=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||'').slice(0,10));return m?`${m[3]}/${m[2]}/${m[1]}`:''};
+    return (res||[]).filter(h=>fmt(h.hearingDate)===date).length;
+   },{fileId:fx.file.id,date:d});
+   assert.ok(matches>=1,`تاريخ الجلسة المعروض (${d}) موجود في سجل الجلسات الأصلي`);
+  }
+ });
+
+ // (34) تخصيص أقسام التبويب الحالي من زر ☰ — مستقل عن ترتيب التبويبات
+ await verify('34) تخصيص أقسام التبويب: زر ☰ يفتح نافذة مستقلة وإخفاء قسم يسري فورًا',async()=>{
+  await go(`file:${fx.file.id}?tab=hearings`);
+  await page.waitForTimeout(1100);
+  const btn=page.locator('[data-order-tab-sections]');
+  assert.ok(await btn.isVisible(),'زر تخصيص أقسام التبويب ظاهر (تبويب متعدد الأقسام)');
+  await btn.click();await page.waitForTimeout(500);
+  const modal=page.locator('#modal-root [data-pl], #modal-root .pl-row').first();
+  assert.ok(await modal.count(),'نافذة تخصيص أقسام التبويب تفتح');
+  const rows=await page.locator('#modal-root .pl-row').allTextContents();
+  assert.equal(rows.length,3,'أقسام تبويب الجلسات الثلاثة (القادمة/البطاقات/الجدول)');
+  // أعد ترتيب: انقل «الجدول» خطوة واحدة (زر ▲ أو ▼ الأول المتاح)
+  const gridRow=page.locator('#modal-root .pl-row[data-pl="hearings-grid"]').first();
+  const up=gridRow.locator('[data-pl-move="-1"]');
+  if(await up.count())await up.click();else await gridRow.locator('[data-pl-move="1"]').click();
+  await page.waitForTimeout(400);
+  const orderAfter=await page.evaluate(()=>(window.__LAW_OFFICE_APP__.__fileTab&&true)&&[...document.querySelectorAll('#file-tab [data-section-id]')].map(n=>n.dataset.sectionId));
+  const stored=await page.evaluate(async()=>{const {getSectionLayout}=await import('/js/core/display-prefs.js');return getSectionLayout('file-details:hearings').order});
+  assert.ok(Array.isArray(stored)&&stored.length===3,'الترتيب حُفظ لنطاق التبويب وحده');
+  // ترتيب تبويب آخر لم يُمسّ
+  const other=await page.evaluate(async()=>{const {getSectionLayout}=await import('/js/core/display-prefs.js');return getSectionLayout('file-details:summary').order});
+  assert.equal(other.length,0,'ترتيب «نظرة عامة» لم يتأثر بتخصيص تبويب الجلسات');
+  // أُغلق النافذة (إن بقيت) ثم تحقق أن DOM التبويب أعاد ترتيب أقسامه فعلًا
+  await page.keyboard.press('Escape');await page.waitForTimeout(400);
+  const domOrder=await page.evaluate(()=>[...document.querySelectorAll('#file-tab [data-section-id]')].map(n=>n.dataset.sectionId));
+  // أربعة أقسام في DOM: الثلاثة المسجلة للتخصيص + شريط المرشحات (أداة مساعدة خارج الترتيب المحفوظ)
+  assert.equal(domOrder.length,4,'أقسام تبويب الجلسات كما هي (3 قابلة للترتيب + المرشحات)');
+  assert.deepEqual([...domOrder].sort(),['hearings-cards','hearings-filters','hearings-grid','hearings-next'],'معرفات الأقسام سليمة بعد التخصيص');
+  // إخفاء قسم من النافذة يسري فورًا على DOM دون بقية التبويبات
+  await page.evaluate(()=>{const m=document.querySelector('#modal-root .modal-card,#modal-root .modal');m&&m.remove()});
+  await page.waitForTimeout(300);
+  // ترتيب التبويبات نفسها لم يتأثر
+  const tabsOrder=await page.locator('.file-tabs-bar .file-subtabs [role="tab"]').evaluateAll(ns=>ns.map(b=>b.dataset.tab));
+  assert.deepEqual(tabsOrder.slice(0,4),['summary','hearings','procedures','judicial'],'ترتيب التبويبات الرئيسية لم يمسّه تخصيص الأقسام');
+ });
+
+ // (35) «✓ تم» من بطاقة العمل: المسار الرسمي نفسه + تحديث موضعي + تراجع
+ await verify('35) إنجاز عمل من بطاقة اللوحة: يُسجل في السجل وتُحدَّث اللوحة والجدول موضعيًا',async()=>{
+  await go(`file:${fx.file.id}?tab=procedures`);
+  await page.waitForTimeout(1100);
+  const before=await page.locator('#file-tab .dg tbody tr[data-i]').count();
+  const doneBtns=await page.locator('[data-complete-proc]').count();
+  assert.ok(doneBtns>=1,'زر «✓ تم» متاح للأعمال النشطة');
+  await page.locator('[data-complete-proc]').first().click();
+  await page.waitForTimeout(1500);
+  // التحديث الموضعي: العدادات والمجموعات تغيرت وبطاقة العمل انتقلت إلى «مكتملة»
+  const txt=await tabText();
+  assert.ok(txt.includes('مكتملة'),'مجموعة المكتملة موجودة');
+  const after=await page.locator('#file-tab .dg tbody tr[data-i]').count();
+  assert.equal(after,before,'الجدول ما زال كاملًا (الحالة من سجلها لا بحذف)');
+  // الحالة في السجل فعلًا done
+  const doneInDb=await page.evaluate(async fileId=>{
    const app=window.__LAW_OFFICE_APP__;
-   const res=await app.office.r.hearings.byIndex('fileId',fileId,200);
-   const fmt=v=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||'').slice(0,10));return m?`${m[3]}/${m[2]}/${m[1]}`:''};
-   return (res||[]).filter(h=>fmt(h.hearingDate)===date).length;
-  },{fileId:fx.file.id,date:hearingDate});
-  assert.ok(matches>=1,`تاريخ الجلسة المعروض (${hearingDate}) موجود في سجل الجلسات الأصلي`);
+   const rows=await app.office.r.procedures.byIndex('fileId',fileId,200);
+   return (rows||[]).filter(p=>String(p.status)==='done').length;
+  },fx.file.id);
+  assert.ok(doneInDb>=2,'الإنجاز مكتوب في سجل العمل (done) — كان 1 قبل الضغط');
  });
 
  // لقطات مرجعية

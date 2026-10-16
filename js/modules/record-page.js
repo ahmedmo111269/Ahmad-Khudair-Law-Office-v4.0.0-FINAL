@@ -28,7 +28,10 @@ const TASK_LINK_STORES=['hearings','procedures','appointments','communications',
 const taskScope=(store,id)=>store==='cases'?{caseId:id}:{relatedId:id};
 const NOTE_ENTITY_TYPES={clients:'CLIENT',files:'LEGAL_FILE',cases:'CASE',fileParties:'PARTY',hearings:'HEARING',procedures:'PROCEDURE',judgments:'JUDGMENT',execution:'EXECUTION',powersOfAttorney:'POA',serviceRecords:'SERVICE_RECORD',expertReports:'EXPERT_REPORT',appointments:'APPOINTMENT',communications:'COMMUNICATION',fees:'FEE',documentReferences:'DOCUMENT_REFERENCE'};
 
-export function kvHtml(fields,row,refs,{skipEmpty=true,includeEmptyAvailable=false}={}){
+export function kvHtml(fields,row,refs,{skipEmpty=true,includeEmptyAvailable=false,secondary=null}={}){
+ // secondary: مجموعة مفاتيح حقول «ثانوية» — تُخفى جميعها عند إيقاف «البيانات الثانوية»
+ // من إعدادات العرض (عرض مختصر/تفصيلي) ولا تُحذف من السجل ولا من التخصيص الفردي.
+ const secondaryKeys=secondary instanceof Set?secondary:Array.isArray(secondary)?new Set(secondary.map(String)):null;
  const items=fields.map(f=>{
   const v=displayValue(f,row,refs);
   const empty=v===null||v===undefined||v==='';
@@ -42,7 +45,7 @@ export function kvHtml(fields,row,refs,{skipEmpty=true,includeEmptyAvailable=fal
    ?'<small class="record-ref-unavailable muted" role="status">السجل المرتبط غير متاح حاليًا.</small>':'';
   const optionalEmpty=includeEmptyAvailable&&empty,hasAction=Boolean(link);
   const linkedValue=hasAction?`<button type="button" class="link" data-display-action aria-label="فتح السجل المرتبط: ${esc(f.l)}"><span data-display-hide-target>${esc(v)}</span><span class="record-ref-action-fallback" data-display-action-fallback hidden>فتح السجل المرتبط</span></button>`:esc(v);
-  return `<div class="kv-item${f.t==='textarea'?' wide':''}" data-display-item="field:${esc(String(f.k))}" data-display-label="${esc(f.l)}"${optionalEmpty?' data-display-default-hidden="true"':''}${hasAction?' data-display-preserve-actions="true"':''}><dt${hasAction?' data-display-hide-target="label"':''}>${esc(f.l)}</dt><dd${link}>${empty?'<span class="muted">غير مسجل — أظهر هذا الحقل لإضافته إلى العرض</span>':hasAction?linkedValue:esc(v)}${unavailable}</dd></div>`;
+  return `<div class="kv-item${f.t==='textarea'?' wide':''}${secondaryKeys?.has(f.k)?' is-secondary':''}" data-display-item="field:${esc(String(f.k))}" data-display-label="${esc(f.l)}"${optionalEmpty?' data-display-default-hidden="true"':''}${hasAction?' data-display-preserve-actions="true"':''}><dt${hasAction?' data-display-hide-target="label"':''}>${esc(f.l)}</dt><dd${link}>${empty?'<span class="muted">غير مسجل — أظهر هذا الحقل لإضافته إلى العرض</span>':hasAction?linkedValue:esc(v)}${unavailable}</dd></div>`;
  }).join('');
  return items?`<dl class="kv">${items}</dl>`:'<p class="muted">لا توجد بيانات مسجلة بعد. اضغط «تعديل البيانات» لإضافتها.</p>';
 }

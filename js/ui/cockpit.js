@@ -303,7 +303,8 @@ function fmt(d){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));return m
  * @param {number} [o.limit] عدد الصفوف المعروضة (الباقي بإشارة واحدة)
  * @param {function} [o.fileLabelOf] لإظهار اسم الملف على كل صف في سياق الموكل
  */
-export function executionStripHtml({summary={},route='executionCenter',scope='file',limit=3,fileLabelOf=null,emptyHint=''}={}){
+export function executionStripHtml({summary={},route='executionCenter',scope='file',limit=3,fileLabelOf=null,emptyHint='',sectionId='',uxcId=''}={}){
+ // sectionId/uxcId اختياريان: هوية قسم ثابتة عبر كل الملفات (قابل للترتيب والتخصيص من النظام المركزي).
  const items=summary.items||[],counts=summary.counts||null;
  const rows=items.slice(0,limit),more=Math.max(0,items.length-rows.length);
  const fileIdOf=item=>String(item.fileId||'');
@@ -323,7 +324,7 @@ export function executionStripHtml({summary={},route='executionCenter',scope='fi
    </button></li>`;
  };
  const pulse=counts?`<p class="cp-exec-pulse"><span><b>${counts.all}</b> تنفيذ</span><span class="${counts.attention?'is-alert':''}"><b>${counts.attention}</b> يحتاج قرارًا</span><span class="${Number(counts.overdueMinor||0)?'is-alert':''}">متأخرات <b>${money(counts.overdueMinor||0)}</b></span><span>المتبقي <b>${money(counts.remainingMinor||0)}</b></span></p>`:'';
- return `<section class="cp-exec" data-section-id="execution" data-exec-strip aria-label="سياق التنفيذ">
+ return `<section class="cp-exec"${sectionId?` data-section-id="${esc(sectionId)}"`:''}${uxcId?` data-uxc-id="${esc(uxcId)}" data-uxc-type="panel"`:''} data-exec-strip aria-label="سياق التنفيذ">
   <header class="cp-exec-head">
    <div><span class="cp-eyebrow">التنفيذ</span><h3 class="cp-exec-title">${esc(scope==='client'?'تنفيذ الموكل':'التنفيذ المرتبط بهذا الملف')}</h3></div>
    <button type="button" class="ghost small" data-route="${esc(route)}">مركز التنفيذ <span aria-hidden="true">←</span></button>

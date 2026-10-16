@@ -53,6 +53,9 @@
 .info-s{font-size:calc(12.5px * var(--cd-fs,1))}
 [data-cborders="off"] .info-row{border-color:transparent;background:transparent}
 [data-csecondary="off"] .info-s{display:none}
+/* الحقول الثانوية الموسومة (kvHtml secondary=[...]): تُخفى جماعيًا في العرض المختصر —
+   بلا حذف من السجل ولا من التخصيص الفردي للحقل. */
+[data-csecondary="off"] .kv-item.is-secondary{display:none}
 
 /* ---------- جسم البطاقة وعنوانها يتبعان قياس الخط والكثافة ---------- */
 .ux-card-body{padding:calc(var(--card-pad) * var(--cd-padscale,1));font-size:calc(1em * var(--cd-fs,1))}

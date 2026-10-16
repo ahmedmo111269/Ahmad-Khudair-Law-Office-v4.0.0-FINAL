@@ -56,7 +56,10 @@ export function registerPageLayout(def){
   }
   finalSections=[...byId.values()];
  }
- const entry={pageId,title:registry.get(pageId)?.title||normalizedTitle,sections:finalSections};
+ // closed:true = التعريف اليدوي لهذه الصفحة حصري: لا يُدمج فيه ما يُكتشف تلقائيًا
+ // من DOM (بطاقات/لوحات). يُستخدم لصفحات لها نظام أقسام خاص متعدد المستويات
+ // (مثل صفحة الملف: تبويبات + أقسام داخل كل تبويب) حتى لا تختلط المستويات.
+ const entry={pageId,title:registry.get(pageId)?.title||normalizedTitle,sections:finalSections,closed:registry.get(pageId)?.closed||def.closed===true};
  registry.set(pageId,entry);
  return entry;
 }
@@ -67,6 +70,9 @@ const legacySectionId=(pageId,id)=>pageId==='dashboard'&&id==='activity'?'tasks'
 /** يوسّع تعريف الصفحة الحالي بعناصرها الفعلية (الأقسام واللوحات والبطاقات)، مع هويات مستقرة لكل صفحة. */
 export function discoverPageLayout(root,pageId,title=''){
  if(!root?.querySelectorAll||!pageId)return getPageLayout(pageId);
+ // صفحة «مغلقة» (closed): تعريفها اليدوي حصري — أقسامها الداخلية لها تخطيطاتها
+ // الخاصة المسجلة صراحة، فلا يُدمج فيها شيء مكتشف تلقائيًا من DOM.
+ if(getPageLayout(pageId)?.closed)return getPageLayout(pageId);
  const sections=[],seen=new Set();
  const add=(el,id,defaultTitle='')=>{
   const key=String(id||'').trim();
