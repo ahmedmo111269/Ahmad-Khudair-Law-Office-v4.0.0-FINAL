@@ -632,12 +632,11 @@ async function renderTabContent(app){
    office.r.procedures.byIndex('fileId',id,2000)
   ]);
   const hearings=hearingResult.rows;
-  const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
   // نظرة عامة هي لوحة قرار ومتابعة، لا نسخة من تبويبات الجلسات والمراحل والعلاقات.
   // مصدر كل معلومة يظل السجل الأصلي؛ تفاصيله الكاملة في تبويبه المتخصص.
   const execPanel=`<section class="panel fp-exec" data-collapse-id="file-exec" data-collapse-key="file-details:exec" data-collapse-default="open">
-   <div class="panel-head"><h3>المتابعة والخطوة التالية</h3><span class="collapse-summary" data-collapse-summary>ملخص حي من الجلسات والأعمال الإدارية المسجلة</span></div>
-   ${fileCockpitHtml({hearings,procedures,stages,parties,today,currentStage:cur?refLabel('cases',cur):''})}
+   <div class="panel-head"><h3>موقف الملف</h3><span class="collapse-summary" data-collapse-summary>ملخص حي من الجلسات والأعمال الإدارية المسجلة</span></div>
+   ${fileCockpitHtml({hearings,procedures,stages,parties,today})}
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
   </section>`;
   const refs=new Map();
@@ -649,7 +648,7 @@ async function renderTabContent(app){
     <div class="sec-actions"><button type="button" class="ghost small" data-file-edit2>✎ تعديل بيانات الملف</button><button type="button" class="ghost small" data-reclass>تغيير القسم / النوع</button></div></div>
    <div class="fp-kv">
     ${kvHtml(fileFields,f,refs)}
-    ${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}
+    ${f.archivedAt?`<p class="muted small">تاريخ الأرشفة: ${fmtDate(f.archivedAt)}</p>`:''}
     ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — السبب: '+esc(f.reopenReason):''}</p>`:''}
    </div></section>`;
   // المراحل الكاملة والعلاقات والأحكام تُدار في تبويباتها المتخصصة؛ لا نعيد نسخها هنا.
