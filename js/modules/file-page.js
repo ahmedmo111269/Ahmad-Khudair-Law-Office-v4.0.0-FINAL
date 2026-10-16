@@ -636,7 +636,7 @@ async function renderTabContent(app){
   // مصدر كل معلومة يظل السجل الأصلي؛ تفاصيله الكاملة في تبويبه المتخصص.
   const execPanel=`<section class="panel fp-exec" data-collapse-id="file-exec" data-collapse-key="file-details:exec" data-collapse-default="open">
    <div class="panel-head"><h3>موقف الملف</h3><span class="collapse-summary" data-collapse-summary>ملخص حي من الجلسات والأعمال الإدارية المسجلة</span></div>
-   ${fileCockpitHtml({hearings,procedures,stages,parties,today})}
+   ${fileCockpitHtml({hearings,procedures,today,compact:true})}
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
   </section>`;
   const refs=new Map();
