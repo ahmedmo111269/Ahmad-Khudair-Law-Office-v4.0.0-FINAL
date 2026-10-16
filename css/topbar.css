@@ -331,3 +331,10 @@ body.topnav-collapsed #sidebar.tn-bar .tn-brand{padding-block:2px}
  #toast-stack{bottom:calc(var(--tn-mobilebar-h,72px) + env(safe-area-inset-bottom,0px) + 10px)}
 }
 @media(prefers-reduced-motion:reduce){.tn-mobile-item{transition:none}}
+
+/* The existing PageLayout customizer is the sole entry into transient card
+   editing. Read mode hides only presentation controls, never data/actions or
+   collapse toggles; no saved display preference is changed. */
+#main-content:not(.layout-customizing) .uxc-gear,
+#main-content:not(.layout-customizing) .uxc-gear-bar,
+#main-content:not(.layout-customizing) .collapse-pin{display:none}

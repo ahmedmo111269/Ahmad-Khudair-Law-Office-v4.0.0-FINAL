@@ -19,10 +19,12 @@ export const PRESETS={
   c:{bg:'#F3F6FA',surface:'#FFFFFF',chrome:'#FFFFFF',text:'#1F2A37',textStrong:'#0B1320',textMuted:'#5B6878',primary:'#1D4F91',primary2:'#3A73C0'},meta:'#F3F6FA'},
  desertSand:{name:'Desert Sand',ar:'الرملي الدافئ',desc:'بيج رملي هادئ وبني قهوة — ورقي مريح',
   c:{bg:'#F4EEE3',surface:'#FBF8F2',chrome:'#FBF8F2',text:'#3B3024',textStrong:'#21190F',textMuted:'#7A6B58',primary:'#8B5A2B',primary2:'#B07A43'},meta:'#F4EEE3'},
+ diwan:{name:'Diwan Paper & Navy',ar:'الديوان — ورقي وكحلي',desc:'ورق هادئ ونص كحلي؛ اختياري ولا يغيّر الثيم الافتراضي',
+  c:{bg:'#F6F4EF',surface:'#FFFFFF',chrome:'#FFFFFF',text:'#1B2430',textStrong:'#131C29',textMuted:'#4A5568',primary:'#1F3A5F',primary2:'#825F20'},meta:'#F6F4EF'},
  highContrast:{name:'High Contrast',ar:'التباين العالي',desc:'أقصى وضوح للقراءة وضعاف البصر والشمس المباشرة',
   c:{bg:'#000000',surface:'#0A0A0A',chrome:'#000000',text:'#FFFFFF',textStrong:'#FFFFFF',textMuted:'#D0D0D0',primary:'#FFD400',primary2:'#FFE866'},meta:'#000000'}
 };
-export const LIGHT_PRESETS=['elegantLight','pearlBlue','desertSand'];
+export const LIGHT_PRESETS=['elegantLight','pearlBlue','desertSand','diwan'];
 export const FONTS_AR=[
  {id:'Cairo',label:'القاهرة (Cairo)'},{id:'Tajawal',label:'تجوّل (Tajawal)'},{id:'Almarai',label:'المراعي (Almarai)'},
  {id:'IBM Plex Sans Arabic',label:'IBM Plex Arabic'},{id:'Noto Kufi Arabic',label:'نوتو كوفي'},{id:'Noto Naskh Arabic',label:'نوتو نسخ (كلاسيكي)'},

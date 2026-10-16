@@ -266,14 +266,18 @@ function addSearchGroupCollapse(group,scope,index){
 }
 
 function addPageCollapseTools(root){
- let control=[...root.children].find(child=>child.classList?.contains('collapse-page-tools'))||null;
+ let control=root.querySelector(':scope > .collapse-page-tools,:scope > .list-head .collapse-page-tools');
  const items=[...root.querySelectorAll('[data-collapse-ready="true"]')];
  if(items.length<2){control?.remove();return}
  if(control){const count=control.querySelector('.collapse-page-count');if(count)count.textContent=`${items.length} عناصر`;return}
  control=document.createElement('details');control.className='collapse-page-tools';
  control.innerHTML=`<summary><span>الأقسام والجداول</span><small class="collapse-page-count">${items.length} عناصر</small></summary><div class="collapse-page-actions"><button type="button" class="ghost small" data-collapse-bulk="open">فتح الكل</button><button type="button" class="ghost small" data-collapse-bulk="closed">طي الكل</button><button type="button" class="ghost small" data-collapse-reset title="إعادة كل الأقسام للحالة الافتراضية ومسح تفضيلاتها المحفوظة في هذه الصفحة">استعادة الافتراضي</button><label><input type="checkbox" data-collapse-bulk-save> حفظ هذه الحالة</label><small class="muted">بدون تفعيل الحفظ، يقتصر التغيير على العرض الحالي. يمكن تثبيت العناصر منفردة من رمز الدبوس.</small></div>`;
+ const clientsActions=root.querySelector(':scope > .list-head--clients > .head-actions');
  const anchor=root.querySelector('.page-head,.record-head,.hero')||null;
- if(anchor?.parentElement)anchor.after(control);else root.prepend(control);
+ // Same bulk control, mounted in the existing client-list header instead of
+ // consuming a separate band before the data. Its event listeners still use root.
+ if(clientsActions)clientsActions.append(control);
+ else if(anchor?.parentElement)anchor.after(control);else root.prepend(control);
  control.addEventListener('click',event=>{
   const all=[...root.querySelectorAll('[data-collapse-ready="true"]')];
   if(event.target.closest('[data-collapse-reset]')){

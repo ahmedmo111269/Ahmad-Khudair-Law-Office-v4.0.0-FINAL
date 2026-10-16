@@ -32,7 +32,7 @@
  font-size:calc(12px * var(--cd-lbl,1));
  color:var(--text-muted);
  font-weight:700;
- letter-spacing:.2px;
+ letter-spacing:normal;
  margin-bottom:calc(3px * var(--cd-lbl,1));
 }
 .kv dd{
@@ -48,7 +48,7 @@
 /* ---------- تسلسل بصري داخل info-stack (بطاقات الملخص) ---------- */
 .info-stack{gap:var(--cd-gap,10px)}
 .info-row{padding:var(--cd-rowpad,8px 10px);gap:calc(3px * var(--cd-lbl,1))}
-.info-k{font-size:calc(11.5px * var(--cd-lbl,1));letter-spacing:.2px}
+.info-k{font-size:calc(11.5px * var(--cd-lbl,1));letter-spacing:normal}
 .info-v{font-size:calc(15.5px * var(--cd-fs,1));line-height:1.5}
 .info-s{font-size:calc(12.5px * var(--cd-fs,1))}
 [data-cborders="off"] .info-row{border-color:transparent;background:transparent}

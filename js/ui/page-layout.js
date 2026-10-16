@@ -207,6 +207,8 @@ export function openPageCustomizer(app,{pageId,root,onChanged}={}){
  const card=modal(`
   <h2 class="modal-title">تخصيص الصفحة — ${esc(layout.title)}</h2>
   <p class="muted small">رتّب الأقسام بالسحب أو بأزرار ▲▼ (تعمل على اللمس)، وأظهر أو أخفِ ما لا تحتاجه، وافتح أو اطوِ أي قسم، وثبّت حالته بالدبوس. كل التغييرات تفضيلات عرض تُحفظ فورًا لهذا المستخدم — لا تُغيَّر أي بيانات.</p>
+  <button type="button" class="ghost" data-pl-edit-controls aria-pressed="${host.classList.contains('layout-customizing')}">${host.classList.contains('layout-customizing')?'إنهاء تخصيص البطاقات':'إظهار أدوات تخصيص البطاقات'}</button>
+  <p class="muted small">في وضع القراءة تختفي تروس البطاقات والدبابيس؛ افتح هذا الوضع لاستخدام إعداداتها، ثم أنهِه من هنا. أسهم الطي والإجراءات تبقى متاحة.</p>
   <div class="pl-display">
    <div class="pl-field"><span class="ux-dp-lbl">حجم الخط في هذه الصفحة</span>
     <div class="ux-dp-stepper"><button type="button" class="ghost small" data-pl-fstep="-1" aria-label="تصغير خط الصفحة">A−</button><span data-pl-fontseg></span><button type="button" class="ghost small" data-pl-fstep="1" aria-label="تكبير خط الصفحة">A+</button></div>
@@ -327,6 +329,13 @@ export function openPageCustomizer(app,{pageId,root,onChanged}={}){
  });
  // إعدادات عرض الصفحة
  card.addEventListener('click',async e=>{
+  const mode=e.target.closest('[data-pl-edit-controls]');
+  if(mode){
+   const editing=host.classList.toggle('layout-customizing');
+   mode.setAttribute('aria-pressed',String(editing));
+   mode.textContent=editing?'إنهاء تخصيص البطاقات':'إظهار أدوات تخصيص البطاقات';
+   return;
+  }
   const segBtn=e.target.closest('[data-plseg] button');
   if(segBtn){
    const group=segBtn.closest('[data-plseg]')?.dataset.plseg;

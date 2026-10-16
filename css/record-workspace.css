@@ -85,3 +85,26 @@
  .record-tabs-bar{border-radius:0;}
  .record-quick-notes [data-record-quick-list]{grid-template-columns:1fr;}
 }
+
+/* Client record on phones: the identity is already in the hero, while short
+   stored fields can share a row. Keep long text and ID entirely readable.
+   Respect an explicit expanded field-layout preference. */
+@media(max-width:640px){
+ #main-content:not([data-clayout="expanded"]) .record-workspace:has(#client-record-title) .rec-section:not([data-clayout="expanded"]) .kv{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  column-gap:12px;
+ }
+ #main-content .record-workspace:has(#client-record-title) .kv-item:is(
+  [data-display-item="field:fullName"],
+  [data-display-item="field:nationalId"],
+  [data-display-item="field:phones"],
+  [data-display-item="field:email"],
+  [data-display-item="field:address"],
+  [data-display-item="field:workAddress"],
+  [data-display-item="field:legalRepresentative"],
+  [data-display-item="field:notes"]){grid-column:1/-1}
+}
+/* The national ID is a single isolated identifier at every viewport, not just phones. */
+#main-content .record-workspace .kv-item[data-display-item="field:nationalId"] dd{
+ direction:ltr;unicode-bidi:isolate;text-align:start;overflow-wrap:anywhere;
+}
