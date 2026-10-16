@@ -333,10 +333,21 @@ select option{background:var(--surface);color:var(--text)}
 @media print{#main-content .file-tabs-bar{position:static}}
 
 /* ==========================================================================
-   «نظرة عامة» — الملخص التنفيذي: أربع بطاقات ملخص مقروءة من مصادرها الأصلية.
-   كل بطاقة = عنوان معلومة + قيمة + بيانات مساندة + إجراءات تنقل إلى المصدر/التبويب.
+   «نظرة عامة» — متابعة مركزة بخطوة تالية واحدة، دون تكرار بطاقات الجلسات والمراحل.
+   تفاصيل السجلات تبقى في تبويباتها الأصلية، والملخص يوجّه إلى المصدر.
    ========================================================================== */
 .fp-exec{margin:0 0 14px}
+.fp-exec>.panel-head{align-items:center;gap:8px;flex-wrap:wrap}
+.fp-exec .cp-fc{display:grid;gap:10px;min-width:0}
+.fp-exec .cp-fc-next{margin:0;min-width:0}
+.fp-exec .cp-fc-stats{margin:0;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:6px}
+.fp-file-data .panel-head{align-items:center;gap:8px;flex-wrap:wrap}
+.fp-file-data .sec-actions{display:flex;flex-wrap:wrap;gap:6px}
+@media(max-width:520px){
+ .fp-exec .cp-fc-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .fp-file-data .sec-actions{width:100%}
+ .fp-file-data .sec-actions button{flex:1 1 auto}
+}
 .fx-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:10px;margin:0 0 12px}
 .fx-card{
  display:flex;flex-direction:column;gap:5px;min-width:0;padding:10px 12px;
