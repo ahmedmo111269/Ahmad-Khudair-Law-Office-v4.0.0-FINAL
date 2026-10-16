@@ -91,3 +91,89 @@ button{min-height:36px}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* ---------- Dense record pages: mobile navigation + data readability ---------- */
+/* The legal-file page already owns its tab logic. These rules only improve its
+   smallest-screen geometry; tab IDs, ordering, visibility and stored preferences stay intact. */
+@media(max-width:760px){
+  #main-content .file-tabs-bar{
+    gap:6px;
+    padding-block:6px;
+    margin-bottom:10px;
+    box-shadow:0 1px 0 color-mix(in srgb,var(--border) 55%,transparent);
+  }
+  .file-tabs-bar .file-subtabs .subtab-btn{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    line-height:1.25;
+  }
+  .file-tabs-bar .ftb-menu{
+    max-width:calc(100vw - 20px);
+    min-width:min(250px,calc(100vw - 20px));
+    max-height:min(60dvh,440px);
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  .file-tabs-bar .ftb-tools{
+    max-width:100%;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+  .file-tabs-bar .ftb-tools button{
+    min-width:40px;
+    min-height:40px;
+  }
+  .file-overview-identity .fid-parties,
+  .file-overview-identity .fid-actions{gap:6px}
+  .file-overview-identity .fid-actions>*{max-width:100%}
+  .file-overview-identity .fid-title{overflow-wrap:anywhere}
+  .fp-kv .kv{gap:8px}
+  .fp-kv .kv dd{overflow-wrap:anywhere;word-break:normal}
+  .cf-line{gap:7px;padding:9px 8px}
+  .cf-line-main{flex-basis:calc(100% - 48px)}
+  .cf-line-main small{white-space:normal;overflow-wrap:anywhere}
+  .cat-card{min-width:0;padding:11px;overflow-wrap:anywhere}
+}
+@media(max-width:380px){
+  /* 320–380px: four primary tabs in a single row become cramped.
+     Use a predictable 2×2 grid rather than shrinking labels into illegibility. */
+  #main-content .file-tabs-bar{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"tabs" "more" "tools";
+  }
+  .file-tabs-bar .file-subtabs{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:5px;
+    width:100%;
+  }
+  .file-tabs-bar .file-subtabs .subtab-btn{
+    min-height:42px;
+    border:1px solid var(--border);
+    border-radius:9px;
+    margin:0;
+    padding:8px 6px;
+    white-space:normal;
+    text-align:center;
+    justify-content:center;
+    overflow-wrap:anywhere;
+  }
+  .file-tabs-bar .file-subtabs .subtab-btn.active{
+    border-color:var(--primary);
+    box-shadow:inset 0 -2px 0 var(--primary);
+  }
+  .file-tabs-bar .ftb-tools{
+    width:100%;
+    justify-content:flex-start;
+    margin:0;
+  }
+  .file-tabs-bar .ftb-active-name{max-width:12ch}
+  .file-tabs-bar .ftb-menu{max-width:calc(100vw - 20px)}
+  .cf-meta{grid-template-columns:minmax(0,1fr)}
+  .cf-stats{gap:6px}
+  .cf-stats .stat{padding:9px 6px}
+  .cat-grid{gap:7px}
+}
+@media(prefers-reduced-motion:reduce){
+  .file-tabs-bar .file-subtabs .subtab-btn{scroll-behavior:auto}
+}
