@@ -166,7 +166,7 @@ function fileOverviewStaticHtml(app){
       <span class="badge ${statusClass} fid-status" data-file-status>${esc(status)}</span>
      </div>
      ${head?.court?`<p class="fid-court">${esc(head.court)}</p>`:''}
-     ${!head?.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
+     ${head?.sub?`<p class="fid-sub">عنوان الملف: ${esc(head.sub)}</p>`:!head?.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
      <div class="fid-parties" role="list" aria-label="أطراف الملف: الموكل والخصم وبقية الأطراف">
       ${parties.slice(0,HEAD_PARTIES_MAX).map(({p,word,kind},i)=>`<button type="button" role="listitem" class="fid-party fid-party--${kind}" data-party-open="${i}" title="فتح بيانات ${esc(p.partyName||p.name||'طرف')} وإجراءاته"><span class="fid-party-role">${esc(word)}</span><b class="fid-party-name">${esc(p.partyName||p.name||'طرف')}</b>${p.role?`<span class="fid-party-cap">${esc(p.role)}</span>`:''}${p.isActive===false?'<span class="fid-party-cap">غير نشط</span>':''}</button>`).join('')}
       ${parties.length>HEAD_PARTIES_MAX?`<button type="button" class="fid-party fid-party--more" data-tab-jump="parties">+${parties.length-HEAD_PARTIES_MAX} — عرض كل الأطراف (${parties.length})</button>`:''}
