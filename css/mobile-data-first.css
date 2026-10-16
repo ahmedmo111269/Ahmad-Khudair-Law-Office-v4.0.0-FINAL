@@ -277,3 +277,72 @@ button{min-height:36px}
   .fw-pagebar .fw-back .fw-lbl{display:none}
   .fw-pagebar .fw-morebtn{flex:0 0 auto}
 }
+
+/* ---------- Client workspace: preserve contact actions and expose record metadata ---------- */
+@media(max-width:760px){
+  .cfile-page{min-width:0}
+  .cfile-page>.crumbs{
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    overflow-y:hidden;
+    white-space:nowrap;
+    overscroll-behavior-inline:contain;
+    -webkit-overflow-scrolling:touch;
+    padding-bottom:4px;
+  }
+  .cfile-page>.crumbs>*{flex:0 0 auto}
+  .cf-hero{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+    padding:13px;
+  }
+  .cf-id{align-items:flex-start;gap:10px}
+  .cf-id>div:last-child{min-width:0;flex:1}
+  .cf-hero h2{overflow-wrap:anywhere}
+  .cf-code{align-items:flex-start}
+  .cf-meta{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 10px}
+  .cf-meta div{min-width:0;overflow-wrap:anywhere}
+  .cf-meta dd{overflow-wrap:anywhere}
+  .cf-actions{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:6px;
+    width:100%;
+  }
+  .cf-actions>*{
+    display:flex;
+    min-width:0;
+    min-height:42px;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    padding:8px;
+  }
+  .cf-actions [data-new-lf]{grid-column:1 / -1}
+  .cf-line{align-items:flex-start;gap:8px;padding:10px 8px}
+  .cf-line-main{flex:1 1 calc(100% - 40px);min-width:0}
+  .cf-line-main small{
+    white-space:normal;
+    overflow:visible;
+    text-overflow:clip;
+    overflow-wrap:anywhere;
+    line-height:1.45;
+  }
+  .cf-line-icon{flex:0 0 auto;padding-top:1px}
+  .cat-card{min-width:0;overflow-wrap:anywhere}
+  .cat-card b,.cat-card small{max-width:100%;overflow-wrap:anywhere}
+}
+@media(max-width:380px){
+  .cf-hero{padding:10px;border-radius:12px}
+  .cf-avatar{width:40px;height:40px;border-radius:11px;font-size:19px}
+  .cf-meta{grid-template-columns:minmax(0,1fr)}
+  .cf-actions{grid-template-columns:minmax(0,1fr)}
+  .cf-actions [data-new-lf]{grid-column:1}
+  .cf-actions>*{width:100%}
+  .cf-stats .stat b{font-size:20px}
+  .cf-stats .stat span{font-size:11px;overflow-wrap:anywhere}
+}
