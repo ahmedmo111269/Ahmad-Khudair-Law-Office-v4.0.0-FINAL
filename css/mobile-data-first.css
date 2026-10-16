@@ -177,3 +177,103 @@ button{min-height:36px}
 @media(prefers-reduced-motion:reduce){
   .file-tabs-bar .file-subtabs .subtab-btn{scroll-behavior:auto}
 }
+
+/* ---------- Main record lists: search first, actions second, results always visible ---------- */
+@media(max-width:760px){
+  /* Generic entity lists: keep the title and the primary create action readable,
+     but prevent a row of page-level buttons from pushing the data below the fold. */
+  .list-head{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:10px;
+  }
+  .list-head>div:first-child{min-width:0}
+  .list-head .head-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    width:100%;
+  }
+  .list-head .head-actions button{
+    flex:1 1 auto;
+    min-width:0;
+    min-height:40px;
+    white-space:normal;
+  }
+  .list-head .head-actions [data-list-add]{
+    flex:1 0 100%;
+    order:-1;
+  }
+  /* Files workspace: a full-width search row followed by a compact 3-column
+     control grid. No control is removed; the existing More menus remain intact. */
+  .fw-toolbar{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:6px;
+    align-items:stretch;
+    height:auto;
+    min-height:0;
+    max-height:none;
+    padding:8px;
+  }
+  .fw-toolbar .fw-search{
+    grid-column:1 / -1;
+    grid-row:1;
+    width:100%;
+    min-width:0;
+    height:42px;
+    min-height:42px;
+    max-width:none;
+    font-size:15px;
+  }
+  .fw-toolbar .fw-tb-btn{
+    width:100%;
+    min-width:0;
+    min-height:40px;
+    height:auto;
+    max-height:none;
+    padding:7px 5px;
+    font-size:12px;
+    line-height:1.35;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    justify-content:center;
+  }
+  .fw-toolbar [data-fw-sel-clear]{grid-column:1 / -1}
+  .fw-strip{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:5px;
+    min-width:0;
+  }
+  .fw-strip>*{min-width:0;max-width:100%;overflow-wrap:anywhere}
+  .list-filter-summary{display:flex;flex-wrap:wrap;gap:5px}
+  .list-status-chips,.preset-bar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+  }
+  .list-status-chips .chip,.preset-bar .chip{
+    min-height:38px;
+    max-width:100%;
+    white-space:normal;
+  }
+}
+@media(max-width:380px){
+  .list-head .head-actions button{flex:1 1 calc(50% - 6px);font-size:12px;padding-inline:7px}
+  .list-head .head-actions [data-list-add]{flex-basis:100%}
+  .fw-toolbar{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    padding:7px;
+    gap:6px;
+  }
+  .fw-toolbar .fw-search{grid-column:1 / -1}
+  .fw-toolbar .fw-tb-btn{font-size:12px;min-height:42px}
+  .fw-toolbar [data-fw-sel-clear]{grid-column:1 / -1}
+  .fw-pagebar .fw-addfile{min-width:0;flex:1 1 auto}
+  .fw-pagebar .fw-back{flex:0 0 40px;width:40px;padding:0;justify-content:center}
+  .fw-pagebar .fw-back .fw-lbl{display:none}
+  .fw-pagebar .fw-morebtn{flex:0 0 auto}
+}
