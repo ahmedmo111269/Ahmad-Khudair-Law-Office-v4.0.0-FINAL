@@ -122,30 +122,43 @@ export function getDisplayState(){
 
 /** دمج على مستوى الحقل: Card → Page → Global → Default */
 function mergeCardLevels(levels){
- const out={};
- for(const field of ['fontSize','density','fieldLayout','secondary','borders']){
-  let value;
-  for(const level of levels){
-   if(level&&level[field]!==undefined){value=level[field];break}
+  const out={};
+  for(const field of ['fontSize','density','fieldLayout','secondary','borders']){
+   let value;
+   for(const level of levels){
+    if(level&&level[field]!==undefined){value=level[field];break}
+   }
+   out[field]=value===undefined?DISPLAY_DEFAULTS.card[field]:value;
   }
-  out[field]=value===undefined?DISPLAY_DEFAULTS.card[field]:value;
- }
- return out;
+  return out;
 }
-/** الإعدادات الفعالة لبطاقة معينة (المستويات: بطاقة ← صفحة ← عام ← افتراضي). */
+/**
+ * سلسلة الصفحات المتداخلة: 'file-details:hearings' ← ['file-details:hearings','file-details'].
+ * تسمح لتفضيلات صفحة الأم (مثل صفحة الملف) أن تُورَّث في تبويباتها دون العكس —
+ * فلا يطغى إعداد التبويب على الصفحة ولا العكس، وكل مستوى يُحفظ مستقلًا.
+ */
+export function pageScopeChain(pageId=''){
+  const id=String(pageId||'').trim();
+  if(!id)return [];
+  const parts=id.split(':');
+  const chain=[];
+  for(let size=parts.length;size>=1;size--)chain.push(parts.slice(0,size).join(':'));
+  return chain;
+}
+/** الإعدادات الفعالة لبطاقة معينة (المستويات: بطاقة ← صفحة/تبويب ← الصفحة الأم ← عام ← افتراضي). */
 export function resolveCardDisplay(cardKey,pageId=''){
- const st=read();
- return mergeCardLevels([
-  cardKey?st.cards[cardKey]:null,
-  pageId?st.pages[pageId]?.display:null,
-  st.global.card,
-  DISPLAY_DEFAULTS.card
- ]);
+  const st=read();
+  return mergeCardLevels([
+   cardKey?st.cards[cardKey]:null,
+   ...pageScopeChain(pageId).map(scope=>st.pages[scope]?.display),
+   st.global.card,
+   DISPLAY_DEFAULTS.card
+  ]);
 }
-/** الإعدادات الفعالة لصفحة (صفحة ← عام ← افتراضي) — تُطبق على جذر المحتوى. */
+/** الإعدادات الفعالة لصفحة (صفحة ← الصفحة الأم إن وجدت ← عام ← افتراضي) — تُطبق على جذر المحتوى. */
 export function resolvePageDisplay(pageId=''){
- const st=read();
- return mergeCardLevels([pageId?st.pages[pageId]?.display:null,st.global.card,DISPLAY_DEFAULTS.card]);
+  const st=read();
+  return mergeCardLevels([...pageScopeChain(pageId).map(scope=>st.pages[scope]?.display),st.global.card,DISPLAY_DEFAULTS.card]);
 }
 /** الافتراضي العام للجداول: يقرأه Universal DataGrid عندما لا توجد قيمة محفوظة للجدول. */
 export function resolveGridDisplay(){

@@ -32,7 +32,7 @@ import {
  resolveCardDisplay,resolvePageDisplay,setCardDisplay,setPageDisplay,clearCardDisplay,clearPageDisplay,
  setComponentContent,clearComponentContent
 } from '../core/display-prefs.js';
-import {applyComponentContent,componentContentItems,resolveComponentContentView} from './component-content.js';
+import {applyComponentContent,applyComponentContentToAll,componentContentItems,resolveComponentContentView} from './component-content.js';
 
 // ===== سجل المكونات القابلة للتخصيص (قابلية التوسع — البند 24) =====
 const componentRegistry=new Map();
@@ -490,12 +490,13 @@ function bindPanel(card){
    if(to===undefined)return;
    const order=[...layout.order];[order[from],order[to]]=[order[to],order[from]];
    setComponentContent(current.id,{order,hidden:layout.hidden});
-   applyComponentContent(current.el,current.id);redrawContentPane();updateContentPreview();toast('تم حفظ ترتيب أجزاء هذا العنصر');
+   // قالب مشترك (عدة عناصر بالهوية نفسها): الترتيب يسري على كل النسخ فورًا
+   applyComponentContentToAll(current.id);redrawContentPane();updateContentPreview();toast('تم حفظ ترتيب أجزاء هذا العنصر');
    return;
   }
   const resetContent=e.target.closest('[data-uxc-content-reset]');
   if(resetContent&&current?.el){
-   clearComponentContent(current.id);applyComponentContent(current.el,current.id);redrawContentPane();updateContentPreview();toast('عادت حقول وترتيب هذا العنصر إلى الوضع الافتراضي');return;
+   clearComponentContent(current.id);applyComponentContentToAll(current.id);redrawContentPane();updateContentPreview();toast('عادت حقول وترتيب هذا العنصر إلى الوضع الافتراضي');return;
   }
  });
  card.addEventListener('change',e=>{
@@ -505,7 +506,7 @@ function bindPanel(card){
    const hidden=new Set(layout.hidden),id=visible.dataset.uxcContentVisible;
    if(visible.checked)hidden.delete(id);else hidden.add(id);
    setComponentContent(current.id,{order:layout.order,hidden:[...hidden]});
-   applyComponentContent(current.el,current.id);updateContentPreview();toast(visible.checked?'أُظهر الجزء المحدد':'أُخفي الجزء المحدد');return;
+   applyComponentContentToAll(current.id);updateContentPreview();toast(visible.checked?'أُظهر الجزء المحدد':'أُخفي الجزء المحدد');return;
   }
   const tg=e.target.closest('[data-coarse-tg]');
   if(tg){commitCoarse(tg.dataset.coarseTg,tg.checked);return}

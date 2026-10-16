@@ -457,3 +457,126 @@ select option{background:var(--surface);color:var(--text)}
 /* هوية الملف خارج جسم الطي: تبقى أول قسم مرئي في «نظرة عامة». */
 .file-tab-shell>.file-overview-host{min-width:0}
 .file-tab-shell.card-collapsed>.file-overview-host:not([hidden]){display:block!important}
+
+/* ==========================================================================
+   نظرة عامة — إجراءات سريعة + متابعة قريبة + تنبيهات (Data-First)
+   ========================================================================== */
+.fp-quick{display:flex;flex-wrap:wrap;gap:6px;padding:10px 2px 2px;margin-top:4px;border-top:1px dashed var(--border)}
+.fp-quick .ghost{min-height:38px}
+.fp-followup{margin:0 0 14px}
+.fp-fu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;padding:2px}
+.fp-fu-title{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:14px;color:var(--text-strong);margin:4px 0 8px}
+.fp-fu-title .link{font-size:12px}
+.fp-fu-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.fp-fu-list li{position:relative;display:flex;align-items:stretch;gap:6px}
+.fp-fu-list li>button{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;text-align:start;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-sm);padding:8px 12px;cursor:pointer;font:inherit;color:var(--text);min-height:44px}
+.fp-fu-list li>button:hover{border-color:var(--primary)}
+.fp-fu-list b{font-size:14.5px;color:var(--text-strong);overflow-wrap:anywhere}
+.fp-fu-list span{font-size:12.5px;color:var(--text-muted)}
+.fp-fu-late{flex:0 0 auto;align-self:center;font-size:11px;font-weight:800;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);border-radius:99px;padding:1px 8px}
+.fp-fu-empty{display:flex;flex-direction:column;align-items:flex-start;gap:8px;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:12px 14px}
+.fp-fu-empty p{margin:0;color:var(--text-muted);font-size:13.5px}
+.fp-fu-warn{color:var(--warn);margin:8px 0 0}
+.fp-alerts{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border)}
+.fp-alert{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-inline-start:4px solid var(--text-muted);border-radius:var(--radius-sm);padding:8px 12px;font-size:13.5px;background:var(--surface)}
+.fp-alert--danger{border-inline-start-color:var(--danger)}
+.fp-alert--warn{border-inline-start-color:var(--warn)}
+.fp-alert--info{border-inline-start-color:var(--primary)}
+.fp-alert>span{min-width:0;overflow-wrap:anywhere}
+/* البيانات الثانوية داخل «بيانات الملف»: تُخفى جماعيًا بإيقاف «البيانات الثانوية» (عرض مختصر) */
+[data-csecondary="off"] .fp-kv .kv-item.is-secondary{display:none}
+/* غلاف قسم عام للجداول داخل التبويبات (يشارك في ترتيب الأقسام دون إطار مزدوج) */
+.fp-sec-wrap{display:block;padding:0;margin:0 0 14px;min-width:0}
+
+/* ==========================================================================
+   تبويب الجلسات — الجلسة القادمة + مرشحات + بطاقات (مسح سريع للهاتف أولًا)
+   ========================================================================== */
+.hrc-next{margin:0 0 14px}
+.hrc-next .fp-fu-empty{border-style:solid}
+.hrc-filters{margin:0 0 14px}
+.hrc-chips{display:flex;flex-wrap:wrap;gap:6px;padding:6px 2px}
+.hrc-chips .chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;min-height:38px;font:inherit;font-size:12.5px}
+.hrc-chips .chip small{opacity:.7;font-variant-numeric:tabular-nums}
+.hrc-board{margin:0 0 14px}
+.hrc-group{border:1px solid var(--border);border-radius:var(--radius);margin:0 0 10px;background:var(--surface)}
+.hrc-group summary{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:14px;color:var(--text-strong);list-style:none}
+.hrc-group summary::-webkit-details-marker{display:none}
+.hrc-group summary::before{content:"▾";color:var(--text-muted);transition:transform .15s}
+.hrc-group:not([open]) summary::before{transform:rotate(90deg)}
+.hrc-group summary .count{margin-inline-start:auto;font-size:11.5px;background:var(--surface2);border-radius:99px;padding:1px 8px;color:var(--text-muted)}
+.hrc-group--upcoming{border-inline-start:4px solid var(--primary)}
+.hrc-group--past{border-inline-start:4px solid var(--border)}
+.hrc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;padding:0 12px 12px}
+.hrc-card{display:flex;flex-direction:column;gap:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);padding:10px 12px;min-width:0}
+.hrc-card.is-next{border-color:var(--primary);box-shadow:0 0 0 1px color-mix(in srgb,var(--primary) 35%,transparent)}
+.hrc-card.is-today{border-inline-start:4px solid var(--danger)}
+.hrc-when{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hrc-when time{font-size:17px;font-weight:800;color:var(--text-strong);font-variant-numeric:tabular-nums}
+.hrc-time{font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums;direction:ltr}
+.hrc-main{display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:0}
+.hrc-type{font-size:15px;font-weight:700;color:var(--text-strong);overflow-wrap:anywhere}
+.hrc-court{font-size:12.5px;color:var(--text-muted);overflow-wrap:anywhere}
+.hrc-stage{font-size:12px;color:var(--primary);background:color-mix(in srgb,var(--primary) 12%,transparent);border:0;border-radius:99px;padding:2px 10px;cursor:pointer;font:inherit;font-weight:700}
+.hrc-side{display:flex;flex-direction:column;gap:4px;font-size:13px;min-width:0}
+.hrc-result{overflow-wrap:anywhere}
+.hrc-result.is-missing{color:var(--text-muted);font-style:normal}
+.hrc-adjourn{font-size:12.5px;color:var(--warn)}
+.hrc-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px;border-top:1px dashed var(--border)}
+/* البطاقات مسح سريع للهاتف؛ الجدول هو أداة الإدارة الكاملة على الشاشات الواسعة
+   (خصوصية أعلى من .panel في cards.css الذي يُحمَّل بعد هذا الملف) */
+section.hrc-board{display:none}
+@media (max-width:760px){
+ section.hrc-board{display:block}
+ .hrc-list{grid-template-columns:1fr}
+ .hrc-chips{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px}
+ .hrc-chips .chip{flex:none}
+}
+
+/* ==========================================================================
+   تبويب الأعمال الإدارية — لوحة متابعة حسب الحالة المسجلة + جدول كامل
+   ========================================================================== */
+.proc-board{margin:0 0 14px}
+.prc-counters{display:flex;flex-wrap:wrap;gap:8px;padding:4px 2px 10px}
+.prc-counter{display:inline-flex;align-items:baseline;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);padding:6px 12px;font-size:12.5px;color:var(--text-muted)}
+.prc-counter b{font-size:17px;font-weight:800;color:var(--text-strong);font-variant-numeric:tabular-nums}
+.prc-counter--overdue{border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+.prc-counter--overdue b{color:var(--danger)}
+.prc-counter--open b{color:var(--primary)}
+.prc-counter--done b{color:var(--success,#2e9d62)}
+.prc-tools{display:flex;flex-direction:column;gap:8px;padding:0 2px 10px}
+.prc-tools input[type="search"]{width:100%}
+.prc-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.prc-chips .chip{display:inline-flex;align-items:center;cursor:pointer;min-height:38px;font:inherit;font-size:12.5px}
+.prc-group{border:1px solid var(--border);border-radius:var(--radius);margin:0 0 10px;background:var(--surface)}
+.prc-group summary{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:14px;color:var(--text-strong);list-style:none}
+.prc-group summary::-webkit-details-marker{display:none}
+.prc-group summary::before{content:"▾";color:var(--text-muted);transition:transform .15s}
+.prc-group:not([open]) summary::before{transform:rotate(90deg)}
+.prc-group summary .count{margin-inline-start:auto;font-size:11.5px;background:var(--surface2);border-radius:99px;padding:1px 8px;color:var(--text-muted)}
+.prc-group--overdue{border-inline-start:4px solid var(--danger)}
+.prc-group--open{border-inline-start:4px solid var(--primary)}
+.prc-group-more{padding:0 14px 10px;margin:0}
+.prc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;padding:0 12px 12px}
+.prc-card{display:flex;flex-direction:column;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);padding:10px 12px;min-width:0}
+.prc-card.is-overdue{border-inline-start:4px solid var(--danger)}
+.prc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.prc-type{font-size:15px;font-weight:700;color:var(--text-strong);overflow-wrap:anywhere}
+.prc-status--open{color:var(--primary)}
+.prc-status--pending{color:var(--warn)}
+.prc-status--done{color:var(--success,#2e9d62)}
+.prc-status--cancelled{color:var(--text-muted)}
+.prc-desc{margin:0;font-size:13.5px;color:var(--text);overflow-wrap:anywhere}
+.prc-meta{display:flex;flex-wrap:wrap;gap:3px 12px;font-size:12.5px;color:var(--text-muted)}
+.prc-meta .is-overdue{color:var(--danger);font-weight:700}
+.prc-stage{font-size:12px;color:var(--primary);background:color-mix(in srgb,var(--primary) 12%,transparent);border:0;border-radius:99px;padding:2px 10px;cursor:pointer;font:inherit;font-weight:700}
+.prc-result{margin:0;font-size:12.5px;color:var(--text-muted);overflow-wrap:anywhere}
+.prc-result.is-missing{color:var(--text-muted)}
+.prc-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px;border-top:1px dashed var(--border)}
+.prc-done{font-weight:800}
+@media (max-width:760px){
+ .prc-list{grid-template-columns:1fr}
+ .prc-chips{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px}
+ .prc-chips .chip{flex:none}
+ .prc-counters{gap:6px}
+ .prc-counter{padding:4px 10px}
+}

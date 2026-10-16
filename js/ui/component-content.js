@@ -190,5 +190,23 @@ export function applyComponentContent(root,componentId){
 
 /** تخطيط فعّال للوحة التخصيص ومعاينة حقولها؛ يحتفظ بالعناصر الأصلية كما هي. */
 export function resolveComponentContentView(componentId,items){
- return effectiveLayout(componentId,items||[]);
+  return effectiveLayout(componentId,items||[]);
+}
+
+/**
+ * تطبيق التخطيط المحفوظ على كل العناصر التي تتشارك الهوية نفسها (قوالب البطاقات
+ * المشتركة مثل بطاقة الجلسة/العمل الإداري): تخصيص واحد يسري على كل نسخة القالب
+ * فورًا — بلا إعادة رسم وبلا أي مساس بالبيانات.
+ */
+export function applyComponentContentToAll(componentId,root=document){
+  if(!componentId||!root?.querySelectorAll)return [];
+  const selector=`[data-uxc-id="${typeof CSS!=='undefined'&&CSS.escape?CSS.escape(componentId):componentId}"]`;
+  if(!root.querySelectorAll(selector).length)return [];
+  let items=[];
+  for(const el of root.querySelectorAll(selector)){
+    if(el.classList?.contains('uxc-preview'))continue;
+    const applied=applyComponentContent(el,componentId);
+    if(applied?.length&&!items.length)items=applied;
+  }
+  return items;
 }
