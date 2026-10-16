@@ -26,14 +26,8 @@ button{min-height:36px}
   #app{display:block;min-height:100dvh}
   #sidebar{width:100%;max-width:100%;padding:0;position:sticky;top:0;z-index:40}
   main{width:100%;min-width:0}
-  .topbar{height:auto;min-height:56px;padding:calc(8px + env(safe-area-inset-top)) var(--mobile-gutter) 8px;gap:8px;align-items:center;flex-wrap:wrap;z-index:35}
-  .topbar>div:first-of-type{min-width:0;flex:1 1 130px}
-  .topbar h1{font-size:clamp(16px,4.3vw,20px);line-height:1.35}
-  #db-badge,#network-badge{display:inline-block;margin-inline-end:5px}
-  .top-actions{width:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .top-actions>button,.top-actions>.nav-cluster{flex:0 1 auto;min-height:var(--mobile-control)}
-  .top-actions .top-action-label{display:none}
-  .top-actions .nav-cluster{display:flex;gap:5px;flex-wrap:wrap}
+  /* Keep the existing compact, single-line topbar/top-navigation contract intact.
+     Only the content area is reflowed here; topbar.css owns header sizing and actions. */
   #main-content,.topbar+.section{padding:var(--mobile-gutter)}
   .page-head{align-items:flex-start;gap:8px}
   .page-head>*{min-width:0}
