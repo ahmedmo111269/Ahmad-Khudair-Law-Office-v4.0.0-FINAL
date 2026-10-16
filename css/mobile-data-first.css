@@ -23,7 +23,8 @@ button{min-height:36px}
 :where([role=tablist],.tabs,.tab-list,.section-tabs,.page-tabs) button{flex:0 0 auto}
 :where(details>summary){cursor:pointer;min-height:40px;align-content:center}
 @media(max-width:760px){
-  #app{display:block;min-height:100dvh}
+  /* Keep the app shell as a column flex container; workspace pages rely on flex sizing. */
+  #app{display:flex;flex-direction:column;min-height:100dvh}
   #sidebar{width:100%;max-width:100%;padding:0;position:sticky;top:0;z-index:40}
   main{width:100%;min-width:0}
   /* Keep the existing compact, single-line topbar/top-navigation contract intact.
