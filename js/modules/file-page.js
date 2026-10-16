@@ -293,23 +293,6 @@ function moreMenuHtml(app,tabCount){
   </div>`;
 }
 
-/**
- * بطاقة ملخص تنفيذي واحدة داخل «نظرة عامة».
- * ملخص للقراءة فقط: العنوان/البيانات تُبنى من السجل الأصلي، وكل إجراء فيها ينقل إلى
- * السجل نفسه أو إلى تبويبه — لا يوجد هنا أي حقل قابل للتحرير ولا نسخة مستقلة من البيانات.
- * @param {{eyebrow:string,icon?:string,tone?:string,title?:string,meta?:string[],empty?:string,actions?:Array<{label:string,attr:string,kind?:string}>}} o
- */
-function execCard({eyebrow,icon='',tone='',title='',meta=[],empty='',actions=[]}){
- const rows=meta.filter(Boolean);
- return `<article class="fx-card${tone?` is-${esc(tone)}`:''}">
-  <header class="fx-card-head"><span class="fx-eyebrow">${esc(eyebrow)}</span>${icon?`<span class="fx-ic" aria-hidden="true">${icon}</span>`:''}</header>
-  ${title?`<b class="fx-title">${title}</b>`:''}
-  ${rows.length?`<p class="fx-meta">${rows.map(m=>`<span>${m}</span>`).join('')}</p>`:''}
-  ${empty?`<p class="fx-empty muted small">${esc(empty)}</p>`:''}
-  ${actions.length?`<div class="fx-actions">${actions.map(a=>`<button type="button" class="${a.kind==='primary'?'primary small':'ghost small'}" ${a.attr}>${esc(a.label)}</button>`).join('')}</div>`:''}
- </article>`;
-}
-
 /** ربط عناصر كتلة الهوية بعد تركيب التبويب — يعمل أيضًا عند فتح رابط عميق ثم العودة للملخص. */
 function bindFileIdentityControls(root,app,id,f,openItemsCheck){
  const once=(el,key,fn)=>{
@@ -541,47 +524,7 @@ function stageChildList(rows,render,moreWord){
  if(!rows.length)return '<span class="muted small">لا شيء مسجل</span>';
  return `<ul class="fss-rows">${rows.slice(0,4).map(render).join('')}${rows.length>4?`<li class="muted small">+${rows.length-4} ${moreWord} — في تبويبها</li>`:''}</ul>`;
 }
-async function stageSequenceHtml(app,{id,f,stages,cur,hearings,procedures,judgments,relRows}){
- const currentId=f.currentStageId||cur?.id||'';
- const hBy=new Map(),jBy=new Map(),pBy=new Map();
- const push=(m,k,r)=>{if(!k)return;const a=m.get(k)||[];a.push(r);m.set(k,a)};
- hearings.forEach(h=>push(hBy,h.caseId,h));
- judgments.forEach(j=>push(jBy,j.caseId,j));
- procedures.forEach(p=>push(pBy,p.caseId,p));
- const stageRow=(s,i)=>{
-  const lc=s.lifecycle||(s.id===currentId?'active':'done');
-  const isCurrent=s.id===currentId;
-  const hs=(hBy.get(s.id)||[]).slice().sort((a,b)=>String(a.hearingDate||'').localeCompare(String(b.hearingDate||'')));
-  const js=(jBy.get(s.id)||[]).slice().sort((a,b)=>String(b.judgmentDate||'').localeCompare(String(a.judgmentDate||'')));
-  const ps=(pBy.get(s.id)||[]).slice().sort((a,b)=>String(b.actionDate||b.internalDueDate||b.createdAt||'').localeCompare(String(a.actionDate||a.internalDueDate||a.createdAt||'')));
-  const kv=[['الرقم والسنة',s.caseNumber?`${s.caseNumber}${s.caseYear?' / '+s.caseYear:''}`:''],['المحكمة / الجهة',s.courtId],['الدائرة',s.chamber],['درجة التقاضي',s.degree],['تاريخ القيد',s.filingDate?fmtDate(s.filingDate):''],['حالة المرحلة',s.status?label(s.status):''],['نتيجة المرحلة',s.outcome],['صفة الموكل',s.clientCapacity],['صفة الخصم',s.opponentCapacity],['الموضوع',s.subject],['الطلبات',s.requests],['ملاحظات',s.notes]].filter(([,v])=>v!=null&&String(v).trim()!=='');
-  return `<li class="fss-stage${isCurrent?' is-current':''} fss-lc-${esc(lc)}">
-   <div class="fss-stage-top"><span class="fss-idx" aria-hidden="true">${i+1}</span><b class="fss-stage-name">${esc(s.stageType||s.numberType||'مرحلة')}</b><span class="badge">${esc(STAGE_LC_LABEL[lc]||lc)}</span>${isCurrent?'<span class="badge open">المرحلة الحالية</span>':''}</div>
-   ${kv.length?`<dl class="kv fss-kv">${kv.map(([k,v])=>`<div class="kv-item${k==='الموضوع'||k==='الطلبات'||k==='ملاحظات'?' wide':''}"><dt>${esc(k)}</dt><dd>${esc(String(v))}</dd></div>`).join('')}</dl>`:'<p class="muted small">لم تُسجل تفاصيل هذه المرحلة بعد — <button type="button" class="link" data-open-case="'+esc(s.id)+'">أكمل بياناتها</button>.</p>'}
-   <div class="fss-children">
-    <div class="fss-child"><span class="fss-child-k">الجلسات (${hs.length})</span>${stageChildList(hs,h=>`<li><button type="button" class="link" data-open="hearings:${esc(h.id)}">${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(String(h.hearingTime).slice(0,5)):''}</button><small>${esc(h.type||'')}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></li>`,'جلسات أخرى')}</div>
-    <div class="fss-child"><span class="fss-child-k">الأحكام (${js.length})</span>${stageChildList(js,j=>`<li><button type="button" class="link" data-open="judgments:${esc(j.id)}">${fmtDate(j.judgmentDate)||'بدون تاريخ'}</button><small>${esc(j.judgmentType||'')}${j.operativeSummary?' — '+esc(j.operativeSummary):''}</small></li>`,'أحكام أخرى')}</div>
-    <div class="fss-child"><span class="fss-child-k">الأعمال (${ps.length})</span>${stageChildList(ps,p=>`<li><button type="button" class="link" data-open="procedures:${esc(p.id)}">${esc(p.type||p.description||'عمل إداري')}</button><small>${esc(label(p.status||''))}${p.result?' — '+esc(p.result):''}</small></li>`,'أعمال أخرى')}</div>
-   </div>
-   <div class="fss-actions"><button type="button" class="ghost small" data-open-case="${esc(s.id)}">فتح بيانات المرحلة</button></div>
-  </li>`;
- };
- let related='';
- if(relRows&&relRows.length){
-  const relations=createGridRelations(app.office,'fileRelations');
-  const rows=relRows.map(r=>({...r,dirLabel:r.direction==='out'?'هذا الملف ←':'← من ملف آخر'}));
-  await relations.hydrate(rows);
-  related=`<div class="fss-related"><h4 class="fp-kv-h">ملفات مرتبطة بعلاقات مسجلة (${rows.length})</h4><ul class="fss-rel-list">${rows.map(r=>`<li><button type="button" class="link" data-open-file="${esc(r.otherFileId)}">${esc(r.otherLabel||'ملف مرتبط')}</button><span class="muted small">${esc(r.dirLabel||'')} · ${esc(r.relationType||'علاقة')}</span></li>`).join('')}</ul><p class="muted small">الإدارة الكاملة للعلاقات في تبويب «العلاقات والملفات المرتبطة».</p></div>`;
- }
- return `<section class="panel fp-data fp-stage-seq" data-collapse-id="file-stage-seq" data-collapse-key="file-details:stage-seq" data-collapse-default="open">
-  <div class="panel-head"><h3>المرحلة والتسلسل القضائي</h3><span class="collapse-summary" data-collapse-summary>${stages.length?`${stages.length} ${stages.length===1?'مرحلة':'مراحل'}${cur?' · الحالية: '+esc(cur.stageType||cur.numberType||''):' '}`:'بلا مراحل مسجلة'}</span></div>
-  ${cur?`<div class="fss-current"><span class="fss-current-k">المرحلة الحالية</span><b class="fss-current-v">${esc(refLabel('cases',cur))}</b>${[cur.courtId,cur.chamber,cur.degree].filter(Boolean).map(x=>`<span class="fss-current-meta">${esc(String(x))}</span>`).join('')}</div>`:'<p class="muted fp-kv-note">لا توجد أرقام قضائية مسجلة لهذا الملف (ملف بلا قضية) — يُضاف الرقم/المرحلة من تبويب «المراحل والأرقام القضائية» أو من شريط إدارة المراحل أدناه عند الحاجة.</p>'}
-  ${stages.length?`<ol class="fss-chain">${stages.map(stageRow).join('')}</ol>`:''}
-  ${stagePathHtml(stages,currentId,id)}
-  ${related}
- </section>`;
-}
-function partyGroupsHtml(parties){
+async function partyGroupsHtml(parties){
  const groups=new Map();
  for(const p of parties){const name=String(p.roleGroup||p.role||'أطراف أخرى');if(!groups.has(name))groups.set(name,[]);groups.get(name).push(p)}
  const ordered=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],'ar'));
@@ -719,7 +662,6 @@ async function renderTabContent(app){
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
   el.querySelectorAll('[data-open-case]').forEach(b=>b.onclick=()=>app.go('case:'+b.dataset.openCase));
   el.querySelectorAll('[data-open-file]').forEach(b=>b.onclick=()=>app.go('file:'+b.dataset.openFile));
-  el.querySelectorAll('[data-hearing-cycle]').forEach(b=>b.onclick=()=>showHearingCycle(app,b.dataset.hearingCycle||nextH?.id||lastH?.id||''));
   el.querySelectorAll('.cp-fc [data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
   el.querySelector('[data-cp-task]')?.addEventListener('click',()=>document.querySelector('#main-content [data-file-task]')?.click());
   return;
