@@ -26,6 +26,8 @@
   --space-3:calc(12px * var(--density));
   --space-4:calc(16px * var(--density));
   --space-5:calc(24px * var(--density));
+  --space-6:calc(32px * var(--density));
+  --space-7:calc(48px * var(--density));
   --row-pad:calc(9px * var(--density));
   --transition:.25s cubic-bezier(.2,.7,.2,1);
 
@@ -141,6 +143,17 @@
   --success:#2F7A45;--warn:#9A5B00;--danger:#A8321F;--info:#2D5F8A;
   --border-tint:12%;--shadow-strength:.10;--glow-strength:.12;
   --overlay:rgb(33 25 15 / .45);--chrome-text:#43372A;--on-chrome:#21190F;color-scheme:light;
+}
+/* ---------- Diwan: optional paper + navy, no change to the default preset ---------- */
+:root[data-theme="diwan"]{
+  --bg:#F6F4EF;--surface:#FFFFFF;--surface2:#FBFAF7;--chrome:#FFFFFF;
+  --text-strong:#131C29;--text:#1B2430;--text-muted:#4A5568;
+  --primary:#1F3A5F;--primary-2:#825F20;--on-primary:#FFFFFF;
+  --copper:#A67C2E; /* decorative only: not a small-text foreground */
+  --success:#236446;--warn:#825A16;--danger:#A63232;--info:#1F5F94;
+  --border-tint:12%;--shadow-strength:.08;--glow-strength:0;
+  --overlay:rgb(19 28 41 / .48);--chrome-text:#1B2430;--on-chrome:#131C29;
+  color-scheme:light;
 }
 /* ---------- 9) High Contrast ---------- */
 :root[data-theme="highContrast"]{

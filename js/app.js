@@ -340,6 +340,8 @@ class App{
     const canonicalRoute=routeWithTab(route,resolvedTab);
     if(canonicalRoute!==route){route=canonicalRoute;this.route=canonicalRoute;appStore.set({route:canonicalRoute});this.routeHistory?.record(canonicalRoute,{replace:true})}
    }
+   // وضع أدوات البطاقات عابر للصفحة الحالية فقط؛ لا يكتب تفضيلًا ولا ينتقل مع التنقل.
+   main.classList.remove('layout-customizing');
    main.innerHTML=html;
    await page.bind?.(this,query);
    // صفحة الملف: بلا شريط «الأقسام والجداول» (فتح/طي الكل) فوق المحتوى — التنقل من شريط

@@ -5,7 +5,7 @@
    ========================================================================= */
 
 /* ---------- 1) التركيز وإمكانية الوصول ---------- */
-:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px;box-shadow:0 0 0 4px var(--surface)}
 .dg-table tbody tr:focus-visible,.dg-table tbody tr:focus{outline:2px solid var(--primary);outline-offset:-2px}
 .skip:focus{z-index:999}
 

@@ -301,7 +301,7 @@ function moreMenuHtml(app,tabCount){
  */
 function execCard({eyebrow,icon='',tone='',title='',meta=[],empty='',actions=[]}){
  const rows=meta.filter(Boolean);
- return `<article class="fx-card${tone?` is-${esc(tone)}`:''}">
+ return `<article class="fx-card${empty?' is-empty':''}${tone?` is-${esc(tone)}`:''}">
   <header class="fx-card-head"><span class="fx-eyebrow">${esc(eyebrow)}</span>${icon?`<span class="fx-ic" aria-hidden="true">${icon}</span>`:''}</header>
   ${title?`<b class="fx-title">${title}</b>`:''}
   ${rows.length?`<p class="fx-meta">${rows.map(m=>`<span>${m}</span>`).join('')}</p>`:''}
@@ -753,7 +753,7 @@ async function renderTabContent(app){
    actions:[{label:'فتح المراحل والأرقام القضائية',kind:'primary',attr:'data-tab-jump="judicial"'}]
   });
   const lastCard=lastH?execCard({
-   eyebrow:'الجلسة السابقة',icon:'⌛',
+   eyebrow:'الجلسة السابقة',icon:'⌛',tone:!lastH.result?'warn':'',
    title:`${esc(fmtDate(lastH.hearingDate))}${lastH.hearingTime?` <span class="fx-sub">· ${esc(String(lastH.hearingTime).slice(0,5))}</span>`:''}`,
    meta:[lastH.type,lastH.result?`القرار: ${lastH.result}`:'لم يُسجل القرار',lastH.adjournedTo?`التأجيل إلى ${fmtDate(lastH.adjournedTo)}`:''].filter(Boolean).map(esc),
    actions:[
@@ -763,7 +763,7 @@ async function renderTabContent(app){
   }):execCard({eyebrow:'الجلسة السابقة',icon:'⌛',empty:'لا توجد جلسات سابقة مسجلة.'});
   const execPanel=`<section class="panel fp-exec" data-collapse-id="file-exec" data-collapse-key="file-details:exec" data-collapse-default="open">
    <div class="panel-head"><h3>الملخص التنفيذي</h3><span class="collapse-summary" data-collapse-summary></span></div>
-   <div class="fx-grid">${nextCard}${procCard}${stageCard}${lastCard}</div>
+   <div class="fx-grid">${lastH&&!lastH.result?lastCard:''}${nextCard}${procCard}${stageCard}${lastH&&!lastH.result?'':lastCard}</div>
    ${fileCockpitHtml({hearings,procedures,stages,parties,today,currentStage:cur?refLabel('cases',cur):''})}
    <p class="fx-foot muted small">
     <span>${lastActivity?`آخر نشاط مسجل: <b>${esc(lastActivity)}</b>`:'لا يوجد نشاط مسجل بعد'}</span>

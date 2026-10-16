@@ -197,3 +197,35 @@ tr:hover .dg-qa-btn,tr:focus-within .dg-qa-btn{background:var(--primary-soft);co
 @media(max-width:640px){.dg .dg-cell-list-foot{min-height:28px}.dg .dg-cell-more{min-height:28px}.dg.dg-cards .dg-cell-item{white-space:normal}.dg.dg-cards .dg-cell-entries{min-height:0}}
 .search-group .dg tr.kbd-focus>td{background:var(--row-selected,var(--surface2))}
 .search-group .dg tr.kbd-focus{outline:2px solid var(--primary);outline-offset:-2px}
+
+/* Diwan: in the existing (non-workspace) grid, keep both disclosure controls
+   and their pin/appearance actions while using one touch-sized line per header.
+   The saved open/closed state and every toolbar control remain untouched. */
+@media(min-width:761px){
+ .dg:not(.dg-workspace) .dg-shell-head{padding-block:0}
+ .dg:not(.dg-workspace) .dg-shell-toggle{min-height:44px}
+ .dg:not(.dg-workspace) .dg-tools-summary{padding-block:0}
+ .dg:not(.dg-workspace) .dg-tools-summary-toggle{min-height:44px}
+}
+
+/* Critical identity columns must never end in an ellipsis. The column width
+   remains user-resizable; a long name/ID wraps instead of hiding data. */
+.dg .dg-table td[data-k="fullName"],
+.dg .dg-table td[data-k="nationalId"]{
+ white-space:normal;
+ overflow-wrap:anywhere;
+ text-overflow:clip;
+ line-height:1.7;
+}
+.dg .dg-table td[data-k="nationalId"]{direction:ltr;unicode-bidi:isolate;text-align:start}
+
+/* Clients: a collapsed filter panel is a disclosure, not a second card body.
+   Expanding it restores its original padding and all search/period controls. */
+#main-content:has(> .list-head--clients) > .list-filter-panel.card-collapsed{
+ padding-block:4px;
+}
+.list-head--clients .head-actions > .collapse-page-tools{
+ margin:0;
+ align-self:center;
+}
+.list-head--clients .head-actions > .collapse-page-tools > summary{min-height:44px}

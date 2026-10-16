@@ -419,3 +419,24 @@ body:has(.fw) .topbar{position:static}
  .fw-pagebar,.fw-toolbar,.fw-strip,.fw-panel,.dg-fs-exit{display:none}
  .fw .dg.dg-workspace .dg-scroll{max-height:none;overflow:visible}
 }
+
+/* One-line relation preview in the file table. Every populated relation has
+   an explicit, keyboard-accessible full-details button (including one-item
+   cells); the entire value remains available without relying on hover. */
+@media(min-width:761px){
+ .fw .dg.dg-workspace:not(.dg-cards) .dg-cell-list{display:flex;align-items:center;gap:4px;min-width:0}
+ .fw .dg.dg-workspace:not(.dg-cards) .dg-cell-entries{display:block;min-width:0;min-height:0;flex:1 1 auto}
+ .fw .dg.dg-workspace:not(.dg-cards) .dg-cell-list-foot{display:block;min-height:0;flex:none}
+ .fw .dg.dg-workspace:not(.dg-cards) .dg-cell-more{min-height:28px;min-width:28px;padding:0 4px}
+}
+/* Default desktop density only; saved normal/comfortable and custom row-pad
+   still win. The 28px details target + 2×4px padding yields readable rows. */
+@media(min-width:761px){
+ .fw .dg.dg-workspace:not(.dg-cards):not(.dg-d-mobile):not(.dg-d-normal):not(.dg-d-comfortable){--row-pad:4px}
+}
+/* Desktop files: the actions already fit within 52px / 44px (buttons remain
+   at least 40px). This saves 8px above the first row without hiding actions. */
+@media(min-width:761px){
+ .fw-pagebar{height:52px;min-height:52px;max-height:52px}
+ .fw-toolbar{height:44px;min-height:44px;max-height:44px}
+}

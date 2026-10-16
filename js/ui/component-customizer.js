@@ -666,7 +666,8 @@ function drawTargets(){
 // ===== الربط التلقائي في أي جذر (اكتشاف + وسم + تطبيق + أزرار ⚙) =====
 const headTitle=el=>el.querySelector('.panel-head h3,.panel-head h2,.sp-head>b,summary span,h3,h2,b')?.textContent?.trim()||'';
 // رؤوس الأقسام التي يُوضع فيها ⚙ داخل التدفق الطبيعي (لا فوق النص).
-const GEAR_HEAD_SEL='.panel-head,.panel-collapse-head,.sp-head,.cp-focus-head,.cp-day-head,.cp-attn-head,.cp-exec-head,summary,header';
+// DataGrid has a real heading; use it rather than inserting a standalone gear strip above the rows.
+const GEAR_HEAD_SEL='.panel-head,.panel-collapse-head,.dg-shell-head,.sp-head,.cp-focus-head,.cp-day-head,.cp-attn-head,.cp-exec-head,summary,header';
 // عناصر تفاعلية لا تحمل ⚙ أبدًا: زر داخل زر = HTML غير صالح وتداخل مع النص (مثل تبويبات الملف).
 // summary مسموح كرأس للقسم؛ زر التخصيص داخله يمنع افتراضيًا فتح/طي details عند النقر.
 const INTERACTIVE_SEL='button,a,input,select,textarea,label,[role="tab"],[role="tablist"],[role="button"]';

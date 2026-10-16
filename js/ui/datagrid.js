@@ -314,10 +314,13 @@ export function mountGrid(root,opts){
   const marked=text=>hl?markHtml(text,hl):esc(text);
   let content=marked(t);
   if(items){
-   const shown=items.slice(0,c.compactLimit),remaining=items.length-shown.length;
-   const details=remaining>0||items.some(item=>item.detail);
+   // In the file workspace, one visible relation + the existing full-details
+   // button keeps rows short without losing any linked file/party. Other grids
+   // retain their saved/default compact presentation.
+   const shown=items.slice(0,o.workspace?1:c.compactLimit),remaining=items.length-shown.length;
+   const details=remaining>0||items.some(item=>item.detail)||(o.workspace&&items.length>0);
    const width=columnWidth(c);
-   content=`<span class="dg-cell-list" style="max-width:min(100%,${Math.max(1,width-20)}px)"><span class="dg-cell-entries">${shown.map(item=>`<span class="dg-cell-item">${marked(item.text)}</span>`).join('')}</span><span class="dg-cell-list-foot">${details?`<button type="button" class="link dg-cell-more" data-column="${esc(c.key)}" aria-label="عرض التفاصيل الكاملة: ${esc(c.label)}">${remaining?`<bdi dir="ltr">+${remaining}</bdi>`:'التفاصيل'}</button>`:''}</span></span>`;
+   content=`<span class="dg-cell-list" style="max-width:min(100%,${Math.max(1,width-20)}px)"><span class="dg-cell-entries">${shown.map(item=>`<span class="dg-cell-item">${marked(item.text)}</span>`).join('')}</span><span class="dg-cell-list-foot">${details?`<button type="button" class="link dg-cell-more" data-column="${esc(c.key)}" aria-label="عرض التفاصيل الكاملة: ${esc(c.label)}">${remaining?`<bdi dir="ltr">+${remaining}</bdi>`:o.workspace?'ⓘ':'التفاصيل'}</button>`:''}</span></span>`;
   }
   return `<td data-k="${esc(c.key)}" data-label="${esc(c.label)}"${!t?' data-empty="true"':''}${c.type==='number'?' class="num"':''} title="${esc(t)}">${content}</td>`;
  }
