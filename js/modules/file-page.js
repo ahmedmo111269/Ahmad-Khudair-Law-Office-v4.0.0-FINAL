@@ -113,7 +113,7 @@ function tabLayout(){
 }
 // عدد الأطراف المعروضة في رأس الملف قبل الاختصار بزر «عرض كل الأطراف» — الأطراف كلها
 // متاحة دائمًا في تبويب الأطراف، والرأس يعرض ما يكفي للهوية دون إطالة غير منضبطة.
-const HEAD_PARTIES_MAX=12;
+const HEAD_PARTIES_MAX=3;
 /** ترتيب الأطراف اليدوي المحفوظ (sequence ثم تاريخ الإضافة ثم الاسم) — لا يُختزل ولا يُعاد ترتيبه. */
 const sortParties=rows=>[...rows].sort((a,b)=>(Number(a.sequence)||Number.MAX_SAFE_INTEGER)-(Number(b.sequence)||Number.MAX_SAFE_INTEGER)||String(a.createdAt||'').localeCompare(String(b.createdAt||''))||String(a.partyName||a.name||'').localeCompare(String(b.partyName||b.name||''),'ar'));
 /** الاسم المعرّف للمرحلة: «دعوى»←«الدعوى»، «استئناف»←«الاستئناف»، والأسماء المركّبة كما هي. */
@@ -166,7 +166,7 @@ function fileOverviewStaticHtml(app){
       <span class="badge ${statusClass} fid-status" data-file-status>${esc(status)}</span>
      </div>
      ${head?.court?`<p class="fid-court">${esc(head.court)}</p>`:''}
-     ${!head?.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
+     ${head?.sub?`<p class="fid-sub">عنوان الملف: ${esc(head.sub)}</p>`:!head?.isCase?`<p class="fid-sub">${esc(ftype?.name||f.fileType||'')} — لا توجد أرقام قضائية مسجلة (ملف بلا قضية)</p>`:''}
      <div class="fid-parties" role="list" aria-label="أطراف الملف: الموكل والخصم وبقية الأطراف">
       ${parties.slice(0,HEAD_PARTIES_MAX).map(({p,word,kind},i)=>`<button type="button" role="listitem" class="fid-party fid-party--${kind}" data-party-open="${i}" title="فتح بيانات ${esc(p.partyName||p.name||'طرف')} وإجراءاته"><span class="fid-party-role">${esc(word)}</span><b class="fid-party-name">${esc(p.partyName||p.name||'طرف')}</b>${p.role?`<span class="fid-party-cap">${esc(p.role)}</span>`:''}${p.isActive===false?'<span class="fid-party-cap">غير نشط</span>':''}</button>`).join('')}
       ${parties.length>HEAD_PARTIES_MAX?`<button type="button" class="fid-party fid-party--more" data-tab-jump="parties">+${parties.length-HEAD_PARTIES_MAX} — عرض كل الأطراف (${parties.length})</button>`:''}
@@ -291,23 +291,6 @@ function moreMenuHtml(app,tabCount){
     ${body}${hiddenHtml}
    </div>
   </div>`;
-}
-
-/**
- * بطاقة ملخص تنفيذي واحدة داخل «نظرة عامة».
- * ملخص للقراءة فقط: العنوان/البيانات تُبنى من السجل الأصلي، وكل إجراء فيها ينقل إلى
- * السجل نفسه أو إلى تبويبه — لا يوجد هنا أي حقل قابل للتحرير ولا نسخة مستقلة من البيانات.
- * @param {{eyebrow:string,icon?:string,tone?:string,title?:string,meta?:string[],empty?:string,actions?:Array<{label:string,attr:string,kind?:string}>}} o
- */
-function execCard({eyebrow,icon='',tone='',title='',meta=[],empty='',actions=[]}){
- const rows=meta.filter(Boolean);
- return `<article class="fx-card${tone?` is-${esc(tone)}`:''}">
-  <header class="fx-card-head"><span class="fx-eyebrow">${esc(eyebrow)}</span>${icon?`<span class="fx-ic" aria-hidden="true">${icon}</span>`:''}</header>
-  ${title?`<b class="fx-title">${title}</b>`:''}
-  ${rows.length?`<p class="fx-meta">${rows.map(m=>`<span>${m}</span>`).join('')}</p>`:''}
-  ${empty?`<p class="fx-empty muted small">${esc(empty)}</p>`:''}
-  ${actions.length?`<div class="fx-actions">${actions.map(a=>`<button type="button" class="${a.kind==='primary'?'primary small':'ghost small'}" ${a.attr}>${esc(a.label)}</button>`).join('')}</div>`:''}
- </article>`;
 }
 
 /** ربط عناصر كتلة الهوية بعد تركيب التبويب — يعمل أيضًا عند فتح رابط عميق ثم العودة للملخص. */
@@ -541,47 +524,7 @@ function stageChildList(rows,render,moreWord){
  if(!rows.length)return '<span class="muted small">لا شيء مسجل</span>';
  return `<ul class="fss-rows">${rows.slice(0,4).map(render).join('')}${rows.length>4?`<li class="muted small">+${rows.length-4} ${moreWord} — في تبويبها</li>`:''}</ul>`;
 }
-async function stageSequenceHtml(app,{id,f,stages,cur,hearings,procedures,judgments,relRows}){
- const currentId=f.currentStageId||cur?.id||'';
- const hBy=new Map(),jBy=new Map(),pBy=new Map();
- const push=(m,k,r)=>{if(!k)return;const a=m.get(k)||[];a.push(r);m.set(k,a)};
- hearings.forEach(h=>push(hBy,h.caseId,h));
- judgments.forEach(j=>push(jBy,j.caseId,j));
- procedures.forEach(p=>push(pBy,p.caseId,p));
- const stageRow=(s,i)=>{
-  const lc=s.lifecycle||(s.id===currentId?'active':'done');
-  const isCurrent=s.id===currentId;
-  const hs=(hBy.get(s.id)||[]).slice().sort((a,b)=>String(a.hearingDate||'').localeCompare(String(b.hearingDate||'')));
-  const js=(jBy.get(s.id)||[]).slice().sort((a,b)=>String(b.judgmentDate||'').localeCompare(String(a.judgmentDate||'')));
-  const ps=(pBy.get(s.id)||[]).slice().sort((a,b)=>String(b.actionDate||b.internalDueDate||b.createdAt||'').localeCompare(String(a.actionDate||a.internalDueDate||a.createdAt||'')));
-  const kv=[['الرقم والسنة',s.caseNumber?`${s.caseNumber}${s.caseYear?' / '+s.caseYear:''}`:''],['المحكمة / الجهة',s.courtId],['الدائرة',s.chamber],['درجة التقاضي',s.degree],['تاريخ القيد',s.filingDate?fmtDate(s.filingDate):''],['حالة المرحلة',s.status?label(s.status):''],['نتيجة المرحلة',s.outcome],['صفة الموكل',s.clientCapacity],['صفة الخصم',s.opponentCapacity],['الموضوع',s.subject],['الطلبات',s.requests],['ملاحظات',s.notes]].filter(([,v])=>v!=null&&String(v).trim()!=='');
-  return `<li class="fss-stage${isCurrent?' is-current':''} fss-lc-${esc(lc)}">
-   <div class="fss-stage-top"><span class="fss-idx" aria-hidden="true">${i+1}</span><b class="fss-stage-name">${esc(s.stageType||s.numberType||'مرحلة')}</b><span class="badge">${esc(STAGE_LC_LABEL[lc]||lc)}</span>${isCurrent?'<span class="badge open">المرحلة الحالية</span>':''}</div>
-   ${kv.length?`<dl class="kv fss-kv">${kv.map(([k,v])=>`<div class="kv-item${k==='الموضوع'||k==='الطلبات'||k==='ملاحظات'?' wide':''}"><dt>${esc(k)}</dt><dd>${esc(String(v))}</dd></div>`).join('')}</dl>`:'<p class="muted small">لم تُسجل تفاصيل هذه المرحلة بعد — <button type="button" class="link" data-open-case="'+esc(s.id)+'">أكمل بياناتها</button>.</p>'}
-   <div class="fss-children">
-    <div class="fss-child"><span class="fss-child-k">الجلسات (${hs.length})</span>${stageChildList(hs,h=>`<li><button type="button" class="link" data-open="hearings:${esc(h.id)}">${fmtDate(h.hearingDate)||'بدون تاريخ'}${h.hearingTime?' '+esc(String(h.hearingTime).slice(0,5)):''}</button><small>${esc(h.type||'')}${h.result?' — '+esc(h.result):h.adjournedTo?' — تأجيل إلى '+fmtDate(h.adjournedTo):''}</small></li>`,'جلسات أخرى')}</div>
-    <div class="fss-child"><span class="fss-child-k">الأحكام (${js.length})</span>${stageChildList(js,j=>`<li><button type="button" class="link" data-open="judgments:${esc(j.id)}">${fmtDate(j.judgmentDate)||'بدون تاريخ'}</button><small>${esc(j.judgmentType||'')}${j.operativeSummary?' — '+esc(j.operativeSummary):''}</small></li>`,'أحكام أخرى')}</div>
-    <div class="fss-child"><span class="fss-child-k">الأعمال (${ps.length})</span>${stageChildList(ps,p=>`<li><button type="button" class="link" data-open="procedures:${esc(p.id)}">${esc(p.type||p.description||'عمل إداري')}</button><small>${esc(label(p.status||''))}${p.result?' — '+esc(p.result):''}</small></li>`,'أعمال أخرى')}</div>
-   </div>
-   <div class="fss-actions"><button type="button" class="ghost small" data-open-case="${esc(s.id)}">فتح بيانات المرحلة</button></div>
-  </li>`;
- };
- let related='';
- if(relRows&&relRows.length){
-  const relations=createGridRelations(app.office,'fileRelations');
-  const rows=relRows.map(r=>({...r,dirLabel:r.direction==='out'?'هذا الملف ←':'← من ملف آخر'}));
-  await relations.hydrate(rows);
-  related=`<div class="fss-related"><h4 class="fp-kv-h">ملفات مرتبطة بعلاقات مسجلة (${rows.length})</h4><ul class="fss-rel-list">${rows.map(r=>`<li><button type="button" class="link" data-open-file="${esc(r.otherFileId)}">${esc(r.otherLabel||'ملف مرتبط')}</button><span class="muted small">${esc(r.dirLabel||'')} · ${esc(r.relationType||'علاقة')}</span></li>`).join('')}</ul><p class="muted small">الإدارة الكاملة للعلاقات في تبويب «العلاقات والملفات المرتبطة».</p></div>`;
- }
- return `<section class="panel fp-data fp-stage-seq" data-collapse-id="file-stage-seq" data-collapse-key="file-details:stage-seq" data-collapse-default="open">
-  <div class="panel-head"><h3>المرحلة والتسلسل القضائي</h3><span class="collapse-summary" data-collapse-summary>${stages.length?`${stages.length} ${stages.length===1?'مرحلة':'مراحل'}${cur?' · الحالية: '+esc(cur.stageType||cur.numberType||''):' '}`:'بلا مراحل مسجلة'}</span></div>
-  ${cur?`<div class="fss-current"><span class="fss-current-k">المرحلة الحالية</span><b class="fss-current-v">${esc(refLabel('cases',cur))}</b>${[cur.courtId,cur.chamber,cur.degree].filter(Boolean).map(x=>`<span class="fss-current-meta">${esc(String(x))}</span>`).join('')}</div>`:'<p class="muted fp-kv-note">لا توجد أرقام قضائية مسجلة لهذا الملف (ملف بلا قضية) — يُضاف الرقم/المرحلة من تبويب «المراحل والأرقام القضائية» أو من شريط إدارة المراحل أدناه عند الحاجة.</p>'}
-  ${stages.length?`<ol class="fss-chain">${stages.map(stageRow).join('')}</ol>`:''}
-  ${stagePathHtml(stages,currentId,id)}
-  ${related}
- </section>`;
-}
-function partyGroupsHtml(parties){
+async function partyGroupsHtml(parties){
  const groups=new Map();
  for(const p of parties){const name=String(p.roleGroup||p.role||'أطراف أخرى');if(!groups.has(name))groups.set(name,[]);groups.get(name).push(p)}
  const ordered=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],'ar'));
@@ -684,110 +627,32 @@ async function renderTabContent(app){
   // الأصلي (الجلسات/الأعمال/المراحل/سجل النشاط) وكل زر يفتح السجل نفسه أو تبويبه، ولا
   // يُنشئ أي سجل أو نسخة قابلة للتحرير، ولا يُخترع رقم أو تاريخ أو حالة غير مسجلة.
   const today=localDate();
-  const dayOf=v=>String(v||'').slice(0,10);
-  const [hearingResult,procedures,judgmentsRes,relRows]=await Promise.all([
+  const [hearingResult,procedures]=await Promise.all([
    fileChildren(office,id,'hearings'),
-   office.r.procedures.byIndex('fileId',id,2000),
-   fileChildren(office,id,'judgments').catch(()=>({rows:[]})),
-   fileRelations(office,id).catch(()=>[])
+   office.r.procedures.byIndex('fileId',id,2000)
   ]);
   const hearings=hearingResult.rows;
-  const upcomingAll=hearings.filter(h=>dayOf(h.hearingDate)>=today).sort((a,b)=>(dayOf(a.hearingDate)+(a.hearingTime||'99')).localeCompare(dayOf(b.hearingDate)+(b.hearingTime||'99')));
-  const previousAll=hearings.filter(h=>dayOf(h.hearingDate)<today).sort((a,b)=>(dayOf(b.hearingDate)+(b.hearingTime||'')).localeCompare(dayOf(a.hearingDate)+(a.hearingTime||'')));
-  const nextH=upcomingAll[0],lastH=previousAll[0];
-  const openProc=procedures.filter(p=>!p.status||['open','pending'].includes(p.status));
-  const openUnfinished=openProc.filter(p=>dayOf(p.internalDueDate)<today||!p.result);
-  // «آخر عمل إداري مسجل» = أحدث سجل فعلي في مخزن الأعمال (نفس مفتاح الترتيب المستخدم في تبويبه).
-  const procSorted=[...procedures].sort((a,b)=>String(b.actionDate||b.internalDueDate||b.createdAt||'').localeCompare(String(a.actionDate||a.internalDueDate||a.createdAt||'')));
-  const latestProc=procSorted[0];
-  const cur=stages.find(s=>s.id===f.currentStageId)||stages.at(-1);
-  const clientParty=parties.find(p=>p.clientId);
-  const lastActivity=f.lastActivityAt?fmtDate(dayOf(f.lastActivityAt)):'';
-  const sig=nextH?dateSignal(dayOf(nextH.hearingDate)):null;
-  // (أ) الملخص التنفيذي: أربع بطاقات ملخص فقط، كل واحدة مرتبطة بمصدرها الأصلي
-  const nextCard=nextH?execCard({
-   eyebrow:'أقرب جلسة قادمة',icon:'◷',tone:sig?.tone||'',
-   title:`${esc(fmtDate(nextH.hearingDate))}${nextH.hearingTime?` <span class="fx-sub">· ${esc(String(nextH.hearingTime).slice(0,5))}</span>`:''}${sig?` <span class="ux-badge ux-badge--${esc(sig.tone)}">${esc(sig.text)}</span>`:''}`,
-   meta:[nextH.type,nextH.court,nextH.chamber,nextH.reason?`المطلوب: ${nextH.reason}`:''].filter(Boolean).map(esc),
-   actions:[
-    {label:'عرض الجلسة',kind:'primary',attr:`data-open="hearings:${esc(nextH.id)}"`},
-    {label:`كل الجلسات (${hearings.length})`,attr:'data-tab-jump="hearings"'},
-    {label:'دورة الجلسات',attr:`data-hearing-cycle="${esc(nextH.id)}"`}
-   ]
-  }):execCard({
-   eyebrow:'أقرب جلسة قادمة',icon:'◷',
-   empty:hearings.length?'لا توجد جلسة قادمة مسجلة؛ كل الجلسات المسجلة سابقة.':'لا توجد جلسات مسجلة لهذا الملف بعد.',
-   actions:[{label:'فتح تبويب الجلسات',kind:'primary',attr:'data-tab-jump="hearings"'}]
-  });
-  const procCard=latestProc?execCard({
-   eyebrow:'آخر عمل إداري مسجل',icon:'☷',tone:openUnfinished.length?'warn':'',
-   title:esc(latestProc.type||latestProc.description||'عمل إداري'),
-   meta:[
-    latestProc.description?esc(latestProc.description):'',
-    latestProc.actionDate?`تاريخ العمل ${esc(fmtDate(latestProc.actionDate))}`:'',
-    latestProc.internalDueDate?`موعد المتابعة ${esc(fmtDate(latestProc.internalDueDate))}`:'',
-    latestProc.status?`الحالة: ${esc(label(latestProc.status))}`:'',
-    openProc.length?`مفتوحة في الملف: ${openProc.length}`:'',
-    openUnfinished.length?`غير مكتملة: ${openUnfinished.length}`:''
-   ].filter(Boolean),
-   actions:[
-    {label:'عرض العمل',kind:'primary',attr:`data-open="procedures:${esc(latestProc.id)}"`},
-    {label:`الأعمال (${procedures.length})`,attr:'data-tab-jump="procedures"'}
-   ]
-  }):execCard({
-   eyebrow:'آخر عمل إداري مسجل',icon:'☷',
-   empty:'لا توجد أعمال إدارية مسجلة لهذا الملف.',
-   actions:[{label:'فتح تبويب الأعمال الإدارية',kind:'primary',attr:'data-tab-jump="procedures"'}]
-  });
-  const stageCard=cur?execCard({
-   eyebrow:'المرحلة الحالية',icon:'▣',
-   title:esc(refLabel('cases',cur)),
-   meta:[cur.courtId,cur.chamber,cur.degree,cur.filingDate?`تاريخ القيد ${fmtDate(cur.filingDate)}`:'',stages.length>1?`إجمالي المراحل في الملف: ${stages.length}`:''].filter(Boolean).map(esc),
-   actions:[
-    {label:'فتح بيانات المرحلة',kind:'primary',attr:`data-open-case="${esc(cur.id)}"`},
-    {label:`المراحل (${stages.length})`,attr:'data-tab-jump="judicial"'}
-   ]
-  }):execCard({
-   eyebrow:'المرحلة الحالية',icon:'▣',
-   empty:'لا توجد مرحلة أو رقم قضائي مسجل (ملف بلا قضية).',
-   actions:[{label:'فتح المراحل والأرقام القضائية',kind:'primary',attr:'data-tab-jump="judicial"'}]
-  });
-  const lastCard=lastH?execCard({
-   eyebrow:'الجلسة السابقة',icon:'⌛',
-   title:`${esc(fmtDate(lastH.hearingDate))}${lastH.hearingTime?` <span class="fx-sub">· ${esc(String(lastH.hearingTime).slice(0,5))}</span>`:''}`,
-   meta:[lastH.type,lastH.result?`القرار: ${lastH.result}`:'لم يُسجل القرار',lastH.adjournedTo?`التأجيل إلى ${fmtDate(lastH.adjournedTo)}`:''].filter(Boolean).map(esc),
-   actions:[
-    {label:'عرض الجلسة',kind:'primary',attr:`data-open="hearings:${esc(lastH.id)}"`},
-    {label:'كل الجلسات',attr:'data-tab-jump="hearings"'}
-   ]
-  }):execCard({eyebrow:'الجلسة السابقة',icon:'⌛',empty:'لا توجد جلسات سابقة مسجلة.'});
+  // نظرة عامة هي لوحة قرار ومتابعة، لا نسخة من تبويبات الجلسات والمراحل والعلاقات.
+  // مصدر كل معلومة يظل السجل الأصلي؛ تفاصيله الكاملة في تبويبه المتخصص.
   const execPanel=`<section class="panel fp-exec" data-collapse-id="file-exec" data-collapse-key="file-details:exec" data-collapse-default="open">
-   <div class="panel-head"><h3>الملخص التنفيذي</h3><span class="collapse-summary" data-collapse-summary></span></div>
-   <div class="fx-grid">${nextCard}${procCard}${stageCard}${lastCard}</div>
-   ${fileCockpitHtml({hearings,procedures,stages,parties,today,currentStage:cur?refLabel('cases',cur):''})}
-   <p class="fx-foot muted small">
-    <span>${lastActivity?`آخر نشاط مسجل: <b>${esc(lastActivity)}</b>`:'لا يوجد نشاط مسجل بعد'}</span>
-    ${openUnfinished.length?`<span>متابعات غير مكتملة: <button type="button" class="link" data-tab-jump="procedures">${openUnfinished.length}</button></span>`:''}
-    ${clientParty?.clientId?`<span>الموكل المسجل: <button type="button" class="link" data-route="client:${esc(clientParty.clientId)}">${esc(clientParty.name||clientParty.partyName||'')}</button>${clientParty.role?` — ${esc(clientParty.role)}`:''}</span>`:''}
-   </p>
+   <div class="panel-head"><h3>موقف الملف</h3><span class="collapse-summary" data-collapse-summary>ملخص حي من الجلسات والأعمال الإدارية المسجلة</span></div>
+   ${fileCockpitHtml({hearings,procedures,today,compact:true})}
    ${hearingResult.more?'<div class="notice" role="status">تعرض هذه الصفحة حتى 5,000 جلسة مرتبطة بالملف. قد توجد سجلات إضافية؛ لم تُحذف أو تُغيّر أي بيانات.</div>':''}
   </section>`;
-  // (ب) بيانات الملف فقط — كل حقل من مصدره. بيانات المرحلة/الرقم القضائي وحقول نوع العمل
-  // لا تُعرض هنا: مصدرها الوحيد تبويب «المراحل» وتبويب «بيانات نوع العمل» فلا تتكرر المعلومات.
   const refs=new Map();
   // رقم الملف الداخلي لا يُكرر في البيانات التفصيلية؛ مصدره الوحيد زر «الملف الفرعي».
-  const fileFields=ENTITIES.files.fields.filter(x=>x.k!=='fileNumber');
+  const identityKeys=new Set(['fileNumber','title','fileType','mainCategory','subCategory','status','priority','responsibleLawyer']);
+  const fileFields=ENTITIES.files.fields.filter(x=>!identityKeys.has(x.k));
   const dataPanel=`<section class="panel fp-data fp-file-data" data-collapse-id="file-file-data" data-collapse-key="file-details:file-data" data-collapse-default="open">
    <div class="panel-head"><h3>بيانات الملف</h3><span class="collapse-summary" data-collapse-summary></span>
     <div class="sec-actions"><button type="button" class="ghost small" data-file-edit2>✎ تعديل بيانات الملف</button><button type="button" class="ghost small" data-reclass>تغيير القسم / النوع</button></div></div>
    <div class="fp-kv">
     ${kvHtml(fileFields,f,refs)}
-    ${f.archivedAt?`<p class="muted small">أُرشف في ${fmtDate(f.archivedAt)}${f.archivedReason?' — السبب: '+esc(f.archivedReason):''}</p>`:''}
+    ${f.archivedAt?`<p class="muted small">تاريخ الأرشفة: ${fmtDate(f.archivedAt)}</p>`:''}
     ${f.reopenedAt?`<p class="muted small">أُعيد فتحه في ${fmtDate(f.reopenedAt)}${f.reopenReason?' — السبب: '+esc(f.reopenReason):''}</p>`:''}
    </div></section>`;
-  // (ج) المسار القضائي: المراحل والعلاقات المسجلة فعلًا، وكل عنصر يفتح سجله الأصلي
-  const stagePanel=await stageSequenceHtml(app,{id,f,stages,cur,hearings,procedures,judgments:judgmentsRes.rows,relRows});
-  el.innerHTML=`${execPanel}${dataPanel}${stagePanel}
+  // المراحل الكاملة والعلاقات والأحكام تُدار في تبويباتها المتخصصة؛ لا نعيد نسخها هنا.
+  el.innerHTML=`${execPanel}${dataPanel}
    ${executionStripHtml({summary:executionContextSummary(app.__file.executions||[]),scope:'file',route:`executionCenter?fileId=${encodeURIComponent(id)}`})}`;
   // (د) كل إجراءات «نظرة عامة» تنقل إلى المصدر الأصلي أو إلى تبويبه — بلا كتابة من هنا
   el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>openEntityForm(app,'files',{id}));
@@ -796,7 +661,6 @@ async function renderTabContent(app){
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
   el.querySelectorAll('[data-open-case]').forEach(b=>b.onclick=()=>app.go('case:'+b.dataset.openCase));
   el.querySelectorAll('[data-open-file]').forEach(b=>b.onclick=()=>app.go('file:'+b.dataset.openFile));
-  el.querySelectorAll('[data-hearing-cycle]').forEach(b=>b.onclick=()=>showHearingCycle(app,b.dataset.hearingCycle||nextH?.id||lastH?.id||''));
   el.querySelectorAll('.cp-fc [data-route]').forEach(b=>b.onclick=()=>app.go(b.dataset.route));
   el.querySelector('[data-cp-task]')?.addEventListener('click',()=>document.querySelector('#main-content [data-file-task]')?.click());
   return;
