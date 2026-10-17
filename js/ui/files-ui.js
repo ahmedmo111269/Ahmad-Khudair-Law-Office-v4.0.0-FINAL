@@ -151,6 +151,35 @@ export function reviewImpact({title='مراجعة قبل التنفيذ',summary
  });
 }
 
+/**
+ * تأكيد داخل ورقة مفتوحة: يُعرض كنافذة مكدَّسة حتى تبقى الورقة تحته،
+ * بخلاف confirmBox الذي يستبدل النافذة كاملة ويفقد سياق اللوحة.
+ */
+export function fsConfirm(message,{okText='تأكيد',input=false,label='السبب / ملاحظة',placeholder='',value='',danger=false}={}){
+ return new Promise(resolve=>{
+  const stacked=Boolean(document.querySelector('#modal-root .modal-card'));
+  const html=`<h2 class="modal-title">تأكيد</h2><p>${esc(message)}</p>${input?`<label>${esc(label)}<textarea class="confirm-input" rows="2" placeholder="${esc(placeholder)}">${esc(value)}</textarea></label>`:''}<div class="form-actions"><button type="button" class="${danger?'danger':'primary'}" data-fs-confirm-ok>${esc(okText)}</button><button type="button" class="ghost" data-fs-confirm-cancel>إلغاء</button></div>`;
+  const card=stacked?stackedModal(html):modal(html);
+  let settled=false;
+  const onClosed=()=>{
+   if(settled)return;
+   settled=true;
+   document.removeEventListener('modal:closed',onClosed);
+   resolve(input?{ok:false}:false);
+  };
+  document.addEventListener('modal:closed',onClosed);
+  const finish=v=>{
+   if(settled)return;
+   settled=true;
+   document.removeEventListener('modal:closed',onClosed);
+   resolve(v);
+   closeModal();
+  };
+  card.querySelector('[data-fs-confirm-ok]')?.addEventListener('click',()=>finish(input?{ok:true,value:card.querySelector('.confirm-input')?.value||''}:true));
+  card.querySelector('[data-fs-confirm-cancel]')?.addEventListener('click',()=>finish(input?{ok:false}:false));
+ });
+}
+
 /** تنزيل ملف JSON محلي (تفضيلات فقط). */
 export function downloadJson(filename,payload){
  const blob=new Blob([typeof payload==='string'?payload:JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});

@@ -44,7 +44,11 @@ import {prefs} from '../core/preferences.js';
 import {getComponentStyle,setComponentStyle} from '../core/component-style.js';
 import {getComponentContent,setComponentContent} from '../core/display-prefs.js';
 import {recordFileVisit,updateVisitTab} from '../services/files-admin.js';
-import {openFileChecklist,openPreCloseReview,openFieldHistory,openAdminDecisions,openVerifiableSummary,editFileWithReview,openFileComparePicker,openRecentFiles,openFileQuickDrawer} from './files-suite.js';
+
+// مجموعة الملفات (المركز/اللوحات) لا تُستورد ساكنًا: كل إجراء يفتحها عند الطلب
+// حتى لا تُحمَّل على كل صفحة ملف ولا تدخل حزمة الإقلاع.
+const suiteAction=(app,name,...args)=>import('./files-suite.js').then(module=>module[name](app,...args)).catch(error=>toast(error?.message||'تعذّر فتح أداة الملفات','error'));
+const editFileWithReview=(app,id,options)=>suiteAction(app,'editFileWithReview',id,options);
 
 // شريط تبويبات واحد (Data-First Legal Workspace): أربعة تبويبات ثابتة ظاهرة دائمًا
 // (نظرة عامة ← الجلسات ← الأعمال الإدارية ← المراحل) وبقية الأقسام كلها في قائمة منسدلة
@@ -456,13 +460,15 @@ function bindFileIdentityControls(root,app,id,f,openItemsCheck){
  root.querySelectorAll('[data-file-copy]').forEach(b=>once(b,'fileCopyBound',()=>copyFileSummary(app)));
  // أدوات إدارة الملف: كلها قراءة/تفضيلات أو كتابة عبر خدمة الإدارة الجديدة (settings)،
  // ولا تعدّل سجلات الملف إلا عبر النماذج الأصلية بعد مراجعة أثر صريحة.
- root.querySelectorAll('[data-file-summary]').forEach(b=>once(b,'fileSummaryBound',()=>openVerifiableSummary(app,id)));
- root.querySelectorAll('[data-file-checklist]').forEach(b=>once(b,'fileChecklistBound',()=>openFileChecklist(app,id)));
- root.querySelectorAll('[data-file-history]').forEach(b=>once(b,'fileHistoryBound',()=>openFieldHistory(app,id)));
- root.querySelectorAll('[data-file-decisions]').forEach(b=>once(b,'fileDecisionsBound',()=>openAdminDecisions(app,id)));
- root.querySelectorAll('[data-file-compare]').forEach(b=>once(b,'fileCompareBound',()=>openFileComparePicker(app)));
- root.querySelectorAll('[data-file-recent]').forEach(b=>once(b,'fileRecentBound',()=>openRecentFiles(app)));
- root.querySelectorAll('[data-file-preview]').forEach(b=>once(b,'filePreviewBound',()=>openFileQuickDrawer(app,id)));
+ // مجموعة الملفات تُحمَّل عند أول استخدام من هذه القائمة فقط (لا تدخل حزمة الإقلاع).
+ const withSuite=(name,...args)=>suiteAction(app,name,...args);
+ root.querySelectorAll('[data-file-summary]').forEach(b=>once(b,'fileSummaryBound',()=>withSuite('openVerifiableSummary',id)));
+ root.querySelectorAll('[data-file-checklist]').forEach(b=>once(b,'fileChecklistBound',()=>withSuite('openFileChecklist',id)));
+ root.querySelectorAll('[data-file-history]').forEach(b=>once(b,'fileHistoryBound',()=>withSuite('openFieldHistory',id)));
+ root.querySelectorAll('[data-file-decisions]').forEach(b=>once(b,'fileDecisionsBound',()=>withSuite('openAdminDecisions',id)));
+ root.querySelectorAll('[data-file-compare]').forEach(b=>once(b,'fileCompareBound',()=>withSuite('openFileComparePicker')));
+ root.querySelectorAll('[data-file-recent]').forEach(b=>once(b,'fileRecentBound',()=>withSuite('openRecentFiles')));
+ root.querySelectorAll('[data-file-preview]').forEach(b=>once(b,'filePreviewBound',()=>withSuite('openFileQuickDrawer',id)));
  root.querySelectorAll('[data-file-task]').forEach(b=>once(b,'fileTaskBound',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await reload(app)}})}));
  root.querySelectorAll('[data-file-pin]').forEach(b=>once(b,'filePinBound',async e=>{
   const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()},app.ctx?.profile?.id||'');
@@ -470,9 +476,9 @@ function bindFileIdentityControls(root,app,id,f,openItemsCheck){
   e.currentTarget.setAttribute('aria-pressed',String(on));
   toast(on?'ثُبّت الملف في الرئيسية':'أُلغي التثبيت');
  }));
- root.querySelectorAll('[data-file-archive]').forEach(b=>once(b,'fileArchiveBound',async()=>{await openPreCloseReview(app,id,{mode:'archive',onDone:()=>reload(app)})}));
+ root.querySelectorAll('[data-file-archive]').forEach(b=>once(b,'fileArchiveBound',()=>withSuite('openPreCloseReview',id,{mode:'archive',onDone:()=>reload(app)})));
  root.querySelectorAll('[data-file-reopen]').forEach(b=>once(b,'fileReopenBound',async()=>{const r=await confirmBox('إعادة فتح الملف؟',{okText:'إعادة فتح',input:true,placeholder:'سبب إعادة الفتح (اختياري)'});if(!r.ok)return;try{await reopenFile(app.office,id,r.value);toast('تمت إعادة فتح الملف');reload(app)}catch(e){toast(userError(e),'error')}}));
- root.querySelectorAll('[data-file-close]').forEach(b=>once(b,'fileCloseBound',async()=>{await openPreCloseReview(app,id,{mode:'close',onDone:()=>reload(app)})}));
+ root.querySelectorAll('[data-file-close]').forEach(b=>once(b,'fileCloseBound',()=>withSuite('openPreCloseReview',id,{mode:'close',onDone:()=>reload(app)})));
  root.querySelectorAll('[data-file-delete]').forEach(b=>once(b,'fileDeleteBound',async()=>{if(!await confirmBox('حذف منطقي للملف؟ لا يُسمح إذا كان للملف قضايا/مراحل غير محذوفة. البيانات لا تُمحى نهائيًا.',{okText:'حذف منطقي'}))return;try{await deleteEntity(app.office,'files',id);toast('تم الحذف المنطقي');app.go('files')}catch(e){toast(userError(e),'error')}}));
 }
 

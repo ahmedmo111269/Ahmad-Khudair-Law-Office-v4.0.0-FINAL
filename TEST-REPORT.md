@@ -4,7 +4,7 @@
 
 | الفحص | الأمر | النتيجة |
 |---|---|---|
-| مجموعة Node الكاملة (تنفيذ فعلي) | `cd tools/node-tests && npm install --no-audit --no-fund --ignore-scripts && node run-tests.mjs` | **712/712 ناجح، 0 فشل، خروج 0** (~18s) — منها 50 اختبارًا جديدًا في `js/tests/files-suite-tests.js` |
+| مجموعة Node الكاملة (تنفيذ فعلي) | `cd tools/node-tests && npm install --no-audit --no-fund --ignore-scripts && node run-tests.mjs` | **716/716 ناجح، 0 فشل، خروج 0** (~18s) — منها 54 اختبارًا جديدًا في `js/tests/files-suite-tests.js` |
 | فحص الصياغة | `node --check` على الوحدات الجديدة والمعدلة و`sw.js` | **نجح** |
 | تكافؤ المشغّلين | حارس الاختبارات داخل المجموعة | **نجح** (`runFilesSuiteTests` مسجل في `tests.html` و`run-tests.mjs`) |
 | حراسة Precache | اختبار «كل وحدات الإقلاع مخزَّنة مسبقًا» | **نجح** (وحدات المجموعة تُحمَّل عند الطلب ولا تدخل حزمة الإقلاع) |

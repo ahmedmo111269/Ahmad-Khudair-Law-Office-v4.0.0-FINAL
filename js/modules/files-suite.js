@@ -7,7 +7,7 @@
 // أو تفضيلات العرض عبر workspaces/prefs.
 // =====================================================================
 import {esc} from '../ui/dom.js';
-import {modal,closeModal,confirmBox} from '../ui/modal.js';
+import {stackedModal,closeModal} from '../ui/modal.js';
 import {toast} from '../ui/toast.js';
 import {ENTITIES,fmtDate,label,isClosedFile,fileTypeGroup} from '../domain/entities.js';
 import {formatFileNumber} from '../core/file-number.js';
@@ -39,7 +39,7 @@ import {
 } from '../services/workspace-views.js';
 import {
  fsState,fsBadge,fsStat,fsEmpty,fsNotice,fsMeter,fsBarChart,fsDonut,fsNum,fsMissing,
- openFsDrawer,reviewImpact,downloadJson,pickJsonFile,fsCopy,fsPrintHtml
+ openFsDrawer,reviewImpact,downloadJson,pickJsonFile,fsCopy,fsPrintHtml,fsConfirm
 } from '../ui/files-ui.js';
 
 const PRIORITY_LABEL={high:'عالية',medium:'متوسطة',low:'منخفضة'};
@@ -282,7 +282,8 @@ function kpiValues(portfolio,{visits=[]}={}){
 }
 function openKpiConfig(app,rerender){
  const config=new Set(kpiConfig());
- const card=modal(`<h2 class="modal-title">تخصيص مؤشرات مركز الملفات</h2><p class="muted small">اختر المؤشرات التي تريد رؤيتها. التعريف الدقيق لكل مؤشر مذكور أسفله، ويمكن تعديل الاختيار في أي وقت.</p><div class="fs-kpi-config">${KPI_DEFS.map(item=>`<label class="fs-check"><input type="checkbox" value="${item.id}" ${config.has(item.id)?'checked':''}><span><b>${esc(item.label)}</b><small>${esc(item.definition)}</small></span></label>`).join('')}</div><div class="form-actions"><button type="button" class="primary" data-kpi-save>حفظ الاختيار</button><button type="button" class="ghost" data-kpi-reset>استعادة الكل</button></div>`);
+ const card=stackedModal(`<h2 class="modal-title">تخصيص مؤشرات مركز الملفات</h2><p class="muted small">اختر المؤشرات التي تريد رؤيتها. التعريف الدقيق لكل مؤشر مذكور أسفله، ويمكن تعديل الاختيار في أي وقت.</p><div class="fs-kpi-config">${KPI_DEFS.map(item=>`<label class="fs-check"><input type="checkbox" value="${item.id}" ${config.has(item.id)?'checked':''}><span><b>${esc(item.label)}</b><small>${esc(item.definition)}</small></span></label>`).join('')}</div><div class="form-actions"><button type="button" class="primary" data-kpi-save>حفظ الاختيار</button><button type="button" class="ghost" data-kpi-reset>استعادة الكل</button></div>`);
+ // النافذة مكدَّسة فوق المركز: إغلاقها لا يمسح اللوحة، ثم يُعاد رسم المركز.
  card.querySelector('[data-kpi-save]').onclick=()=>{const ids=[...card.querySelectorAll('input:checked')].map(input=>input.value);prefs.set(KPI_KEY,ids.length?ids:KPI_DEFS.map(item=>item.id));closeModal();toast('حُفظت مؤشراتك');rerender?.()};
  card.querySelector('[data-kpi-reset]').onclick=()=>{prefs.remove(KPI_KEY);closeModal();toast('عادت المؤشرات الافتراضية');rerender?.()};
 }
@@ -576,15 +577,13 @@ export async function openFilesWorkspaces(app){
    await applyWorkspace(app,workspace);
   }));
   body.querySelector('[data-ws-save]')?.addEventListener('click',async()=>{
-   const {confirmBox}=await import('../ui/modal.js');
-   const answer=await confirmBox('احفظ الحالة الحالية كمساحة عمل. اكتب اسمًا واضحًا للمهمة (مثل: مراجعة جلسات الأسبوع).',{okText:'حفظ',input:true,label:'اسم مساحة العمل',placeholder:'مثال: ملفات تحتاج إجراء — أسبوعي'});
+   const answer=await fsConfirm('احفظ الحالة الحالية كمساحة عمل. اكتب اسمًا واضحًا للمهمة (مثل: مراجعة جلسات الأسبوع).',{okText:'حفظ',input:true,label:'اسم مساحة العمل',placeholder:'مثال: ملفات تحتاج إجراء — أسبوعي'});
    if(!answer?.ok)return;
    try{const record=saveWorkspace({name:answer.value,...captureCurrentWorkspace(app)});toast(`حُفظت مساحة «${record.name}»`);draw()}
    catch(error){toast(error?.message||'تعذر الحفظ','error')}
   });
   body.querySelector('[data-ws-export]')?.addEventListener('click',async()=>{
-   const {confirmBox}=await import('../ui/modal.js');
-   const answer=await confirmBox('سيُصدَّر ملف إعدادات عرض فقط (مساحات العمل ولقطة الجدول والتفضيلات). لا يحتوي أي سجل أو بيانات موكل.',{okText:'تصدير'});
+   const answer=await fsConfirm('سيُصدَّر ملف إعدادات عرض فقط (مساحات العمل ولقطة الجدول والتفضيلات). لا يحتوي أي سجل أو بيانات موكل.',{okText:'تصدير'});
    if(!answer)return;
    const {json}=exportSettingsTemplate({gridState:captureCurrentWorkspace(app).gridState,workspaces:getWorkspaces(),appVersion:prefs.get('app:version','')});
    downloadJson(`akl-files-settings-${localDate()}.json`,json);
@@ -595,10 +594,9 @@ export async function openFilesWorkspaces(app){
    if(!picked)return;
    try{
     const result=importSettingsTemplate(picked.text);
-    const {confirmBox}=await import('../ui/modal.js');
     const lines=[`مساحات عمل مستوردة: ${result.importedWorkspaces}`,`تفضيلات صفحات: ${result.importedPages}`,`بطاقات: ${result.importedCards}`,`عناصر واجهة: ${result.importedComponents}`];
     const message=`تم الاستيراد دون حذف أي تفضيل قائم. ${lines.join(' · ')}.${result.renamed.length?` أُعيدت تسمية ${result.renamed.length} مساحة لتعارض الأسماء.`:''}`;
-    const applyGrid=result.gridState?await confirmBox(`${message}\nهل تريد تطبيق لقطة الجدول المستوردة على جدول الملفات الحالي؟ (تغيير عرض فقط، ولا يمس السجلات)`,{okText:'تطبيق لقطة الجدول',cancelText:'لاحقًا'}):false;
+    const applyGrid=result.gridState?await fsConfirm(`${message}\nهل تريد تطبيق لقطة الجدول المستوردة على جدول الملفات الحالي؟ (تغيير عرض فقط، ولا يمس السجلات)`,{okText:'تطبيق لقطة الجدول',cancelText:'لاحقًا'}):false;
     if(applyGrid){const grid=currentGridOf();grid?.applyViewState?.(result.gridState);toast('طُبّقت لقطة الجدول المستوردة')}
     else toast(message);
     draw();
@@ -608,8 +606,7 @@ export async function openFilesWorkspaces(app){
    const rename=event.target.closest('[data-ws-rename]');
    if(rename){
     const item=getWorkspaces().find(work=>work.id===rename.dataset.wsRename);if(!item)return;
-    const {confirmBox}=await import('../ui/modal.js');
-    const answer=await confirmBox('اكتب الاسم الجديد لمساحة العمل.',{okText:'إعادة التسمية',input:true,label:'الاسم',value:item.name});
+    const answer=await fsConfirm('اكتب الاسم الجديد لمساحة العمل.',{okText:'إعادة التسمية',input:true,label:'الاسم',value:item.name});
     if(!answer?.ok)return;
     try{renameWorkspace(item.id,answer.value);toast('أُعيدت التسمية');draw()}catch(error){toast(error?.message||'تعذرت إعادة التسمية','error')}
     return;
@@ -657,10 +654,10 @@ export async function openRecentFiles(app){
  host.addEventListener('click',async event=>{
   const recentRemove=event.target.closest('[data-recent-remove]');
   if(recentRemove){removeRecent(recentRemove.dataset.recentRemove,scope);openRecentFiles(app);return}
-  if(event.target.closest('[data-recent-clear]')){if(await confirmBox('مسح سجل «آخر ما فتحت»؟ لا يمس أي سجل ملف أو بياناته.',{okText:'مسح السجل'})){clearRecent(scope);openRecentFiles(app)}return}
+  if(event.target.closest('[data-recent-clear]')){if(await fsConfirm('مسح سجل «آخر ما فتحت»؟ لا يمس أي سجل ملف أو بياناته.',{okText:'مسح السجل'})){clearRecent(scope);openRecentFiles(app)}return}
   const visitRemove=event.target.closest('[data-visit-remove]');
   if(visitRemove){removeFileVisit(visitRemove.dataset.visitRemove,{scope});openRecentFiles(app);return}
-  if(event.target.closest('[data-visit-clear]')){if(await confirmBox('مسح سجل زيارات الملفات المحلي؟ لا يمس أي سجل أو نشاط.',{okText:'مسح الزيارات'})){clearFileVisits({scope});openRecentFiles(app)}return}
+  if(event.target.closest('[data-visit-clear]')){if(await fsConfirm('مسح سجل زيارات الملفات المحلي؟ لا يمس أي سجل أو نشاط.',{okText:'مسح الزيارات'})){clearFileVisits({scope});openRecentFiles(app)}return}
   const favRemove=event.target.closest('[data-fav-remove]');
   if(favRemove){await removeFavorite(favRemove.dataset.favRemove,scope);openRecentFiles(app)}
  });
@@ -837,7 +834,7 @@ export async function openFileChecklist(app,fileId){
   body.querySelector('[data-ck-group]')?.addEventListener('change',async event=>{group=event.target.value;await draw()});
   body.querySelector('[data-ck-template]')?.addEventListener('click',()=>openChecklistTemplate(app,group,draw));
   body.querySelector('[data-ck-reset]')?.addEventListener('click',async()=>{
-   if(!await confirmBox('إعادة ضبط حالة بنود التحقق لهذا الملف؟ لا تُحذف أي بيانات ملف، ويعود كل بند إلى «غير منجز».',{okText:'إعادة الضبط'}))return;
+   if(!await fsConfirm('إعادة ضبط حالة بنود التحقق لهذا الملف؟ لا تُحذف أي بيانات ملف، ويعود كل بند إلى «غير منجز».',{okText:'إعادة الضبط'}))return;
    await resetFileChecklist(office,fileId);toast('أُعيد ضبط حالة القائمة');await draw();
   });
   body.querySelectorAll('[data-ck-item]').forEach(input=>input.addEventListener('change',async()=>{
@@ -852,13 +849,17 @@ export async function openFileChecklist(app,fileId){
 function openChecklistTemplate(app,group,onDone){
  const office=officeOf(app);
  getChecklistTemplate(office,group).then(template=>{
-  const card=modal(`<h2 class="modal-title">قالب التحقق الإداري — ${esc(group)}</h2><p class="muted small">عدّل نص البنود أو أضف/احذف. الحذف من القالب لا يحذف حالات البنود المحفوظة لملف معيّن؛ تُعرض كبنود قديمة محفوظة.</p><div data-tpl-list class="fs-tpl-list">${template.items.map((item,index)=>`<div class="fs-tpl-row" data-id="${esc(item.id)}"><input value="${esc(item.label)}" aria-label="نص البند ${index+1}"><button type="button" class="link danger" data-tpl-del aria-label="حذف البند">✕</button></div>`).join('')}</div>
+  const card=stackedModal(`<h2 class="modal-title">قالب التحقق الإداري — ${esc(group)}</h2><p class="muted small">عدّل نص البنود أو أضف/احذف. الحذف من القالب لا يحذف حالات البنود المحفوظة لملف معيّن؛ تُعرض كبنود قديمة محفوظة.</p><div data-tpl-list class="fs-tpl-list">${template.items.map((item,index)=>`<div class="fs-tpl-row" data-id="${esc(item.id)}"><input value="${esc(item.label)}" aria-label="نص البند ${index+1}"><button type="button" class="link danger" data-tpl-del aria-label="حذف البند">✕</button></div>`).join('')}</div>
   <div class="fs-toolrow"><button type="button" class="ghost small" data-tpl-add>+ بند جديد</button><button type="button" class="ghost small" data-tpl-reset>استعادة الافتراضي</button></div>
   <div class="form-actions"><button type="button" class="primary" data-tpl-save>حفظ القالب</button><button type="button" class="ghost" data-close>إلغاء</button></div>`);
   const list=card.querySelector('[data-tpl-list]');
   card.querySelector('[data-tpl-add]').onclick=()=>{const row=document.createElement('div');row.className='fs-tpl-row';row.dataset.id='';row.innerHTML='<input aria-label="نص البند الجديد"><button type="button" class="link danger" data-tpl-del aria-label="حذف">✕</button>';list.append(row);row.querySelector('input').focus()};
   list.addEventListener('click',event=>{if(event.target.closest('[data-tpl-del]'))event.target.closest('.fs-tpl-row').remove()});
-  card.querySelector('[data-tpl-reset]').onclick=async()=>{if(await confirmBox('استعادة القالب الافتراضي لهذه المجموعة؟ حالات الملفات المحفوظة لا تُحذف.',{okText:'استعادة'})){await resetChecklistTemplate(office,group);closeModal();toast('استُعيد القالب الافتراضي');onDone?.()}};
+  card.querySelector('[data-tpl-reset]').onclick=async()=>{
+   // تأكيد مكدَّس: يبقي محرر القالب تحته، ثم يُغلَّق المحرر وحده وتُحدَّث الورقة الأم.
+   if(!await fsConfirm('استعادة القالب الافتراضي لهذه المجموعة؟ حالات الملفات المحفوظة لا تُحذف.',{okText:'استعادة'}))return;
+   await resetChecklistTemplate(office,group);closeModal();toast('استُعيد القالب الافتراضي');onDone?.();
+  };
   card.querySelector('[data-tpl-save]').onclick=async()=>{
    const items=[...list.querySelectorAll('.fs-tpl-row')].map((row,index)=>({id:row.dataset.id||`custom-${index+1}-${Date.now()}`,label:row.querySelector('input').value.trim()})).filter(item=>item.label);
    try{await saveChecklistTemplate(office,group,items);closeModal();toast('حُفظ القالب');onDone?.()}
@@ -977,7 +978,7 @@ export async function openFieldHistory(app,fileId){
   const host=card.querySelector('.fs-sheet-body');
   host.querySelector('[data-fh-enabled]')?.addEventListener('change',async event=>{await setFieldHistoryEnabled(event.target.checked);toast(event.target.checked?'سيُسجَّل تغيّر الحقول':'أُوقف تسجيل تغيّر الحقول')});
   host.querySelector('[data-fh-clear]')?.addEventListener('click',async()=>{
-   if(!await confirmBox('مسح سجل تغيّر الحقول لهذا الملف؟ لا يمس أي بيانات ملف.',{okText:'مسح السجل'}))return;
+   if(!await fsConfirm('مسح سجل تغيّر الحقول لهذا الملف؟ لا يمس أي بيانات ملف.',{okText:'مسح السجل'}))return;
    await clearFieldHistory(office,fileId);toast('مُسح سجل التغييرات');openFieldHistory(app,fileId);
   });
   return card;
@@ -999,13 +1000,23 @@ export async function openAdminDecisions(app,fileId){
   const host=card.querySelector('.fs-sheet-body');
   host.querySelector('[data-dec-form]')?.addEventListener('submit',async event=>{
    event.preventDefault();const form=event.target;const data=new FormData(form);
-   try{await addAdminDecision(office,fileId,{text:data.get('text'),context:data.get('context'),author:data.get('author')});toast('أُضيف القرار الإداري');closeModal();await draw();cacheInvalidated=true}
-   catch(error){toast(error?.message||'تعذر حفظ القرار','error')}
+   try{
+    await addAdminDecision(office,fileId,{text:data.get('text'),context:data.get('context'),author:data.get('author')});
+    toast('أُضيف القرار الإداري');cacheInvalidated=true;
+    await draw();// الورقة نفسها تبقى مفتوحة — لا closeModal هنا
+   }catch(error){toast(error?.message||'تعذر حفظ القرار','error')}
   });
   host.querySelectorAll('[data-dec-del]').forEach(button=>button.addEventListener('click',async()=>{
-   const answer=await confirmBox('حذف القرار الإداري من العرض؟ يبقى السجل مع علامة حذف وسبب، ولا تُحذف بيانات الملف.',{okText:'حذف القرار',input:true,label:'سبب الحذف (اختياري)'});
+   const answer=await reviewImpact({
+    title:'حذف القرار الإداري من العرض',
+    summary:'القرار سجل إداري داخلي، وليس حكمًا ولا واقعة قانونية.',
+    effects:['وضع علامة حذف وسبب على القرار وإخفاؤه من القائمة.'],
+    caveats:['لا تُحذف بيانات الملف ولا أي سجل قانوني.','النص يبقى محفوظًا في سجل الإدارة.'],
+    okText:'حذف القرار',danger:true,
+    reason:{label:'سبب الحذف (اختياري)',placeholder:'سبب الحذف'}
+   });
    if(!answer?.ok)return;
-   try{await deleteAdminDecision(office,fileId,button.dataset.decDel,{reason:answer.value});toast('حُذف القرار من العرض');closeModal();await draw()}
+   try{await deleteAdminDecision(office,fileId,button.dataset.decDel,{reason:answer.value});toast('حُذف القرار من العرض');await draw()}
    catch(error){toast(error?.message||'تعذر الحذف','error')}
   }));
   return card;
@@ -1039,7 +1050,7 @@ export async function openVerifiableSummary(app,fileId){
   host.querySelector('[data-sum-copy]')?.addEventListener('click',()=>fsCopy(asText(),'نُسخ الملخص الإداري'));
   host.querySelector('[data-sum-print]')?.addEventListener('click',()=>fsPrintHtml({title:'ملخص إداري قابل للتحقق',subtitle:fileTitle(file),body:`<table><thead><tr><th>البند</th><th>القيمة</th><th>المصدر</th></tr></thead><tbody>${rows.map(line=>`<tr><td>${esc(line.label)}</td><td>${line.available?esc(line.value):'<span class="missing">غير مسجل</span>'}</td><td>${esc(line.source)}</td></tr>`).join('')}</tbody></table><p class="small">${esc(summary.disclaimer)}</p>`}));
   host.querySelector('[data-sum-snapshot]')?.addEventListener('click',async()=>{
-   const note=await confirmBox('حفظ لقطة من هذا التقرير للمقارنة لاحقًا؟ اكتب ملاحظة قصيرة (اختياري).',{okText:'حفظ اللقطة',input:true,label:'ملاحظة اللقطة',placeholder:'مثال: قبل تحديث بيانات المرحلة'});
+   const note=await fsConfirm('حفظ لقطة من هذا التقرير للمقارنة لاحقًا؟ اكتب ملاحظة قصيرة (اختياري).',{okText:'حفظ اللقطة',input:true,label:'ملاحظة اللقطة',placeholder:'مثال: قبل تحديث بيانات المرحلة'});
    if(!note?.ok)return;
    try{await saveReportSnapshot(office,fileId,{sections:{file:{id:file.id,fileNumber:file.fileNumber,title:file.title,status:file.status},lines:rows,completeness:summary.completeness}},{note:note.value});toast('حُفظت اللقطة');openVerifiableSummary(app,fileId)}
    catch(error){toast(error?.message||'تعذر حفظ اللقطة','error')}
@@ -1050,7 +1061,7 @@ export async function openVerifiableSummary(app,fileId){
    fsPrintHtml({title:'لقطة تقرير محفوظة',subtitle:`${fileTitle(file)} — ${formatDateTime(snapshot.at)}${snapshot.note?' — '+snapshot.note:''}`,body:`<table><thead><tr><th>البند</th><th>القيمة وقت اللقطة</th><th>المصدر</th></tr></thead><tbody>${lines.map(line=>`<tr><td>${esc(line.label)}</td><td>${line.available?esc(line.value):'<span class="missing">غير مسجل</span>'}</td><td>${esc(line.source)}</td></tr>`).join('')}</tbody></table><p class="small">هذه لقطة تاريخية؛ القيم الحالية قد تكون تغيّرت.</p>`});
   }));
   host.querySelectorAll('[data-sum-del]').forEach(button=>button.addEventListener('click',async()=>{
-   if(!await confirmBox('حذف لقطة التقرير؟ لا تمس بيانات الملف.',{okText:'حذف اللقطة'}))return;
+   if(!await fsConfirm('حذف لقطة التقرير؟ لا تمس بيانات الملف.',{okText:'حذف اللقطة'}))return;
    await deleteReportSnapshot(office,fileId,button.dataset.sumDel);openVerifiableSummary(app,fileId);
   }));
   return card;

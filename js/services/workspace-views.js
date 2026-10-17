@@ -93,6 +93,8 @@ export function saveWorkspace({id='',name,list={},gridView='',gridState=null,tab
  if(!clean)throw new Error('اسم مساحة العمل مطلوب.');
  const current=getWorkspaces();
  const existing=id?current.find(item=>item.id===id):current.find(item=>item.name===clean);
+ // لا اقتطاع صامت: عند بلوغ الحد نرفض الحفظ الجديد برسالة صريحة بدل فقد المساحة بلا إشعار.
+ if(!existing&&current.length>=MAX)throw new Error(`بلغت الحد الأقصى (${MAX} مساحة). احذف مساحة غير مستخدمة أولًا.`);
  const now=new Date().toISOString();
  const record=sanitizeWorkspace({
   id:existing?.id||id||uid(),name:clean,list,gridView,gridState,tab,focus,note,
@@ -117,6 +119,7 @@ export function duplicateWorkspace(id,name=''){
  const current=getWorkspaces();
  const source=current.find(item=>item.id===id);
  if(!source)throw new Error('مساحة العمل غير موجودة.');
+ if(current.length>=MAX)throw new Error(`بلغت الحد الأقصى (${MAX} مساحة). احذف مساحة غير مستخدمة أولًا.`);
  const base=cleanName(name)||`${source.name} — نسخة`;
  let candidate=base,index=2;
  while(current.some(item=>item.name===candidate))candidate=`${base} (${index++})`;

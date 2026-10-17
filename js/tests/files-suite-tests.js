@@ -371,7 +371,21 @@ export async function runFilesSuiteTests(test,expect){
    expect(getWorkspaces().length).toBe(1);
    expect(builtInWorkspaces().length>=6).toBe(true);
   });
-  test('workspaces: التطبيق يغيّر عرض القائمة فقط',()=>{
+  test('workspaces: الحد الأقصى 30 يرفض الحفظ برسالة ولا يقتطع صامتًا',()=>{
+  clearWorkspaces();
+  for(let index=0;index<30;index++)saveWorkspace({name:`مساحة ${index}`,list:{chip:'active'}});
+  expect(getWorkspaces().length).toBe(30);
+  let message='';
+  try{saveWorkspace({name:'مساحة 31',list:{chip:'stale'}})}catch(error){message=error.message}
+  expect(message.includes('30')).toBe(true);
+  expect(getWorkspaces().length).toBe(30);
+  expect(getWorkspaces().some(item=>item.name==='مساحة 31')).toBe(false);
+  // التعديل على مساحة قائمة يبقى مسموحًا عند الحد.
+  const edited=saveWorkspace({id:getWorkspaces()[0].id,name:'مساحة معدّلة',list:{chip:'pinned'}});
+  expect(edited.name).toBe('مساحة معدّلة');
+  clearWorkspaces();
+ });
+ test('workspaces: التطبيق يغيّر عرض القائمة فقط',()=>{
    const st={q:'قديم',preset:'year',chip:'pinned',status:'closed',from:'2020-01-01',to:'2020-12-31'};
    applyWorkspaceToList(st,{list:{q:'',preset:'all',chip:'action',status:'all'}});
    expect(st.chip).toBe('action');
@@ -513,6 +527,49 @@ export async function runFilesSuiteTests(test,expect){
   const html=fsBarChart({rows:[{label:'مدني',count:3},{label:'جنائي',count:1}],onAction:'dist'});
   expect(html.includes('data-dist-key="مدني"')).toBe(true);
   expect(html.includes('data-fs-key="جنائي"')).toBe(true);
+ });
+ test('ui: تخصيص مؤشرات المركز يُفتح فوق اللوحة ويحفظ دون فقدها',async()=>{
+  const card=await openFilesCenter(uiApp,{tab:'analytics'});
+  const body=card.querySelector('.fs-sheet-body');
+  body.querySelector('[data-fs-action="kpi-customize"]').click();
+  await new Promise(resolve=>setTimeout(resolve,30));
+  expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(2);
+  document.querySelector('#modal-root .modal-card:last-child [data-kpi-save]').click();
+  await new Promise(resolve=>setTimeout(resolve,40));
+  expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(1);
+  expect(document.body.textContent.includes('مركز الملفات')).toBe(true);
+  closeModal();
+ });
+ test('ui: إعادة ضبط قائمة التحقق تُبقي الورقة مفتوحة (تأكيد مكدَّس)',async()=>{
+  await resetFileChecklist(office,'F1');
+  const card=await openFileChecklist(uiApp,'F1');
+  card.querySelector('[data-ck-reset]').click();
+  await new Promise(resolve=>setTimeout(resolve,20));
+  expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(2);
+  document.querySelector('[data-fs-confirm-ok]').click();
+  await new Promise(resolve=>setTimeout(resolve,60));
+  expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(1);
+  const sheet=document.querySelector('#modal-root .modal-card');
+  expect(sheet.textContent.includes('قائمة التحقق الإدارية')).toBe(true);
+  expect(sheet.querySelectorAll('[data-ck-item]').length>0).toBe(true);
+  closeModal();
+ });
+ test('ui: محرر قالب التحقق يُفتح فوق القائمة ويحفظ دون فقدها',async()=>{
+  const card=await openFileChecklist(uiApp,'F1');
+  card.querySelector('[data-ck-template]').click();
+  await new Promise(resolve=>setTimeout(resolve,40));
+  expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(2);
+  const editor=document.querySelectorAll('#modal-root .modal-card')[1];
+  editor.querySelector('.fs-tpl-row input').value='بند مخصص من الاختبار';
+  editor.querySelector('[data-tpl-save]').click();
+  await new Promise(resolve=>setTimeout(resolve,60));
+  expect(document.querySelectorAll('#modal-root .modal-card').length).toBe(1);
+  const sheet=document.querySelector('#modal-root .modal-card');
+  expect(sheet.textContent.includes('بند مخصص من الاختبار')).toBe(true);
+  const template=await getChecklistTemplate(office,'default');
+  expect(template.custom).toBe(true);
+  await resetChecklistTemplate(office,'default');
+  closeModal();
  });
  test('ui: مراجعة الأثر تُعرض مكدَّسة ولا تفقد النموذج عند الإلغاء',async()=>{
   modal('<div id="keep-form"><input name="x" value="قيمة"></div>');
