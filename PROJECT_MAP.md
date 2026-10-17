@@ -18,10 +18,10 @@
 | `js/ui/form.js` · `js/ui/palette.js` | خطاف `onBeforeSave` قبل `saveEntity`، وخمسة أوامر أدوات ملفات تُحمَّل عند التنفيذ. |
 | `index.html` · `sw.js` | ربط `css/files-suite.css` وإدراج وحدات المجموعة في Precache؛ كاش `v5.20.0-files-suite`. |
 | `tests.html` · `tools/node-tests/run-tests.mjs` | تسجيل `runFilesSuiteTests` في المشغّلين (حارس التكافؤ). |
-| `js/tests/files-suite-tests.js` (جديد) | 54 اختبارًا: منطق صرف، خدمات على IndexedDB وهمي، DOM خفيف، وسلامة بيانات (لا تغيير مخطط/إصدار الملف/سجل النشاط). |
+| `js/tests/files-suite-tests.js` (جديد) | 55 اختبارًا: منطق صرف، خدمات على IndexedDB وهمي، DOM خفيف، وسلامة بيانات (لا تغيير مخطط/إصدار الملف/سجل النشاط). |
 | `docs/FILES-SUITE.md` · `TEST-REPORT.md` · `docs/KNOWN-LIMITATIONS.md` | جدول البنود المئة، نتائج الاختبار، والحدود المعروفة. |
 
-**التحقق الفعلي:** Node **716/716** (0 فشل). لم يُنفَّذ اختبار متصفح/Chromium ولا فحص بصري للمقاسات في هذه الجولة؛ مذكور صراحة في `TEST-REPORT.md` و`docs/KNOWN-LIMITATIONS.md`.
+**التحقق الفعلي:** Node **717/717** (0 فشل). لم يُنفَّذ اختبار متصفح/Chromium ولا فحص بصري للمقاسات في هذه الجولة؛ مذكور صراحة في `TEST-REPORT.md` و`docs/KNOWN-LIMITATIONS.md`.
 
 # 2026-10-17 — صفحة الملف Data-First (إصدار 2): نظرة عامة تشغيلية + جلسات وأعمال بحالة مسجلة + أقسام قابلة للتخصيص لكل تبويب
 

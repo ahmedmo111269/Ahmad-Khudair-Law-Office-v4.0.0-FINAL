@@ -172,7 +172,7 @@ export async function openFilesCenter(app,{tab='attention'}={}){
   if(action==='review-queue'){closeModal();openReviewQueue(app,{ids:[]}).catch(error=>toast(error?.message||'تعذر بدء المراجعة','error'));return}
   if(action==='open-workspaces'){closeModal();openFilesWorkspaces(app).catch(error=>toast(error?.message||'تعذر فتح مساحات العمل','error'));return}
   if(action==='open-quality'){state.tab='quality';state.qualityLevel='all';doRender();return}
-  if(action==='period-run'){runPeriodCompare(app,state,doRender);return}
+  if(action==='period-run'){runPeriodCompare(app,state,doRender,body);return}
   if(action==='kpi-customize'){openKpiConfig(app,doRender);return}
   if(action==='long-index'){loadLongIndex(app,state,doRender);return}
   if(action==='long-search'){doRender();return}
@@ -325,9 +325,11 @@ function analyticsHtml(app,portfolio,state){
  </section>`;
 }
 
-function runPeriodCompare(app,state,rerender){
- const aFrom=document.querySelector('[data-period="a-from"]')?.value||'',aTo=document.querySelector('[data-period="a-to"]')?.value||'';
- const bFrom=document.querySelector('[data-period="b-from"]')?.value||'',bTo=document.querySelector('[data-period="b-to"]')?.value||'';
+function runPeriodCompare(app,state,rerender,root){
+ // القراءة من جسم اللوحة المفتوحة فقط: لا تُقرأ حقول تاريخ أخرى في الصفحة أو في لوحة تحتها.
+ const scope=root&&root.querySelector?root:document;
+ const aFrom=scope.querySelector('[data-period="a-from"]')?.value||'',aTo=scope.querySelector('[data-period="a-to"]')?.value||'';
+ const bFrom=scope.querySelector('[data-period="b-from"]')?.value||'',bTo=scope.querySelector('[data-period="b-to"]')?.value||'';
  if(!aFrom||!aTo||!bFrom||!bTo){toast('حدّد بداية ونهاية كل فترة أولًا.','error');return}
  if(aFrom>aTo||bFrom>bTo){toast('نطاق الفترة غير صحيح: البداية بعد النهاية.','error');return}
  state.periodA={from:aFrom,to:aTo};state.periodB={from:bFrom,to:bTo};

@@ -528,6 +528,27 @@ export async function runFilesSuiteTests(test,expect){
   expect(html.includes('data-dist-key="مدني"')).toBe(true);
   expect(html.includes('data-fs-key="جنائي"')).toBe(true);
  });
+ test('ui: مقارنة الفترات تقرأ تواريخ لوحتها فقط ولا تتأثر بحقول خارجها',async()=>{
+  const card=await openFilesCenter(uiApp,{tab:'analytics'});
+  const body=card.querySelector('.fs-sheet-body');
+  body.querySelector('[data-period="a-from"]').value='2026-01-01';
+  body.querySelector('[data-period="a-to"]').value='2026-03-31';
+  body.querySelector('[data-period="b-from"]').value='2026-04-01';
+  body.querySelector('[data-period="b-to"]').value='2026-06-30';
+  // حقول تاريخ مزيفة خارج اللوحة: لو قُرئت عامًّا لأوقف الحساب برسالة «حدّد بداية ونهاية كل فترة».
+  const decoy=document.createElement('div');
+  decoy.innerHTML='<input type="date" data-period="a-from"><input type="date" data-period="a-to"><input type="date" data-period="b-from"><input type="date" data-period="b-to">';
+  // تُوضع قبل جذر النوافذ في ترتيب DOM كي يلتقطها أي بحث عام أولًا.
+  document.body.insertBefore(decoy,document.body.firstChild);
+  body.querySelector('[data-fs-action="period-run"]').click();
+  await new Promise(resolve=>setTimeout(resolve,120));
+  expect(document.querySelector('[data-fs-action="period-run"]')).toBeTruthy();
+  expect(document.querySelector('.fs-period-result')).toBeTruthy();
+  expect(document.querySelector('.fs-period-result').textContent.includes('الفترة')).toBe(false);
+  expect(document.body.textContent.includes('لم تُستنتج أي فترة بديلة')).toBe(true);
+  decoy.remove();
+  closeModal();
+ });
  test('ui: تخصيص مؤشرات المركز يُفتح فوق اللوحة ويحفظ دون فقدها',async()=>{
   const card=await openFilesCenter(uiApp,{tab:'analytics'});
   const body=card.querySelector('.fs-sheet-body');
