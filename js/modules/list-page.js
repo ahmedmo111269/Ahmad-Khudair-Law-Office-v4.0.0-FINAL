@@ -350,7 +350,7 @@ function bulkFor(store){
  // «فتح المحدد» ليس إجراءً جماعيًا هنا: الجدول الموحّد يوفره مرة واحدة كزر مدمج
  // في شريط التحديد (dg-open-sel) ويستدعي onBulk('open',…) نفسه — لا تكرار للزر.
  const items=[];
- if(store==='files')items.push({id:'archive',label:'أرشفة',danger:true,confirm:'أرشفة الملفات المحددة؟ تبقى كل البيانات محفوظة ويمكن إعادة فتح الملف لاحقًا.',okText:'أرشفة'});
+ if(store==='files'){items.push({id:'archive',label:'أرشفة',danger:true});items.push({id:'close',label:'إنهاء',danger:true});}
  if(store==='procedures')items.push({id:'done',label:'تعليم كمنجَز',confirm:'تعليم الأعمال المحددة كمنجَزة؟ يمكن تعديل الحالة لاحقًا من سجل كل عمل.',okText:'تعليم كمنجَز'});
  return items;
 }
@@ -361,9 +361,34 @@ async function handleBulk(app,store,id,rows,reload){
   card.querySelectorAll('[data-open-one]').forEach(b=>b.onclick=()=>{import('../ui/modal.js').then(m=>m.closeModal());app.go(b.dataset.openOne)});
   return;
  }
- if(id==='archive'&&store==='files'){
-  const {archiveFile}=await import('../services/legal-files.js');
-  const {reopenFile}=await import('../services/legal-files.js');
+ if((id==='archive'||id==='close')&&store==='files'){
+  // أي إجراء جماعي مؤثر يعرض النطاق الكامل (الأسماء والأعداد) قبل التنفيذ،
+  // ويُبقي الأرشفة والإنهاء عمليتين منفصلتين يمكن التراجع عن كل منهما.
+  const {reviewImpact}=await import('../ui/files-ui.js');
+  const {archiveFile,reopenFile,closeFile}=await import('../services/legal-files.js');
+  const {formatFileNumber}=await import('../core/file-number.js');
+  const scope=rows.slice(0,40).map(r=>`${formatFileNumber(r.fileNumber)||r.fileNumber||'ملف'} — ${r.title||'بدون عنوان'}`);
+  if(rows.length>40)scope.push(`و${rows.length-40} سجلًا آخر…`);
+  const ok=await reviewImpact({
+   title:id==='archive'?'أرشفة جماعية للملفات':'تسجيل انتهاء جماعي للملفات',
+   summary:`${rows.length} ملفًا محددًا في الجدول الحالي.`,
+   scope,
+   effects:id==='archive'?['تسجيل أرشفة كل ملف مع بقاء بياناته وقابلية إعادة الفتح.']:['تسجيل حالة «منتهٍ» لكل ملف دون حذف أي بيانات.'],
+   caveats:['الإجراء على الملفات المحددة فقط، وليس على كل نتائج البحث.','يمكن التراجع عبر زر «العودة» في شريط صفحة الملفات.'],
+   okText:id==='archive'?'أرشفة المحدد':'إنهاء المحدد',danger:true
+  });
+  if(!ok)return;
+  if(id==='close'){
+   const {saveEntity}=await import('../services/entity-save.js');
+   const closed=[];
+   for(const r of rows){if(isClosedFile(r)||r.isArchived)continue;await closeFile(app.office,r.id,{closeReason:'إنهاء جماعي من الجدول'});closed.push({id:r.id,status:r.status||'open',closedAt:r.closedAt||'',closeReason:r.closeReason||''})}
+   if(!closed.length){toast('لا ملفات قابلة للإنهاء ضمن التحديد');return}
+   toast(`سُجّل انتهاء ${closed.length} ملفًا — يمكنك العودة عنه الآن`,'ok',{undoable:true,undoLabel:`إنهاء ${closed.length} ملفًا`});
+   pushUndo({key:'files:bulk-close',label:`إنهاء ${closed.length} ملفًا`,run:async()=>{for(const row of closed){const current=await app.office.r.files.get(row.id);if(!current)continue;// لا نتجاوز تعديلًا لاحقًا من المستخدم: العكس يقتصر على الملفات التي ما زالت منتهية أو مؤرشفة.
+   if(!isClosedFile(current))continue;
+   await saveEntity(app.office,'files',{...current,status:row.status,closedAt:row.closedAt||'',closeReason:row.closeReason||''},row.id)}}});
+   return reload?.();
+  }
   const archived=[];
   for(const r of rows){if(r.isArchived)continue;await archiveFile(app.office,r.id,'أرشفة جماعية من الجدول');archived.push(r.id)}
   if(!archived.length){toast('الملفات المحددة مؤرشفة بالفعل');return}

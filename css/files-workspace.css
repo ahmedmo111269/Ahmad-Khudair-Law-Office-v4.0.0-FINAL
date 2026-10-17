@@ -419,3 +419,11 @@ body:has(.fw) .topbar{position:static}
  .fw-pagebar,.fw-toolbar,.fw-strip,.fw-panel,.dg-fs-exit{display:none}
  .fw .dg.dg-workspace .dg-scroll{max-height:none;overflow:visible}
 }
+
+/* شريط الإجراءات الجماعية لصفوف الملفات المحددة — يظهر فقط عند وجود تحديد فعلي. */
+.fw-bulkbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 2px;padding:8px 10px;border:1px solid var(--border,#d6cdb8);border-radius:10px;background:var(--surface-2,#f7f2e6);box-shadow:inset 3px 0 0 var(--accent,#8a6d1f)}
+.fw-bulkbar[hidden]{display:none}
+.fw-bulk-count{font-size:13px;color:var(--text,#23303d);white-space:nowrap}
+.fw-bulkbar .danger{color:#8f2f2f;border-color:#c9a3a3}
+@media(max-width:640px){.fw-bulkbar{gap:6px}.fw-bulkbar .fw-bulk-count{width:100%}}
+@media print{.fw-bulkbar{display:none!important}}

@@ -43,6 +43,8 @@ import {readStoredSeen,markHomeSeen,sinceChanges} from '../services/home-visit.j
 import {prefs} from '../core/preferences.js';
 import {getComponentStyle,setComponentStyle} from '../core/component-style.js';
 import {getComponentContent,setComponentContent} from '../core/display-prefs.js';
+import {recordFileVisit,updateVisitTab} from '../services/files-admin.js';
+import {openFileChecklist,openPreCloseReview,openFieldHistory,openAdminDecisions,openVerifiableSummary,editFileWithReview,openFileComparePicker,openRecentFiles,openFileQuickDrawer} from './files-suite.js';
 
 // شريط تبويبات واحد (Data-First Legal Workspace): أربعة تبويبات ثابتة ظاهرة دائمًا
 // (نظرة عامة ← الجلسات ← الأعمال الإدارية ← المراحل) وبقية الأقسام كلها في قائمة منسدلة
@@ -303,6 +305,14 @@ function fileOverviewStaticHtml(app){
         <button type="button" role="menuitem" class="ux-menu-item" data-reclass>تغيير القسم / النوع</button>
         <button type="button" role="menuitem" class="ux-menu-item" data-file-pin aria-pressed="${favOn}">${favOn?'★ إلغاء التثبيت':'☆ تثبيت في الرئيسية'}</button>
         <button type="button" role="menuitem" class="ux-menu-item" data-file-copy>📋 نسخ ملخص الملف</button>
+        <div class="ux-menu-sep" role="separator"></div>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-summary>◈ ملخص إداري قابل للتحقق</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-checklist>☑ قائمة التحقق الإدارية</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-history>≋ سجل تغيّر الحقول</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-decisions>✎ القرارات الإدارية</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-compare>⇄ مقارنة مع ملف آخر</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-recent>◷ آخر الملفات والزيارات</button>
+        <button type="button" role="menuitem" class="ux-menu-item" data-file-preview>◉ معاينة سريعة</button>
         ${f.isArchived||closed?'<button type="button" role="menuitem" class="ux-menu-item" data-file-reopen>إعادة فتح</button>':'<button type="button" role="menuitem" class="ux-menu-item" data-file-close>إنهاء الملف</button><button type="button" role="menuitem" class="ux-menu-item" data-file-archive>أرشفة</button>'}
         <button type="button" role="menuitem" class="ux-menu-item is-danger" data-file-delete>حذف منطقي للملف</button>
        </div>
@@ -331,6 +341,8 @@ export async function filePage(app,id){
  const cfRow=f.clientFileId?await app.office.r.clientFiles.get(f.clientFileId):null;
  const cfClient=cfRow?.clientId?await app.office.r.clients.get(cfRow.clientId).catch(()=>null):null;
  app.__file={id,f,parties,stages,tax,serviceCount,executions};
+ // زيارة الملف تفضيل محلي (آخر فتح) فقط؛ لا تُسجَّل كحدث قانوني ولا تمس سجل النشاط.
+ try{recordFileVisit(id,{tab:routeTab(app)||'summary',scope:app.ctx?.profile?.id||'',title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim(),lastActivityAt:f.lastActivityAt||''})}catch{}
  // فتح صفحة الملف يبدأ دائمًا من «نظرة عامة»؛ لا تُفرض حالة تبويب قديمة عند
  // الدخول من قائمة الملفات أو من رابط الملف. التبويب المختلف لا يُفتح إلا برابط
  // صريح (?tab=hearings مثلًا)، وهو ما يحفظ العودة العميقة دون إرباك المستخدم.
@@ -424,7 +436,7 @@ function bindFileIdentityControls(root,app,id,f,openItemsCheck){
  };
  const head=root.querySelector('#file-head');
  if(!head)return;
- once(head.querySelector('[data-file-edit]'),'fileEditBound',()=>openEntityForm(app,'files',{id}));
+ once(head.querySelector('[data-file-edit]'),'fileEditBound',()=>editFileWithReview(app,id));
  root.querySelectorAll('[data-file-quick]').forEach(b=>once(b,'fileQuickBound',()=>openQuickAdd(app)));
  root.querySelectorAll('[data-party-open]').forEach(b=>once(b,'partyOpenBound',()=>{
   const item=app.__file.headParties?.[Number(b.dataset.partyOpen)];
@@ -442,6 +454,15 @@ function bindFileIdentityControls(root,app,id,f,openItemsCheck){
   numberButton?.setAttribute('aria-expanded',String(willOpen));
  });
  root.querySelectorAll('[data-file-copy]').forEach(b=>once(b,'fileCopyBound',()=>copyFileSummary(app)));
+ // أدوات إدارة الملف: كلها قراءة/تفضيلات أو كتابة عبر خدمة الإدارة الجديدة (settings)،
+ // ولا تعدّل سجلات الملف إلا عبر النماذج الأصلية بعد مراجعة أثر صريحة.
+ root.querySelectorAll('[data-file-summary]').forEach(b=>once(b,'fileSummaryBound',()=>openVerifiableSummary(app,id)));
+ root.querySelectorAll('[data-file-checklist]').forEach(b=>once(b,'fileChecklistBound',()=>openFileChecklist(app,id)));
+ root.querySelectorAll('[data-file-history]').forEach(b=>once(b,'fileHistoryBound',()=>openFieldHistory(app,id)));
+ root.querySelectorAll('[data-file-decisions]').forEach(b=>once(b,'fileDecisionsBound',()=>openAdminDecisions(app,id)));
+ root.querySelectorAll('[data-file-compare]').forEach(b=>once(b,'fileCompareBound',()=>openFileComparePicker(app)));
+ root.querySelectorAll('[data-file-recent]').forEach(b=>once(b,'fileRecentBound',()=>openRecentFiles(app)));
+ root.querySelectorAll('[data-file-preview]').forEach(b=>once(b,'filePreviewBound',()=>openFileQuickDrawer(app,id)));
  root.querySelectorAll('[data-file-task]').forEach(b=>once(b,'fileTaskBound',async()=>{const {openLinkedTaskForm}=await import('../ui/work-actions.js');openLinkedTaskForm(app,'files',id,{onSaved:async()=>{toast('تمت إضافة المهمة المرتبطة');await reload(app)}})}));
  root.querySelectorAll('[data-file-pin]').forEach(b=>once(b,'filePinBound',async e=>{
   const on=await toggleFavorite({route:'file:'+id,title:`${formatFileNumber(f.fileNumber)||'ملف'} — ${f.title||''}`.trim()},app.ctx?.profile?.id||'');
@@ -449,9 +470,9 @@ function bindFileIdentityControls(root,app,id,f,openItemsCheck){
   e.currentTarget.setAttribute('aria-pressed',String(on));
   toast(on?'ثُبّت الملف في الرئيسية':'أُلغي التثبيت');
  }));
- root.querySelectorAll('[data-file-archive]').forEach(b=>once(b,'fileArchiveBound',async()=>{const extra=await openItemsCheck().catch(()=> '');const r=await confirmBox(`أرشفة الملف؟ يبقى الملف وكل بياناته محفوظة ويمكن إعادة فتحه في أي وقت.${extra}`,{okText:'أرشفة',input:true,placeholder:'سبب الأرشفة (اختياري)'});if(!r.ok)return;try{await archiveFile(app.office,id,r.value);toast('تمت الأرشفة');reload(app)}catch(e){toast(userError(e),'error')}}));
+ root.querySelectorAll('[data-file-archive]').forEach(b=>once(b,'fileArchiveBound',async()=>{await openPreCloseReview(app,id,{mode:'archive',onDone:()=>reload(app)})}));
  root.querySelectorAll('[data-file-reopen]').forEach(b=>once(b,'fileReopenBound',async()=>{const r=await confirmBox('إعادة فتح الملف؟',{okText:'إعادة فتح',input:true,placeholder:'سبب إعادة الفتح (اختياري)'});if(!r.ok)return;try{await reopenFile(app.office,id,r.value);toast('تمت إعادة فتح الملف');reload(app)}catch(e){toast(userError(e),'error')}}));
- root.querySelectorAll('[data-file-close]').forEach(b=>once(b,'fileCloseBound',async()=>{const extra=await openItemsCheck().catch(()=> '');const r=await confirmBox(`تسجيل انتهاء الملف (حالة إدارية فقط)؟${extra}`,{okText:'إنهاء',input:true,placeholder:'سبب الانتهاء (اختياري)'});if(!r.ok)return;try{await closeFile(app.office,id,{closeReason:r.value});toast('تم تسجيل انتهاء الملف');reload(app)}catch(e){toast(userError(e),'error')}}));
+ root.querySelectorAll('[data-file-close]').forEach(b=>once(b,'fileCloseBound',async()=>{await openPreCloseReview(app,id,{mode:'close',onDone:()=>reload(app)})}));
  root.querySelectorAll('[data-file-delete]').forEach(b=>once(b,'fileDeleteBound',async()=>{if(!await confirmBox('حذف منطقي للملف؟ لا يُسمح إذا كان للملف قضايا/مراحل غير محذوفة. البيانات لا تُمحى نهائيًا.',{okText:'حذف منطقي'}))return;try{await deleteEntity(app.office,'files',id);toast('تم الحذف المنطقي');app.go('files')}catch(e){toast(userError(e),'error')}}));
 }
 
@@ -558,7 +579,9 @@ export async function bindFilePage(app,id){
  app.__fileGotoTab=tab=>{
   if(!TAB_META.has(tab))return false;
   const base=String(app.route||`file:${id}`).split('?')[0],params=new URLSearchParams(String(app.route||'').split('?')[1]||'');
-  params.set('tab',tab);return app.go(`${base}?${params.toString()}`);
+  params.set('tab',tab);
+  try{updateVisitTab(id,tab,{scope:app.ctx?.profile?.id||''})}catch{}
+  return app.go(`${base}?${params.toString()}`);
  };
  // أزرار التبويبات: الحالة المرئية وعنوان الرجوع يُحدَّثان عبر App.go الحالي.
  root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tab));
@@ -1074,7 +1097,7 @@ async function renderTabContent(app){
    ${executionStripHtml({summary:executionContextSummary(app.__file.executions||[]),scope:'file',route:`executionCenter?fileId=${encodeURIComponent(id)}`,sectionId:'summary-execution',uxcId:'panel:file:summary:execution'})}`;
   // كل إجراءات «نظرة عامة» تنقل إلى المصدر الأصلي أو تبويبه — أو تفتح نموذج الإضافة
   // الصحيح مباشرة (نقرة واحدة بدل التنقل إلى التبويب ثم البحث عن زر الإضافة).
-  el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>openEntityForm(app,'files',{id}));
+  el.querySelector('[data-file-edit2]')?.addEventListener('click',()=>editFileWithReview(app,id));
   el.querySelectorAll('[data-reclass]').forEach(b=>b.onclick=()=>reclassDialog(app,f));
   el.querySelectorAll('[data-tab-jump]').forEach(b=>b.onclick=()=>app.__fileGotoTab(b.dataset.tabJump));
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>app.go('rec:'+b.dataset.open));
@@ -1268,7 +1291,7 @@ async function renderTabContent(app){
   const otherData=Object.entries(FILE_TYPE_GROUPS).filter(([k])=>k!==g).map(([,d])=>({d,html:kvHtml(d.fields,f,new Map())})).filter(x=>!x.html.includes('class="muted"'));
   el.innerHTML=`<section class="panel" data-section-id="extra-panel" data-uxc-id="panel:file:extra:panel" data-collapse-id="extra-panel" data-collapse-key="file-details:extra-panel" data-collapse-default="open"><div class="panel-head"><h3>${esc(def?.label||'بيانات حسب نوع الملف')}</h3><button class="primary" data-edit-extra>تعديل</button></div>${def?kvHtml(def.fields,f,new Map()):'<p class="muted">حدد نوع الملف من «تعديل البيانات» لتظهر الحقول الخاصة به.</p>'}</section>
    ${otherData.map(x=>`<section class="panel"><h3>${esc(x.d.label)} <small class="muted">(من نوع سابق — محفوظة ولم تُحذف)</small></h3>${x.html}</section>`).join('')}`;
-  el.querySelector('[data-edit-extra]').onclick=()=>openEntityForm(app,'files',{id,typeFieldsOnly:true,title:'تعديل البيانات حسب نوع الملف'});
+  el.querySelector('[data-edit-extra]').onclick=()=>editFileWithReview(app,id,{typeFieldsOnly:true,title:'تعديل البيانات حسب نوع الملف'});
   return;
  }
  if(tab==='money'){
