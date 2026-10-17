@@ -17,7 +17,7 @@
 // يُرقّى بأمر صريح من التطبيق (SKIP_WAITING) عند قبول المستخدم أو عند
 // الإقلاع التالي — منعًا لتبديل الكود تحت يدي المستخدم أثناء العمل.
 // =====================================================================
-const CACHE='ahmad-khudair-law-office-v5.19.0-file-page-data-first-v2';
+const CACHE='ahmad-khudair-law-office-v5.20.0-files-suite';
 const CACHE_PREFIX='ahmad-khudair-law-office-';
 const SHELL='./index.html';
 const RUNTIME_TIMEOUT_MS=6000;
@@ -49,6 +49,7 @@ const ASSETS=[
   "./css/topnav.css",
   "./css/topbar.css",
   "./css/files-workspace.css",
+  "./css/files-suite.css",
   "./css/cockpit.css",
   "./css/mobile-pwa.css",
   "./icons/app-icon.svg",
@@ -115,6 +116,12 @@ const ASSETS=[
   "./js/modules/integrity.js",
   "./js/modules/list-page.js",
   "./js/modules/files-workspace.js",
+  "./js/modules/files-suite.js",
+  "./js/ui/files-ui.js",
+  "./js/core/files-query.js",
+  "./js/services/files-admin.js",
+  "./js/services/files-hub.js",
+  "./js/services/workspace-views.js",
   "./js/ui/workspace-menu.js",
   "./js/modules/quick-add.js",
   "./js/modules/quick-notes.js",

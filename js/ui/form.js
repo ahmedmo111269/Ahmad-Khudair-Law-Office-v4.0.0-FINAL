@@ -106,7 +106,7 @@ function typeGroupHtml(type,values,ctx){
  * فتح نموذج إضافة/تعديل لأي كيان داخل نافذة.
  * preset: قيم مبدئية (مثل fileId عند الإضافة من داخل الملف). stageOptions: مراحل الملف لاختيار القضية.
  */
-export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,title=null,only=null,stageOptions=null,hearingOptions=null,partyOptions=null,bailiffOptions=null,serviceOptions=null,typeFieldsOnly=false}={}){
+export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,onBeforeSave=null,title=null,only=null,stageOptions=null,hearingOptions=null,partyOptions=null,bailiffOptions=null,serviceOptions=null,typeFieldsOnly=false}={}){
  const office=app.office;const ent=ENTITIES[store];
  // إنشاء تنفيذ جديد يمر دائمًا بنموذج مركز التنفيذ الموجَّه: النموذج العام لا ينشئ
  // حكمًا ولا بند قيمة، فيظهر التنفيذ بلا أي حساب في أي تبويب أو نافذة.
@@ -247,6 +247,12 @@ export async function openEntityForm(app,store,{id=null,preset={},onSaved=null,t
     if(duplicateState.ackKey&&duplicateState.ackKey!==currentDuplicateKey)duplicateState.ackKey='';
     await refreshClientDuplicates({force:true});
     if(duplicateState.items.length&&duplicateState.ackKey!==currentDuplicateKey){btn.disabled=false;duplicateSlot.scrollIntoView?.({behavior:'smooth',block:'center'});duplicateSlot.querySelector('[data-client-duplicate-continue]')?.focus();return}
+   }
+   // مراجعة أثر اختيارية قبل الكتابة: تُستدعى فقط إن مرّرها المستدعي، ويمكنها
+   // إلغاء الحفظ تمامًا. لا تغيّر عقد أي نموذج قديم.
+   if(typeof onBeforeSave==='function'){
+    const verdict=await onBeforeSave({...data},{old,isNew,store});
+    if(verdict===false||verdict?.ok===false){btn.disabled=false;return}
    }
    let row;
    try{row=await saveEntity(office,store,data,old?.id||null,old?.version??null,{allowDuplicate:store==='clients'&&isNew&&duplicateState.ackKey===currentDuplicateKey})}

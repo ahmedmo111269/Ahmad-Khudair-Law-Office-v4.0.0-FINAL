@@ -94,6 +94,13 @@ export function staticCommands(app){
  // وجهتا البحث والنسخ الاحتياطي مولدتان من سجل التنقل أعلاه؛ لا نضيف لهما أوامر
  // «إجراءات سريعة» مكررة. البحث الحي في هذه اللوحة يستعمل searchAll نفسه، لا محركًا موازيًا.
  // تنظيف البيانات التجريبية: نفس المسار المستخدم في الرئيسية والإعدادات (فحص ← تأكيد ← حذف في معاملة واحدة)
+ // أدوات ملفات متقدمة: تُحمَّل عند التنفيذ فقط (لا تزيد حزمة الإقلاع).
+ const fileTool=(id,label,keywords,run)=>cmds.push({id:`files:${id}`,label,icon:'folder',group:'أدوات الملفات',keywords:`ملفات ${keywords}`,run});
+ fileTool('center','مركز الملفات — الانتباه والتحليل','مركز تحليل جودة تنبيهات احصاء',async()=>{const m=await import('../modules/files-suite.js');return m.openFilesCenter(app)});
+ fileTool('workspaces','مساحات العمل — حفظ واستعادة عرض الملفات','مساحة عمل طرق عرض تفضيلات',async()=>{const m=await import('../modules/files-suite.js');return m.openFilesWorkspaces(app)});
+ fileTool('review','مراجعة جماعية للملفات','مراجعة طابور انتباه ملفات',async()=>{const m=await import('../modules/files-suite.js');return m.openReviewQueue(app)});
+ fileTool('compare','مقارنة ملفين','مقارنة ملفين فروق',async()=>{const m=await import('../modules/files-suite.js');return m.openFileComparePicker(app)});
+ fileTool('recent','آخر الملفات والزيارات والمثبتة','آخر زيارة مثبتة حديسة',async()=>{const m=await import('../modules/files-suite.js');return m.openRecentFiles(app)});
  cmds.push({id:'qa:demo-clean',label:'حذف كل البيانات التجريبية (بتأكيد)',icon:'x',group:'إجراءات سريعة',keywords:'تجريبي بيانات تجريبية حذف مسح تنظيف demo seed',kbd:'تأكيد',run:async()=>{
   const {startDemoCleanup}=await import('./demo-cleanup.js');
   return startDemoCleanup(app,{onDone:()=>app.refresh()});

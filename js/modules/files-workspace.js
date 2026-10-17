@@ -52,11 +52,16 @@ export function filesWorkspaceHtml({st,presets,chips,hasDate}){
  </header>
  <div class="fw-panel" data-fw-panel="page-more" hidden role="menu" aria-label="المزيد">
   <button type="button" role="menuitem" data-fw-themes>${icon('palette')} الثيمات</button>
+  <button type="button" role="menuitem" data-fw-center>◈ مركز الملفات — تحليل وتنبيهات</button>
+  <button type="button" role="menuitem" data-fw-workspaces>★ مساحات العمل</button>
+  <button type="button" role="menuitem" data-fw-recent>◷ آخر الملفات والزيارات</button>
+  <button type="button" role="menuitem" data-fw-review>☑ مراجعة جماعية</button>
   <button type="button" role="menuitem" data-qa-custom>إجراءات الصف</button>
   <button type="button" role="menuitem" data-customize-page>تخصيص الصفحة</button>
  </div>
  <div class="fw-toolbar" role="toolbar" aria-label="أدوات جدول الملفات" data-fw-toolbar>
   <button type="button" class="ghost fw-tb-btn" data-fw-display aria-haspopup="true" aria-expanded="false">إعدادات العرض</button>
+  <button type="button" class="ghost fw-tb-btn fw-tb-center" data-fw-center title="مركز الملفات: ما يحتاج انتباهك، جودة البيانات، العلاقات، التشابه، البحث المركب">◈ المركز</button>
   <button type="button" class="ghost fw-tb-btn" data-fw-filters aria-haspopup="true" aria-expanded="false">الفلاتر <span class="fw-badge" data-fw-grid-count hidden></span></button>
   <button type="button" class="ghost fw-tb-btn" data-fw-time aria-haspopup="true" aria-expanded="false">فلاتر الوقت <span class="fw-badge" data-fw-time-count hidden></span></button>
   <input id="list-q" type="search" class="fw-search list-search" value="${q}" placeholder="بحث فوري في الملفات…" autocomplete="off" aria-label="بحث فوري في الملفات">
@@ -64,6 +69,13 @@ export function filesWorkspaceHtml({st,presets,chips,hasDate}){
   <button type="button" class="ghost fw-tb-btn" data-fw-cards aria-pressed="false" title="تبديل جدول / بطاقات">بطاقات</button>
   <button type="button" class="ghost fw-tb-btn" data-fw-io aria-haspopup="true" aria-expanded="false">المزيد</button>
   <button type="button" class="ghost fw-tb-btn fw-sel-clear" data-fw-sel-clear hidden title="مسح تحديد الصفوف المحددة فقط — لا يمس البحث ولا الفلاتر ولا إعدادات العرض">${icon('x')}<span>مسح التحديد</span><span class="fw-badge" data-fw-sel-count hidden></span></button>
+ </div>
+ <div class="fw-bulkbar" data-fw-bulkbar hidden role="group" aria-label="إجراءات الصفوف المحددة">
+  <b class="fw-bulk-count" data-fw-bulk-count></b>
+  <button type="button" class="ghost small danger" data-fw-bulk="archive">أرشفة المحدد</button>
+  <button type="button" class="ghost small danger" data-fw-bulk="close">إنهاء المحدد</button>
+  <button type="button" class="ghost small" data-fw-select-all title="يحدد كل صفوف الاستعلام الحالي، لا الصفحة الظاهرة فقط">تحديد كل النتائج</button>
+  <button type="button" class="link small" data-fw-sel-clear>مسح التحديد</button>
  </div>
  <div class="fw-panel fw-time-panel" data-fw-panel="time" hidden role="dialog" aria-label="فلاتر الوقت">
   <section class="fw-group"><h3>حالة الملف</h3>${chipsHtml}</section>
@@ -89,12 +101,18 @@ export function paintFilesWorkspace(root,st,grid){
  const gridBadge=root.querySelector('[data-fw-grid-count]');
  if(gridBadge){gridBadge.textContent=nGrid?String(nGrid):'';gridBadge.hidden=!nGrid}
  const nSel=Number(ui?.selected||0);
- const selBtn=root.querySelector('[data-fw-sel-clear]');
+ const selBtn=root.querySelector('[data-fw-toolbar] [data-fw-sel-clear]');
  if(selBtn){
   selBtn.hidden=!nSel;
   const cnt=selBtn.querySelector('[data-fw-sel-count]');
   if(cnt){cnt.textContent=nSel?String(nSel):'';cnt.hidden=!nSel}
   selBtn.setAttribute('aria-label',nSel?`مسح التحديد — ${nSel} صف محدد`:'مسح التحديد');
+ }
+ const bulkBar=root.querySelector('[data-fw-bulkbar]');
+ if(bulkBar){
+  bulkBar.hidden=!nSel;
+  const count=bulkBar.querySelector('[data-fw-bulk-count]');
+  if(count)count.textContent=nSel?`${nSel} محدد`:'';
  }
  const cardsBtn=root.querySelector('[data-fw-cards]');
  if(cardsBtn){
@@ -198,11 +216,28 @@ export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,save
   g.toggleCards();
   paintFilesWorkspace(root,st,g);
  });
- root.querySelector('[data-fw-sel-clear]')?.addEventListener('click',()=>{
+ root.querySelectorAll('[data-fw-sel-clear]').forEach(button=>button.addEventListener('click',()=>{
   closeAll();
   const g=gridOf();
   if(!g)return;
   g.clearSelection();// يمسح التحديد الفعلي وحده: يحدّث الصفوف والعدّاد فورًا ولا يمس بحثًا ولا فلترًا
+  paintFilesWorkspace(root,st,g);
+ }));
+ root.querySelectorAll('[data-fw-bulk]').forEach(button=>button.addEventListener('click',async()=>{
+  closeAll();
+  const g=gridOf();if(!g)return;
+  // التأكيد والنطاق والتراجع كلها في list-page/handleBulk — لا تنفيذ مباشر من هنا.
+  try{await g.runBulk(button.dataset.fwBulk)}catch(error){toast(error?.message||'تعذر تنفيذ الإجراء','error')}
+  paintFilesWorkspace(root,st,g);
+ }));
+ root.querySelector('[data-fw-select-all]')?.addEventListener('click',async()=>{
+  closeAll();
+  const g=gridOf();if(!g)return;
+  try{
+   const result=await g.selectAllResults({max:2000});
+   if(result.truncated)toast('حُدد أول 2000 صف؛ ضيّق البحث لتحديد الباقي','warn');
+   else toast(`حُدد ${result.count} صفًا من نتائج الاستعلام`);
+  }catch(error){toast(error?.message||'تعذر تحديد النتائج','error')}
   paintFilesWorkspace(root,st,g);
  });
  root.querySelector('[data-fw-clear]')?.addEventListener('click',()=>{
@@ -226,6 +261,13 @@ export function bindFilesChrome(app,{root,st,getGrid,load,syncFilterSummary,save
   }});
   paintFilesWorkspace(root,st,g);
  });
+
+ // مداخل مجموعة الملفات: تُحمَّل الوحدة عند الطلب فقط حتى لا تزيد حزمة القائمة.
+ const openSuite=(name,call)=>{closeAll();import('./files-suite.js').then(module=>module[name](app,...(call?[call]:[]))).catch(error=>toast(error?.message||'تعذر فتح أداة الملفات','error'))};
+ root.querySelectorAll('[data-fw-center]').forEach(button=>button.addEventListener('click',()=>openSuite('openFilesCenter')));
+ root.querySelector('[data-fw-workspaces]')?.addEventListener('click',()=>openSuite('openFilesWorkspaces'));
+ root.querySelector('[data-fw-recent]')?.addEventListener('click',()=>openSuite('openRecentFiles'));
+ root.querySelector('[data-fw-review]')?.addEventListener('click',()=>openSuite('openReviewQueue'));
 
  const onChrome=()=>paintFilesWorkspace(root,st,gridOf());
  root.addEventListener('click',e=>{

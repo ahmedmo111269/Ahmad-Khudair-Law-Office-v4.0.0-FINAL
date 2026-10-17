@@ -147,7 +147,7 @@ export function mountGrid(root,opts){
   <button type="button" class="ghost dg-print">طباعة</button>
   <select class="dg-export" aria-label="تصدير"><option value="">تصدير…</option><option value="xls">Excel</option><option value="doc">Word</option><option value="csv">CSV</option><option value="txt">نص TXT</option><optgroup label="يشمل البيانات الحساسة"><option value="xls:full">Excel كامل</option><option value="csv:full">CSV كامل</option></optgroup></select>
  </div>
- ${o.workspace?'':`<div class="dg-selbar" hidden><b class="dg-sel-count"></b><span class="dg-bulk-slot"></span><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="ghost small dg-open-sel">فتح المحدد</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>`}
+ ${o.workspace?'':`<div class="dg-selbar" hidden><b class="dg-sel-count"></b><span class="dg-bulk-slot"></span><button type="button" class="ghost small dg-sel-export">Excel المحدد</button><button type="button" class="ghost small dg-sel-csv">CSV المحدد</button><button type="button" class="ghost small dg-sel-print">طباعة المحدد</button><button type="button" class="ghost small dg-open-sel">فتح المحدد</button><button type="button" class="ghost small dg-select-results">تحديد كل النتائج</button><button type="button" class="link dg-sel-clear">مسح التحديد</button></div>`}
  <div class="dg-chips" hidden aria-label="التصفية النشطة"></div>
  <div class="dg-adv" hidden></div></div>
  <div class="dg-scroll" tabindex="0"><table class="dg-table"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
@@ -778,17 +778,75 @@ export function mountGrid(root,opts){
  function openViewsPop(anchor){
   if(!anchor)return;
   closePop();pop=document.createElement('div');pop.className='dg-pop';
-  const draw=()=>{pop.innerHTML=`<div class="dg-pop-head"><b>طرق العرض المحفوظة</b><button type="button" class="link dg-x">✕</button></div>
-   <div class="dg-views">${st.views.map((v,i)=>`<div class="dg-view"><button type="button" class="ghost${st.activeView===v.name?' dg-chip-active':''}" data-vi="${i}">★ ${esc(v.name)}</button><button type="button" class="link" data-vup="${i}" title="تحديث بالحالة الحالية">⟳</button><button type="button" class="link danger" data-vdel="${i}" aria-label="حذف">✕</button></div>`).join('')||'<p class="muted small">لا توجد طرق عرض محفوظة. طبّق الفلاتر والفرز ثم احفظها باسم لتسترجعها بنقرة.</p>'}</div>
-   <form class="dg-vsave" style="display:flex;gap:6px"><input name="nm" placeholder="اسم العرض، مثل: جلسات الأسبوع" required style="flex:1"><button class="primary">حفظ</button></form>`;
+  const draw=()=>{pop.innerHTML=`<div class="dg-pop-head"><b>طرق العرض المحفوظة</b><button type="button" class="link dg-x" aria-label="إغلاق">✕</button></div>
+   <p class="ws-hint">يحفظ العرض: البحث والفلاتر المتقدمة والفرز والأعمدة والكثافة والتجميع — ولا يحفظ أي سجل أو بيانات موكل.</p>
+   <div class="dg-views">${st.views.map((v,i)=>`<div class="dg-view"><button type="button" class="ghost${st.activeView===v.name?' dg-chip-active':''}" data-vi="${i}" title="استعادة هذا العرض">★ ${esc(v.name)}</button>
+    <button type="button" class="link" data-vup="${i}" title="تحديث العرض بالحالة الحالية" aria-label="تحديث العرض">⟳</button>
+    <button type="button" class="link" data-vren="${i}" title="إعادة تسمية" aria-label="إعادة تسمية">✎</button>
+    <button type="button" class="link" data-vdup="${i}" title="نسخ العرض" aria-label="نسخ">⧉</button>
+    <button type="button" class="link" data-vexp="${i}" title="تصدير هذا العرض كملف إعدادات" aria-label="تصدير">⇩</button>
+    <button type="button" class="link danger" data-vdel="${i}" aria-label="حذف">✕</button></div>`).join('')||'<p class="muted small">لا توجد طرق عرض محفوظة. طبّق الفلاتر والفرز ثم احفظها باسم لتسترجعها بنقرة.</p>'}</div>
+   <form class="dg-vsave" style="display:flex;gap:6px"><input name="nm" placeholder="اسم العرض، مثل: جلسات الأسبوع" required maxlength="80" style="flex:1"><button class="primary">حفظ الحالة الحالية</button></form>
+   <div class="dg-view-tools"><button type="button" class="ghost small" data-vexportall>⇩ تصدير كل طرق العرض</button><button type="button" class="ghost small" data-vimport>⇧ استيراد ملف عرض</button><span class="muted small" data-vnote>${st.activeView?`النشط: ${esc(st.activeView)}`:'لا يوجد عرض نشط'}</span></div>`;
    pop.querySelector('.dg-x').onclick=closePop;
    pop.querySelector('.dg-vsave').onsubmit=ev=>{ev.preventDefault();const nm=ev.target.nm.value.trim();if(!nm)return;const i=st.views.findIndex(v=>v.name===nm);const v={name:nm,state:snapshot(),at:new Date().toISOString()};if(i>=0)st.views[i]=v;else st.views.push(v);st.activeView=nm;persist();draw();renderBody()};
   };
-  draw();place(pop,anchor);
-  pop.addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
-   if(b.dataset.vi!==undefined){const v=st.views[Number(b.dataset.vi)];st.activeView=v.name;closePop();restore(v.state)}
-   else if(b.dataset.vup!==undefined){st.views[Number(b.dataset.vup)].state=snapshot();persist();draw()}
-   else if(b.dataset.vdel!==undefined){const [v]=st.views.splice(Number(b.dataset.vdel),1);if(st.activeView===v?.name)st.activeView='';persist();draw();renderBody()}});
+  draw();place(pop,anchor);armPopGuard();
+  pop.addEventListener('click',async ev=>{
+   const b=ev.target.closest('button');if(!b)return;
+   if(b.dataset.vi!==undefined){const v=st.views[Number(b.dataset.vi)];if(!v)return;st.activeView=v.name;closePop();restore(v.state);return}
+   if(b.dataset.vup!==undefined){const v=st.views[Number(b.dataset.vup)];if(v){v.state=snapshot();v.at=new Date().toISOString();persist();draw()}return}
+   if(b.dataset.vren!==undefined){
+    const i=Number(b.dataset.vren),v=st.views[i];if(!v)return;
+    const {confirmBox}=await import('./modal.js');pop.classList.remove('is-open');
+    const answer=await confirmBox(`إعادة تسمية «${esc(v.name)}»؟ اكتب الاسم الجديد.`,{okText:'إعادة التسمية',input:true,label:'الاسم الجديد',value:v.name});
+    if(answer?.ok&&String(answer.value||'').trim()){const name=String(answer.value).trim();if(!st.views.some((x,index)=>index!==i&&x.name===name)){if(st.activeView===v.name)st.activeView=name;v.name=name;persist();toast('تمت إعادة التسمية')}else toast('الاسم مستخدم بالفعل','error')}
+    closePop();return;
+   }
+   if(b.dataset.vdup!==undefined){
+    const v=st.views[Number(b.dataset.vdup)];if(!v)return;
+    let name=`${v.name} — نسخة`,n=2;while(st.views.some(x=>x.name===name))name=`${v.name} — نسخة ${n++}`;
+    st.views.push({name,state:JSON.parse(JSON.stringify(v.state)),at:new Date().toISOString()});persist();draw();toast('تم نسخ العرض');return;
+   }
+   if(b.dataset.vexp!==undefined){
+    const v=st.views[Number(b.dataset.vexp)];if(!v)return;
+    const payload={format:'akl-grid-view',version:1,exportedAt:new Date().toISOString(),name:v.name,state:v.state,containsOfficeRecords:false};
+    download(JSON.stringify(payload,null,2),`view-${String(v.name).replace(/[\\/:*?"<>|]+/g,'-').slice(0,50)}.json`,'application/json;charset=utf-8');
+    return;
+   }
+   if(b.dataset.vdel!==undefined){
+    const i=Number(b.dataset.vdel),v=st.views[i];if(!v)return;
+    const {confirmBox}=await import('./modal.js');
+    const ok=await confirmBox(`حذف طريقة العرض «${esc(v.name)}»؟ لا يُحذف أي سجل ولا يمس الحالة الحالية للجدول.`,{okText:'حذف العرض'});
+    if(ok){st.views.splice(i,1);if(st.activeView===v.name)st.activeView='';persist();draw();renderBody()}
+    return;
+   }
+   if(b.dataset.vexportall!==undefined){
+    const payload={format:'akl-grid-view',version:1,exportedAt:new Date().toISOString(),views:st.views,containsOfficeRecords:false};
+    download(JSON.stringify(payload,null,2),'grid-views.json','application/json;charset=utf-8');toast('صُدّرت طرق العرض (بلا أي بيانات سجلات)');return;
+   }
+   if(b.dataset.vimport!==undefined){
+    const input=document.createElement('input');input.type='file';input.accept='application/json,.json';
+    input.onchange=async()=>{
+     const file=input.files?.[0];if(!file)return;
+     try{
+      if(file.size>512000)throw new Error('الملف أكبر من الحد المسموح.');
+      const data=JSON.parse(await file.text());
+      if(data?.format!=='akl-grid-view')throw new Error('الملف ليس قالب عرض صالحًا.');
+      const imported=Array.isArray(data.views)?data.views:[{name:data.name,state:data.state}];
+      let count=0;
+      for(const item of imported.slice(0,30)){
+       if(!item?.name||!item?.state)continue;
+       let name=String(item.name).slice(0,80),n=2;while(st.views.some(x=>x.name===name))name=`${name} (مستورد ${n++})`;
+       st.views.push({name,state:item.state,at:new Date().toISOString()});count++;
+      }
+      if(!count)throw new Error('لا توجد طرق عرض صالحة في الملف.');
+      persist();draw();toast(`استُوردت ${count} طريقة عرض — لم يُحذف أي عرض قائم`);
+     }catch(error){toast(error?.message||'تعذر استيراد العرض','error')}
+    };
+    input.click();return;
+   }
+  });
  }
  $('.dg-views-btn').addEventListener('click',e=>openViewsPop(e.currentTarget));
  // ===== التصفية المركّبة =====
@@ -1192,6 +1250,17 @@ export function mountGrid(root,opts){
   if(act.confirm){const {confirmBox}=await import('./modal.js');const ok=await confirmBox(act.confirm,{okText:act.okText||act.label||'تأكيد'});if(!ok)return}
   try{await o.onBulk?.(act.id,picked)}catch(err){toast(err?.message||'تعذر تنفيذ الإجراء','error')}
  });
+ $('.dg-select-results')?.addEventListener('click',async e=>{
+  if(!o.selectable)return;
+  const button=e.currentTarget;button.disabled=true;
+  try{
+   const collected=await collectMatchingRows({max:2000});
+   for(const row of collected.rows){const key=rowKey(row);st.selected.add(key);selectedRowsByKey.set(key,row)}
+   renderHead();renderBody();syncChrome();
+   toast(`حُدد ${st.selected.size} صفًا${collected.truncated?' — اقتُصر على 2000 نتيجة':''}`,collected.truncated?'warn':'ok');
+  }catch(error){toast(error?.message||'تعذر تحديد النتائج','error')}
+  finally{button.disabled=false}
+ });
  $('.dg-open-sel')?.addEventListener('click',async()=>{
   const picked=selectedRows().slice(0,20);if(!picked.length)return;
   if(o.onBulk){try{await o.onBulk('open',picked)}catch(err){toast(err?.message||'تعذر الفتح','error')}return}
@@ -1217,6 +1286,8 @@ export function mountGrid(root,opts){
   getSelection(){return selectedRows()},
   destroy(){providerSequence++;try{providerController?.abort()}catch{}providerObserver?.disconnect();document.removeEventListener('mousedown',onDocDown,true);document.removeEventListener('keydown',onDocKey);closePop();closeMenu()},
   clearSelection(){st.selected.clear();selectedRowsByKey.clear();renderHead();renderBody();syncChrome()},
+  /** تنفيذ إجراء جماعي عبر نفس دالة onBulk التي يستخدمها شريط التحديد. */
+  async runBulk(id){const picked=selectedRows();if(!picked.length){toast('حدّد صفًا واحدًا على الأقل أولًا','info');return false}if(typeof o.onBulk!=='function')return false;await o.onBulk(id,picked);return true},
   setColSearch(key,val){if(val)st.colSearch[key]=val;else delete st.colSearch[key];changeQuery()},
   isColSearchOn(){return st.colSearchOn},
   exportData:(kind,srcRows)=>exportGrid(kind,srcRows??null),
@@ -1231,6 +1302,61 @@ export function mountGrid(root,opts){
   toggleCards(){st.cards=!st.cards;persist();renderBody();return st.cards},
   isCards:()=>st.cards,
   getUi:()=>getUiState(),
+  getPageInfo:()=>({page:pageIndex+1,pageSize:st.remotePageSize,total:providerMeta.total,totalExact:Boolean(providerMeta.totalExact),hasMore:Boolean(providerMeta.hasMore),loading:Boolean(providerMeta.loading),error:providerMeta.error||'',shown:view.length,remote}),
+  getSelectionCount:()=>st.selected.size,
+  async selectAllResults({max=2000}={}){
+   const collected=await collectMatchingRows({max});
+   for(const row of collected.rows){const key=rowKey(row);st.selected.add(key);selectedRowsByKey.set(key,row)}
+   renderHead();renderBody();syncChrome();
+   return {count:st.selected.size,added:collected.rows.length,truncated:collected.truncated,from:'query'};
+  },
+  getViewState:()=>snapshot(),
+  applyViewState(state,{persistView=true}={}){if(!state||typeof state!=='object')return false;restore(state);if(persistView)persist();toast('طُبّق العرض على الجدول الحالي');return true},
+  getSavedViews:()=>st.views.map(view=>({name:view.name,at:view.at||'',state:JSON.parse(JSON.stringify(view.state||{}))})),
+  getActiveView:()=>st.activeView,
+  applySavedView(name){
+   const view=st.views.find(item=>item.name===name);
+   if(!view)return false;
+   st.activeView=view.name;restore(view.state);return true;
+  },
+  saveSavedView(name){
+   const clean=String(name||'').trim().slice(0,80);
+   if(!clean)throw new Error('اسم العرض مطلوب.');
+   const existing=st.views.findIndex(view=>view.name===clean);
+   const record={name:clean,state:snapshot(),at:new Date().toISOString()};
+   if(existing>=0)st.views[existing]=record;else st.views.push(record);
+   st.activeView=clean;persist();
+   return record;
+  },
+  deleteSavedView(name){
+   const before=st.views.length;
+   st.views=st.views.filter(view=>view.name!==name);
+   if(st.activeView===name)st.activeView='';
+   if(st.views.length!==before)persist();
+   return before-st.views.length;
+  },
+  renameSavedView(name,next){
+   const clean=String(next||'').trim().slice(0,80);
+   const view=st.views.find(item=>item.name===name);
+   if(!view||!clean)return false;
+   if(st.views.some(item=>item!==view&&item.name===clean))throw new Error('اسم العرض مستخدم بالفعل.');
+   if(st.activeView===name)st.activeView=clean;
+   view.name=clean;persist();return true;
+  },
+  duplicateSavedView(name,next=''){
+   const view=st.views.find(item=>item.name===name);
+   if(!view)return false;
+   let clean=String(next||`${name} — نسخة`).trim().slice(0,80),n=2;
+   while(st.views.some(item=>item.name===clean))clean=`${next||name+' — نسخة'} ${n++}`;
+   st.views.push({name:clean,state:JSON.parse(JSON.stringify(view.state||{})),at:new Date().toISOString()});
+   persist();return clean;
+  },
+  getHiddenColumns:()=>cols.filter(column=>st.hidden.has(column.key)).map(column=>({key:column.key,label:column.label})),
+  showColumn(key){if(!byKey.has(key))return false;st.hidden.delete(key);persist();renderHead();renderBody();return true},
+  showAllColumns(){st.hidden.clear();persist();renderHead();renderBody();return true},
+  setDensity(value){st.density=['','compact','normal','comfortable','mobile'].includes(value)?value:'';persist();renderBody();return st.density},
+  setFontSize(value){st.fontSize=['small','medium','large'].includes(value)?value:st.fontSize;persist();renderBody();return st.fontSize},
+  getVisibleColumnLabels:()=>visibleCols().map(column=>column.label),
   collectMatchingRows,
   isWorkspace:()=>Boolean(o.workspace)
  };
